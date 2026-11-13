@@ -36,7 +36,11 @@ importers:
 
   packages/host: {}
 
-  packages/module-api: {}
+  packages/module-api:
+    dependencies:
+      '@cardiary/engine-adapter':
+        specifier: workspace:*
+        version: link:../engine-adapter
 
   packages/protocol:
     devDependencies:
