@@ -5,7 +5,7 @@
     "id": "req_hello_1",
     "type": "system.hello",
     "payload": {
-      "auth": { "token": "tok_local_5f2d" },
+      "auth": { "token": "test-token-not-a-secret" },
       "protocol": { "min": 1, "max": 1 },
       "client": {
         "name": "Cardiary macOS",
