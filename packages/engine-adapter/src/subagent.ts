@@ -92,6 +92,7 @@ export interface SubagentHandle {
   readonly parentConversationId: ConversationId;
   readonly rootConversationId: ConversationId;
   readonly depth: SubagentDepth;
+  readonly title: string;
   readonly status: SubagentStatus;
   readonly startedAt: IsoInstant;
   readonly resultCard: SubagentResultCard | null;

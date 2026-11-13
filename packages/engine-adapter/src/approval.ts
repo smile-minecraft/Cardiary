@@ -7,6 +7,7 @@ import type {
   TurnId,
 } from "./ids.js";
 import type { JsonValue } from "./json.js";
+import type { Unsubscribe } from "./runtime.js";
 import type { SubagentOrigin } from "./subagent.js";
 
 /** 審批請求的生命週期狀態。 */
@@ -143,6 +144,11 @@ export interface ApprovalListFilter {
   readonly rootConversationId?: ConversationId;
 }
 
+/** 審批的即時變化；主機用它把新請求推給所有客戶端。 */
+export type ApprovalUpdate =
+  | { readonly kind: "requested"; readonly request: ApprovalRequest }
+  | { readonly kind: "resolved"; readonly resolution: ApprovalResolution };
+
 /**
  * 審批的持久化介面；由儲存層實作。
  *
@@ -188,4 +194,11 @@ export interface ApprovalService {
   decide(input: DecideApprovalInput): Promise<DecideApprovalResult>;
   /** 撤回尚未決定的請求，例如工具已被取消。 */
   withdraw(requestId: ApprovalRequestId, reason: string): Promise<ApprovalResolution>;
+  /**
+   * 訂閱審批變化。
+   *
+   * 背景子代理的請求用 `{ rootConversationId }` 篩選，送到與主線相同的
+   * 客戶端佇列；客戶端不需要另外訂閱支線。
+   */
+  subscribe(listener: (update: ApprovalUpdate) => void, filter?: ApprovalListFilter): Unsubscribe;
 }
