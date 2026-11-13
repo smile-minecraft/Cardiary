@@ -9,4 +9,5 @@ export type * from "./json.js";
 export type * from "./model.js";
 export type * from "./permission.js";
 export type * from "./runtime.js";
+export type * from "./subagent.js";
 export type * from "./tools.js";

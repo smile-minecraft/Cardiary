@@ -31,6 +31,7 @@ export type ModulePermission =
   | "notifications:emit"
   | "mcp:connect"
   | "external-agent:dispatch"
+  | "secrets:use"
   | "storage:maintain";
 
 /**

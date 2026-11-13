@@ -3,6 +3,9 @@ import type { ConversationId, ToolCallId, ToolName, TurnId } from "./ids.js";
 import type { JsonValue } from "./json.js";
 import type { ReplaySafety } from "./tools.js";
 
+/** 三態權限模式；子代理繼承主線當下的模式，不能自己提高。 */
+export type PermissionMode = "hard-rules" | "system-one-review" | "allow-all";
+
 /** 工具執行前送給權限閘道的請求。 */
 export interface ToolPermissionRequest {
   readonly conversationId: ConversationId;
@@ -11,6 +14,8 @@ export interface ToolPermissionRequest {
   readonly toolName: ToolName;
   readonly input: JsonValue;
   readonly replay: ReplaySafety;
+  /** 這場對話（含子代理）目前的權限模式。 */
+  readonly permissionMode: PermissionMode;
 }
 
 /**

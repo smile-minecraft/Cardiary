@@ -7,6 +7,7 @@ import type {
   TurnId,
 } from "./ids.js";
 import type { JsonValue } from "./json.js";
+import type { SubagentOrigin } from "./subagent.js";
 
 /** 審批請求的生命週期狀態。 */
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "withdrawn";
@@ -53,6 +54,13 @@ export interface ApprovalRequestDraft {
   readonly action: ApprovalAction;
   readonly risk: ApprovalRisk;
   readonly requestedBy: ApprovalRequester;
+  /**
+   * 來源子代理；主對話自己發出的請求省略。
+   *
+   * 有這個欄位時，客戶端要標明是哪一個支線在等待，背景子代理的審批
+   * 也要送到同一個審批佇列。
+   */
+  readonly subagent?: SubagentOrigin;
   /** 逾時毫秒數；省略時由主機的預設值決定，`null` 表示不逾時。 */
   readonly timeoutMs?: number | null;
 }
@@ -131,6 +139,8 @@ export interface ApprovalWaitOptions {
 /** 列出待審批請求的篩選條件。 */
 export interface ApprovalListFilter {
   readonly conversationId?: ConversationId;
+  /** 包含這個主對話底下所有子代理的請求；用於同一個客戶端審批佇列。 */
+  readonly rootConversationId?: ConversationId;
 }
 
 /**

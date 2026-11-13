@@ -1,11 +1,14 @@
 import type { ApprovalLedger, ApprovalService } from "./approval.js";
 import type {
   CancelTurnRequest,
+  ConversationHistoryPage,
   ConversationSummary,
   ConversationUpdate,
   CreateConversationRequest,
+  DeleteConversationOptions,
   ForkConversationRequest,
   MessageReceipt,
+  ReadConversationHistoryRequest,
   RestoreConversationResult,
   SendMessageRequest,
 } from "./conversation.js";
@@ -15,6 +18,14 @@ import type { ConversationId, IsoInstant, TurnId } from "./ids.js";
 import type { ModelSettings, ProviderCredentialSource } from "./model.js";
 import type { ToolPermissionGate } from "./permission.js";
 import type { Clock, EngineLogger, Unsubscribe } from "./runtime.js";
+import type {
+  NextTurnInjectionReceipt,
+  NextTurnInjectionRequest,
+  SpawnSubagentRequest,
+  SubagentHandle,
+  SubagentLimits,
+  SubagentOutcome,
+} from "./subagent.js";
 import type { ToolRegistry } from "./tools.js";
 
 /** 引擎的執行狀態。 */
@@ -40,6 +51,7 @@ export interface EngineStatus {
   readonly state: EngineState;
   readonly pause: EmergencyPause | null;
   readonly activeConversations: number;
+  readonly activeSubagents: number;
   readonly pendingApprovals: number;
   readonly environment: {
     readonly stateDir: string;
@@ -47,11 +59,28 @@ export interface EngineStatus {
   };
 }
 
+/**
+ * 引擎的能力旗標。
+ *
+ * 子代理的同步模式已由 `fork(entryId)` 驗證；背景模式的結果卡要送進
+ * 主線上下文，1.5.2 沒有現成的注入 API。這裡明確標出目前支援到什麼程度，
+ * 不把未驗證的行為當成已成立。
+ */
+export interface EngineCapabilities {
+  /**
+   * 能否在下一個模型請求前注入上下文而不啟動回合。
+   * `native` 表示引擎直接支援；`pending` 是設計決定／待驗證；
+   * `unsupported` 表示只能等使用者下一則訊息附帶。
+   */
+  readonly nextTurnContextInjection: "native" | "pending" | "unsupported";
+}
+
 /** 引擎本身的身分；更換引擎時由新的實作回報。 */
 export interface EngineDescriptor {
   readonly name: string;
   readonly version: string;
   readonly storageBackend: string;
+  readonly capabilities: EngineCapabilities;
 }
 
 /** 建立轉接層的參數；由主機服務組裝。 */
@@ -68,6 +97,12 @@ export interface EngineAdapterOptions {
   readonly clock?: Clock;
   /** 事件補送緩衝的筆數上限；超過時回報 `gap`。 */
   readonly eventBufferSize?: number;
+  /**
+   * 子代理上限；省略時用產品預設值：同時 4 個、深度 1、結果卡 800 tokens。
+   * 轉接層用這組數字拒絕超額請求；`maxConcurrentPerParent` 與 `maxDepth`
+   * 的型別是固定值，不能放寬。
+   */
+  readonly subagentLimits?: SubagentLimits;
 }
 
 /**
@@ -112,17 +147,61 @@ export interface EngineAdapter {
   /**
    * 刪除對話與它的引擎資料。
    *
-   * 分岔支線的生命週期由 Cardiary 管理；呼叫端要先刪支線再刪主線。
+   * 支線生命週期跟著主線：預設連同所有子代理一起刪除；`includeBranches: false`
+   * 只刪這一場。刪除子代理不能連帶刪別人的主線。
    */
-  deleteConversation(conversationId: ConversationId): Promise<void>;
+  deleteConversation(
+    conversationId: ConversationId,
+    options?: DeleteConversationOptions,
+  ): Promise<void>;
+
+  /** 讀取對話歷史；展開支線查證時使用。 */
+  readConversationHistory(
+    request: ReadConversationHistoryRequest,
+  ): Promise<ConversationHistoryPage>;
 
   /**
-   * 從指定位置分岔出新對話。
+   * 從指定位置分岔出獨立對話（使用者操作）。
    *
-   * 支線只包含分岔點之前的內容，並有自己的對話識別碼與模型；
-   * 生命週期（封存、刪除）由呼叫端負責。
+   * 新對話列在會話列表、深度 0；不是子代理。子代理用 `spawnSubagent`。
    */
   forkConversation(request: ForkConversationRequest): Promise<ConversationSummary>;
+
+  /**
+   * 從主對話分岔出子代理。
+   *
+   * 子代理繼承分岔點當下的上下文、工具組與權限模式；呼叫端不能另外
+   * 指定工具或權限。主線不受支線寫入影響。深度必須是父對話深度加 1，
+   * 超過上限回 `subagent-depth-exceeded`；同一個主對話同時超過 4 個
+   * 回 `subagent-limit-reached`。
+   *
+   * `waiting: "blocking"` 會等子代理完成才回傳，適合當工具呼叫，
+   * 可同時等多個；結果卡就是工具結果。`waiting: "background"` 立即回傳
+   * running 的 handle；完成後由主機建立結果卡並排進下一輪注入。
+   */
+  spawnSubagent(request: SpawnSubagentRequest): Promise<SubagentHandle>;
+
+  /** 等待背景子代理結束；已結束時立刻回傳。 */
+  waitForSubagent(
+    subagentConversationId: ConversationId,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<SubagentOutcome>;
+
+  /** 取消子代理；支線保留已產生的內容。 */
+  cancelSubagent(subagentConversationId: ConversationId, reason: string): Promise<void>;
+
+  /**
+   * 把背景子代理的結果卡排進主線的下一個模型請求前。
+   *
+   * 結果卡本身由主機的卡片管線建立（協定用卡片事件、UI 顯示卡片）；
+   * 這個方法只負責上下文注入，不建立回合、不新增訊息型別。主線閒置時
+   * 也不得因此啟動模型。不支援時回 `unsupported`，呼叫端把卡片留到
+   * 使用者下一則訊息再帶入。
+   */
+  queueNextTurnInjection(request: NextTurnInjectionRequest): Promise<NextTurnInjectionReceipt>;
+
+  /** 列出某場對話的子代理（含已結束）；供介面展開查證，不用於會話列表。 */
+  listSubagents(parentConversationId: ConversationId): Promise<readonly SubagentHandle[]>;
 
   /**
    * 預告對話的固定前綴與工具組變更；下一次壓縮時才套用。

@@ -1,6 +1,8 @@
 import type { ActorRef, ApprovalRequest } from "./approval.js";
 import type { ConversationCursor, ConversationId, IsoInstant, MessageId, TurnId } from "./ids.js";
 import type { ModelSelection } from "./model.js";
+import type { PermissionMode } from "./permission.js";
+import type { SubagentDepth } from "./subagent.js";
 import type { ToolBundlePin, ToolDiagnostic } from "./tools.js";
 
 /** 送進對話的內容區塊；卡片由領域層先展開成這些區塊。 */
@@ -23,13 +25,18 @@ export interface ConversationMessage {
 }
 
 /** 對話的用途；子代理與背景任務可以選不同模型。 */
-export type ConversationPurpose = "conversation" | "checkpoint-subagent" | "background-task";
+export type ConversationPurpose = "conversation" | "subagent" | "background-task";
+
+/** 對話在會話列表中的可見性；支線不獨立列出。 */
+export type ConversationVisibility = "listed" | "branch";
 
 /** 對話的建立來源；只有分岔出來的對話才有值。 */
 export interface ConversationOrigin {
-  readonly kind: "fork";
+  readonly kind: "user-fork" | "subagent";
   readonly parentConversationId: ConversationId;
+  readonly rootConversationId: ConversationId;
   readonly at: ConversationCursor;
+  readonly depth: SubagentDepth;
 }
 
 /** 對話的即時狀態。 */
@@ -40,6 +47,11 @@ export interface ConversationSummary {
   readonly id: ConversationId;
   readonly title: string;
   readonly purpose: ConversationPurpose;
+  /** 根對話；主對話自己就是根，子代理指向主對話。 */
+  readonly rootConversationId: ConversationId;
+  readonly depth: SubagentDepth;
+  readonly visibility: ConversationVisibility;
+  readonly permissionMode: PermissionMode;
   readonly model: ModelSelection;
   readonly state: ConversationState;
   readonly origin: ConversationOrigin | null;
@@ -54,6 +66,7 @@ export interface ConversationSummary {
  *
  * `systemContext` 是領域核心組好的固定前綴；轉接層不拆解內容。
  * `toolBundles` 是釘選的工具組版本，之後重載模組不會改動這場對話。
+ * `permissionMode` 省略時用「硬規則＋人工確認」。
  */
 export interface CreateConversationRequest {
   readonly title?: string;
@@ -61,6 +74,7 @@ export interface CreateConversationRequest {
   readonly model: ModelSelection;
   readonly systemContext: string;
   readonly toolBundles: readonly ToolBundlePin[];
+  readonly permissionMode?: PermissionMode;
   /** 同一個請求重送時不建立第二場對話；由呼叫端提供。 */
   readonly clientRequestId?: string;
 }
@@ -109,16 +123,19 @@ export interface CancelTurnRequest {
   readonly reason: string;
 }
 
-/** 從既有對話分岔。 */
+/**
+ * 使用者從既有對話分岔。
+ *
+ * 這不是子代理：新對話是獨立的一場，列在會話列表，深度 0。
+ * 工具組與權限模式沿用來源對話；子代理用 `spawnSubagent`，
+ * 它同樣繼承工具與權限，但不獨立列出。
+ */
 export interface ForkConversationRequest {
   readonly conversationId: ConversationId;
   readonly at: ConversationCursor;
-  readonly purpose: "checkpoint-subagent" | "user-fork";
   readonly title?: string;
-  /** 子代理可以換模型；省略時沿用來源對話的模型。 */
+  /** 可以換模型；省略時沿用來源對話的模型。 */
   readonly model?: ModelSelection;
-  /** 省略時沿用來源對話釘選的工具組。 */
-  readonly toolBundles?: readonly ToolBundlePin[];
 }
 
 /**
@@ -145,4 +162,28 @@ export interface RestoreConversationResult {
   readonly conversation: ConversationSummary;
   readonly recoveredTurns: readonly TurnRecovery[];
   readonly pendingApprovals: readonly ApprovalRequest[];
+}
+
+/** 刪除對話的選項。 */
+export interface DeleteConversationOptions {
+  /**
+   * 一起刪除所有子代理支線；預設 true，因為支線生命週期跟著主線。
+   * 刪除其他對話的支線會被拒絕。
+   */
+  readonly includeBranches?: boolean;
+}
+
+/** 讀取對話歷史；支線展開查證時使用。 */
+export interface ReadConversationHistoryRequest {
+  readonly conversationId: ConversationId;
+  /** 從這個位置往前讀；省略時從最新一則開始。 */
+  readonly before?: ConversationCursor;
+  /** 最多回傳幾則；由主機限制上限。 */
+  readonly limit?: number;
+}
+
+/** 一頁對話歷史。 */
+export interface ConversationHistoryPage {
+  readonly messages: readonly ConversationMessage[];
+  readonly nextBefore: ConversationCursor | null;
 }

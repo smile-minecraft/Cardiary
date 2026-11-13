@@ -33,7 +33,22 @@ export interface ToolDiagnostic {
 export type ToolContent =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "json"; readonly value: JsonValue }
-  | { readonly type: "image"; readonly assetId: string; readonly mediaType: string };
+  | { readonly type: "image"; readonly assetId: string; readonly mediaType: string }
+  /** 卡片內容；由主機的卡片管線建立，客戶端用協定卡片事件顯示。 */
+  | { readonly type: "card"; readonly card: ToolResultCard };
+
+/**
+ * 工具結果中的卡片。
+ *
+ * 不是新的訊息型別：它只是工具結果的一種內容，讓 UI 用既有卡片元件
+ * 顯示。`payload` 的結構由卡片種類決定。
+ */
+export interface ToolResultCard {
+  readonly cardKind: string;
+  readonly cardId: string | null;
+  readonly title: string;
+  readonly payload: JsonValue;
+}
 
 /** 工具執行成功。 */
 export interface ToolSuccess {

@@ -16,6 +16,7 @@ import type {
   TurnId,
 } from "./ids.js";
 import type { JsonValue } from "./json.js";
+import type { SubagentHandle, SubagentOutcome } from "./subagent.js";
 import type { ToolOutcome, ToolProgress } from "./tools.js";
 
 /**
@@ -108,6 +109,18 @@ export interface ConversationDeletedEvent extends EngineEventBase {
   readonly kind: "conversation.deleted";
 }
 
+/** 子代理開始；事件掛在主線的串流上，`conversationId` 是主線。 */
+export interface SubagentStartedEvent extends EngineEventBase {
+  readonly kind: "subagent.started";
+  readonly handle: SubagentHandle;
+}
+
+/** 子代理結束；事件掛在主線的串流上。 */
+export interface SubagentCompletedEvent extends EngineEventBase {
+  readonly kind: "subagent.completed";
+  readonly outcome: SubagentOutcome;
+}
+
 /** 一場對話的事件聯集。 */
 export type EngineEvent =
   | TurnStartedEvent
@@ -121,7 +134,9 @@ export type EngineEvent =
   | TurnCompletedEvent
   | ConversationCompactedEvent
   | ConversationBranchCreatedEvent
-  | ConversationDeletedEvent;
+  | ConversationDeletedEvent
+  | SubagentStartedEvent
+  | SubagentCompletedEvent;
 
 /** 訂閱選項。 */
 export interface SubscribeOptions {

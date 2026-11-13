@@ -13,6 +13,10 @@ export type EngineErrorCode =
   | "tool-not-registered"
   | "model-unavailable"
   | "storage-unavailable"
+  | "subagent-limit-reached"
+  | "subagent-depth-exceeded"
+  | "subagent-not-found"
+  | "context-injection-unsupported"
   | "invalid-cursor"
   | "invalid-request"
   | "internal";

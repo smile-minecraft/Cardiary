@@ -26,15 +26,9 @@ function resolveRelative(fromFile: string, specifier: string): string | null {
     return null;
   }
   const base = resolve(dirname(fromFile), specifier);
-  const candidates = [
-    base,
-    base.replace(/\.js$/, ".d.ts"),
-    base.replace(/\.js$/, ".ts"),
-    `${base}.d.ts`,
-    `${base}.ts`,
-    join(base, "index.d.ts"),
-    join(base, "index.ts"),
-  ];
+  const candidates = specifier.endsWith(".js")
+    ? [base.replace(/\.js$/, ".d.ts"), base.replace(/\.js$/, ".ts"), base]
+    : [base, `${base}.d.ts`, `${base}.ts`, join(base, "index.d.ts"), join(base, "index.ts")];
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
