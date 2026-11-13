@@ -10,5 +10,15 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "scripts": {
+    "schema:build": "node schema/build-schema.mjs && prettier --write schema/protocol.schema.json",
+    "generate": "node scripts/generate.mjs",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "json-schema-to-typescript": "16.0.0"
   }
 }

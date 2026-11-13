@@ -1,0 +1,534 @@
+{
+  "helloRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_hello_1",
+    "type": "system.hello",
+    "payload": {
+      "auth": { "token": "tok_local_5f2d" },
+      "protocol": { "min": 1, "max": 1 },
+      "client": {
+        "name": "Cardiary macOS",
+        "version": "0.1.0",
+        "platform": "macos",
+        "instanceId": "inst_mac_01J8Z3K4Q5R6S7T8V9W0X1Y2Z8"
+      },
+      "resume": { "systemSeq": 41 }
+    }
+  },
+  "helloResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_hello_1",
+    "type": "system.hello",
+    "payload": {
+      "protocol": { "version": 1, "min": 1, "max": 1 },
+      "server": { "name": "Cardiary", "version": "0.1.0" },
+      "connectionId": "conn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z9",
+      "limits": { "maxFrameBytes": 1048576, "replayWindow": 512, "heartbeatSeconds": 20 },
+      "capabilities": { "modules": true, "files": true }
+    }
+  },
+  "systemSubscribeRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_sys_sub_1",
+    "type": "system.subscribe",
+    "payload": { "lastSeq": 41 }
+  },
+  "systemSubscribeResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_sys_sub_1",
+    "type": "system.subscribe",
+    "payload": {
+      "stream": "system",
+      "seq": 42,
+      "resyncRequired": true,
+      "snapshot": {
+        "folder": { "state": "ready", "displayName": "Cardiary", "writable": true },
+        "service": {
+          "state": "running",
+          "version": "0.1.0",
+          "uptimeSeconds": 3721,
+          "activeTasks": 1
+        }
+      }
+    }
+  },
+  "systemUnsubscribeRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_sys_unsub_1",
+    "type": "system.unsubscribe",
+    "payload": {}
+  },
+  "systemUnsubscribeResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_sys_unsub_1",
+    "type": "system.unsubscribe",
+    "payload": { "stream": "system" }
+  },
+  "systemStatusEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "system.status",
+    "stream": "system",
+    "seq": 43,
+    "emittedAt": "2026-11-14T10:05:12Z",
+    "payload": {
+      "folder": { "state": "ready", "displayName": "Cardiary", "writable": true },
+      "service": {
+        "state": "running",
+        "version": "0.1.0",
+        "uptimeSeconds": 3782,
+        "activeTasks": 1
+      }
+    }
+  },
+  "sessionCreateRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_create_1",
+    "type": "session.create",
+    "payload": {
+      "title": "協定設計討論",
+      "clientRequestId": "create_01J8Z3K4Q5R6S7T8V9W0X1Y2ZA"
+    }
+  },
+  "sessionCreateResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_create_1",
+    "type": "session.create",
+    "payload": {
+      "session": {
+        "id": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+        "title": "協定設計討論",
+        "status": "idle",
+        "createdAt": "2026-11-14T10:06:00Z",
+        "updatedAt": "2026-11-14T10:06:00Z",
+        "messageCount": 0
+      }
+    }
+  },
+  "sessionListRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_list_1",
+    "type": "session.list",
+    "payload": { "limit": 20 }
+  },
+  "sessionListResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_list_1",
+    "type": "session.list",
+    "payload": {
+      "sessions": [
+        {
+          "id": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+          "title": "協定設計討論",
+          "status": "running",
+          "createdAt": "2026-11-14T10:06:00Z",
+          "updatedAt": "2026-11-14T10:07:20Z",
+          "messageCount": 2
+        }
+      ],
+      "nextCursor": "sessions_01J8Z3K4Q5R6S7T8V9W0X1Y2ZB"
+    }
+  },
+  "sessionSendMessageRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_send_1",
+    "type": "session.send_message",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "text": "先把信封與補送語義定下來。",
+      "delivery": "queue",
+      "clientMessageId": "msgclient_01J8Z3K4Q5R6S7T8V9W0X1Y2ZC"
+    }
+  },
+  "sessionSendMessageResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_send_1",
+    "type": "session.send_message",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "userMessageId": "msg_user_01J8Z3K4Q5R6S7T8V9W0X1Y2ZD",
+      "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+      "disposition": "queued",
+      "queuedBehindTurnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z0"
+    }
+  },
+  "sessionInterruptRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_int_1",
+    "type": "session.interrupt",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "reason": "使用者按下停止"
+    }
+  },
+  "sessionInterruptResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_int_1",
+    "type": "session.interrupt",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "interrupted": true
+    }
+  },
+  "sessionSubscribeRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_sub_1",
+    "type": "session.subscribe",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "lastSeq": 18,
+      "historyLimit": 50
+    }
+  },
+  "sessionSubscribeResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_sub_1",
+    "type": "session.subscribe",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "seq": 18,
+      "resyncRequired": true,
+      "snapshot": {
+        "session": {
+          "id": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+          "title": "協定設計討論",
+          "status": "waiting_approval",
+          "createdAt": "2026-11-14T10:06:00Z",
+          "updatedAt": "2026-11-14T10:07:05Z",
+          "messageCount": 1
+        },
+        "entries": [
+          {
+            "id": "msg_user_01J8Z3K4Q5R6S7T8V9W0X1Y2ZD",
+            "role": "user",
+            "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+            "createdAt": "2026-11-14T10:06:30Z",
+            "text": "跑一次檢查，順便看資料夾狀態。"
+          },
+          {
+            "id": "msg_asst_01J8Z3K4Q5R6S7T8V9W0X1Y2ZE",
+            "role": "assistant",
+            "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+            "createdAt": "2026-11-14T10:07:01Z",
+            "text": "我先確認資料夾狀態，再執行檢查。",
+            "status": "complete"
+          }
+        ],
+        "activeTurn": {
+          "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+          "state": "waiting_approval",
+          "startedAt": "2026-11-14T10:07:00Z"
+        },
+        "pendingApproval": {
+          "approvalId": "appr_01J8Z3K4Q5R6S7T8V9W0X1Y2Z7",
+          "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+          "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+          "toolCallId": "call_01J8Z3K4Q5R6S7T8V9W0X1Y2Z6",
+          "title": "執行指令前需要核准",
+          "summary": "pnpm check",
+          "scope": { "kind": "tool_call", "target": "bash", "detail": { "cwd": "." } },
+          "options": [
+            { "id": "approve", "label": "核准一次", "effect": "approve" },
+            { "id": "approve_always", "label": "此目錄一律允許", "effect": "approve_always" },
+            { "id": "reject", "label": "拒絕", "effect": "reject" }
+          ],
+          "requestedAt": "2026-11-14T10:07:05Z",
+          "expiresAt": "2026-11-14T10:12:05Z"
+        }
+      }
+    }
+  },
+  "sessionUnsubscribeRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_unsub_1",
+    "type": "session.unsubscribe",
+    "payload": { "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3" }
+  },
+  "sessionUnsubscribeResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_unsub_1",
+    "type": "session.unsubscribe",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "unsubscribed": true
+    }
+  },
+  "sessionGetHistoryRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_hist_1",
+    "type": "session.get_history",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "cursor": "hist_01J8Z3K4Q5R6S7T8V9W0X1Y2ZF",
+      "limit": 50
+    }
+  },
+  "sessionGetHistoryResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_hist_1",
+    "type": "session.get_history",
+    "payload": {
+      "entries": [
+        {
+          "id": "msg_tool_01J8Z3K4Q5R6S7T8V9W0X1Y2ZG",
+          "role": "tool",
+          "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+          "createdAt": "2026-11-14T10:07:08Z",
+          "toolCallId": "call_01J8Z3K4Q5R6S7T8V9W0X1Y2Z6",
+          "name": "bash",
+          "input": { "command": "pnpm check" },
+          "output": { "text": "全部通過", "truncated": false },
+          "status": "complete",
+          "diagnostics": []
+        }
+      ]
+    }
+  },
+  "streamTurnStartedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "stream.turn_started",
+    "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+    "seq": 19,
+    "emittedAt": "2026-11-14T10:07:00Z",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+      "triggerMessageId": "msg_user_01J8Z3K4Q5R6S7T8V9W0X1Y2ZD",
+      "startedAt": "2026-11-14T10:07:00Z"
+    }
+  },
+  "streamTextDeltaEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "stream.text_delta",
+    "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+    "seq": 20,
+    "emittedAt": "2026-11-14T10:07:01Z",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+      "messageId": "msg_asst_01J8Z3K4Q5R6S7T8V9W0X1Y2ZE",
+      "delta": "我先確認"
+    }
+  },
+  "streamMessageCompletedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "stream.message_completed",
+    "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+    "seq": 25,
+    "emittedAt": "2026-11-14T10:07:09Z",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+      "entry": {
+        "id": "msg_asst_01J8Z3K4Q5R6S7T8V9W0X1Y2ZE",
+        "role": "assistant",
+        "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+        "createdAt": "2026-11-14T10:07:01Z",
+        "text": "我先確認資料夾狀態。",
+        "status": "complete"
+      },
+      "usage": { "inputTokens": 1200, "outputTokens": 86 }
+    }
+  },
+  "streamToolCallEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "stream.tool_call",
+    "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+    "seq": 21,
+    "emittedAt": "2026-11-14T10:07:02Z",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+      "toolCallId": "call_01J8Z3K4Q5R6S7T8V9W0X1Y2Z6",
+      "name": "bash",
+      "title": "檢查專案",
+      "input": { "command": "pnpm check" }
+    }
+  },
+  "streamToolResultEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "stream.tool_result",
+    "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+    "seq": 24,
+    "emittedAt": "2026-11-14T10:07:08Z",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+      "toolCallId": "call_01J8Z3K4Q5R6S7T8V9W0X1Y2Z6",
+      "status": "error",
+      "output": { "text": "指令被中斷", "truncated": false },
+      "diagnostics": [{ "code": "interrupted", "message": "主機重啟時工具正在執行" }]
+    }
+  },
+  "streamTurnStateEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "stream.turn_state",
+    "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+    "seq": 23,
+    "emittedAt": "2026-11-14T10:07:05Z",
+    "payload": {
+      "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+      "state": "waiting_approval",
+      "startedAt": "2026-11-14T10:07:00Z"
+    }
+  },
+  "streamUiEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "stream.ui",
+    "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+    "seq": 22,
+    "emittedAt": "2026-11-14T10:07:03Z",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+      "toolCallId": "call_01J8Z3K4Q5R6S7T8V9W0X1Y2Z6",
+      "renderer": "module.cards.grid",
+      "data": { "columns": 3, "cards": [] }
+    }
+  },
+  "approvalRequestedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "approval.requested",
+    "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+    "seq": 23,
+    "emittedAt": "2026-11-14T10:07:05Z",
+    "payload": {
+      "approvalId": "appr_01J8Z3K4Q5R6S7T8V9W0X1Y2Z7",
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+      "toolCallId": "call_01J8Z3K4Q5R6S7T8V9W0X1Y2Z6",
+      "title": "執行指令前需要核准",
+      "summary": "pnpm check",
+      "scope": { "kind": "tool_call", "target": "bash", "detail": { "cwd": "." } },
+      "options": [
+        { "id": "approve", "label": "核准一次", "effect": "approve" },
+        { "id": "approve_always", "label": "此目錄一律允許", "effect": "approve_always" },
+        { "id": "reject", "label": "拒絕", "effect": "reject" }
+      ],
+      "requestedAt": "2026-11-14T10:07:05Z",
+      "expiresAt": "2026-11-14T10:12:05Z"
+    }
+  },
+  "approvalDecideRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_appr_1",
+    "type": "approval.decide",
+    "payload": {
+      "approvalId": "appr_01J8Z3K4Q5R6S7T8V9W0X1Y2Z7",
+      "optionId": "approve",
+      "note": "這次可以"
+    }
+  },
+  "approvalDecideResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_appr_1",
+    "type": "approval.decide",
+    "payload": {
+      "approvalId": "appr_01J8Z3K4Q5R6S7T8V9W0X1Y2Z7",
+      "effect": "approve",
+      "decidedAt": "2026-11-14T10:07:20Z",
+      "persisted": true
+    }
+  },
+  "approvalDecidedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "approval.decided",
+    "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+    "seq": 24,
+    "emittedAt": "2026-11-14T10:07:20Z",
+    "payload": {
+      "approvalId": "appr_01J8Z3K4Q5R6S7T8V9W0X1Y2Z7",
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "effect": "approve",
+      "decidedAt": "2026-11-14T10:07:20Z",
+      "decidedBy": {
+        "kind": "client",
+        "clientId": "inst_mac_01J8Z3K4Q5R6S7T8V9W0X1Y2Z8"
+      }
+    }
+  },
+  "approvalPauseAllRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_pause_1",
+    "type": "approval.pause_all",
+    "payload": { "reason": "使用者按下緊急暫停" }
+  },
+  "approvalPauseAllResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_pause_1",
+    "type": "approval.pause_all",
+    "payload": {
+      "pausedAt": "2026-11-14T10:08:00Z",
+      "interruptedSessionIds": ["sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3"]
+    }
+  },
+  "moduleRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_mod_1",
+    "type": "module.cards.search",
+    "payload": { "data": { "query": "協定", "limit": 10 } }
+  },
+  "moduleResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_mod_1",
+    "type": "module.cards.search",
+    "payload": { "data": { "cardIds": ["card_01J8Z3K4Q5R6S7T8V9W0X1Y2ZH"] } }
+  },
+  "moduleEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "module.cards.changed",
+    "stream": "system",
+    "seq": 44,
+    "emittedAt": "2026-11-14T10:09:00Z",
+    "payload": {
+      "data": { "cardId": "card_01J8Z3K4Q5R6S7T8V9W0X1Y2ZH", "change": "updated" },
+      "schemaVersion": "1"
+    }
+  },
+  "errorFrame": {
+    "v": 1,
+    "kind": "error",
+    "replyTo": "req_hello_1",
+    "code": "incompatible_version",
+    "message": "客戶端與主機沒有共同的協定版本。",
+    "details": { "clientMin": 2, "clientMax": 2, "serverMin": 1, "serverMax": 1 },
+    "retryable": false
+  }
+}

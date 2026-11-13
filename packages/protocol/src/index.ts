@@ -1,1 +1,1 @@
-export {};
+export * from "./generated/protocol.js";

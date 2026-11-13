@@ -1,0 +1,2625 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cardiary.app/protocol/v1/protocol.schema.json",
+  "title": "CardiaryProtocol",
+  "description": "Cardiary 主機服務與客戶端之間的 JSON 協定。持續狀態走 WebSocket，大型檔案走 HTTP。",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ClientFrame"
+    },
+    {
+      "$ref": "#/$defs/ServerFrame"
+    }
+  ],
+  "$defs": {
+    "JSONValue": {
+      "title": "JSONValue",
+      "description": "任意 JSON 值。只用於工具輸出、模組資料與錯誤細節，協定欄位不使用。",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JSONValue"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/JSONValue"
+          }
+        }
+      ]
+    },
+    "JSONObject": {
+      "title": "JSONObject",
+      "description": "字串鍵的 JSON 物件。",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/JSONValue"
+      }
+    },
+    "EmptyPayload": {
+      "title": "EmptyPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {},
+      "description": "沒有內容的請求或回應。"
+    },
+    "ErrorCode": {
+      "title": "ErrorCode",
+      "type": "string",
+      "enum": [
+        "auth_invalid",
+        "auth_expired",
+        "not_authenticated",
+        "incompatible_version",
+        "invalid_message",
+        "payload_too_large",
+        "not_found",
+        "conflict",
+        "busy",
+        "permission_denied",
+        "rate_limited",
+        "unavailable",
+        "internal",
+        "cancelled",
+        "unsupported"
+      ],
+      "description": "協定層級的錯誤碼。"
+    },
+    "ErrorFrame": {
+      "title": "ErrorFrame",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "code", "message", "retryable"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "error"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id；連線層級的錯誤沒有這個欄位。"
+        },
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "message": {
+          "type": "string",
+          "description": "給人看的錯誤說明，不含敏感資料。"
+        },
+        "details": {
+          "$ref": "#/$defs/JSONObject"
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "客戶端是否可以原樣重試。"
+        }
+      },
+      "description": "錯誤信封。HTTP 端點使用同一個結構作為錯誤回應內容。"
+    },
+    "HelloAuth": {
+      "title": "HelloAuth",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["token"],
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "驗證 Token。連線成功後不得再出現在任何訊息或日誌。",
+          "writeOnly": true
+        }
+      },
+      "description": "WebSocket 第一則訊息攜帶的驗證資料。原生客戶端也可以改用 Authorization 標頭。"
+    },
+    "ProtocolRange": {
+      "title": "ProtocolRange",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min", "max"],
+      "properties": {
+        "min": {
+          "type": "integer",
+          "description": "客戶端支援的最低協定主版本。",
+          "minimum": 1
+        },
+        "max": {
+          "type": "integer",
+          "description": "客戶端支援的最高協定主版本。",
+          "minimum": 1
+        }
+      }
+    },
+    "ClientPlatform": {
+      "title": "ClientPlatform",
+      "type": "string",
+      "enum": ["macos", "ios", "ipados", "web", "other"],
+      "description": "客戶端平台。"
+    },
+    "ClientInfo": {
+      "title": "ClientInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "platform", "instanceId"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "客戶端名稱，例如 Cardiary macOS。"
+        },
+        "version": {
+          "type": "string",
+          "description": "客戶端版本。"
+        },
+        "platform": {
+          "$ref": "#/$defs/ClientPlatform"
+        },
+        "instanceId": {
+          "type": "string",
+          "description": "同一次安裝穩定的隨機識別碼；只用於區分客戶端，不含個人資料。"
+        }
+      }
+    },
+    "HelloResume": {
+      "title": "HelloResume",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "systemSeq": {
+          "type": "integer",
+          "description": "客戶端最後收到的系統串流序號。",
+          "minimum": 0
+        }
+      }
+    },
+    "SystemHelloRequestPayload": {
+      "title": "SystemHelloRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "client"],
+      "properties": {
+        "auth": {
+          "$ref": "#/$defs/HelloAuth"
+        },
+        "protocol": {
+          "$ref": "#/$defs/ProtocolRange"
+        },
+        "client": {
+          "$ref": "#/$defs/ClientInfo"
+        },
+        "resume": {
+          "$ref": "#/$defs/HelloResume"
+        }
+      },
+      "description": "連線後的第一則請求。伺服器在驗證與版本協商完成前不接受其他請求。"
+    },
+    "ProtocolInfo": {
+      "title": "ProtocolInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "min", "max"],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "description": "這次連線使用的協定主版本。",
+          "minimum": 1
+        },
+        "min": {
+          "type": "integer",
+          "description": "伺服器支援的最低主版本。",
+          "minimum": 1
+        },
+        "max": {
+          "type": "integer",
+          "description": "伺服器支援的最高主版本。",
+          "minimum": 1
+        }
+      }
+    },
+    "ServerInfo": {
+      "title": "ServerInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "主機服務名稱。"
+        },
+        "version": {
+          "type": "string",
+          "description": "主機服務版本。"
+        }
+      }
+    },
+    "ServerLimits": {
+      "title": "ServerLimits",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxFrameBytes", "replayWindow", "heartbeatSeconds"],
+      "properties": {
+        "maxFrameBytes": {
+          "type": "integer",
+          "description": "單一 WebSocket 訊息的最大位元組數。",
+          "minimum": 1
+        },
+        "replayWindow": {
+          "type": "integer",
+          "description": "每個串流保留的可補送事件數量。",
+          "minimum": 0
+        },
+        "heartbeatSeconds": {
+          "type": "integer",
+          "description": "WebSocket ping 的間隔秒數。",
+          "minimum": 1
+        }
+      }
+    },
+    "ServerCapabilities": {
+      "title": "ServerCapabilities",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modules", "files"],
+      "properties": {
+        "modules": {
+          "type": "boolean",
+          "description": "是否接受模組命名空間的請求與事件。"
+        },
+        "files": {
+          "type": "boolean",
+          "description": "是否提供 HTTP 大型檔案端點。"
+        }
+      }
+    },
+    "SystemHelloResponsePayload": {
+      "title": "SystemHelloResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "server", "connectionId", "limits", "capabilities"],
+      "properties": {
+        "protocol": {
+          "$ref": "#/$defs/ProtocolInfo"
+        },
+        "server": {
+          "$ref": "#/$defs/ServerInfo"
+        },
+        "connectionId": {
+          "type": "string",
+          "description": "這次連線的識別碼；重連後會改變。"
+        },
+        "limits": {
+          "$ref": "#/$defs/ServerLimits"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/ServerCapabilities"
+        }
+      },
+      "description": "版本協商與驗證的結果。"
+    },
+    "SystemSubscribeRequestPayload": {
+      "title": "SystemSubscribeRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "lastSeq": {
+          "type": "integer",
+          "description": "客戶端最後收到的系統串流序號；省略代表要一份完整快照。",
+          "minimum": 0
+        }
+      }
+    },
+    "FolderState": {
+      "title": "FolderState",
+      "type": "string",
+      "enum": ["ready", "not_selected", "unavailable"],
+      "description": "資料夾狀態。"
+    },
+    "FolderStatus": {
+      "title": "FolderStatus",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "displayName", "writable"],
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/FolderState"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "給使用者看的資料夾名稱，不含完整路徑。"
+        },
+        "writable": {
+          "type": "boolean",
+          "description": "資料夾目前是否可寫。"
+        },
+        "reason": {
+          "type": "string",
+          "description": "狀態不是 ready 時的原因。"
+        }
+      }
+    },
+    "ServiceState": {
+      "title": "ServiceState",
+      "type": "string",
+      "enum": ["running", "paused", "degraded"],
+      "description": "主機服務狀態。"
+    },
+    "ServiceStatus": {
+      "title": "ServiceStatus",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "version", "uptimeSeconds", "activeTasks"],
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/ServiceState"
+        },
+        "version": {
+          "type": "string",
+          "description": "主機服務版本。"
+        },
+        "uptimeSeconds": {
+          "type": "integer",
+          "description": "服務已執行的秒數。",
+          "minimum": 0
+        },
+        "activeTasks": {
+          "type": "integer",
+          "description": "目前進行中的任務數。",
+          "minimum": 0
+        }
+      }
+    },
+    "SystemStatus": {
+      "title": "SystemStatus",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["folder", "service"],
+      "properties": {
+        "folder": {
+          "$ref": "#/$defs/FolderStatus"
+        },
+        "service": {
+          "$ref": "#/$defs/ServiceStatus"
+        }
+      }
+    },
+    "SystemSubscribeResponsePayload": {
+      "title": "SystemSubscribeResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stream", "seq", "resyncRequired"],
+      "properties": {
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，系統串流固定是 system。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "訂閱當下的最新序號。",
+          "minimum": 0
+        },
+        "resyncRequired": {
+          "type": "boolean",
+          "description": "是否附上完整快照；false 表示接下來只會補送 seq 之後的事件。"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/SystemStatus"
+        }
+      }
+    },
+    "SystemUnsubscribeResponsePayload": {
+      "title": "SystemUnsubscribeResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stream"],
+      "properties": {
+        "stream": {
+          "type": "string",
+          "description": "已取消訂閱的串流識別碼。"
+        }
+      }
+    },
+    "SessionStatus": {
+      "title": "SessionStatus",
+      "type": "string",
+      "enum": ["idle", "running", "waiting_approval", "archived"],
+      "description": "會話狀態。"
+    },
+    "SessionSummary": {
+      "title": "SessionSummary",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "status", "createdAt", "updatedAt", "messageCount"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "title": {
+          "type": "string",
+          "description": "會話標題。"
+        },
+        "status": {
+          "$ref": "#/$defs/SessionStatus"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "建立時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "最後更新時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "messageCount": {
+          "type": "integer",
+          "description": "可見訊息數量。",
+          "minimum": 0
+        }
+      }
+    },
+    "SessionCreateRequestPayload": {
+      "title": "SessionCreateRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "初始標題；省略時由主機產生。"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "客戶端產生的冪等鍵；同一個鍵重送只會建立一場會話。"
+        }
+      }
+    },
+    "SessionCreateResponsePayload": {
+      "title": "SessionCreateResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session"],
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionSummary"
+        }
+      }
+    },
+    "SessionListRequestPayload": {
+      "title": "SessionListRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "cursor": {
+          "type": "string",
+          "description": "上一頁回傳的游標。"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "最多回傳幾筆。",
+          "minimum": 1,
+          "maximum": 200
+        }
+      }
+    },
+    "SessionListResponsePayload": {
+      "title": "SessionListResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessions"],
+      "properties": {
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionSummary"
+          }
+        },
+        "nextCursor": {
+          "type": "string",
+          "description": "下一頁游標；沒有更多資料時省略。"
+        }
+      }
+    },
+    "DeliveryMode": {
+      "title": "DeliveryMode",
+      "type": "string",
+      "enum": ["queue", "interrupt"],
+      "description": "送出訊息時的行為。queue 在下一個模型請求生效，不中止目前串流；interrupt 先中止目前生成再送出。"
+    },
+    "SendMessageDisposition": {
+      "title": "SendMessageDisposition",
+      "type": "string",
+      "enum": ["started", "queued", "interrupted_then_started"],
+      "description": "主機實際採用的送出方式。"
+    },
+    "SessionSendMessageRequestPayload": {
+      "title": "SessionSendMessageRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "text", "delivery"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "目標會話。"
+        },
+        "text": {
+          "type": "string",
+          "description": "使用者訊息文字。"
+        },
+        "delivery": {
+          "$ref": "#/$defs/DeliveryMode"
+        },
+        "clientMessageId": {
+          "type": "string",
+          "description": "客戶端產生的訊息冪等鍵；重送時主機回傳同一則訊息。"
+        }
+      }
+    },
+    "SessionSendMessageResponsePayload": {
+      "title": "SessionSendMessageResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "userMessageId", "turnId", "disposition"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "目標會話。"
+        },
+        "userMessageId": {
+          "type": "string",
+          "description": "已接受的訊息識別碼。"
+        },
+        "turnId": {
+          "type": "string",
+          "description": "訊息對應的回應回合。"
+        },
+        "disposition": {
+          "$ref": "#/$defs/SendMessageDisposition"
+        },
+        "queuedBehindTurnId": {
+          "type": "string",
+          "description": "排隊時，前面尚未結束的回合識別碼。"
+        }
+      }
+    },
+    "SessionInterruptRequestPayload": {
+      "title": "SessionInterruptRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "要中止的會話。"
+        },
+        "reason": {
+          "type": "string",
+          "description": "中止原因，會寫入日誌與回合狀態。"
+        }
+      }
+    },
+    "SessionInterruptResponsePayload": {
+      "title": "SessionInterruptResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "interrupted"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "目標會話。"
+        },
+        "interrupted": {
+          "type": "boolean",
+          "description": "這次請求是否真的中止了進行中的生成。"
+        }
+      }
+    },
+    "MessageStatus": {
+      "title": "MessageStatus",
+      "type": "string",
+      "enum": ["streaming", "complete", "interrupted", "failed"],
+      "description": "訊息狀態。"
+    },
+    "ToolDiagnostic": {
+      "title": "ToolDiagnostic",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "診斷碼。目前使用 interrupted、truncated、full_output、timeout、denied；這是開放字串，新增代碼不需要改協定版本。"
+        },
+        "message": {
+          "type": "string",
+          "description": "補充說明。"
+        }
+      }
+    },
+    "ToolOutput": {
+      "title": "ToolOutput",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "給人或模型看的文字輸出。"
+        },
+        "data": {
+          "$ref": "#/$defs/JSONValue"
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "輸出是否被截斷。"
+        }
+      }
+    },
+    "ToolResultStatus": {
+      "title": "ToolResultStatus",
+      "type": "string",
+      "enum": ["ok", "error"],
+      "description": "工具結果狀態。"
+    },
+    "UserTranscriptEntry": {
+      "title": "UserTranscriptEntry",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "turnId", "createdAt", "text"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "訊息識別碼。"
+        },
+        "role": {
+          "const": "user"
+        },
+        "turnId": {
+          "type": "string",
+          "description": "所屬回合。"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "建立時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "text": {
+          "type": "string",
+          "description": "訊息文字。"
+        }
+      }
+    },
+    "AssistantTranscriptEntry": {
+      "title": "AssistantTranscriptEntry",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "turnId", "createdAt", "text", "status"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "訊息識別碼。"
+        },
+        "role": {
+          "const": "assistant"
+        },
+        "turnId": {
+          "type": "string",
+          "description": "所屬回合。"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "建立時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "text": {
+          "type": "string",
+          "description": "目前的完整文字。串流中的訊息會持續變長。"
+        },
+        "status": {
+          "$ref": "#/$defs/MessageStatus"
+        }
+      }
+    },
+    "ToolTranscriptEntry": {
+      "title": "ToolTranscriptEntry",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "role",
+        "turnId",
+        "createdAt",
+        "toolCallId",
+        "name",
+        "input",
+        "status",
+        "diagnostics"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "訊息識別碼。"
+        },
+        "role": {
+          "const": "tool"
+        },
+        "turnId": {
+          "type": "string",
+          "description": "所屬回合。"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "建立時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "toolCallId": {
+          "type": "string",
+          "description": "工具呼叫識別碼。"
+        },
+        "name": {
+          "type": "string",
+          "description": "工具名稱。"
+        },
+        "input": {
+          "$ref": "#/$defs/JSONObject"
+        },
+        "output": {
+          "$ref": "#/$defs/ToolOutput"
+        },
+        "status": {
+          "$ref": "#/$defs/MessageStatus"
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolDiagnostic"
+          },
+          "description": "工具結果的診斷碼。"
+        }
+      }
+    },
+    "TranscriptEntry": {
+      "title": "TranscriptEntry",
+      "description": "會話歷史中的一則訊息，依 role 區分。",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/UserTranscriptEntry"
+        },
+        {
+          "$ref": "#/$defs/AssistantTranscriptEntry"
+        },
+        {
+          "$ref": "#/$defs/ToolTranscriptEntry"
+        }
+      ]
+    },
+    "TurnError": {
+      "title": "TurnError",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "錯誤碼。"
+        },
+        "message": {
+          "type": "string",
+          "description": "錯誤說明。"
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "這回合是否可以重試。"
+        }
+      }
+    },
+    "TurnPhase": {
+      "title": "TurnPhase",
+      "type": "string",
+      "enum": ["queued", "running", "waiting_approval", "completed", "failed", "interrupted"],
+      "description": "回合狀態。"
+    },
+    "TurnState": {
+      "title": "TurnState",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turnId", "state", "startedAt"],
+      "properties": {
+        "turnId": {
+          "type": "string",
+          "description": "回合識別碼。"
+        },
+        "state": {
+          "$ref": "#/$defs/TurnPhase"
+        },
+        "startedAt": {
+          "type": "string",
+          "description": "開始時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "endedAt": {
+          "type": "string",
+          "description": "結束時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "error": {
+          "$ref": "#/$defs/TurnError"
+        }
+      }
+    },
+    "TokenUsage": {
+      "title": "TokenUsage",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "inputTokens": {
+          "type": "integer",
+          "description": "輸入 token 數。",
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "integer",
+          "description": "輸出 token 數。",
+          "minimum": 0
+        }
+      }
+    },
+    "SessionSnapshot": {
+      "title": "SessionSnapshot",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session", "entries"],
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionSummary"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TranscriptEntry"
+          },
+          "description": "最新一段歷史，依時間由舊到新。"
+        },
+        "activeTurn": {
+          "$ref": "#/$defs/TurnState"
+        },
+        "pendingApproval": {
+          "$ref": "#/$defs/ApprovalRequest"
+        }
+      }
+    },
+    "SessionSubscribeRequestPayload": {
+      "title": "SessionSubscribeRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "要訂閱的會話。"
+        },
+        "lastSeq": {
+          "type": "integer",
+          "description": "客戶端最後收到的會話串流序號；省略代表要一份完整快照。",
+          "minimum": 0
+        },
+        "historyLimit": {
+          "type": "integer",
+          "description": "快照最多帶幾則歷史訊息。",
+          "minimum": 1,
+          "maximum": 500
+        }
+      }
+    },
+    "SessionSubscribeResponsePayload": {
+      "title": "SessionSubscribeResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "stream", "seq", "resyncRequired"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，格式是 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "訂閱當下的最新序號。",
+          "minimum": 0
+        },
+        "resyncRequired": {
+          "type": "boolean",
+          "description": "是否附上完整快照；false 表示接下來只會補送 seq 之後的事件。"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/SessionSnapshot"
+        }
+      }
+    },
+    "SessionUnsubscribeRequestPayload": {
+      "title": "SessionUnsubscribeRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "要取消訂閱的會話。"
+        }
+      }
+    },
+    "SessionUnsubscribeResponsePayload": {
+      "title": "SessionUnsubscribeResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "unsubscribed"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "unsubscribed": {
+          "type": "boolean",
+          "description": "是否已取消訂閱。"
+        }
+      }
+    },
+    "SessionGetHistoryRequestPayload": {
+      "title": "SessionGetHistoryRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "cursor": {
+          "type": "string",
+          "description": "上一頁回傳的游標。"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "最多回傳幾則。",
+          "minimum": 1,
+          "maximum": 200
+        }
+      }
+    },
+    "SessionGetHistoryResponsePayload": {
+      "title": "SessionGetHistoryResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entries"],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TranscriptEntry"
+          },
+          "description": "依時間由舊到新。"
+        },
+        "nextCursor": {
+          "type": "string",
+          "description": "下一頁游標；沒有更多資料時省略。"
+        }
+      }
+    },
+    "StreamTurnStartedEventPayload": {
+      "title": "StreamTurnStartedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "turnId", "triggerMessageId", "startedAt"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "turnId": {
+          "type": "string",
+          "description": "回合識別碼。"
+        },
+        "triggerMessageId": {
+          "type": "string",
+          "description": "觸發這回合的使用者訊息。"
+        },
+        "startedAt": {
+          "type": "string",
+          "description": "開始時間，RFC 3339。",
+          "format": "date-time"
+        }
+      }
+    },
+    "StreamTextDeltaEventPayload": {
+      "title": "StreamTextDeltaEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "turnId", "messageId", "delta"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "turnId": {
+          "type": "string",
+          "description": "回合識別碼。"
+        },
+        "messageId": {
+          "type": "string",
+          "description": "正在增長的助理訊息。"
+        },
+        "delta": {
+          "type": "string",
+          "description": "這次追加的文字。"
+        }
+      }
+    },
+    "StreamMessageCompletedEventPayload": {
+      "title": "StreamMessageCompletedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "turnId", "entry"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "turnId": {
+          "type": "string",
+          "description": "回合識別碼。"
+        },
+        "entry": {
+          "$ref": "#/$defs/AssistantTranscriptEntry"
+        },
+        "usage": {
+          "$ref": "#/$defs/TokenUsage"
+        }
+      }
+    },
+    "StreamToolCallEventPayload": {
+      "title": "StreamToolCallEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "turnId", "toolCallId", "name", "input"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "turnId": {
+          "type": "string",
+          "description": "回合識別碼。"
+        },
+        "toolCallId": {
+          "type": "string",
+          "description": "工具呼叫識別碼。"
+        },
+        "name": {
+          "type": "string",
+          "description": "工具名稱。"
+        },
+        "title": {
+          "type": "string",
+          "description": "給人看的工具動作標題。"
+        },
+        "input": {
+          "$ref": "#/$defs/JSONObject"
+        }
+      }
+    },
+    "StreamToolResultEventPayload": {
+      "title": "StreamToolResultEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "turnId", "toolCallId", "status", "output", "diagnostics"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "turnId": {
+          "type": "string",
+          "description": "回合識別碼。"
+        },
+        "toolCallId": {
+          "type": "string",
+          "description": "工具呼叫識別碼。"
+        },
+        "status": {
+          "$ref": "#/$defs/ToolResultStatus"
+        },
+        "output": {
+          "$ref": "#/$defs/ToolOutput"
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolDiagnostic"
+          },
+          "description": "工具結果的診斷碼。"
+        }
+      }
+    },
+    "StreamUiEventPayload": {
+      "title": "StreamUiEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "turnId", "renderer", "data"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "turnId": {
+          "type": "string",
+          "description": "回合識別碼。"
+        },
+        "toolCallId": {
+          "type": "string",
+          "description": "相關的工具呼叫。"
+        },
+        "renderer": {
+          "type": "string",
+          "description": "介面渲染器名稱，使用模組命名空間，例如 module.cards.grid。"
+        },
+        "data": {
+          "$ref": "#/$defs/JSONValue"
+        }
+      }
+    },
+    "ApprovalScopeKind": {
+      "title": "ApprovalScopeKind",
+      "type": "string",
+      "enum": ["tool_call", "settings_change", "schedule"],
+      "description": "審批範圍的種類。"
+    },
+    "ApprovalScope": {
+      "title": "ApprovalScope",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "target"],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ApprovalScopeKind"
+        },
+        "target": {
+          "type": "string",
+          "description": "審批對象，例如工具名稱或設定鍵。"
+        },
+        "detail": {
+          "$ref": "#/$defs/JSONValue"
+        }
+      }
+    },
+    "ApprovalEffect": {
+      "title": "ApprovalEffect",
+      "type": "string",
+      "enum": ["approve", "reject", "approve_always"],
+      "description": "審批決定的效果。"
+    },
+    "ApprovalOption": {
+      "title": "ApprovalOption",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "effect"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "選項識別碼。"
+        },
+        "label": {
+          "type": "string",
+          "description": "給使用者看的按鈕文字。"
+        },
+        "effect": {
+          "$ref": "#/$defs/ApprovalEffect"
+        }
+      }
+    },
+    "ApprovalRequest": {
+      "title": "ApprovalRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvalId", "sessionId", "turnId", "title", "scope", "options", "requestedAt"],
+      "properties": {
+        "approvalId": {
+          "type": "string",
+          "description": "審批識別碼。"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "所屬會話。"
+        },
+        "turnId": {
+          "type": "string",
+          "description": "所屬回合。"
+        },
+        "toolCallId": {
+          "type": "string",
+          "description": "相關的工具呼叫。"
+        },
+        "title": {
+          "type": "string",
+          "description": "給人看的審批標題。"
+        },
+        "summary": {
+          "type": "string",
+          "description": "補充說明，例如要執行的指令。"
+        },
+        "scope": {
+          "$ref": "#/$defs/ApprovalScope"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ApprovalOption"
+          },
+          "description": "可選的決定；至少一個。",
+          "minItems": 1
+        },
+        "requestedAt": {
+          "type": "string",
+          "description": "請求時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "description": "逾時時間，RFC 3339；省略代表不會自動逾時。",
+          "format": "date-time"
+        }
+      }
+    },
+    "ApprovalDecideRequestPayload": {
+      "title": "ApprovalDecideRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvalId", "optionId"],
+      "properties": {
+        "approvalId": {
+          "type": "string",
+          "description": "要決定的審批。"
+        },
+        "optionId": {
+          "type": "string",
+          "description": "ApprovalRequest.options 裡的選項。"
+        },
+        "note": {
+          "type": "string",
+          "description": "使用者留下的備註。"
+        }
+      }
+    },
+    "ApprovalDecideResponsePayload": {
+      "title": "ApprovalDecideResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvalId", "effect", "decidedAt", "persisted"],
+      "properties": {
+        "approvalId": {
+          "type": "string",
+          "description": "審批識別碼。"
+        },
+        "effect": {
+          "$ref": "#/$defs/ApprovalEffect"
+        },
+        "decidedAt": {
+          "type": "string",
+          "description": "決定時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "persisted": {
+          "type": "boolean",
+          "description": "決定是否已寫入耐久儲存；true 代表主機重啟後仍會續跑。"
+        }
+      }
+    },
+    "DeciderKind": {
+      "title": "DeciderKind",
+      "type": "string",
+      "enum": ["client", "system"],
+      "description": "做出決定的來源。"
+    },
+    "DecidedBy": {
+      "title": "DecidedBy",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/DeciderKind"
+        },
+        "clientId": {
+          "type": "string",
+          "description": "決定者的客戶端 instanceId。"
+        }
+      }
+    },
+    "ApprovalDecidedEventPayload": {
+      "title": "ApprovalDecidedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvalId", "sessionId", "effect", "decidedAt", "decidedBy"],
+      "properties": {
+        "approvalId": {
+          "type": "string",
+          "description": "審批識別碼。"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "所屬會話。"
+        },
+        "effect": {
+          "$ref": "#/$defs/ApprovalEffect"
+        },
+        "decidedAt": {
+          "type": "string",
+          "description": "決定時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "decidedBy": {
+          "$ref": "#/$defs/DecidedBy"
+        }
+      }
+    },
+    "ApprovalPauseAllRequestPayload": {
+      "title": "ApprovalPauseAllRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "暫停原因。"
+        }
+      }
+    },
+    "ApprovalPauseAllResponsePayload": {
+      "title": "ApprovalPauseAllResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pausedAt", "interruptedSessionIds"],
+      "properties": {
+        "pausedAt": {
+          "type": "string",
+          "description": "暫停時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "interruptedSessionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "被中止的會話識別碼。"
+          }
+        }
+      }
+    },
+    "ModuleRequestPayload": {
+      "title": "ModuleRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data"],
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/JSONObject"
+        }
+      }
+    },
+    "ModuleResponsePayload": {
+      "title": "ModuleResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data"],
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/JSONObject"
+        }
+      }
+    },
+    "ModuleEventPayload": {
+      "title": "ModuleEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data"],
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/JSONObject"
+        },
+        "schemaVersion": {
+          "type": "string",
+          "description": "模組事件的 payload schema 版本。"
+        }
+      }
+    },
+    "SystemHelloRequest": {
+      "title": "SystemHelloRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.hello"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemHelloRequestPayload"
+        }
+      },
+      "description": "連線後的第一則請求：驗證、版本協商與客戶端資訊。"
+    },
+    "SystemHelloResponse": {
+      "title": "SystemHelloResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.hello"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemHelloResponsePayload"
+        }
+      },
+      "description": "驗證與版本協商的結果。"
+    },
+    "SystemSubscribeRequest": {
+      "title": "SystemSubscribeRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.subscribe"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemSubscribeRequestPayload"
+        }
+      },
+      "description": "訂閱系統狀態串流。"
+    },
+    "SystemSubscribeResponse": {
+      "title": "SystemSubscribeResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.subscribe"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemSubscribeResponsePayload"
+        }
+      },
+      "description": "系統狀態串流的訂閱結果。"
+    },
+    "SystemUnsubscribeRequest": {
+      "title": "SystemUnsubscribeRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.unsubscribe"
+        },
+        "payload": {
+          "$ref": "#/$defs/EmptyPayload"
+        }
+      },
+      "description": "取消系統狀態串流。"
+    },
+    "SystemUnsubscribeResponse": {
+      "title": "SystemUnsubscribeResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.unsubscribe"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemUnsubscribeResponsePayload"
+        }
+      },
+      "description": "系統狀態串流的取消結果。"
+    },
+    "SystemStatusEvent": {
+      "title": "SystemStatusEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "system.status"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemStatus"
+        }
+      },
+      "description": "資料夾或服務狀態改變。"
+    },
+    "SessionCreateRequest": {
+      "title": "SessionCreateRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "session.create"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionCreateRequestPayload"
+        }
+      },
+      "description": "建立一場會話。"
+    },
+    "SessionCreateResponse": {
+      "title": "SessionCreateResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "session.create"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionCreateResponsePayload"
+        }
+      },
+      "description": "建立會話的結果。"
+    },
+    "SessionListRequest": {
+      "title": "SessionListRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "session.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionListRequestPayload"
+        }
+      },
+      "description": "列出會話。"
+    },
+    "SessionListResponse": {
+      "title": "SessionListResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "session.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionListResponsePayload"
+        }
+      },
+      "description": "會話列表。"
+    },
+    "SessionSendMessageRequest": {
+      "title": "SessionSendMessageRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "session.send_message"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionSendMessageRequestPayload"
+        }
+      },
+      "description": "送出使用者訊息；可排隊插話或中止後重送。"
+    },
+    "SessionSendMessageResponse": {
+      "title": "SessionSendMessageResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "session.send_message"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionSendMessageResponsePayload"
+        }
+      },
+      "description": "訊息已接受，回傳實際採用的送出方式。"
+    },
+    "SessionInterruptRequest": {
+      "title": "SessionInterruptRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "session.interrupt"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionInterruptRequestPayload"
+        }
+      },
+      "description": "中止目前生成，不送出新的訊息。"
+    },
+    "SessionInterruptResponse": {
+      "title": "SessionInterruptResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "session.interrupt"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionInterruptResponsePayload"
+        }
+      },
+      "description": "中止的結果。"
+    },
+    "SessionSubscribeRequest": {
+      "title": "SessionSubscribeRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "session.subscribe"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionSubscribeRequestPayload"
+        }
+      },
+      "description": "訂閱一場會話的歷史與事件。"
+    },
+    "SessionSubscribeResponse": {
+      "title": "SessionSubscribeResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "session.subscribe"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionSubscribeResponsePayload"
+        }
+      },
+      "description": "會話串流的訂閱結果。"
+    },
+    "SessionUnsubscribeRequest": {
+      "title": "SessionUnsubscribeRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "session.unsubscribe"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionUnsubscribeRequestPayload"
+        }
+      },
+      "description": "取消訂閱一場會話。"
+    },
+    "SessionUnsubscribeResponse": {
+      "title": "SessionUnsubscribeResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "session.unsubscribe"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionUnsubscribeResponsePayload"
+        }
+      },
+      "description": "取消訂閱的結果。"
+    },
+    "SessionGetHistoryRequest": {
+      "title": "SessionGetHistoryRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "session.get_history"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionGetHistoryRequestPayload"
+        }
+      },
+      "description": "往回捲動時分頁取得較早的訊息。"
+    },
+    "SessionGetHistoryResponse": {
+      "title": "SessionGetHistoryResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "session.get_history"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionGetHistoryResponsePayload"
+        }
+      },
+      "description": "較早的訊息分頁。"
+    },
+    "StreamTurnStartedEvent": {
+      "title": "StreamTurnStartedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "stream.turn_started"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/StreamTurnStartedEventPayload"
+        }
+      },
+      "description": "一個回應回合開始。"
+    },
+    "StreamTextDeltaEvent": {
+      "title": "StreamTextDeltaEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "stream.text_delta"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/StreamTextDeltaEventPayload"
+        }
+      },
+      "description": "助理文字增量。"
+    },
+    "StreamMessageCompletedEvent": {
+      "title": "StreamMessageCompletedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "stream.message_completed"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/StreamMessageCompletedEventPayload"
+        }
+      },
+      "description": "助理訊息完成。"
+    },
+    "StreamToolCallEvent": {
+      "title": "StreamToolCallEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "stream.tool_call"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/StreamToolCallEventPayload"
+        }
+      },
+      "description": "模型要求呼叫工具。"
+    },
+    "StreamToolResultEvent": {
+      "title": "StreamToolResultEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "stream.tool_result"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/StreamToolResultEventPayload"
+        }
+      },
+      "description": "工具結果，含診斷碼。"
+    },
+    "StreamTurnStateEvent": {
+      "title": "StreamTurnStateEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "stream.turn_state"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/TurnState"
+        }
+      },
+      "description": "回合狀態改變。"
+    },
+    "StreamUiEvent": {
+      "title": "StreamUiEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "stream.ui"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/StreamUiEventPayload"
+        }
+      },
+      "description": "工具專屬的介面資料；由客戶端依 renderer 渲染。"
+    },
+    "ApprovalRequestedEvent": {
+      "title": "ApprovalRequestedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "approval.requested"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/ApprovalRequest"
+        }
+      },
+      "description": "需要使用者決定時送出審批請求。"
+    },
+    "ApprovalDecideRequest": {
+      "title": "ApprovalDecideRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "approval.decide"
+        },
+        "payload": {
+          "$ref": "#/$defs/ApprovalDecideRequestPayload"
+        }
+      },
+      "description": "核准或拒絕一筆審批。"
+    },
+    "ApprovalDecideResponse": {
+      "title": "ApprovalDecideResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "approval.decide"
+        },
+        "payload": {
+          "$ref": "#/$defs/ApprovalDecideResponsePayload"
+        }
+      },
+      "description": "審批決定已持久化。"
+    },
+    "ApprovalDecidedEvent": {
+      "title": "ApprovalDecidedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "approval.decided"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/ApprovalDecidedEventPayload"
+        }
+      },
+      "description": "任何客戶端做出決定後，通知其他客戶端。"
+    },
+    "ApprovalPauseAllRequest": {
+      "title": "ApprovalPauseAllRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "approval.pause_all"
+        },
+        "payload": {
+          "$ref": "#/$defs/ApprovalPauseAllRequestPayload"
+        }
+      },
+      "description": "緊急暫停所有進行中的任務。"
+    },
+    "ApprovalPauseAllResponse": {
+      "title": "ApprovalPauseAllResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "approval.pause_all"
+        },
+        "payload": {
+          "$ref": "#/$defs/ApprovalPauseAllResponsePayload"
+        }
+      },
+      "description": "緊急暫停的結果。"
+    },
+    "ModuleRequest": {
+      "title": "ModuleRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼。"
+        },
+        "type": {
+          "type": "string",
+          "description": "模組命名空間的請求型別，例如 module.cards.search。",
+          "pattern": "^module\\.[a-z][a-z0-9-]*\\.[a-z][a-z0-9.-]*$"
+        },
+        "payload": {
+          "$ref": "#/$defs/ModuleRequestPayload"
+        }
+      },
+      "description": "模組貢獻的請求。主機依 type 的命名空間路由給對應模組。",
+      "x-catch-all": true
+    },
+    "ModuleResponse": {
+      "title": "ModuleResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的模組請求 id。"
+        },
+        "type": {
+          "type": "string",
+          "description": "模組命名空間的回應型別。",
+          "pattern": "^module\\.[a-z][a-z0-9-]*\\.[a-z][a-z0-9.-]*$"
+        },
+        "payload": {
+          "$ref": "#/$defs/ModuleResponsePayload"
+        }
+      },
+      "description": "模組貢獻的回應。",
+      "x-catch-all": true
+    },
+    "ModuleEvent": {
+      "title": "ModuleEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "type": "string",
+          "description": "模組命名空間的事件型別，例如 module.cards.changed。",
+          "pattern": "^module\\.[a-z][a-z0-9-]*\\.[a-z][a-z0-9.-]*$"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "這個串流的單調遞增序號。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/ModuleEventPayload"
+        }
+      },
+      "description": "模組貢獻的事件。未安裝對應模組的客戶端可以忽略。",
+      "x-catch-all": true
+    },
+    "ClientFrame": {
+      "title": "ClientFrame",
+      "description": "客戶端送給主機的所有訊息。",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SystemHelloRequest"
+        },
+        {
+          "$ref": "#/$defs/SystemSubscribeRequest"
+        },
+        {
+          "$ref": "#/$defs/SystemUnsubscribeRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionCreateRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionListRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionSendMessageRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionInterruptRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionSubscribeRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionUnsubscribeRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionGetHistoryRequest"
+        },
+        {
+          "$ref": "#/$defs/ApprovalDecideRequest"
+        },
+        {
+          "$ref": "#/$defs/ApprovalPauseAllRequest"
+        },
+        {
+          "$ref": "#/$defs/ModuleRequest"
+        }
+      ]
+    },
+    "ServerFrame": {
+      "title": "ServerFrame",
+      "description": "主機送給客戶端的所有訊息。",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SystemHelloResponse"
+        },
+        {
+          "$ref": "#/$defs/SystemSubscribeResponse"
+        },
+        {
+          "$ref": "#/$defs/SystemUnsubscribeResponse"
+        },
+        {
+          "$ref": "#/$defs/SystemStatusEvent"
+        },
+        {
+          "$ref": "#/$defs/SessionCreateResponse"
+        },
+        {
+          "$ref": "#/$defs/SessionListResponse"
+        },
+        {
+          "$ref": "#/$defs/SessionSendMessageResponse"
+        },
+        {
+          "$ref": "#/$defs/SessionInterruptResponse"
+        },
+        {
+          "$ref": "#/$defs/SessionSubscribeResponse"
+        },
+        {
+          "$ref": "#/$defs/SessionUnsubscribeResponse"
+        },
+        {
+          "$ref": "#/$defs/SessionGetHistoryResponse"
+        },
+        {
+          "$ref": "#/$defs/StreamTurnStartedEvent"
+        },
+        {
+          "$ref": "#/$defs/StreamTextDeltaEvent"
+        },
+        {
+          "$ref": "#/$defs/StreamMessageCompletedEvent"
+        },
+        {
+          "$ref": "#/$defs/StreamToolCallEvent"
+        },
+        {
+          "$ref": "#/$defs/StreamToolResultEvent"
+        },
+        {
+          "$ref": "#/$defs/StreamTurnStateEvent"
+        },
+        {
+          "$ref": "#/$defs/StreamUiEvent"
+        },
+        {
+          "$ref": "#/$defs/ApprovalRequestedEvent"
+        },
+        {
+          "$ref": "#/$defs/ApprovalDecideResponse"
+        },
+        {
+          "$ref": "#/$defs/ApprovalDecidedEvent"
+        },
+        {
+          "$ref": "#/$defs/ApprovalPauseAllResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorFrame"
+        },
+        {
+          "$ref": "#/$defs/ModuleResponse"
+        },
+        {
+          "$ref": "#/$defs/ModuleEvent"
+        }
+      ]
+    }
+  }
+}
