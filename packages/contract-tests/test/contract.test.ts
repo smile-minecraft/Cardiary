@@ -819,3 +819,36 @@ describe("第三次審查的必須先修", () => {
     expect(result.stderr).toContain("故障注入旗標只供測試使用");
   }, 10_000);
 });
+
+describe("第三次審查的 shutdown 缺口", () => {
+  it("control.shutdown 遇到儲存失效：notify.fatal、1011、exit 70，不回 cleanShutdown:true", async () => {
+    const service = await boot({ control: true, faultCloseRuntimeMs: 300 });
+    const connected = await client(service);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const shutdown = await service.controlRequest(
+      "control.shutdown",
+      { reason: "user" },
+      service.controlToken,
+      3000,
+    );
+    expect(shutdown.ok).toBe(false);
+    expect((shutdown.error as { code: string }).code).toBe("unavailable");
+    expect((shutdown.payload as { cleanShutdown?: boolean } | undefined)?.cleanShutdown).not.toBe(
+      true,
+    );
+    await waitUntil(
+      () => service.notifications().some((frame) => frame.route === "notify.fatal"),
+      5000,
+    );
+    const fatal = service.notifications().find((frame) => frame.route === "notify.fatal");
+    expect((fatal?.payload as { reason?: string }).reason).toBe("storage_io");
+    const code = await Promise.race([
+      service.exited,
+      new Promise<number | null>((resolve) => setTimeout(() => resolve(-1), 5000)),
+    ]);
+    expect(code).toBe(70);
+    await waitUntil(() => connected.closed, 5000);
+    expect(connected.closeCode).toBe(1011);
+    expect(connected.closeReason).toBe("storage_failure");
+  }, 20_000);
+});

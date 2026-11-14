@@ -86,6 +86,7 @@ export class HostService {
   #epochAtPause = "";
   #databasesClosed = false;
   #closed = false;
+  #fatalHandled = false;
 
   constructor(options: HostServiceOptions) {
     this.#options = options;
@@ -95,6 +96,11 @@ export class HostService {
 
   get lifecycle(): Lifecycle {
     return this.#lifecycle;
+  }
+
+  /** 資料庫是否真的關閉（暫停成功才為 true）；resume 部分失敗時必須為 false。 */
+  get databasesClosed(): boolean {
+    return this.#databasesClosed;
   }
 
   get epoch(): string {
@@ -265,6 +271,9 @@ export class HostService {
           reason: "state_reopen_failed",
         };
       }
+      // 狀態庫一重開，handle 就是開著的；後面 events.reopen／epoch 檢查／
+      // engine.resume 任何一步失敗都不能再宣稱 databasesClosed。
+      this.#databasesClosed = false;
       try {
         await this.#options.storage.events.reopen();
       } catch {
@@ -345,18 +354,35 @@ export class HostService {
         if (snapshot.epoch !== (this.#epochAtPause || snapshot.epoch)) {
           return { state: "closed" as const, cleanShutdown: false, reason: "folder_mismatch" };
         }
-        await this.#options.storage.runtime.markCleanShutdown(reason);
-        await this.#options.storage.runtime.checkpointAndClose();
+        try {
+          await this.#options.storage.runtime.markCleanShutdown(reason);
+          await this.#options.storage.runtime.checkpointAndClose();
+        } catch (error) {
+          // 已暫停時的寫入失敗也要走致命路徑；#fatalHandled 讓 #closed 不擋住它。
+          await this.failStorage(error instanceof Error ? error.message : "關閉時儲存失效");
+          throw new ControlError("unavailable", "儲存失效，關閉未完成。");
+        }
+        this.#databasesClosed = true;
+        this.#fatalHandled = true;
         return { state: "closed" as const, cleanShutdown: true };
       }
-      this.#gateway.stopAccepting();
-      await this.#options.spawn.cancelAll(this.#options.pauseDeadlineMs ?? 5000);
-      await this.#options.engine.close();
-      await this.#gateway.drain();
-      await this.#options.storage.events.flush();
-      await this.#options.storage.runtime.markCleanShutdown(reason);
-      await this.#options.storage.runtime.checkpointAndClose();
-      await this.#options.storage.events.close();
+      try {
+        this.#gateway.stopAccepting();
+        await this.#options.spawn.cancelAll(this.#options.pauseDeadlineMs ?? 5000);
+        await this.#options.engine.close();
+        await this.#gateway.drain();
+        await this.#options.storage.events.flush();
+        await this.#options.storage.runtime.markCleanShutdown(reason);
+        await this.#options.storage.runtime.checkpointAndClose();
+        await this.#options.storage.events.close();
+      } catch (error) {
+        // flush／markCleanShutdown／checkpoint／close 失敗都是儲存失效；
+        // 不能因為 shutdown 先把 #closed 設起來就吞掉 fatal。
+        await this.failStorage(error instanceof Error ? error.message : "關閉時儲存失效");
+        throw new ControlError("unavailable", "儲存失效，關閉未完成。");
+      }
+      this.#databasesClosed = true;
+      this.#fatalHandled = true;
       await this.#gateway.close();
       return { state: "closed" as const, cleanShutdown: true };
     });
@@ -377,12 +403,14 @@ export class HostService {
     await this.#options.storage.events.flush().catch(() => undefined);
     await this.#options.storage.events.close().catch(() => undefined);
     await this.#options.storage.runtime.checkpointAndClose().catch(() => undefined);
+    this.#fatalHandled = true;
     this.#options.logger.info("服務結束（未經殼確認，不設 clean_shutdown）", { reason });
   }
 
   /** 儲存失效：停止寫入、送 notify.fatal、關閉客戶端連線（1011）。 */
   async failStorage(detail: string): Promise<void> {
-    if (this.#closed) return;
+    if (this.#fatalHandled) return;
+    this.#fatalHandled = true;
     this.#closed = true;
     this.#folderState = "unavailable";
     this.#serviceState = "storage-failed";

@@ -46,6 +46,7 @@ interface ParsedArgs {
   readonly script?: string;
   readonly control: boolean;
   readonly faultCloseEventLogMs?: number;
+  readonly faultCloseRuntimeMs?: number;
   readonly faultSkipDedupeComplete: boolean;
 }
 
@@ -66,6 +67,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let script: string | undefined;
   let control = false;
   let faultCloseEventLogMs: number | undefined;
+  let faultCloseRuntimeMs: number | undefined;
   let faultSkipDedupeComplete = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -98,6 +100,12 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
         index += 1;
         break;
       }
+      case "--fault-close-runtime": {
+        const value = argv[index + 1];
+        faultCloseRuntimeMs = value === undefined ? undefined : Number.parseInt(value, 10);
+        index += 1;
+        break;
+      }
       case "--fault-skip-dedupe-complete":
         faultSkipDedupeComplete = true;
         break;
@@ -112,6 +120,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     ...(script === undefined ? {} : { script }),
     control,
     ...(faultCloseEventLogMs === undefined ? {} : { faultCloseEventLogMs }),
+    ...(faultCloseRuntimeMs === undefined ? {} : { faultCloseRuntimeMs }),
     faultSkipDedupeComplete,
   };
 }
@@ -248,7 +257,9 @@ export async function run(
   const input = streams.input ?? process.stdin;
   const args = parseArgs(argv);
   const usesFaultInjection =
-    args.faultCloseEventLogMs !== undefined || args.faultSkipDedupeComplete;
+    args.faultCloseEventLogMs !== undefined ||
+    args.faultCloseRuntimeMs !== undefined ||
+    args.faultSkipDedupeComplete;
   if (usesFaultInjection && process.env.CARDIARY_TEST_FAULTS !== "1") {
     stderr.write("故障注入旗標只供測試使用；需要 CARDIARY_TEST_FAULTS=1。\n");
     return 2;
@@ -288,6 +299,9 @@ async function runIndependent(
       ...(args.faultCloseEventLogMs === undefined
         ? {}
         : { faultCloseEventLogAfterMs: args.faultCloseEventLogMs }),
+      ...(args.faultCloseRuntimeMs === undefined
+        ? {}
+        : { faultCloseRuntimeAfterMs: args.faultCloseRuntimeMs }),
       ...(args.faultSkipDedupeComplete ? { faultSkipDedupeComplete: true } : {}),
       fatalNotifier: async () => {
         setTimeout(() => process.exit(70), 50).unref?.();
@@ -363,6 +377,9 @@ async function runControl(
       ...(args.faultCloseEventLogMs === undefined
         ? {}
         : { faultCloseEventLogAfterMs: args.faultCloseEventLogMs }),
+      ...(args.faultCloseRuntimeMs === undefined
+        ? {}
+        : { faultCloseRuntimeAfterMs: args.faultCloseRuntimeMs }),
       ...(args.faultSkipDedupeComplete ? { faultSkipDedupeComplete: true } : {}),
       maintenanceNotifier: async (lifecycle, operationId) => {
         await channelRef

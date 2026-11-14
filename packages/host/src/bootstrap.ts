@@ -73,6 +73,8 @@ export interface StartHostOptions {
   readonly faultCloseEventLogAfterMs?: number;
   /** 測試故障注入：第一個 request_dedupe complete 不寫入。 */
   readonly faultSkipDedupeComplete?: boolean;
+  /** 測試故障注入：啟動 N 毫秒後關閉執行期狀態庫，模擬 shutdown 寫入失敗。 */
+  readonly faultCloseRuntimeAfterMs?: number;
 }
 
 export interface RunningHost {
@@ -213,6 +215,11 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
     setTimeout(() => {
       void events.close();
     }, options.faultCloseEventLogAfterMs).unref?.();
+  }
+  if (options.faultCloseRuntimeAfterMs !== undefined) {
+    setTimeout(() => {
+      void runtime.checkpointAndClose();
+    }, options.faultCloseRuntimeAfterMs).unref?.();
   }
   await service.start();
   return { service, gateway, engine, storage, port, epoch: snapshot.epoch, spawn };

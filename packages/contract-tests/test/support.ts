@@ -80,6 +80,8 @@ export interface ServiceOptions {
   readonly faultCloseEventLogMs?: number;
   /** 測試故障注入：讓第一個 request_dedupe complete 不寫入。 */
   readonly faultSkipDedupeComplete?: boolean;
+  /** 測試故障注入：啟動 N 毫秒後關閉執行期狀態庫。 */
+  readonly faultCloseRuntimeMs?: number;
 }
 
 export interface SpawnedService {
@@ -132,6 +134,9 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
   }
   if (options.faultSkipDedupeComplete === true) {
     args.push("--fault-skip-dedupe-complete");
+  }
+  if (options.faultCloseRuntimeMs !== undefined) {
+    args.push("--fault-close-runtime", String(options.faultCloseRuntimeMs));
   }
   const child = spawn(process.execPath, args, {
     env: {

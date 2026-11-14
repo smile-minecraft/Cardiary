@@ -2,7 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { EngineLogger, ToolPermissionGate } from "@cardiary/engine-adapter";
 import { FakeEngine } from "@cardiary/engine-fake";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   m0PermissionGate,
@@ -194,6 +194,53 @@ describe("生命週期", () => {
       code: "unavailable",
     });
     expect(failures).toHaveLength(1);
+  });
+
+  it("shutdown 的儲存寫入失敗會走 failStorage：notify.fatal、1011，不回 cleanShutdown", async () => {
+    const failures: string[] = [];
+    const host = await boot({
+      fatalNotifier: async (reason, detail) => {
+        failures.push(`${reason}:${detail}`);
+      },
+    });
+    const client = await TestClient.connect(host.url);
+    const hello = await client.hello(host.token);
+    await client.waitForReply(hello);
+    // 實際的 StorageFailure：狀態庫已關閉，markCleanShutdown 會失敗。
+    await (
+      host.host.storage.runtime as unknown as { checkpointAndClose(): Promise<void> }
+    ).checkpointAndClose();
+    await expect(host.host.service.shutdown("user")).rejects.toMatchObject({
+      code: "unavailable",
+    });
+    expect(failures[0]?.startsWith("storage_io:")).toBe(true);
+    expect(host.host.service.health().state).toBe("storage-failed");
+    expect(host.host.service.databasesClosed).toBe(false);
+    await waitUntil(() => client.closed, 4000);
+    expect(client.closeCode).toBe(1011);
+    expect(client.closeReason).toBe("storage_failure");
+  });
+
+  it("resume 部分失敗後 pause 不會回假的 databasesClosed", async () => {
+    const host = await boot();
+    await host.host.service.pause("user", 100);
+    const checkpointCalls = runtimeCalls(host).filter(
+      (call) => call === "runtime.checkpointAndClose",
+    ).length;
+    const resumeSpy = vi
+      .spyOn(host.host.engine, "resume")
+      .mockRejectedValueOnce(new Error("resume 失敗"));
+    const resumed = await host.host.service.resume();
+    expect(resumed.state).toBe("degraded");
+    expect(resumed.reason).toBe("engine_reopen_failed");
+    expect(host.host.service.databasesClosed).toBe(false);
+    const paused = await host.host.service.pause("user", 100);
+    expect(paused.databasesClosed).toBe(true);
+    expect(runtimeCalls(host).filter((call) => call === "runtime.checkpointAndClose").length).toBe(
+      checkpointCalls + 1,
+    );
+    expect(host.host.service.databasesClosed).toBe(true);
+    resumeSpy.mockRestore();
   });
 
   it("執行中的 shutdown 取消工具並等它們結束", async () => {
