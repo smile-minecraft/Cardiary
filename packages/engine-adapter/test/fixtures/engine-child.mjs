@@ -1,9 +1,15 @@
+/* global process, setTimeout */
 // 子行程夾具：跑真引擎流程，讓測試在工具執行中或等待審批時強制結束行程。
 // 用建置後的 dist，因為 Node 直接執行 TypeScript 需要型別剝除，不是 CI 的前提。
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
-import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import {
+  createModels,
+  fauxAssistantMessage,
+  fauxProvider,
+  fauxToolCall,
+} from "@earendil-works/pi-ai";
 
 import { createEngineAdapter } from "../../dist/index.js";
 import { createFileApprovalLedger } from "./file-ledger.mjs";
@@ -88,7 +94,11 @@ const adapter = createEngineAdapter({
 await adapter.open();
 await adapter.configureModels({
   providers: [
-    { provider: "faux", credentialRef: "test", models: [{ id: "faux-1", displayName: "Faux", contextWindow: 100000, input: ["text"] }] },
+    {
+      provider: "faux",
+      credentialRef: "test",
+      models: [{ id: "faux-1", displayName: "Faux", contextWindow: 100000, input: ["text"] }],
+    },
   ],
   roles: {
     main: { provider: "faux", model: "faux-1" },

@@ -70,7 +70,8 @@ export class ApprovalServiceImpl implements ApprovalService {
       );
     }
     const toolName =
-      draft.action.toolName ?? (draft.requestedBy.kind === "tool" ? draft.requestedBy.toolName : undefined);
+      draft.action.toolName ??
+      (draft.requestedBy.kind === "tool" ? draft.requestedBy.toolName : undefined);
     if (toolName === undefined) {
       throw engineError("invalid-request", "工具審批必須帶工具名稱");
     }
@@ -102,8 +103,7 @@ export class ApprovalServiceImpl implements ApprovalService {
   ): Promise<ApprovalRequest> {
     const now = this.#clock.now();
     const timeoutMs = draft.timeoutMs === undefined ? DEFAULT_TIMEOUT_MS : draft.timeoutMs;
-    const expiresAt =
-      timeoutMs === null ? null : new Date(now.getTime() + timeoutMs).toISOString();
+    const expiresAt = timeoutMs === null ? null : new Date(now.getTime() + timeoutMs).toISOString();
     const candidate: ApprovalRequest = {
       id: `apr_${randomUUID()}`,
       status: "pending",
@@ -234,14 +234,25 @@ export class ApprovalServiceImpl implements ApprovalService {
     if (request.status !== "pending") {
       return {
         request,
-        outcome: request.status === "expired" ? "expired" : request.status === "withdrawn" ? "withdrawn" : request.status === "approved" ? "approved" : "denied",
+        outcome:
+          request.status === "expired"
+            ? "expired"
+            : request.status === "withdrawn"
+              ? "withdrawn"
+              : request.status === "approved"
+                ? "approved"
+                : "denied",
         decision: request.decision ?? null,
       };
     }
     const withdrawn: ApprovalRequest = { ...request, status: "withdrawn" };
     await this.#ledger.update(withdrawn);
     this.#requests.set(requestId, withdrawn);
-    const resolution: ApprovalResolution = { request: withdrawn, outcome: "withdrawn", decision: null };
+    const resolution: ApprovalResolution = {
+      request: withdrawn,
+      outcome: "withdrawn",
+      decision: null,
+    };
     this.#publish({ kind: "resolved", resolution });
     this.#settle(requestId, resolution);
     void reason;
@@ -337,7 +348,8 @@ function matchesFilter(update: ApprovalUpdate, filter: ApprovalListFilter | unde
   if (filter === undefined) {
     return true;
   }
-  const draft = update.kind === "requested" ? update.request.draft : update.resolution.request.draft;
+  const draft =
+    update.kind === "requested" ? update.request.draft : update.resolution.request.draft;
   const { conversationId } = draft;
   if (filter.conversationId !== undefined && conversationId !== filter.conversationId) {
     return false;

@@ -1,4 +1,3 @@
-import { readFile, writeFile } from "node:fs/promises";
 /**
  * 記憶體版的審批 ledger；給測試與假引擎使用。
  *
@@ -50,7 +49,10 @@ export function createInMemoryApprovalLedger(): import("../approval.js").Approva
         if (row.status !== "pending") {
           return false;
         }
-        if (filter?.conversationId !== undefined && row.draft.conversationId !== filter.conversationId) {
+        if (
+          filter?.conversationId !== undefined &&
+          row.draft.conversationId !== filter.conversationId
+        ) {
           return false;
         }
         if (filter?.rootConversationId !== undefined) {

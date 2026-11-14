@@ -28,7 +28,10 @@ export function canonicalJson(value: JsonValue): string {
       }
       return `{${Object.keys(value)
         .sort(compareUtf8)
-        .map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, JsonValue>)[key] as JsonValue)}`)
+        .map(
+          (key) =>
+            `${JSON.stringify(key)}:${canonicalJson((value as Record<string, JsonValue>)[key] as JsonValue)}`,
+        )
         .join(",")}}`;
     default:
       throw new TypeError("正規化 JSON 不接受這個型別");

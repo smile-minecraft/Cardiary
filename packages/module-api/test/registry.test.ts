@@ -101,7 +101,10 @@ describe("模組註冊表", () => {
 
   it("重載配發新 generation，並對進行中的對話預告變更", async () => {
     const tools = new RecordingRegistry();
-    const staged: { conversationId: string; pins: readonly { bundleId: string; generation: number }[] }[] = [];
+    const staged: {
+      conversationId: string;
+      pins: readonly { bundleId: string; generation: number }[];
+    }[] = [];
     const host = createModuleHost({
       tools,
       services,

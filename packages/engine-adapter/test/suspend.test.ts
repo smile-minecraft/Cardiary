@@ -33,8 +33,12 @@ describe("暫停與恢復", () => {
       const deadline = Date.now() + 10000;
       let text = "";
       while (Date.now() < deadline) {
-        const history = await fixture.adapter.readConversationHistory({ conversationId: conversation.id });
-        const assistant = [...history.messages].reverse().find((message) => message.role === "assistant");
+        const history = await fixture.adapter.readConversationHistory({
+          conversationId: conversation.id,
+        });
+        const assistant = [...history.messages]
+          .reverse()
+          .find((message) => message.role === "assistant");
         text = (assistant?.content ?? [])
           .map((block) => (block.type === "text" ? block.text : ""))
           .join("");

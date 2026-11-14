@@ -68,7 +68,9 @@ describe("當機續跑", () => {
         const deadline = Date.now() + 15000;
         let rendered = "";
         while (Date.now() < deadline) {
-          const history = await fixture.adapter.readConversationHistory({ conversationId: found!.id });
+          const history = await fixture.adapter.readConversationHistory({
+            conversationId: found!.id,
+          });
           rendered = history.messages
             .map((message) =>
               message.content.map((block) => (block.type === "text" ? block.text : "")).join(""),
@@ -122,17 +124,22 @@ describe("當機續跑", () => {
 
       // 註冊表只在行程內；重啟後要在 open() 之前重新註冊對話釘選的版本。
       const restoreTool = (): ToolDefinition => ({
-          name: "gated",
-          description: "需要核准的副作用",
-          replay: "safe",
-          parameters: { type: "object", properties: {}, additionalProperties: false },
+        name: "gated",
+        description: "需要核准的副作用",
+        replay: "safe",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
         async execute(_input, context) {
           await appendFile(join(root, "effects.log"), "enter\n");
           const resolution = await context.requestApproval({
             conversationId: context.conversationId,
             turnId: context.turnId,
             toolCallId: context.callId,
-            action: { kind: "tool-execution", summary: "需要核准的副作用", toolName: "gated", toolInput: {} },
+            action: {
+              kind: "tool-execution",
+              summary: "需要核准的副作用",
+              toolName: "gated",
+              toolInput: {},
+            },
             risk: "medium",
             requestedBy: { kind: "tool", toolName: "gated" },
           });
@@ -148,22 +155,18 @@ describe("當機續跑", () => {
         ledger: createFileApprovalLedger(join(root, "approvals.json")),
         responses: answer("已核准"),
         gate: gateWith({ kind: "allow" }),
-        beforeOpen: async (adapter) => {
-          await adapter.tools.register(bundleOf("child.tools", [restoreTool()], 1));
-        },
       });
       try {
+        // 真實流程：open() 只載入狀態，宿主註冊釘選的工具組之後才 restore（resume）。
+        await fixture.adapter.tools.register(bundleOf("child.tools", [restoreTool()], 1));
         const found = await fixture.adapter.findConversationByClientRequestId("child-conv");
         expect(found).not.toBeNull();
-        console.log("DEBUG inspect-before", JSON.stringify(await (fixture.adapter as unknown as { debugInspection(): Promise<unknown> }).debugInspection()).slice(0, 1500));
         await fixture.adapter.restoreConversation(found!.id);
-        await new Promise((r) => setTimeout(r, 500));
-        console.log("DEBUG inspect-after", JSON.stringify(await (fixture.adapter as unknown as { debugInspection(): Promise<unknown> }).debugInspection()).slice(0, 1500));
-        const started = Date.now();
-        try {
         await waitFor(async () => {
           const conversation = await fixture.adapter.getConversation(found!.id);
-          const history = await fixture.adapter.readConversationHistory({ conversationId: found!.id });
+          const history = await fixture.adapter.readConversationHistory({
+            conversationId: found!.id,
+          });
           const text = history.messages
             .map((message) =>
               message.content.map((block) => (block.type === "text" ? block.text : "")).join(""),
@@ -171,15 +174,6 @@ describe("當機續跑", () => {
             .join("\n");
           return conversation?.state === "idle" && text.includes("gated-done") ? true : undefined;
         }, "重跑後完成");
-        } catch (error) {
-          const history = await fixture.adapter.readConversationHistory({ conversationId: found!.id });
-          console.log("DEBUG effects", await readEffects(root));
-          console.log("DEBUG history", history.messages.map((message) => `${message.role}:${message.content.map((b) => (b.type === "text" ? b.text : "")).join("")}`).join(" | "));
-          const raw = await (fixture.adapter as unknown as { debugEntries(id: string): Promise<unknown> }).debugEntries(found!.id);
-          console.log("DEBUG raw", JSON.stringify(raw).slice(0, 2000));
-          void started;
-          throw error;
-        }
         const after = await readEffects(root);
         // 工具重跑一次（enter 兩次），副作用只發生一次。
         expect(after).toEqual(["enter", "enter", "effect"]);

@@ -21,7 +21,12 @@ export interface ManagedChild {
   readonly pid: number;
   readonly child: ChildProcess;
   /** 讀完 stdout／stderr；`stdio: "ignore"` 時是空字串。 */
-  collect(): Promise<{ readonly stdout: string; readonly stderr: string; readonly code: number | null; readonly signal: NodeJS.Signals | null }>;
+  collect(): Promise<{
+    readonly stdout: string;
+    readonly stderr: string;
+    readonly code: number | null;
+    readonly signal: NodeJS.Signals | null;
+  }>;
   /** 對整個 process group 送訊號；預設 SIGTERM。 */
   terminate(signal?: NodeJS.Signals): void;
   /** 等到行程結束。 */

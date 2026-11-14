@@ -56,9 +56,7 @@ export interface ModuleHostOptions {
    * 列出目前釘選這個模組工具組的對話；重載時用來預告變更。
    * 省略時 `stagedConversationIds` 一律是空陣列。
    */
-  readonly listPinnedConversations?: (
-    pins: readonly ToolBundlePin[],
-  ) => Promise<readonly string[]>;
+  readonly listPinnedConversations?: (pins: readonly ToolBundlePin[]) => Promise<readonly string[]>;
   /** 對進行中的對話預告工具組變更；省略時不預告。 */
   readonly stageConversationUpdate?: (
     conversationId: string,
@@ -213,22 +211,20 @@ export class ModuleRegistry implements ModuleHost {
     }
     const replacement = next ?? entry.module;
     if (next !== undefined) {
-      validateManifest(
-        next.manifest,
-        this.#options.hostApiVersion ?? DEFAULT_HOST_API_VERSION,
-      );
+      validateManifest(next.manifest, this.#options.hostApiVersion ?? DEFAULT_HOST_API_VERSION);
       if (next.manifest.id !== moduleId) {
         throw new ModuleLifecycleFailure("invalid-manifest", moduleId, "重載不能換模組識別碼");
       }
       entry.module = next;
     }
     const record = await this.activate(moduleId);
-    const newPins: ToolBundlePin[] = record.identity.generation === 0
-      ? []
-      : entry.bundles.map((bundle) => ({
-          bundleId: bundle.bundleId,
-          generation: bundle.generation,
-        }));
+    const newPins: ToolBundlePin[] =
+      record.identity.generation === 0
+        ? []
+        : entry.bundles.map((bundle) => ({
+            bundleId: bundle.bundleId,
+            generation: bundle.generation,
+          }));
     const stagedConversationIds =
       this.#options.listPinnedConversations === undefined
         ? []
@@ -275,13 +271,23 @@ export class ModuleRegistry implements ModuleHost {
         const registration = handle(async () => {
           await this.#options.tools.retire(draft.bundleId, generation);
         });
-        (registration as { registrationId: string }).registrationId = `${registration.registrationId}:bundle`;
+        (registration as { registrationId: string }).registrationId =
+          `${registration.registrationId}:bundle`;
         void this.#options.tools.register({ ...draft, generation });
         return registration;
       },
-      registerContextSection: (_section: ContextSectionContribution) => handle(async () => {}),
-      registerHook: (_hook: HookDeclaration) => handle(async () => {}),
-      registerSchedule: (_schedule: ScheduleDeclaration) => handle(async () => {}),
+      registerContextSection: (section: ContextSectionContribution) => {
+        void section;
+        return handle(async () => {});
+      },
+      registerHook: (hook: HookDeclaration) => {
+        void hook;
+        return handle(async () => {});
+      },
+      registerSchedule: (schedule: ScheduleDeclaration) => {
+        void schedule;
+        return handle(async () => {});
+      },
     };
   }
 

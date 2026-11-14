@@ -127,7 +127,7 @@ describe("對話生命週期", () => {
       expect(first.delivery).toBe("started");
 
       await waitFor(
-        async () => (await fixture.adapter.approvals.listPending()).length > 0 ? true : undefined,
+        async () => ((await fixture.adapter.approvals.listPending()).length > 0 ? true : undefined),
         "等待審批請求",
       );
 
@@ -166,10 +166,14 @@ describe("對話生命週期", () => {
       expect(kinds).toContain("approval.requested");
       expect(kinds).toContain("approval.resolved");
 
-      const history = await fixture.adapter.readConversationHistory({ conversationId: conversation.id });
+      const history = await fixture.adapter.readConversationHistory({
+        conversationId: conversation.id,
+      });
       const userTexts = history.messages
         .filter((message) => message.role === "user")
-        .map((message) => message.content.map((block) => (block.type === "text" ? block.text : "")).join(""));
+        .map((message) =>
+          message.content.map((block) => (block.type === "text" ? block.text : "")).join(""),
+        );
       expect(userTexts).toContain("改用 pnpm，不要用 npm");
       subscription.close();
     } finally {

@@ -41,7 +41,9 @@ export async function deleteEngineSubtree(
     const scopeClauses = [`(scope_kind = 'conversation' AND owner_id IN (${placeholders}))`];
     const scopeParams: number[] = [...conversationIds];
     if (taskIds.length > 0) {
-      scopeClauses.push(`(scope_kind = 'task' AND owner_id IN (${taskIds.map(() => "?").join(", ")}))`);
+      scopeClauses.push(
+        `(scope_kind = 'task' AND owner_id IN (${taskIds.map(() => "?").join(", ")}))`,
+      );
       scopeParams.push(...taskIds);
     }
     const documentWhere = scopeClauses.join(" OR ");
@@ -84,7 +86,10 @@ export async function deleteEngineSubtree(
       // record_ids 是引擎的 ID 所有權表；沒清掉會讓重建的 root 撞
       // "ID 1 already belongs to conversation"。
       const recordPlaceholders = recordIds.map(() => "?").join(", ");
-      await database.run(`DELETE FROM record_ids WHERE id IN (${recordPlaceholders})`, ...recordIds);
+      await database.run(
+        `DELETE FROM record_ids WHERE id IN (${recordPlaceholders})`,
+        ...recordIds,
+      );
     }
 
     await database.exec("COMMIT");

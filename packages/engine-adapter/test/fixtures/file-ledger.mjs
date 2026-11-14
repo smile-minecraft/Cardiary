@@ -20,7 +20,11 @@ export function createFileApprovalLedger(path) {
     queue = next.catch(() => {});
     return next;
   };
-  const strip = ({ sequence, ...rest }) => rest;
+  const strip = (row) => {
+    const copy = { ...row };
+    delete copy.sequence;
+    return copy;
+  };
   return {
     record: (request) =>
       serial(async () => {

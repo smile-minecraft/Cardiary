@@ -2,13 +2,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import {
+  createModels,
+  fauxAssistantMessage,
+  fauxProvider,
+  fauxToolCall,
+} from "@earendil-works/pi-ai";
 import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
 
-import {
-  createEngineAdapter,
-  createInMemoryApprovalLedger,
-} from "../src/index.js";
+import { createEngineAdapter, createInMemoryApprovalLedger } from "../src/index.js";
 import type {
   ApprovalLedger,
   EngineAdapter,
@@ -50,8 +52,8 @@ export interface FixtureOptions {
   readonly environment?: Partial<EngineEnvironment>;
   /** 在 `open()` 之前先排好的模型回應；續跑時第一個模型請求就會用到。 */
   readonly responses?: readonly AssistantMessage[];
-  /** 在 `open()` 之前執行；主機就是在這個時機註冊模組的工具組。 */
-  readonly beforeOpen?: (adapter: EngineAdapter) => Promise<void>;
+  /** 事件補送緩衝大小。 */
+  readonly eventBufferSize?: number;
 }
 
 /** 假模型 + SQLite 引擎的測試夾具；不需要金鑰與網路。 */
@@ -76,8 +78,13 @@ export async function createFixture(options: FixtureOptions = {}): Promise<Fixtu
     async close() {},
   };
   const ledger = options.ledger ?? createInMemoryApprovalLedger();
-  const gate: ToolPermissionGate =
-    options.gate ?? { evaluate: async () => ({ kind: "ask-human", action: { kind: "tool-execution", summary: "執行工具" }, risk: "medium" }) };
+  const gate: ToolPermissionGate = options.gate ?? {
+    evaluate: async () => ({
+      kind: "ask-human",
+      action: { kind: "tool-execution", summary: "執行工具" },
+      risk: "medium",
+    }),
+  };
   const adapter = createEngineAdapter({
     environment,
     approvals: ledger,
@@ -86,10 +93,8 @@ export async function createFixture(options: FixtureOptions = {}): Promise<Fixtu
     logger: silentLogger,
     models: modelSource,
     ...(options.purger === undefined ? {} : { purger: options.purger }),
+    ...(options.eventBufferSize === undefined ? {} : { eventBufferSize: options.eventBufferSize }),
   });
-  if (options.beforeOpen !== undefined) {
-    await options.beforeOpen(adapter);
-  }
   await adapter.open();
   await adapter.configureModels(settingsFor());
   return {
@@ -123,7 +128,11 @@ export function settingsFor(): ModelSettings {
 }
 
 /** 腳本化模型回應：一次工具呼叫 + 最後的文字。 */
-export function toolThenAnswer(name: string, input: Record<string, JsonValue>, answer = "完成"): AssistantMessage[] {
+export function toolThenAnswer(
+  name: string,
+  input: Record<string, JsonValue>,
+  answer = "完成",
+): AssistantMessage[] {
   return [
     fauxAssistantMessage([fauxToolCall(name, input) as ToolCall], { stopReason: "toolUse" }),
     fauxAssistantMessage(answer),
@@ -166,11 +175,16 @@ export function bundleOf(
 }
 
 /** 一個會等待審批的工具。 */
-export function approvalTool(options: {
-  readonly name?: string;
-  readonly replay?: "safe" | "unsafe";
-  readonly run?: (input: JsonValue, context: { tempDir: string; turnId: string }) => Promise<void>;
-} = {}): ToolDefinition {
+export function approvalTool(
+  options: {
+    readonly name?: string;
+    readonly replay?: "safe" | "unsafe";
+    readonly run?: (
+      input: JsonValue,
+      context: { tempDir: string; turnId: string },
+    ) => Promise<void>;
+  } = {},
+): ToolDefinition {
   const name = options.name ?? "deploy";
   return {
     name,
@@ -182,7 +196,12 @@ export function approvalTool(options: {
         conversationId: context.conversationId,
         turnId: context.turnId,
         toolCallId: context.callId,
-        action: { kind: "tool-execution", summary: `執行 ${name}`, toolName: name, toolInput: input },
+        action: {
+          kind: "tool-execution",
+          summary: `執行 ${name}`,
+          toolName: name,
+          toolInput: input,
+        },
         risk: "medium",
         requestedBy: { kind: "tool", toolName: name },
       });
@@ -190,7 +209,9 @@ export function approvalTool(options: {
         return {
           ok: false,
           message: resolution.outcome === "expired" ? "審批逾時" : "使用者拒絕",
-          diagnostics: [{ code: resolution.outcome === "expired" ? "approval-expired" : "approval-denied" }],
+          diagnostics: [
+            { code: resolution.outcome === "expired" ? "approval-expired" : "approval-denied" },
+          ],
         };
       }
       await options.run?.(input, { tempDir: context.tempDir, turnId: context.turnId });

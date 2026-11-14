@@ -1,17 +1,9 @@
 import { mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import {
-  AgentDoc,
-  Harness,
-  LiveDoc,
-  defineDocFamily,
-  defineExtension,
-  defineTool,
-} from "@earendil-works/pi-durable";
+import { LiveDoc, defineDocFamily, defineExtension, defineTool } from "@earendil-works/pi-durable";
 import type {
   Conversation,
-  ConversationRecord,
   EntryRecord,
   Submission,
   SubmissionRecord,
@@ -20,16 +12,7 @@ import type {
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 
-import type {
-  ApprovalRequest,
-  ApprovalService,
-  ApprovalUpdate,
-  DecideApprovalInput,
-  DecideApprovalResult,
-  ApprovalListFilter,
-  ApprovalResolution,
-  ApprovalWaitOptions,
-} from "../approval.js";
+import type { ApprovalRequest, ApprovalService, ApprovalResolution } from "../approval.js";
 import type {
   CancelTurnRequest,
   CompletedTurnStatus,
@@ -57,7 +40,7 @@ import type {
   EngineStatus,
 } from "../engine.js";
 import type { EngineSubscription, SubscribeOptions } from "../events.js";
-import type { ConversationId, MessageId, ToolBundleId, ToolCallId, ToolName, TurnId } from "../ids.js";
+import type { ConversationId, ToolBundleId, ToolCallId, ToolName, TurnId } from "../ids.js";
 import type { JsonValue } from "../json.js";
 import type { ModelSettings } from "../model.js";
 import type { ToolPermissionVerdict } from "../permission.js";
@@ -75,7 +58,6 @@ import type {
   ReplaySafety,
   ToolBundle,
   ToolBundleState,
-  ToolDefinition,
   ToolDiagnostic,
   ToolOutcome,
   ToolProgress,
@@ -85,11 +67,7 @@ import { ApprovalServiceImpl } from "./approval-service.js";
 import { BundleIndex, type RegisteredBundle } from "./bundle-index.js";
 import type { ActiveTurn, CatalogSnapshot, ConversationMeta } from "./catalog.js";
 import { CatalogDoc, emptyCatalog } from "./catalog.js";
-import {
-  compactAfterDelete,
-  deleteEngineSubtree,
-  listConversationSubtree,
-} from "./delete.js";
+import { compactAfterDelete, deleteEngineSubtree, listConversationSubtree } from "./delete.js";
 import { EngineAdapterFailure, engineError } from "./errors.js";
 import { EventBus } from "./event-bus.js";
 import { EngineSession, createEngineRegistry } from "./session.js";
@@ -137,6 +115,8 @@ export class PiEngineAdapter implements EngineAdapter {
   readonly #activeTurns = new Map<ConversationId, ActiveTurn>();
   readonly #subagentStatuses = new Map<ConversationId, SubagentHandle["status"]>();
   readonly #announcedApprovals = new Set<string>();
+  /** 工具呼叫的執行結果；`tool.finished` 的 `ok` 從這裡來。 */
+  readonly #toolOutcomes = new Map<ToolCallId, boolean>();
   readonly #statusListeners = new Set<(status: EngineStatus) => void>();
 
   constructor(options: EngineAdapterOptions) {
@@ -151,7 +131,9 @@ export class PiEngineAdapter implements EngineAdapter {
     this.approvals = this.#approvals;
     this.#supervisor = new ProcessSupervisor({
       tempDir: options.environment.tempDir,
-      ...(options.environment.homeDir === undefined ? {} : { homeDir: options.environment.homeDir }),
+      ...(options.environment.homeDir === undefined
+        ? {}
+        : { homeDir: options.environment.homeDir }),
     });
     this.#engineRegistry = createEngineRegistry();
     this.#session = new EngineSession({
@@ -173,7 +155,7 @@ export class PiEngineAdapter implements EngineAdapter {
     await mkdir(resolve(this.#options.environment.defaultWorkingDir), { recursive: true });
     // 建立 Harness 之前先完成未結束的刪除意圖；那條路徑只開引擎的連線。
     await this.#recoverDeletionIntents();
-    await this.#openHarness();
+    await this.#openHarness(false);
     this.#descriptor = {
       name: "pi-durable",
       version: "1.5.2",
@@ -202,7 +184,7 @@ export class PiEngineAdapter implements EngineAdapter {
       return;
     }
     this.#state = "starting";
-    await this.#openHarness();
+    await this.#openHarness(true);
     this.#state = this.#pause === null ? "running" : "paused";
     this.#emitStatus();
   }
@@ -240,7 +222,14 @@ export class PiEngineAdapter implements EngineAdapter {
     };
   }
 
-  async #openHarness(): Promise<void> {
+  /**
+   * 開儲存與 Harness。
+   *
+   * `open()` 只載入狀態、不啟動排程：宿主必須先註冊對話釘選的工具組版本並
+   * 設定模型，`restoreConversation()` 或 `resume()` 才呼叫引擎的 `resume()`。
+   * 否則中斷的工具會在擴充還沒安裝時重跑，直接得到 `tool-unavailable`。
+   */
+  async #openHarness(resume: boolean): Promise<void> {
     await this.#session.open();
     // 重新註冊所有工具組 generation；registry 是新的，擴充要以名稱重新安裝。
     for (const bundle of this.#bundles.list()) {
@@ -249,7 +238,9 @@ export class PiEngineAdapter implements EngineAdapter {
         this.#installExtension(registered);
       }
     }
-    this.#session.harness.resume();
+    if (resume) {
+      this.#session.harness.resume();
+    }
   }
 
   #emitStatus(): void {
@@ -305,10 +296,9 @@ export class PiEngineAdapter implements EngineAdapter {
   // ── 工具組 ─────────────────────────────────────────────────────────────
 
   #createToolRegistry(): ToolRegistry {
-    const adapter = this;
     return {
-      async register(bundle: ToolBundle): Promise<void> {
-        adapter.#bundles.register({
+      register: async (bundle: ToolBundle): Promise<void> => {
+        this.#bundles.register({
           retired: false,
           bundleId: bundle.bundleId,
           generation: bundle.generation,
@@ -321,17 +311,15 @@ export class PiEngineAdapter implements EngineAdapter {
             execute: tool.execute,
           })),
         });
-        const registered = adapter.#bundles.get(bundle.bundleId, bundle.generation);
+        const registered = this.#bundles.get(bundle.bundleId, bundle.generation);
         if (registered !== undefined) {
-          adapter.#installExtension(registered);
+          this.#installExtension(registered);
         }
       },
-      async retire(bundleId: ToolBundleId, generation: number): Promise<void> {
-        adapter.#bundles.retire(bundleId, generation);
+      retire: async (bundleId: ToolBundleId, generation: number): Promise<void> => {
+        this.#bundles.retire(bundleId, generation);
       },
-      async list(): Promise<readonly ToolBundleState[]> {
-        return adapter.#bundles.list();
-      },
+      list: async (): Promise<readonly ToolBundleState[]> => this.#bundles.list(),
     };
   }
 
@@ -374,7 +362,7 @@ export class PiEngineAdapter implements EngineAdapter {
         parameters: definition.parameters as object,
         replay: definition.replay,
         execute: async (args, api, context) =>
-          (await this.#executeTool({
+          (await this.#runToolAndRecord({
             conversationId: String(api.conversationId),
             callId: api.callId,
             toolName: definition.name,
@@ -385,6 +373,16 @@ export class PiEngineAdapter implements EngineAdapter {
               if (progress.message !== undefined) {
                 api.output(progress.message);
               }
+              this.#bus.publish({
+                kind: "tool.progress",
+                at: this.#clock.now().toISOString(),
+                conversationId: String(api.conversationId),
+                turnId:
+                  this.#activeTurns.get(String(api.conversationId))?.turnId ?? `turn_${api.callId}`,
+                callId: api.callId,
+                toolName: definition.name,
+                progress,
+              });
             },
           })) as never,
       }),
@@ -392,6 +390,35 @@ export class PiEngineAdapter implements EngineAdapter {
     const extension = defineExtension({ name, tools });
     registry.install(extension);
     this.#registry.set(name, extension);
+  }
+
+  async #runToolAndRecord(input: {
+    readonly conversationId: ConversationId;
+    readonly callId: ToolCallId;
+    readonly toolName: ToolName;
+    readonly input: JsonValue;
+    readonly replay: ReplaySafety;
+    readonly context: Context;
+    readonly reportProgress?: (progress: ToolProgress) => void;
+  }): Promise<{
+    output: { readonly type: "text"; readonly text: string }[];
+    isError?: boolean;
+    diagnostics?: readonly { code: string; message?: string }[];
+    details?: JsonValue;
+  }> {
+    const result = await this.#executeTool(input);
+    this.#recordToolOutcome(input.callId, result.isError !== true);
+    return result;
+  }
+
+  #recordToolOutcome(callId: ToolCallId, ok: boolean): void {
+    this.#toolOutcomes.set(callId, ok);
+    if (this.#toolOutcomes.size > 1000) {
+      const oldest = this.#toolOutcomes.keys().next().value;
+      if (oldest !== undefined) {
+        this.#toolOutcomes.delete(oldest);
+      }
+    }
   }
 
   async #executeTool(input: {
@@ -413,8 +440,7 @@ export class PiEngineAdapter implements EngineAdapter {
     if (meta === undefined) {
       return toolError("工具不可用：找不到對話", "tool-unavailable");
     }
-    const activeTurn = this.#activeTurns.get(input.conversationId);
-    const turnId = activeTurn?.turnId ?? `turn_${input.callId}`;
+    const turnId = await this.#turnIdForTool(input.conversationId, input.callId);
     const bundle = this.#bundles.resolve(input.toolName, meta.toolBundles);
     if (bundle === null) {
       return toolError(`工具 ${input.toolName} 目前不可用`, "tool-unavailable");
@@ -530,7 +556,13 @@ export class PiEngineAdapter implements EngineAdapter {
         signal: input.context.abortSignal ?? new AbortController().signal,
         tempDir: callTempDir,
         workingDir,
-        spawn: (spec: { command: string; args?: readonly string[]; cwd?: string; env?: Readonly<Record<string, string>>; stdio?: "pipe" | "ignore" }) =>
+        spawn: (spec: {
+          command: string;
+          args?: readonly string[];
+          cwd?: string;
+          env?: Readonly<Record<string, string>>;
+          stdio?: "pipe" | "ignore";
+        }) =>
           this.#supervisor.spawn({
             command: spec.command,
             args: spec.args ?? [],
@@ -586,6 +618,25 @@ export class PiEngineAdapter implements EngineAdapter {
     };
   }
 
+  /**
+   * 工具執行所屬的回合。
+   *
+   * 優先序：目前進行中的回合、對話目錄裡仍在跑的回合、最後才用工具呼叫 ID
+   * 組一個備援值。重啟後工具重跑時，前兩者讓 `turnId` 和原本的回合一致，
+   * `approval_key` 才不會變。
+   */
+  async #turnIdForTool(conversationId: ConversationId, callId: ToolCallId): Promise<TurnId> {
+    const active = this.#activeTurns.get(conversationId);
+    if (active !== undefined) {
+      return active.turnId;
+    }
+    const catalog = await this.#catalog();
+    const running = Object.values(catalog.turns).filter(
+      (turn) => turn.status === "running" && turn.conversationId === conversationId,
+    );
+    return running.at(-1)?.turnId ?? `turn_${callId}`;
+  }
+
   // ── 對話 ───────────────────────────────────────────────────────────────
 
   async getConversation(conversationId: ConversationId): Promise<ConversationSummary | null> {
@@ -594,7 +645,10 @@ export class PiEngineAdapter implements EngineAdapter {
     if (meta === undefined) {
       return null;
     }
-    const conversation = await this.#session.harness.conversation(engineConversationId(conversationId), BACKGROUND_CONTEXT);
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(conversationId),
+      BACKGROUND_CONTEXT,
+    );
     if (conversation === undefined) {
       return null;
     }
@@ -662,7 +716,9 @@ export class PiEngineAdapter implements EngineAdapter {
     return this.#summary(meta, conversation);
   }
 
-  async findConversationByClientRequestId(clientRequestId: string): Promise<ConversationSummary | null> {
+  async findConversationByClientRequestId(
+    clientRequestId: string,
+  ): Promise<ConversationSummary | null> {
     const index = await this.#session.harness.snapshot(
       ClientRequestIndex,
       clientRequestId,
@@ -679,13 +735,32 @@ export class PiEngineAdapter implements EngineAdapter {
     if (summary === null) {
       throw engineError("conversation-not-found", `找不到對話 ${conversationId}`);
     }
-    const conversation = await this.#session.harness.conversation(engineConversationId(conversationId), BACKGROUND_CONTEXT);
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(conversationId),
+      BACKGROUND_CONTEXT,
+    );
     if (conversation === undefined) {
       throw engineError("conversation-not-found", `找不到對話 ${conversationId}`);
     }
-    this.#session.harness.resume();
-    const live = await this.#session.harness.snapshot(LiveDoc, engineConversationId(conversationId), BACKGROUND_CONTEXT);
+    const live = await this.#session.harness.snapshot(
+      LiveDoc,
+      engineConversationId(conversationId),
+      BACKGROUND_CONTEXT,
+    );
     const recovered = await this.#recoverTurns(conversationId, conversation, live);
+    // 先把重跑中的回合放回記憶體，工具重跑時才拿得到同一個 turnId；
+    // 宿主已註冊釘選的工具組、設定好模型之後才啟動排程。
+    const first = recovered[0];
+    if (first !== undefined && first.outcome !== "completed") {
+      this.#activeTurns.set(conversationId, {
+        turnId: first.turnId,
+        conversationId,
+        triggerMessageId: first.triggerMessageId,
+        status: "running",
+      });
+      void this.#watchRecoveredTurn(conversationId, first.turnId);
+    }
+    await this.#session.harness.resume();
     const pending = await this.#approvals.listPending({ conversationId });
     return { conversation: summary, recoveredTurns: recovered, pendingApprovals: pending };
   }
@@ -741,16 +816,25 @@ export class PiEngineAdapter implements EngineAdapter {
   }
 
   async #interruptedDiagnostics(conversation: Conversation): Promise<readonly ToolDiagnostic[]> {
-    const page = await conversation.entries({ order: "descending" }, 30, undefined, BACKGROUND_CONTEXT);
+    const page = await conversation.entries(
+      { order: "descending" },
+      30,
+      undefined,
+      BACKGROUND_CONTEXT,
+    );
     const diagnostics: ToolDiagnostic[] = [];
     for (const entry of page.items) {
       if (!entry.kind.startsWith("pi.tool")) {
         continue;
       }
-      const data = entry.data as { diagnostics?: readonly { code?: string; message?: string }[] } | undefined;
+      const data = entry.data as
+        { diagnostics?: readonly { code?: string; message?: string }[] } | undefined;
       for (const diagnostic of data?.diagnostics ?? []) {
         if (diagnostic.code === "interrupted") {
-          diagnostics.push({ code: "interrupted", ...(diagnostic.message === undefined ? {} : { message: diagnostic.message }) });
+          diagnostics.push({
+            code: "interrupted",
+            ...(diagnostic.message === undefined ? {} : { message: diagnostic.message }),
+          });
         }
       }
     }
@@ -837,7 +921,7 @@ export class PiEngineAdapter implements EngineAdapter {
     }
 
     if (wasOpen) {
-      await this.#openHarness();
+      await this.#openHarness(true);
       this.#state = "running";
       this.#emitStatus();
     }
@@ -867,7 +951,10 @@ export class PiEngineAdapter implements EngineAdapter {
   }
 
   async #readHistory(request: ReadConversationHistoryRequest): Promise<ConversationHistoryPage> {
-    const conversation = await this.#session.harness.conversation(engineConversationId(request.conversationId), BACKGROUND_CONTEXT);
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(request.conversationId),
+      BACKGROUND_CONTEXT,
+    );
     if (conversation === undefined) {
       throw engineError("conversation-not-found", `找不到對話 ${request.conversationId}`);
     }
@@ -899,7 +986,10 @@ export class PiEngineAdapter implements EngineAdapter {
     if (parent === null) {
       throw engineError("conversation-not-found", `找不到對話 ${request.conversationId}`);
     }
-    const conversation = await this.#session.harness.conversation(engineConversationId(request.conversationId), BACKGROUND_CONTEXT);
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(request.conversationId),
+      BACKGROUND_CONTEXT,
+    );
     if (conversation === undefined) {
       throw engineError("conversation-not-found", `找不到對話 ${request.conversationId}`);
     }
@@ -976,9 +1066,98 @@ export class PiEngineAdapter implements EngineAdapter {
       meta.stagedUpdate = {
         reason: update.reason,
         systemContext: update.systemContext ?? null,
-        toolBundles:
-          update.toolBundles === undefined ? null : ([...update.toolBundles] as never),
+        toolBundles: update.toolBundles === undefined ? null : ([...update.toolBundles] as never),
       };
+    }, BACKGROUND_CONTEXT);
+    // 進行中的對話沒有回合在跑也要換版：等下一次壓縮出現時套用。
+    void this.#watchForCompaction(conversationId);
+  }
+
+  /** 等這場對話出現下一個壓縮 entry，套用預告的變更。 */
+  async #watchForCompaction(conversationId: ConversationId): Promise<void> {
+    const deadline = Date.now() + 10 * 60 * 1000;
+    let baseline: number;
+    try {
+      const conversation = await this.#session.harness.conversation(
+        engineConversationId(conversationId),
+        BACKGROUND_CONTEXT,
+      );
+      const page = await conversation?.entries(
+        { order: "descending" },
+        1,
+        undefined,
+        BACKGROUND_CONTEXT,
+      );
+      baseline = page?.items[0]?.id === undefined ? 0 : Number(page.items[0].id);
+    } catch {
+      return;
+    }
+    while (Date.now() < deadline) {
+      if (!this.#session.isOpen) {
+        return;
+      }
+      try {
+        const catalog = await this.#catalog();
+        if (catalog.conversations[conversationId]?.stagedUpdate == null) {
+          return;
+        }
+        const conversation = await this.#session.harness.conversation(
+          engineConversationId(conversationId),
+          BACKGROUND_CONTEXT,
+        );
+        if (conversation === undefined) {
+          return;
+        }
+        const page = await conversation.entries(
+          { order: "ascending", minEntryId: engineEntryId(baseline + 1) },
+          50,
+          undefined,
+          BACKGROUND_CONTEXT,
+        );
+        if (page.items.some((entry) => entry.kind === "pi.compaction")) {
+          await this.#applyStagedUpdate(conversationId);
+          return;
+        }
+        for (const entry of page.items) {
+          baseline = Math.max(baseline, Number(entry.id));
+        }
+      } catch {
+        return;
+      }
+      await new Promise<void>((resolveTick) => {
+        const timer = setTimeout(resolveTick, 100);
+        timer.unref?.();
+      });
+    }
+  }
+
+  /**
+   * 測試用：直接寫一筆 `pi.compaction` entry。
+   *
+   * 引擎的手動壓縮在對話量很小時不會產生摘要；測試要驗的是「壓縮時換版」
+   * 的轉接層行為，所以用一筆真正的壓縮 entry 觸發。
+   */
+  async debugAppendCompaction(conversationId: ConversationId): Promise<void> {
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(conversationId),
+      BACKGROUND_CONTEXT,
+    );
+    if (conversation === undefined) {
+      throw engineError("conversation-not-found", `找不到對話 ${conversationId}`);
+    }
+    await conversation.commit(async (tx) => {
+      const page = await tx.scanEntries(
+        { conversationId: engineConversationId(conversationId) },
+        1,
+        undefined,
+      );
+      const first = page.items[0];
+      await tx.appendEntry(engineConversationId(conversationId), {
+        kind: "pi.compaction",
+        data: { reason: "manual" },
+        ...(first === undefined ? {} : { head: first.id }),
+        model: [{ role: "user", content: "這是壓縮摘要" } as never],
+      });
     }, BACKGROUND_CONTEXT);
   }
 
@@ -986,12 +1165,20 @@ export class PiEngineAdapter implements EngineAdapter {
 
   async sendMessage(request: SendMessageRequest): Promise<MessageReceipt> {
     this.#assertAcceptingWork();
-    const conversation = await this.#session.harness.conversation(engineConversationId(request.conversationId), BACKGROUND_CONTEXT);
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(request.conversationId),
+      BACKGROUND_CONTEXT,
+    );
     if (conversation === undefined) {
       throw engineError("conversation-not-found", `找不到對話 ${request.conversationId}`);
     }
     const text = contentText(request.content);
-    const whenBusy = request.delivery === "steer" ? "steer" : request.delivery === "reject" ? "reject" : "followUp";
+    const whenBusy =
+      request.delivery === "steer"
+        ? "steer"
+        : request.delivery === "reject"
+          ? "reject"
+          : "followUp";
     let submission: Submission;
     try {
       submission = await conversation.submit(
@@ -1074,6 +1261,7 @@ export class PiEngineAdapter implements EngineAdapter {
   async #beginTurn(conversationId: ConversationId, turnId: TurnId, entry: number): Promise<void> {
     this.#activeTurns.set(conversationId, {
       turnId,
+      conversationId,
       triggerMessageId: String(entry),
       status: "running",
     });
@@ -1081,13 +1269,53 @@ export class PiEngineAdapter implements EngineAdapter {
       const draft = await tx.doc(CatalogDoc);
       draft.turns[turnId] = {
         turnId,
+        conversationId,
         triggerMessageId: String(entry),
         status: "running",
       };
     }, BACKGROUND_CONTEXT);
   }
 
-  async #finishTurn(conversationId: ConversationId, turnId: TurnId, status: CompletedTurnStatus): Promise<void> {
+  /** 重啟後接回的回合：等引擎的 `pi.live.run` 消失，才標成完成。 */
+  async #watchRecoveredTurn(conversationId: ConversationId, turnId: TurnId): Promise<void> {
+    const deadline = Date.now() + 5 * 60 * 1000;
+    while (Date.now() < deadline) {
+      if (!this.#session.isOpen) {
+        return;
+      }
+      try {
+        const live = await this.#session.harness.snapshot(
+          LiveDoc,
+          engineConversationId(conversationId),
+          BACKGROUND_CONTEXT,
+        );
+        if (live?.run === undefined) {
+          await this.#finishTurn(conversationId, turnId, "completed");
+          this.#bus.publish({
+            kind: "turn.completed",
+            at: this.#clock.now().toISOString(),
+            conversationId,
+            turnId,
+            status: "completed",
+            failure: null,
+          });
+          return;
+        }
+      } catch {
+        return;
+      }
+      await new Promise<void>((resolveTick) => {
+        const timer = setTimeout(resolveTick, 30);
+        timer.unref?.();
+      });
+    }
+  }
+
+  async #finishTurn(
+    conversationId: ConversationId,
+    turnId: TurnId,
+    status: CompletedTurnStatus,
+  ): Promise<void> {
     const active = this.#activeTurns.get(conversationId);
     if (active?.turnId === turnId) {
       this.#activeTurns.delete(conversationId);
@@ -1113,11 +1341,17 @@ export class PiEngineAdapter implements EngineAdapter {
     firstEntry: number,
   ): Promise<void> {
     let lastSeen = firstEntry;
+    let lastText = "";
     let settled: CompletedTurnStatus | null = null;
     const settledPromise = submission
       .wait(BACKGROUND_CONTEXT)
       .then((record) => {
-        settled = record.status === "done" ? "completed" : record.status === "unanswered" ? "failed" : "completed";
+        settled =
+          record.status === "done"
+            ? "completed"
+            : record.status === "unanswered"
+              ? "failed"
+              : "completed";
       })
       .catch(() => {
         settled = "failed";
@@ -1125,7 +1359,10 @@ export class PiEngineAdapter implements EngineAdapter {
 
     while (true) {
       try {
-        const conversation = await this.#session.harness.conversation(engineConversationId(conversationId), BACKGROUND_CONTEXT);
+        const conversation = await this.#session.harness.conversation(
+          engineConversationId(conversationId),
+          BACKGROUND_CONTEXT,
+        );
         if (conversation === undefined) {
           break;
         }
@@ -1147,6 +1384,16 @@ export class PiEngineAdapter implements EngineAdapter {
               message,
             });
           }
+          if (entry.kind === "pi.assistant") {
+            // 非串流供應商沒有即時訊息；用最終訊息補一次文字增量。
+            lastText = this.#publishTextDelta(
+              conversationId,
+              turnId,
+              lastText,
+              assistantTextOfEntry(entry),
+            );
+            this.#publishToolStarted(conversationId, turnId, entry);
+          }
           if (entry.kind.startsWith("pi.tool")) {
             this.#publishToolFinished(conversationId, turnId, entry);
           }
@@ -1156,6 +1403,22 @@ export class PiEngineAdapter implements EngineAdapter {
         }
       } catch {
         // 引擎關閉或對話刪除；結束追蹤。
+      }
+      try {
+        const live = await this.#session.harness.snapshot(
+          LiveDoc,
+          engineConversationId(conversationId),
+          BACKGROUND_CONTEXT,
+        );
+        const partial = live?.generation?.message as
+          { content?: readonly { type?: string; text?: string }[] } | undefined;
+        const text = (partial?.content ?? [])
+          .filter((block) => block.type === "text")
+          .map((block) => block.text ?? "")
+          .join("");
+        lastText = this.#publishTextDelta(conversationId, turnId, lastText, text);
+      } catch {
+        // 引擎關閉或對話刪除。
       }
       if (settled !== null) {
         break;
@@ -1178,9 +1441,61 @@ export class PiEngineAdapter implements EngineAdapter {
     });
   }
 
+  /** 從模型回應中的工具呼叫發布 `tool.started`。 */
+  #publishToolStarted(conversationId: ConversationId, turnId: TurnId, entry: EntryRecord): void {
+    const message = entry.model?.[0] as
+      | {
+          content?: readonly { type?: string; id?: string; name?: string; arguments?: JsonValue }[];
+        }
+      | undefined;
+    for (const block of message?.content ?? []) {
+      if (block.type !== "toolCall" || block.id === undefined || block.name === undefined) {
+        continue;
+      }
+      this.#bus.publish({
+        kind: "tool.started",
+        at: this.#clock.now().toISOString(),
+        conversationId,
+        turnId,
+        callId: block.id,
+        toolName: block.name,
+        input: block.arguments ?? {},
+      });
+    }
+  }
+
+  /** 從引擎的即時訊息發布文字增量；messageId 在同一輪內固定。 */
+  #publishTextDelta(
+    conversationId: ConversationId,
+    turnId: TurnId,
+    previous: string,
+    next: string,
+  ): string {
+    if (next.length <= previous.length || !next.startsWith(previous)) {
+      return previous;
+    }
+    const delta = next.slice(previous.length);
+    if (delta.length === 0) {
+      return previous;
+    }
+    this.#bus.publish({
+      kind: "assistant.text.delta",
+      at: this.#clock.now().toISOString(),
+      conversationId,
+      turnId,
+      messageId: `msg_${turnId}`,
+      text: delta,
+    });
+    return next;
+  }
+
   #publishToolFinished(conversationId: ConversationId, turnId: TurnId, entry: EntryRecord): void {
     const data = entry.data as
-      | { diagnostics?: readonly { code?: string; message?: string }[]; callId?: string; name?: string }
+      | {
+          diagnostics?: readonly { code?: string; message?: string }[];
+          callId?: string;
+          name?: string;
+        }
       | undefined;
     const diagnostics = (data?.diagnostics ?? []).map((diagnostic) => ({
       code: (diagnostic.code ?? "interrupted") as ToolDiagnostic["code"],
@@ -1194,7 +1509,12 @@ export class PiEngineAdapter implements EngineAdapter {
       callId: data?.callId ?? `call_${entry.id}`,
       toolName: data?.name ?? "unknown",
       outcome: {
-        ok: !diagnostics.some((diagnostic) => diagnostic.code !== "output-truncated"),
+        ok:
+          (entry.model?.[0] as { isError?: boolean } | undefined)?.isError === false
+            ? true
+            : (entry.model?.[0] as { isError?: boolean } | undefined) === undefined
+              ? (this.#toolOutcomes.get(data?.callId ?? `call_${entry.id}`) ?? false)
+              : false,
         content: [{ type: "text", text: "" }],
         diagnostics,
       } as ToolOutcome,
@@ -1208,7 +1528,10 @@ export class PiEngineAdapter implements EngineAdapter {
       return;
     }
     const update = meta.stagedUpdate;
-    const conversation = await this.#session.harness.conversation(engineConversationId(conversationId), BACKGROUND_CONTEXT);
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(conversationId),
+      BACKGROUND_CONTEXT,
+    );
     if (conversation === undefined) {
       return;
     }
@@ -1249,7 +1572,10 @@ export class PiEngineAdapter implements EngineAdapter {
   }
 
   async cancelTurn(request: CancelTurnRequest): Promise<void> {
-    const conversation = await this.#session.harness.conversation(engineConversationId(request.conversationId), BACKGROUND_CONTEXT);
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(request.conversationId),
+      BACKGROUND_CONTEXT,
+    );
     if (conversation === undefined) {
       throw engineError("conversation-not-found", `找不到對話 ${request.conversationId}`);
     }
@@ -1287,7 +1613,10 @@ export class PiEngineAdapter implements EngineAdapter {
       throw engineError("subagent-limit-reached", "同一個主對話最多 4 個子代理同時進行");
     }
 
-    const conversation = await this.#session.harness.conversation(engineConversationId(request.parentConversationId), BACKGROUND_CONTEXT);
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(request.parentConversationId),
+      BACKGROUND_CONTEXT,
+    );
     if (conversation === undefined) {
       throw engineError("conversation-not-found", `找不到對話 ${request.parentConversationId}`);
     }
@@ -1402,7 +1731,10 @@ export class PiEngineAdapter implements EngineAdapter {
         failure: { code: "engine-closed", message: "引擎已關閉" },
       };
     }
-    const conversation = await this.#session.harness.conversation(engineConversationId(subagentId), BACKGROUND_CONTEXT);
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(subagentId),
+      BACKGROUND_CONTEXT,
+    );
     let status: SubagentOutcome["status"] = "completed";
     if (conversation !== undefined) {
       try {
@@ -1411,13 +1743,16 @@ export class PiEngineAdapter implements EngineAdapter {
         status = "failed";
       }
     }
-    const history = conversation === undefined
-      ? { messages: [] as readonly ConversationMessage[], nextBefore: null }
-      : await this.#readHistory({ conversationId: subagentId, limit: 100 }).catch(() => ({
-          messages: [] as readonly ConversationMessage[],
-          nextBefore: null,
-        }));
-    const assistant = [...history.messages].reverse().find((message) => message.role === "assistant");
+    const history =
+      conversation === undefined
+        ? { messages: [] as readonly ConversationMessage[], nextBefore: null }
+        : await this.#readHistory({ conversationId: subagentId, limit: 100 }).catch(() => ({
+            messages: [] as readonly ConversationMessage[],
+            nextBefore: null,
+          }));
+    const assistant = [...history.messages]
+      .reverse()
+      .find((message) => message.role === "assistant");
     const conclusion = assistant === undefined ? "" : contentText(assistant.content);
     const last = history.messages.at(-1);
     const resultCard: SubagentResultCard = {
@@ -1492,7 +1827,10 @@ export class PiEngineAdapter implements EngineAdapter {
     options?: { readonly signal?: AbortSignal },
   ): Promise<SubagentOutcome> {
     void options;
-    const conversation = await this.#session.harness.conversation(engineConversationId(subagentConversationId), BACKGROUND_CONTEXT);
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(subagentConversationId),
+      BACKGROUND_CONTEXT,
+    );
     if (conversation === undefined) {
       throw engineError("subagent-not-found", `找不到子代理 ${subagentConversationId}`);
     }
@@ -1509,7 +1847,10 @@ export class PiEngineAdapter implements EngineAdapter {
   }
 
   async cancelSubagent(subagentConversationId: ConversationId, reason: string): Promise<void> {
-    const conversation = await this.#session.harness.conversation(engineConversationId(subagentConversationId), BACKGROUND_CONTEXT);
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(subagentConversationId),
+      BACKGROUND_CONTEXT,
+    );
     if (conversation === undefined) {
       throw engineError("subagent-not-found", `找不到子代理 ${subagentConversationId}`);
     }
@@ -1535,7 +1876,9 @@ export class PiEngineAdapter implements EngineAdapter {
       }));
   }
 
-  async queueNextTurnInjection(request: NextTurnInjectionRequest): Promise<NextTurnInjectionReceipt> {
+  async queueNextTurnInjection(
+    request: NextTurnInjectionRequest,
+  ): Promise<NextTurnInjectionReceipt> {
     void request;
     return {
       injectionId: `inj_${this.#clock.now().getTime()}`,
@@ -1549,7 +1892,10 @@ export class PiEngineAdapter implements EngineAdapter {
     const pausedTurns: { conversationId: ConversationId; turnId: TurnId }[] = [];
     for (const [conversationId, active] of this.#activeTurns) {
       pausedTurns.push({ conversationId, turnId: active.turnId });
-      const conversation = await this.#session.harness.conversation(engineConversationId(conversationId), BACKGROUND_CONTEXT);
+      const conversation = await this.#session.harness.conversation(
+        engineConversationId(conversationId),
+        BACKGROUND_CONTEXT,
+      );
       await conversation?.abort(BACKGROUND_CONTEXT);
     }
     await this.#supervisor.terminateAll();
@@ -1597,15 +1943,19 @@ export class PiEngineAdapter implements EngineAdapter {
 
   async #catalog(): Promise<CatalogSnapshot> {
     const value = await this.#session.harness.snapshot(CatalogDoc, BACKGROUND_CONTEXT);
-    const catalog = value === undefined
-      ? emptyCatalog()
-      : (JSON.parse(JSON.stringify(value)) as CatalogSnapshot);
+    const catalog =
+      value === undefined ? emptyCatalog() : (JSON.parse(JSON.stringify(value)) as CatalogSnapshot);
     this.#catalogCache = catalog;
     return catalog;
   }
 
   async #summary(meta: ConversationMeta, conversation: Conversation): Promise<ConversationSummary> {
-    const page = await conversation.entries({ order: "descending" }, 1, undefined, BACKGROUND_CONTEXT);
+    const page = await conversation.entries(
+      { order: "descending" },
+      1,
+      undefined,
+      BACKGROUND_CONTEXT,
+    );
     const latest = page.items[0];
     const active = this.#activeTurns.get(meta.conversationId);
     return {
@@ -1663,11 +2013,20 @@ export class PiEngineAdapter implements EngineAdapter {
       engineConversationId(conversationId),
       BACKGROUND_CONTEXT,
     );
-    const page = await conversation?.entries({ order: "ascending" }, 50, undefined, BACKGROUND_CONTEXT);
+    const page = await conversation?.entries(
+      { order: "ascending" },
+      50,
+      undefined,
+      BACKGROUND_CONTEXT,
+    );
     const agent = await conversation?.agent(BACKGROUND_CONTEXT);
     return {
       tools: agent?.tools.map((tool) => tool.name),
-      entries: page?.items.map((entry) => ({ kind: entry.kind, data: entry.data, model: entry.model })),
+      entries: page?.items.map((entry) => ({
+        kind: entry.kind,
+        data: entry.data,
+        model: entry.model,
+      })),
     };
   }
 
@@ -1743,11 +2102,7 @@ function entryToMessage(entry: EntryRecord): ConversationMessage | null {
     return null;
   }
   const role =
-    entry.kind === "pi.user"
-      ? "user"
-      : entry.kind === "pi.tool-result"
-        ? "tool"
-        : "assistant";
+    entry.kind === "pi.user" ? "user" : entry.kind === "pi.tool-result" ? "tool" : "assistant";
   return {
     id: String(entry.id),
     role,
@@ -1755,6 +2110,21 @@ function entryToMessage(entry: EntryRecord): ConversationMessage | null {
     createdAt: new Date(entry.id).toISOString(),
     cursor: String(entry.id),
   };
+}
+
+function assistantTextOfEntry(entry: EntryRecord): string {
+  const message = entry.model?.[0] as { content?: unknown } | undefined;
+  const content = message?.content;
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .filter(
+      (block): block is { type: "text"; text: string } =>
+        typeof block === "object" && block !== null && (block as { type?: string }).type === "text",
+    )
+    .map((block) => block.text)
+    .join("");
 }
 
 function textOfModel(content: unknown): string {
@@ -1774,12 +2144,19 @@ function textOfModel(content: unknown): string {
     .join("");
 }
 
-function toolError(message: string, code: ToolDiagnostic["code"]): {
+function toolError(
+  message: string,
+  code: ToolDiagnostic["code"],
+): {
   output: { readonly type: "text"; readonly text: string }[];
   isError: true;
   diagnostics: readonly { code: string; message: string }[];
 } {
-  return { output: [{ type: "text", text: message }], isError: true, diagnostics: [{ code, message }] };
+  return {
+    output: [{ type: "text", text: message }],
+    isError: true,
+    diagnostics: [{ code, message }],
+  };
 }
 
 function errorMessage(error: unknown): string {

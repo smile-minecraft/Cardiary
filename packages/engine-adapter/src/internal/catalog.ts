@@ -5,7 +5,11 @@ import type { Tx } from "@earendil-works/pi-durable";
 import type { ModelSelection } from "../model.js";
 import type { PermissionMode } from "../permission.js";
 import type { ToolBundlePin } from "../tools.js";
-import type { ConversationOrigin, ConversationPurpose, ConversationVisibility } from "../conversation.js";
+import type {
+  ConversationOrigin,
+  ConversationPurpose,
+  ConversationVisibility,
+} from "../conversation.js";
 import type { TurnStatus } from "../conversation.js";
 import type { ConversationId } from "../ids.js";
 
@@ -46,6 +50,7 @@ export type ConversationMeta = {
 /** 還在進行中的一輪；重啟後由引擎的 `pi.live` 接回。 */
 export type ActiveTurn = {
   readonly turnId: string;
+  readonly conversationId: string;
   readonly triggerMessageId: string;
   readonly status: TurnStatus;
 };

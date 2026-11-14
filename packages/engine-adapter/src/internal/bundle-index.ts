@@ -116,7 +116,10 @@ export class BundleIndex {
    * 解析對話可使用的一個工具：先找釘選的版本，找不到才用最新版本。
    * 回傳 `null` 表示工具不存在或已退役，呼叫端要回 `tool-unavailable`。
    */
-  resolve(name: string, pins: readonly { readonly bundleId: ToolBundleId; readonly generation: ToolGeneration }[]): RegisteredBundle | null {
+  resolve(
+    name: string,
+    pins: readonly { readonly bundleId: ToolBundleId; readonly generation: ToolGeneration }[],
+  ): RegisteredBundle | null {
     for (const pin of pins) {
       const bundle = this.get(pin.bundleId, pin.generation);
       if (bundle === undefined || bundle.retired) {

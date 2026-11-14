@@ -80,7 +80,9 @@ describe("子代理", () => {
       });
       expect(subagentHistory.messages.some((message) => message.role === "tool")).toBe(true);
 
-      const parentAfter = await fixture.adapter.readConversationHistory({ conversationId: parent.id });
+      const parentAfter = await fixture.adapter.readConversationHistory({
+        conversationId: parent.id,
+      });
       expect(parentAfter.messages).toHaveLength(history.messages.length);
 
       const listed = await fixture.adapter.listSubagents(parent.id);

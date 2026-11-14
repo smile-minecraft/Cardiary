@@ -1,4 +1,9 @@
-import type { EngineEvent, EngineSubscription, SubscribeOptions, SubscriptionReplay } from "../events.js";
+import type {
+  EngineEvent,
+  EngineSubscription,
+  SubscribeOptions,
+  SubscriptionReplay,
+} from "../events.js";
 import type { ConversationId, EventSeq } from "../ids.js";
 
 /** 事件草稿：和 `EngineEvent` 一樣，但 `seq` 由匯流排簽發。 */
@@ -57,10 +62,7 @@ export class EventBus {
     const buffer = this.#buffers.get(conversationId) ?? [];
     const requestedAfter = options.afterSeq ?? null;
     const firstSeq = buffer.length === 0 ? null : (buffer[0]?.seq ?? null);
-    const gap =
-      requestedAfter !== null &&
-      firstSeq !== null &&
-      requestedAfter + 1 < firstSeq;
+    const gap = requestedAfter !== null && firstSeq !== null && requestedAfter + 1 < firstSeq;
 
     const queue: EngineEvent[] = [];
     let closed = false;

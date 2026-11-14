@@ -11,7 +11,12 @@ import {
   waitFor,
 } from "./support.js";
 import { createInMemoryApprovalLedger } from "../src/index.js";
-import type { ApprovalLedger, EngineEvent, ToolDefinition, ToolPermissionGate } from "../src/index.js";
+import type {
+  ApprovalLedger,
+  EngineEvent,
+  ToolDefinition,
+  ToolPermissionGate,
+} from "../src/index.js";
 
 function countingTool(counter: { runs: number }): ToolDefinition {
   return {
@@ -45,7 +50,18 @@ describe("審批", () => {
     const fixture = await createFixture();
     try {
       await fixture.adapter.tools.register(
-        bundleOf("test.approve", [approvalTool({ name: "deploy", run: async () => { counter.runs += 1; } })], 1),
+        bundleOf(
+          "test.approve",
+          [
+            approvalTool({
+              name: "deploy",
+              run: async () => {
+                counter.runs += 1;
+              },
+            }),
+          ],
+          1,
+        ),
       );
       const approveConversation = await fixture.adapter.createConversation({
         model: { provider: "faux", model: "faux-1" },
@@ -60,7 +76,9 @@ describe("審批", () => {
         sender: { kind: "human", clientId: "test" },
       });
       const pending = await waitFor(async () => {
-        const list = await fixture.adapter.approvals.listPending({ conversationId: approveConversation.id });
+        const list = await fixture.adapter.approvals.listPending({
+          conversationId: approveConversation.id,
+        });
         return list.length > 0 ? list : undefined;
       }, "等待審批請求");
       expect(pending[0]?.approvalKey).toMatch(/^[0-9a-f]{64}$/);
@@ -90,7 +108,9 @@ describe("審批", () => {
         sender: { kind: "human", clientId: "test" },
       });
       const secondPending = await waitFor(async () => {
-        const list = await fixture.adapter.approvals.listPending({ conversationId: denyConversation.id });
+        const list = await fixture.adapter.approvals.listPending({
+          conversationId: denyConversation.id,
+        });
         return list.length > 0 ? list : undefined;
       }, "等待第二個審批請求");
       const denied = await fixture.adapter.approvals.decide({
@@ -280,10 +300,14 @@ describe("審批", () => {
         delivery: "queue",
         sender: { kind: "human", clientId: "test" },
       });
-      const finished = await waitFor(async () => {
-        const found = events.find((event) => event.kind === "tool.finished");
-        return found?.kind === "tool.finished" ? found : undefined;
-      }, "工具結果事件", 10000);
+      const finished = await waitFor(
+        async () => {
+          const found = events.find((event) => event.kind === "tool.finished");
+          return found?.kind === "tool.finished" ? found : undefined;
+        },
+        "工具結果事件",
+        10000,
+      );
       expect(finished.outcome.ok).toBe(false);
       expect(counter.runs).toBe(0);
       subscription.close();
@@ -292,7 +316,3 @@ describe("審批", () => {
     }
   }, 20000);
 });
-
-function requestTurnId(recovered: readonly { turnId: string }[]): string {
-  return recovered[0]?.turnId ?? "turn_1";
-}

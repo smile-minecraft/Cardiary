@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import { readdir } from "node:fs/promises";
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -43,7 +42,9 @@ async function runAndRead(
   });
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
-    const history = await fixture.adapter.readConversationHistory({ conversationId: conversation.id });
+    const history = await fixture.adapter.readConversationHistory({
+      conversationId: conversation.id,
+    });
     const toolMessage = history.messages.find((message) => message.role === "tool");
     if (toolMessage !== undefined) {
       return toolMessage.content.map((block) => (block.type === "text" ? block.text : "")).join("");

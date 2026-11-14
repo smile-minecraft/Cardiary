@@ -49,7 +49,10 @@ describe("工具組 generation 釘選", () => {
 
       const states = fixture.adapter.tools.list();
       const state = await states;
-      expect(state.find((entry) => entry.bundleId === "test.echo" && entry.generation === 1)?.pinnedByConversations).toBe(1);
+      expect(
+        state.find((entry) => entry.bundleId === "test.echo" && entry.generation === 1)
+          ?.pinnedByConversations,
+      ).toBe(1);
 
       // 停用（退役）舊版：已釘選的對話失去工具。
       await fixture.adapter.tools.retire("test.echo", 1);
@@ -82,7 +85,9 @@ async function waitForHistory(
     const history = await adapter.readConversationHistory({ conversationId });
     const text = history.messages
       .filter((message) => message.role === "tool")
-      .map((message) => message.content.map((block) => (block.type === "text" ? block.text : "")).join(""))
+      .map((message) =>
+        message.content.map((block) => (block.type === "text" ? block.text : "")).join(""),
+      )
       .join("\n");
     if (text.includes(contains)) {
       return text;
@@ -101,8 +106,12 @@ async function waitForLastAssistant(
     const conversation = await adapter.getConversation(conversationId);
     if (conversation?.state === "idle") {
       const history = await adapter.readConversationHistory({ conversationId });
-      const assistant = [...history.messages].reverse().find((message) => message.role === "assistant");
-      return assistant?.content.map((block) => (block.type === "text" ? block.text : "")).join("") ?? "";
+      const assistant = [...history.messages]
+        .reverse()
+        .find((message) => message.role === "assistant");
+      return (
+        assistant?.content.map((block) => (block.type === "text" ? block.text : "")).join("") ?? ""
+      );
     }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
