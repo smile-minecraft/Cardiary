@@ -1,11 +1,29 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/protocol" },
-    { "path": "packages/domain" },
-    { "path": "packages/engine-adapter" },
-    { "path": "packages/module-api" },
-    { "path": "packages/storage" },
-    { "path": "packages/host" }
+    {
+      "path": "packages/protocol"
+    },
+    {
+      "path": "packages/domain"
+    },
+    {
+      "path": "packages/engine-adapter"
+    },
+    {
+      "path": "packages/module-api"
+    },
+    {
+      "path": "packages/storage"
+    },
+    {
+      "path": "packages/host"
+    },
+    {
+      "path": "packages/engine-fake"
+    },
+    {
+      "path": "packages/contract-tests"
+    }
   ]
 }

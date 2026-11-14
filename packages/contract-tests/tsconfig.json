@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "rootDir": ".",
+    "outDir": "dist",
+    "esModuleInterop": true,
+    "declaration": true,
+    "emitDeclarationOnly": true
+  },
+  "include": ["test"],
+  "references": [
+    {
+      "path": "../protocol"
+    }
+  ]
+}

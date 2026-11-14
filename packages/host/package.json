@@ -10,5 +10,14 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "dependencies": {
+    "@cardiary/engine-adapter": "workspace:*",
+    "@cardiary/engine-fake": "workspace:*",
+    "@cardiary/protocol": "workspace:*",
+    "ws": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1"
   }
 }

@@ -30,6 +30,25 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6))
 
+  packages/contract-tests:
+    dependencies:
+      '@cardiary/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
+      ajv-formats:
+        specifier: 3.0.1
+        version: 3.0.1(ajv@8.20.0)
+      ws:
+        specifier: 8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
+
   packages/domain: {}
 
   packages/engine-adapter:
@@ -47,7 +66,30 @@ importers:
         specifier: 1.5.2
         version: 1.5.2
 
-  packages/host: {}
+  packages/engine-fake:
+    dependencies:
+      '@cardiary/engine-adapter':
+        specifier: workspace:*
+        version: link:../engine-adapter
+
+  packages/host:
+    dependencies:
+      '@cardiary/engine-adapter':
+        specifier: workspace:*
+        version: link:../engine-adapter
+      '@cardiary/engine-fake':
+        specifier: workspace:*
+        version: link:../engine-fake
+      '@cardiary/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      ws:
+        specifier: 8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
 
   packages/module-api:
     dependencies:
@@ -523,6 +565,9 @@ packages:
 
   '@types/retry@0.12.0':
     resolution: {integrity: sha512-wWKOClTTiizcZhXnPY4wikVAwmdYHp8q6DmC+EJUzAMsycb7HB32Kh9RN4+0gExjmPmZSAQjgURXIGATPegAvA==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@typescript-eslint/eslint-plugin@8.72.2':
     resolution: {integrity: sha512-222PKFXKihmFpi/pS5njoBgdAqsPhj2/GBmFbrNw8Tq8gEG9Sv+kSlKFy4u2q+mJv9ZzJgM2Gkv/bUzRZwZw5g==}
@@ -1845,6 +1890,10 @@ snapshots:
       undici-types: 8.9.0
 
   '@types/retry@0.12.0': {}
+
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 26.6.6
 
   '@typescript-eslint/eslint-plugin@8.72.2(@typescript-eslint/parser@8.72.2(eslint@10.14.0)(typescript@6.0.3))(eslint@10.14.0)(typescript@6.0.3)':
     dependencies:
