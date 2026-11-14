@@ -320,6 +320,7 @@ async function runControl(
     init.clientToken !== init.brokerToken
       ? init.clientToken
       : generateToken();
+  let channelRef: ControlChannel | null = null;
   let host: RunningHost;
   try {
     host = await startHost({
@@ -330,7 +331,9 @@ async function runControl(
       scripts,
       ...(args.port === undefined ? {} : { port: args.port }),
       maintenanceNotifier: async (lifecycle, operationId) => {
-        channel.notify("notify.maintenance", { lifecycle, operationId }).catch(() => undefined);
+        await channelRef
+          ?.notify("notify.maintenance", { lifecycle, operationId })
+          .catch(() => undefined);
       },
     });
   } catch (error) {
@@ -356,6 +359,7 @@ async function runControl(
       }
     },
   });
+  channelRef = channel;
   channel.onRequest("control.health", async () => toJson(host.service.health()));
   channel.onRequest("control.pause", async (payload) => {
     const reason = typeof payload.reason === "string" ? payload.reason : "user";
