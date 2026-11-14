@@ -59,7 +59,7 @@ public enum LifecycleOutcome: Equatable, Sendable {
 }
 
 public struct ShutdownOutcome: Equatable, Sendable {
-    /// 服務回報的 `cleanShutdown`。`nil` 代表沒有收到回應；資料庫才是唯一權威。
+    /// 服務回報的 `cleanShutdown`。`nil` 代表沒有送出或沒有收到回應；資料庫才是唯一權威。
     public var cleanShutdown: Bool?
     public var reason: String?
     public var forcedTermination: Bool
@@ -69,6 +69,9 @@ public struct ShutdownOutcome: Equatable, Sendable {
         self.reason = reason
         self.forcedTermination = forcedTermination
     }
+
+    /// 另一個生命週期操作正在進行；呼叫端要保留 supervisor 並稍後重試。
+    public var isBusy: Bool { reason == "busy" }
 }
 
 public struct FolderSnapshot: Equatable, Sendable {
@@ -152,6 +155,8 @@ public final class ServiceSupervisor: @unchecked Sendable {
 
     private var status = ServiceStatusSnapshot()
     private var folder: FolderSnapshot
+    /// 使用者當初授權時記錄的磁碟 UUID。paused 關閉前要用它比對目前路徑。
+    private var recordedVolumeUUID: String?
     private var handle: (any ServiceProcessHandle)?
     private var channel: ControlChannel?
     private var controlToken = ControlToken(value: "")
@@ -195,6 +200,12 @@ public final class ServiceSupervisor: @unchecked Sendable {
         queue.sync { brokerToken }
     }
 
+    /// 殼記錄的磁碟 UUID（`folder-authorization.json` 的值）。只讀，不改資料夾狀態。
+    public var authorizedVolumeUUID: String? {
+        get { queue.sync { recordedVolumeUUID } }
+        set { queue.sync { recordedVolumeUUID = newValue } }
+    }
+
     // MARK: - 啟動
 
     /// 資料夾可用時啟動服務；不可用時只更新狀態，不 spawn。
@@ -206,7 +217,9 @@ public final class ServiceSupervisor: @unchecked Sendable {
             return
         }
 
-        let alreadyActive = queue.sync { status.phase == .running || status.phase == .starting }
+        let alreadyActive = queue.sync {
+            status.phase == .running || status.phase == .starting || status.phase == .paused
+        }
         guard !alreadyActive else { return }
 
         queue.sync {
@@ -217,16 +230,42 @@ public final class ServiceSupervisor: @unchecked Sendable {
         startHealthLoop()
     }
 
-    /// 只有資料夾仍可用時才重新啟動（例如強制卸載後接回）。
+    /// 只有資料夾仍可用、而且**沒有**執行中的行程時才重新啟動。
+    ///
+    /// `paused` 一律走 `resume`：pause 之後行程還在，若這裡再 launch 就會同時有兩個
+    /// 服務碰同一個資料夾。只有 `unavailable`／`failed`／`stopped`／`idle` 且沒有
+    /// handle 時才啟動新行程。
     public func restartIfFolderUsable() async {
-        let snapshot = queue.sync { (folder, status.phase) }
-        guard snapshot.0.isUsable else {
-            setPhase(.unavailable)
-            return
+        enum Decision {
+            case launch
+            case skipNoFolder
+            case skipAlreadyRunning
+            case skipPaused
         }
-        guard snapshot.1 != .running, snapshot.1 != .starting else { return }
-        launch(isRestart: true)
-        startHealthLoop()
+
+        let decision = queue.sync { () -> Decision in
+            guard folder.isUsable else { return .skipNoFolder }
+            if status.phase == .paused { return .skipPaused }
+            guard handle == nil else { return .skipAlreadyRunning }
+            switch status.phase {
+            case .unavailable, .failed, .stopped, .idle:
+                return .launch
+            case .running, .starting, .paused, .stopping:
+                return .skipAlreadyRunning
+            }
+        }
+
+        switch decision {
+        case .skipNoFolder:
+            setPhase(.unavailable)
+        case .skipPaused:
+            log("服務已暫停；接回時走 control.resume，不重新啟動")
+        case .skipAlreadyRunning:
+            break
+        case .launch:
+            launch(isRestart: true)
+            startHealthLoop()
+        }
     }
 
     private func updateFolder(_ newFolder: FolderSnapshot) {
@@ -237,7 +276,15 @@ public final class ServiceSupervisor: @unchecked Sendable {
         let tokens = (ControlToken.generate(), ControlToken.generate())
         var launchGeneration = 0
         var plan = configuration.launchPlan
+        var previous: (any ServiceProcessHandle, ControlChannel?)? = nil
         let currentFolder = queue.sync { () -> FolderSnapshot in
+            // 先收掉舊的行程與通道，避免兩個服務同時碰同一個資料夾。
+            if let old = handle {
+                previous = (old, channel)
+                handle = nil
+                channel = nil
+                status.pid = 0
+            }
             generation += 1
             launchGeneration = generation
             controlToken = tokens.0
@@ -245,8 +292,24 @@ public final class ServiceSupervisor: @unchecked Sendable {
             if isRestart { status.restarts += 1 }
             status.phase = .starting
             status.lastError = nil
+            status.maintenanceInProgress = false
+            status.lifecycle = "idle"
             launchStartedAt = Date()
             return folder
+        }
+
+        if let (oldProcess, oldChannel) = previous {
+            log("終止先前的服務 pid=\(oldProcess.pid) 後才啟動新行程")
+            oldChannel?.invalidate(reason: .closed)
+            oldProcess.terminate()
+            let deadline = Date().addingTimeInterval(0.5)
+            while oldProcess.isRunning && Date() < deadline {
+                usleep(20_000)
+            }
+            if oldProcess.isRunning {
+                oldProcess.kill()
+                usleep(50_000)
+            }
         }
 
         guard let path = currentFolder.path else {
@@ -316,13 +379,30 @@ public final class ServiceSupervisor: @unchecked Sendable {
                     self.status.phase = .running
                     self.status.epoch = ready.epoch
                     self.status.folderId = ready.folderId
-                    self.status.clientPort = ready.clientPort
+                    // 0 代表這個服務沒有客戶端協定（例如開發用的替身）。
+                self.status.clientPort = ready.clientPort == 0 ? nil : ready.clientPort
                 }
                 self.publishStatus()
                 self.log(
                     "服務就緒：epoch \(ready.epoch)、clientPort \(ready.clientPort)、folderId \(ready.folderId)"
                 )
-            } catch {
+            } catch let error as ControlChannel.ChannelError {
+                if case .unsupportedProtocol(let version) = error {
+                    self.log("服務的協定版本 \(version) 與殼不符，停止重啟")
+                    self.queue.sync {
+                        self.intentionalStop = true
+                        if self.generation == launchGeneration {
+                            self.status.phase = .failed
+                            self.status.lastError = "version_mismatch:\(version)"
+                        }
+                    }
+                    self.publishStatus()
+                    process.terminate()
+                    self.queue.asyncAfter(deadline: .now() + self.configuration.terminateGrace, execute: {
+                        if process.isRunning { process.kill() }
+                    })
+                    return
+                }
                 self.log("服務交握失敗：\(error)")
                 self.queue.sync {
                     if self.generation == launchGeneration {
@@ -385,7 +465,7 @@ public final class ServiceSupervisor: @unchecked Sendable {
                 }
             case .closed, .protocolViolation, .writeFailed:
                 registerHealthFailure(reason: "控制通道失效")
-            case .unsupportedRoute:
+            case .unsupportedRoute, .unsupportedProtocol:
                 break
             }
         } catch {
@@ -432,6 +512,8 @@ public final class ServiceSupervisor: @unchecked Sendable {
             status.pid = 0
             status.lastExit = exit.description
             status.clientPort = nil
+            status.maintenanceInProgress = false
+            status.lifecycle = "idle"
             handle = nil
             channel?.invalidate(reason: .closed)
             channel = nil
@@ -565,6 +647,9 @@ public final class ServiceSupervisor: @unchecked Sendable {
             return .failed(reason ?? state)
         } catch {
             log("恢復失敗：\(error)")
+            // 舊行程已經不可用：先收掉，接回時由殼重新啟動，避免留下未監管的行程。
+            await terminateAndWait()
+            setPhase(.unavailable)
             return .failed("\(error)")
         }
     }
@@ -590,7 +675,19 @@ public final class ServiceSupervisor: @unchecked Sendable {
         var serviceReason: String?
         var forced = false
 
-        if let channel = snapshot.1, snapshot.0 == .running || snapshot.0 == .paused {
+        // paused 代表資料庫已關閉。送 shutdown 之前要用殼記錄的磁碟 UUID 比對目前
+        // 路徑；同一條路徑換了另一顆磁碟時，服務可能對著別人的資料夾寫 1。
+        let authorizedUUID = queue.sync { recordedVolumeUUID }
+        let volumeMatches = authorizedUUID == nil
+            || snapshot.3.volumeUUID == nil
+            || authorizedUUID == snapshot.3.volumeUUID
+
+        if snapshot.0 == .paused, !volumeMatches {
+            log(
+                "暫停中但磁碟 UUID 不符（記錄 \(authorizedUUID ?? "nil")、目前 \(snapshot.3.volumeUUID ?? "nil")），跳過 control.shutdown"
+            )
+            forced = true
+        } else if let channel = snapshot.1, snapshot.0 == .running || snapshot.0 == .paused {
             var payload: [String: JSONValue] = ["reason": .string(reason.rawValue)]
             if let volumeUUID = snapshot.3.volumeUUID {
                 payload["volumeUUID"] = .string(volumeUUID)
@@ -638,6 +735,26 @@ public final class ServiceSupervisor: @unchecked Sendable {
             reason: serviceReason,
             forcedTermination: forced
         )
+    }
+
+    /// 生命週期忙碌時重試關閉。
+    ///
+    /// 慢速的 pause／resume 在途時，`shutdown` 會回 `busy`；呼叫端不能因此把
+    /// supervisor 丟掉，要等第一個操作結束再重試。重試用完仍忙碌時回最後一次的結果。
+    public func shutdownRetryingWhileBusy(
+        reason: ShutdownReason,
+        attempts: Int = 8,
+        delay: Duration = .milliseconds(250)
+    ) async -> ShutdownOutcome {
+        var outcome = ShutdownOutcome(reason: "busy")
+        for attempt in 1...max(1, attempts) {
+            outcome = await shutdown(reason: reason)
+            if !outcome.isBusy { return outcome }
+            if attempt < attempts {
+                try? await Task.sleep(for: delay)
+            }
+        }
+        return outcome
     }
 
     /// App 結束時的同步備援：不等請求，直接收掉行程。

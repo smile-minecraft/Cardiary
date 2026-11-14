@@ -1,7 +1,8 @@
 # Cardiary macOS 殼
 
 macOS App 的殼：首次啟動選資料夾、啟動並監管內嵌的 Node 主機服務、關閉視窗後留在選單列，
-以私有控制面與服務通訊，並用 `apple/CardiaryKit` 以協定連上服務。
+以私有控制面與服務通訊。客戶端協定的連線層（`apple/CardiaryKit`）已具備，待 client Token 接入後
+才會實際連上服務；在那之前選單列的待審批數量顯示「需要連上服務」。
 
 設計依據：
 
@@ -75,7 +76,9 @@ NDJSON，不是用假的傳輸層。
 
 這一項**沒有**自動化，需要在實機按一次。步驟：
 
-1. 建置並啟動：`./Scripts/build-app.sh && open dist/Cardiary.app`。
+1. 建置並啟動：`./Scripts/build-app.sh && open dist/Cardiary.app`。預設 bundle 帶的是
+   `scripts/dev-service.mjs`（控制面替身，`ready.clientPort` 為 0，代表沒有客戶端協定）；
+   這樣選資料夾後服務就能交握，TCC 提示才會出現。
 2. 系統設定 → 隱私權與安全性 → 完全磁碟存取：確認 Cardiary 不在允許清單（或先移除）。
 3. 從選單列選「選擇資料夾…」，選 `~/Desktop` 下的一個資料夾。
 4. 預期的系統提示：標題顯示 **Cardiary**（不是 node／CardiaryServiceDouble）。按「允許」。

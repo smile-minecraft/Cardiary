@@ -304,6 +304,116 @@ final class ControlPlaneIntegrationTests: XCTestCase {
         _ = await waitForExit(running.handle, timeout: 3)
     }
 
+    func testDefaultDevServiceHandshakesWithClientPortZero() async throws {
+        guard let node = TestSupport.nodeExecutable() else {
+            throw XCTSkip("找不到 node，跳過預設服務的交握測試")
+        }
+        let folder = try TestSupport.makeTemporaryFolder()
+        let script = TestSupport.devServiceScript
+        XCTAssertTrue(FileManager.default.fileExists(atPath: script.path), "dev-service.mjs 必須存在")
+
+        let tmp = folder.appendingPathComponent("tmp").path
+        var arguments = ["--disable-warning=ExperimentalWarning", script.path]
+        if node.path == "/usr/bin/env" {
+            arguments.insert("node", at: 0)
+        }
+        let plan = ServiceLaunchPlan(
+            executableURL: node,
+            arguments: arguments,
+            environment: [
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                "HOME": NSHomeDirectory(),
+                "TMPDIR": tmp,
+                "TMP": tmp,
+                "TEMP": tmp,
+            ],
+            workingDirectory: folder
+        )
+
+        let handle = try ProcessServiceHandle(plan: plan)
+        var stderrLines: [String] = []
+        let lock = NSLock()
+        handle.setLogHandler { line in
+            lock.lock()
+            stderrLines.append(line)
+            lock.unlock()
+        }
+        let channel = ControlChannel(
+            transport: handle,
+            controlToken: ControlToken.generate(),
+            brokerToken: ControlToken.generate()
+        )
+        defer { handle.kill() }
+
+        let ready = try await channel.handshake(folderPath: folder.path)
+        // 預設 bundle 的替身沒有客戶端協定，用 0 表示。
+        XCTAssertEqual(ready.clientPort, 0)
+        let health = try await channel.request(route: ControlRoute.health, timeout: 2)
+        XCTAssertEqual(health["state"]?.stringValue, "running")
+
+        let shutdown = try await channel.request(route: ControlRoute.shutdown, timeout: 2)
+        XCTAssertEqual(shutdown["cleanShutdown"]?.boolValue, true)
+        handle.closeStdin()
+        let exited = await waitForExit(handle, timeout: 3)
+        XCTAssertTrue(exited)
+
+        lock.lock()
+        let lines = stderrLines
+        lock.unlock()
+        XCTAssertFalse(lines.contains { $0.lowercased().contains("error") })
+    }
+
+    func testSupervisorAcceptsClientPortZero() async throws {
+        guard let node = TestSupport.nodeExecutable() else {
+            throw XCTSkip("找不到 node，跳過預設服務的監管測試")
+        }
+        let folder = try TestSupport.makeTemporaryFolder()
+        let script = TestSupport.devServiceScript
+        let tmp = folder.appendingPathComponent("tmp").path
+        var arguments = ["--disable-warning=ExperimentalWarning", script.path]
+        if node.path == "/usr/bin/env" {
+            arguments.insert("node", at: 0)
+        }
+        let plan = ServiceLaunchPlan(
+            executableURL: node,
+            arguments: arguments,
+            environment: [
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                "HOME": NSHomeDirectory(),
+                "TMPDIR": tmp,
+                "TMP": tmp,
+                "TEMP": tmp,
+            ],
+            workingDirectory: folder
+        )
+        let statuses = StatusBox()
+        let supervisor = ServiceSupervisor(
+            configuration: ServiceSupervisorConfiguration(
+                launchPlan: plan,
+                healthInterval: 0.2,
+                healthTimeout: 1,
+                healthFailureThreshold: 3
+            ),
+            folder: FolderSnapshot(),
+            brokerHandler: { _, _ in .ok(.object([:])) }
+        )
+        supervisor.onStatusChange = { statuses.append($0) }
+        await supervisor.start(
+            folder: FolderSnapshot(
+                state: .ready,
+                path: folder.path,
+                displayName: folder.lastPathComponent,
+                writable: true
+            )
+        )
+        try await TestSupport.waitUntil(timeout: 8, message: "預設服務應進入執行中") {
+            statuses.latest?.phase == .running
+        }
+        // clientPort 0 代表沒有客戶端協定，殼顯示 nil 而不是 0。
+        XCTAssertNil(statuses.latest?.clientPort)
+        _ = await supervisor.shutdown(reason: .shellExit)
+    }
+
     private func waitForExit(_ handle: ProcessServiceHandle, timeout: TimeInterval) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -324,5 +434,24 @@ final class InMemoryKeychain: KeychainReading, @unchecked Sendable {
 
     func read(account: String) -> String? {
         values[account]
+    }
+}
+
+
+/// 收集監管狀態。
+final class StatusBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [ServiceStatusSnapshot] = []
+
+    func append(_ value: ServiceStatusSnapshot) {
+        lock.lock()
+        values.append(value)
+        lock.unlock()
+    }
+
+    var latest: ServiceStatusSnapshot? {
+        lock.lock()
+        defer { lock.unlock() }
+        return values.last
     }
 }

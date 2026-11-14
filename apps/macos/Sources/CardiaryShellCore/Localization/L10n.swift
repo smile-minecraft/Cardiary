@@ -60,6 +60,7 @@ public enum L10n {
         case statusRestarts
         case statusLastError
         case statusApprovalsUnavailable
+        case serviceBusyBody
         case selectFolderPrompt
     }
 
@@ -154,6 +155,7 @@ public enum L10n {
         .statusRestarts: "已重啟 {count} 次",
         .statusLastError: "最近錯誤：{count}",
         .statusApprovalsUnavailable: "待審批數量需要連上服務",
+        .serviceBusyBody: "背景服務正在處理上一個操作（暫停、恢復或刪除）。請稍後再試一次。",
         .selectFolderPrompt: "選擇 Cardiary 資料夾",
     ]
 
@@ -206,6 +208,7 @@ public enum L10n {
         .statusRestarts: "Restarted {count} times",
         .statusLastError: "Last error: {count}",
         .statusApprovalsUnavailable: "Approvals need a service connection",
+        .serviceBusyBody: "The background service is finishing another operation (pause, resume or delete). Try again in a moment.",
         .selectFolderPrompt: "Choose a Cardiary folder",
     ]
 }

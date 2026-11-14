@@ -62,6 +62,7 @@ public final class ControlChannel: @unchecked Sendable {
         case busy
         case timeout
         case protocolViolation(String)
+        case unsupportedProtocol(Int)
         case unsupportedRoute(String)
         case responseError(ControlErrorPayload)
         case writeFailed(Int32)
@@ -72,6 +73,7 @@ public final class ControlChannel: @unchecked Sendable {
             case .busy: return "同一個路由已有在途請求"
             case .timeout: return "控制請求逾時"
             case .protocolViolation(let detail): return "控制面協定錯誤：\(detail)"
+            case .unsupportedProtocol(let version): return "控制面版本 \(version) 與殼不符"
             case .unsupportedRoute(let route): return "不支援的控制路由 \(route)"
             case .responseError(let error): return "服務回報錯誤：\(error.code.rawValue)"
             case .writeFailed(let code): return "寫入控制通道失敗（errno \(code)）"
@@ -257,6 +259,11 @@ public final class ControlChannel: @unchecked Sendable {
             continuation?.resume(returning: ready)
             scheduleHelloDeadline()
         } catch let error as EnvelopeError {
+            if case .unsupportedVersion(let version) = error.reason {
+                // 版本不符不是暫時性錯誤：殼要停止重啟並顯示。
+                close(.unsupportedProtocol(version))
+                return
+            }
             close(.protocolViolation("ready 不合法：\(error.description)"))
         } catch {
             close(.protocolViolation("ready 不合法"))

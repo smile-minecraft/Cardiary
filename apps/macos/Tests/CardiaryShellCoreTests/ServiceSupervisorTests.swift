@@ -303,6 +303,114 @@ final class ServiceSupervisorTests: XCTestCase {
         XCTAssertEqual(harness.statuses.latest?.phase, .stopped)
     }
 
+    func testRemountAfterPauseKeepsSingleService() async throws {
+        let harness = try makeHarness()
+        await harness.supervisor.start(folder: readyFolder(harness.folder))
+        try await waitForRunning(harness)
+        let firstPID = try XCTUnwrap(harness.statuses.latest?.pid)
+        let paused = await harness.supervisor.pause(reason: "unmount")
+        XCTAssertEqual(paused, .completed)
+        XCTAssertEqual(harness.statuses.latest?.phase, .paused)
+
+        // 接回：殼會把資料夾標成可用，再呼叫 restartIfFolderUsable；暫停中不能啟動
+        // 第二個行程。
+        harness.supervisor.folderSnapshot = readyFolder(harness.folder)
+        await harness.supervisor.restartIfFolderUsable()
+        XCTAssertEqual(harness.statuses.latest?.phase, .paused)
+        XCTAssertEqual(harness.statuses.latest?.pid, firstPID)
+        XCTAssertTrue(processAlive(firstPID))
+
+        let launchesBefore = harness.logs.all.filter { $0.contains("啟動服務 pid=") }.count
+        let resumed = await harness.supervisor.resume(volumeUUID: "VOL-1")
+        XCTAssertEqual(resumed, .completed)
+        XCTAssertEqual(harness.statuses.latest?.phase, .running)
+        XCTAssertEqual(harness.statuses.latest?.pid, firstPID, "接回要走 resume，不能換行程")
+        let launchesAfter = harness.logs.all.filter { $0.contains("啟動服務 pid=") }.count
+        XCTAssertEqual(launchesAfter, launchesBefore, "接回不能啟動第二個服務")
+        _ = await harness.supervisor.shutdown(reason: .shellExit)
+    }
+
+    func testMaintenanceStateResetsAfterRestart() async throws {
+        let marker = try TestSupport.makeTemporaryFolder("maintenance-marker")
+            .appendingPathComponent("sent")
+        let harness = try makeHarness(
+            environment: [
+                "CARDIARY_DOUBLE_MAINTENANCE_MS": "5000",
+                "CARDIARY_DOUBLE_MAINTENANCE_ONCE": marker.path,
+                "CARDIARY_DOUBLE_LOG_HEALTH": "1",
+            ],
+            healthInterval: 0.1,
+            healthTimeout: 0.5
+        )
+        await harness.supervisor.start(folder: readyFolder(harness.folder))
+        try await waitForRunning(harness)
+        try await TestSupport.waitUntil(timeout: 3, message: "應進入維護狀態") {
+            harness.statuses.latest?.maintenanceInProgress == true
+        }
+        let firstPID = try XCTUnwrap(harness.statuses.latest?.pid)
+        let healthBefore = harness.logs.all.filter { $0.contains("service-double: health pid=") }.count
+
+        // 維護中把服務殺掉：新行程不該繼承「維護中」，health 要恢復。
+        kill(firstPID, SIGKILL)
+        try await TestSupport.waitUntil(timeout: 5, message: "服務應重啟") {
+            guard let latest = harness.statuses.latest else { return false }
+            return latest.phase == .running && latest.pid > 0 && latest.pid != firstPID
+        }
+        XCTAssertEqual(harness.statuses.latest?.maintenanceInProgress, false)
+        XCTAssertEqual(harness.statuses.latest?.lifecycle, "idle")
+
+        try await TestSupport.waitUntil(timeout: 5, message: "重啟後 health 應恢復") {
+            harness.logs.all.filter { $0.contains("service-double: health pid=") }.count > healthBefore
+        }
+        _ = await harness.supervisor.shutdown(reason: .shellExit)
+    }
+
+    func testPausedShutdownSkipsProtocolWhenVolumeChanged() async throws {
+        let harness = try makeHarness()
+        harness.supervisor.authorizedVolumeUUID = "VOL-RECORDED"
+        await harness.supervisor.start(folder: readyFolder(harness.folder))
+        try await waitForRunning(harness)
+        let paused = await harness.supervisor.pause(reason: "unmount")
+        XCTAssertEqual(paused, .completed)
+
+        // 同一條路徑換成另一顆磁碟：不能送 control.shutdown。
+        harness.supervisor.folderSnapshot = FolderSnapshot(
+            state: .ready,
+            path: harness.folder.path,
+            displayName: harness.folder.lastPathComponent,
+            volumeUUID: "VOL-OTHER",
+            writable: true
+        )
+        let outcome = await harness.supervisor.shutdown(reason: .user)
+        XCTAssertNil(outcome.cleanShutdown, "磁碟不符時不能回報 cleanShutdown")
+        XCTAssertTrue(outcome.forcedTermination)
+        XCTAssertEqual(harness.statuses.latest?.phase, .stopped)
+        XCTAssertFalse(
+            harness.logs.all.contains { $0.contains("服務回報關閉") },
+            "磁碟不符時不能送出 control.shutdown"
+        )
+    }
+
+    func testShutdownRetriesWhileBusy() async throws {
+        let harness = try makeHarness(environment: ["CARDIARY_DOUBLE_PAUSE_MS": "600"])
+        await harness.supervisor.start(folder: readyFolder(harness.folder))
+        try await waitForRunning(harness)
+        let pid = try XCTUnwrap(harness.statuses.latest?.pid)
+
+        async let pause: LifecycleOutcome = harness.supervisor.pause(reason: "unmount")
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let outcome = await harness.supervisor.shutdownRetryingWhileBusy(
+            reason: .user,
+            attempts: 8,
+            delay: .milliseconds(200)
+        )
+        XCTAssertFalse(outcome.isBusy, "慢速 pause 結束後應該關得掉")
+        let pauseResult = await pause
+        XCTAssertEqual(pauseResult, .completed)
+        XCTAssertEqual(harness.statuses.latest?.phase, .stopped)
+        XCTAssertFalse(processAlive(pid))
+    }
+
     private func processAlive(_ pid: Int32) -> Bool {
         guard pid > 0 else { return false }
         return kill(pid, 0) == 0

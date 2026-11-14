@@ -28,6 +28,19 @@ final class StreamBookkeepingTests: XCTestCase {
         XCTAssertEqual(cursor.advance(to: 12, epoch: "B"), .epochChanged)
     }
 
+    func testAdoptEpochOnlyKeepsLastSeqSoReplayApplies() throws {
+        var model = SystemStatusModel(epoch: "epoch_a", lastSeq: 4)
+        // 同一個 epoch、主機回 resyncRequired=false 且沒有快照。
+        model.adoptEpochOnly("epoch_a")
+        XCTAssertEqual(model.cursor.lastSeq, 4, "沒有快照時不能採納回應的 seq")
+
+        let advance = model.apply(
+            try decodeEvent(seq: 5, status: decodeStatus(state: "ready", service: "running"))
+        )
+        XCTAssertEqual(advance, .applied(5))
+        XCTAssertEqual(model.cursor.lastSeq, 5)
+    }
+
     func testSystemStatusSnapshotThenEvents() throws {
         var model = SystemStatusModel()
         let snapshot = try decodeStatus(state: "ready", service: "running", uptime: 5)

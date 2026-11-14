@@ -242,7 +242,8 @@ public enum ControlFrameDecoder {
             throw EnvelopeError(.unsupportedVersion(message.protocol))
         }
         guard message.pid > 0 else { throw EnvelopeError(.invalidField("pid")) }
-        guard message.clientPort > 0 else { throw EnvelopeError(.invalidField("clientPort")) }
+        // `clientPort: 0` 代表這個服務沒有客戶端協定（開發用的替身就是這樣）。
+        // 只要不是 0，就必須是合法的埠號。
         guard !message.folderId.isEmpty else { throw EnvelopeError(.invalidField("folderId")) }
         guard !message.epoch.isEmpty else { throw EnvelopeError(.invalidField("epoch")) }
         return message

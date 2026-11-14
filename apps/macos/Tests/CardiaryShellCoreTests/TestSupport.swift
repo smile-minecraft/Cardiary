@@ -15,6 +15,36 @@ enum TestSupport {
         return folder
     }
 
+    /// 開發用的預設服務腳本（`apps/macos/scripts/dev-service.mjs`）。
+    static var devServiceScript: URL {
+        // #filePath 指向這個測試檔；往上三層就是 apps/macos。
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("scripts/dev-service.mjs")
+    }
+
+    /// 系統上的 Node。測試需要真的 Node 才跑得起來，沒有就跳過。
+    static func nodeExecutable() -> URL? {
+        if let override = ProcessInfo.processInfo.environment["CARDIARY_NODE"],
+            FileManager.default.isExecutableFile(atPath: override)
+        {
+            return URL(fileURLWithPath: override)
+        }
+        for candidate in [
+            "/opt/homebrew/bin/node",
+            "/usr/local/bin/node",
+            "/usr/bin/node",
+        ] where FileManager.default.isExecutableFile(atPath: candidate) {
+            return URL(fileURLWithPath: candidate)
+        }
+        // 最後用 env 找 node（PATH 由殼指定，這裡只給測試）。
+        let probe = run("/usr/bin/env", ["node", "--version"])
+        if probe.hasPrefix("v") { return URL(fileURLWithPath: "/usr/bin/env") }
+        return nil
+    }
+
     static var serviceDoubleURL: URL {
         let bundle = Bundle(for: TestSupportAnchor.self)
         let directory = bundle.bundleURL.deletingLastPathComponent()

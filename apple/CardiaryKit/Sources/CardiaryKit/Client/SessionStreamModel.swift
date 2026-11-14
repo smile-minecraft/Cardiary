@@ -51,6 +51,11 @@ public struct SessionStreamModel: Equatable, Sendable {
         cursor.adopt(epoch: epoch, seq: seq)
     }
 
+    /// 只記錄 epoch，保留 `lastSeq`：沒有快照時，補送事件才推得動游標。
+    public mutating func adoptEpochOnly(_ epoch: String) {
+        cursor.adoptEpochOnly(epoch)
+    }
+
     public mutating func applySnapshot(_ snapshot: SessionSnapshot, epoch: String, seq: Int) {
         cursor.adopt(epoch: epoch, seq: seq)
         streaming = snapshot.streaming.map(StreamingTextState.init(message:))

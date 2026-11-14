@@ -38,6 +38,11 @@ public struct StreamCursor: Equatable, Sendable {
         self.lastSeq = max(0, seq)
     }
 
+    /// 只換 epoch，不動 `lastSeq`（用於同 epoch、無快照的補送）。
+    public mutating func adoptEpochOnly(_ epoch: String) {
+        self.epoch = epoch
+    }
+
     /// 套用一則耐久事件的序號。`applied` 之後呼叫端才能把內容寫進狀態。
     public mutating func advance(to seq: Int, epoch: String) -> Advance {
         guard self.epoch == epoch else {
@@ -73,6 +78,15 @@ public struct SystemStatusModel: Equatable, Sendable {
         if let snapshot {
             status = snapshot
         }
+    }
+
+    /// 只記錄 epoch，保留既有的 `lastSeq`。
+    ///
+    /// 用在「同一個 epoch 且主機沒有回快照」的補送：回應的 `seq` 是補送開始前的
+    /// 邊界，接下來會送 `lastSeq + 1` 到 `seq` 的事件。若在這裡採納 `seq`，補送的
+    /// 事件全部會被當成重複而丟掉。
+    public mutating func adoptEpochOnly(_ epoch: String) {
+        cursor.adoptEpochOnly(epoch)
     }
 
     /// 事件信封本身不帶 epoch，所以游標必須先由握手或訂閱回應建立；

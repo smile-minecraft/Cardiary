@@ -50,6 +50,9 @@ final class ShellController: NSObject {
     private var securityScopedURL: URL?
     private var warningShownForPath: String?
     private var terminating = false
+    private var loggedMissingClientToken = false
+    private var reportedVersionMismatch = false
+    private var pruneTimer: Timer?
 
     override init() {
         let directory = AppPaths.shellStateDirectory()
@@ -77,6 +80,7 @@ final class ShellController: NSObject {
 
         installStatusItem()
         observeVolumes()
+        scheduleDailyPrune()
         loadAuthorization()
 
         if authorization == nil {
@@ -85,6 +89,23 @@ final class ShellController: NSObject {
         } else {
             refreshFolder(startService: true)
             refreshMenu()
+        }
+    }
+
+    /// 殼狀態目錄的清理：啟動時做一次，執行期間每天再做一次。
+    private func scheduleDailyPrune() {
+        pruneTimer?.invalidate()
+        pruneTimer = Timer.scheduledTimer(withTimeInterval: 24 * 60 * 60, repeats: true) {
+            [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                let report = self.stateDirectory.pruneIfNeeded()
+                if !report.removedFiles.isEmpty {
+                    self.log.write(
+                        "每日清理殼狀態：移除 \(report.removedFiles.count) 個檔案（\(report.bytesBefore) → \(report.bytesAfter) bytes）"
+                    )
+                }
+            }
         }
     }
 
@@ -289,7 +310,17 @@ final class ShellController: NSObject {
         Task { [weak self] in
             guard let self else { return }
             if let supervisor = self.supervisor, supervisor.snapshot.phase != .stopped {
-                _ = await supervisor.shutdown(reason: .restart)
+                let outcome = await supervisor.shutdownRetryingWhileBusy(reason: .restart)
+                guard !outcome.isBusy else {
+                    self.log.write("切換資料夾前無法停止舊服務（忙碌），保留原資料夾")
+                    self.presentInfo(
+                        title: L10n.text(.menuChooseFolder),
+                        body: L10n.text(.serviceBusyBody),
+                        primary: nil,
+                        secondary: nil
+                    )
+                    return
+                }
             }
             self.supervisor = nil
             self.client = nil
@@ -339,6 +370,7 @@ final class ShellController: NSObject {
                 let log = self?.log
                 Task { @MainActor in log?.write(message) }
             }
+            supervisor.authorizedVolumeUUID = authorization?.volumeUUID
             self.supervisor = supervisor
         }
 
@@ -357,14 +389,27 @@ final class ShellController: NSObject {
         if snapshot.phase == .running, let port = snapshot.clientPort {
             connectClientIfPossible(port: port)
         }
+        if let error = snapshot.lastError, error.hasPrefix("version_mismatch"), !reportedVersionMismatch {
+            reportedVersionMismatch = true
+            log.write("背景服務版本不符：\(error)")
+            presentInfo(
+                title: L10n.text(.unavailableVersionMismatch),
+                body: L10n.text(.unavailableVersionMismatch),
+                primary: nil,
+                secondary: nil
+            )
+        }
         refreshMenu()
     }
 
     private func connectClientIfPossible(port: UInt16) {
         guard client == nil else { return }
         guard let token = clientTokens.current else {
-            // 設計沒有定義 client Token 的交付方式；沒有 Token 就不連線。
-            log.write("沒有 client Token，暫不建立客戶端連線（見交接事項）。")
+            // 設計沒有定義 client Token 的交付方式；沒有 Token 就不連線，只記一次。
+            if !loggedMissingClientToken {
+                loggedMissingClientToken = true
+                log.write("沒有 client Token，暫不建立客戶端連線（見交接事項）。")
+            }
             return
         }
         guard let endpoint = URL(string: "ws://127.0.0.1:\(port)/v1/ws") else { return }
@@ -401,8 +446,20 @@ final class ShellController: NSObject {
         guard let supervisor else { return }
         Task { [weak self] in
             guard let self else { return }
-            let outcome = await supervisor.shutdown(reason: .user)
+            // 慢速 pause／resume 在途時 shutdown 會回 busy：保留 supervisor 並重試，
+            // 不能把未停止的服務丟掉。
+            let outcome = await supervisor.shutdownRetryingWhileBusy(reason: .user)
             self.log.write("結束背景服務：cleanShutdown=\(outcome.cleanShutdown.map(String.init) ?? "nil")")
+            guard !outcome.isBusy else {
+                self.log.write("服務仍在生命週期操作中，保留監管並顯示忙碌")
+                self.presentInfo(
+                    title: L10n.text(.menuStopService),
+                    body: L10n.text(.serviceBusyBody),
+                    primary: nil,
+                    secondary: nil
+                )
+                return
+            }
             if let client = self.client {
                 await client.stop()
                 self.client = nil
@@ -484,13 +541,21 @@ final class ShellController: NSObject {
 
         log.write("磁碟已接回：\(volumeURL.path)")
 
-        let previousPhase = supervisor?.snapshot.phase
         refreshFolder(startService: false)
         guard folder.isUsable else { return }
 
+        // 只有一條路徑：暫停中走 resume；其他狀態才由 restartIfFolderUsable 判斷
+        // 要不要啟動新行程。兩者不能同時排，否則接回時會有兩個服務。
+        guard let supervisor else {
+            // App 啟動時資料夾不在、服務從未啟動：接回後直接啟動。
+            startServiceIfNeeded()
+            return
+        }
+
+        let phase = supervisor.snapshot.phase
         Task { [weak self] in
-            guard let self, let supervisor = self.supervisor else { return }
-            if previousPhase == .paused {
+            guard let self else { return }
+            if phase == .paused {
                 let outcome = await supervisor.resume(volumeUUID: self.folder.volumeUUID)
                 self.log.write("接回後恢復結果：\(String(describing: outcome))")
                 if outcome != .completed {

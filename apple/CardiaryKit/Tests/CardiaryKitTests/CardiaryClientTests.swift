@@ -225,6 +225,83 @@ final class CardiaryClientTests: XCTestCase {
         await client.stop()
     }
 
+    func testReplayWithinSameEpochAppliesEveryEventOnce() async throws {
+        let queue = TransportQueue()
+        let first = FakeServerTransport()
+        let second = FakeServerTransport()
+        queue.append(first)
+        queue.append(second)
+
+        let statuses = Recorder<SystemStatus>()
+        let client = makeClient(queue: queue, statuses: statuses)
+        await client.start()
+
+        // 第一次連線：快照 seq 5（uptime 5），之後即時事件 seq 6。
+        let hello1 = JSONFixture.decode(try await first.nextSent())
+        await first.push(
+            JSONFixture.helloResponse(
+                replyTo: try XCTUnwrap(hello1["id"] as? String),
+                epoch: "epoch_a"
+            )
+        )
+        let subscribe1 = JSONFixture.decode(try await first.nextSent())
+        await first.push(
+            JSONFixture.systemSubscribeResponse(
+                replyTo: try XCTUnwrap(subscribe1["id"] as? String),
+                seq: 5,
+                epoch: "epoch_a",
+                resyncRequired: true,
+                snapshot: JSONFixture.systemStatus(uptime: 5)
+            )
+        )
+        _ = try await statuses.waitForFirst()
+        await first.push(
+            JSONFixture.systemStatusEvent(seq: 6, status: JSONFixture.systemStatus(uptime: 6))
+        )
+        try await waitUntil { statuses.snapshot.contains { $0.service.uptimeSeconds == 6 } }
+
+        // 重連同一個 epoch：帶 lastSeq 6，主機回 resyncRequired=false、沒有快照，
+        // seq 邊界 8，接著補送 7、8，再送即時 9。
+        await first.serverClosed()
+        let hello2 = JSONFixture.decode(try await second.nextSent())
+        await second.push(
+            JSONFixture.helloResponse(
+                replyTo: try XCTUnwrap(hello2["id"] as? String),
+                epoch: "epoch_a"
+            )
+        )
+        let subscribe2 = JSONFixture.decode(try await second.nextSent())
+        let payload = try XCTUnwrap(subscribe2["payload"] as? [String: Any])
+        XCTAssertEqual(payload["lastSeq"] as? Int, 6)
+        XCTAssertEqual(payload["epoch"] as? String, "epoch_a")
+
+        await second.push(
+            JSONFixture.systemSubscribeResponse(
+                replyTo: try XCTUnwrap(subscribe2["id"] as? String),
+                seq: 8,
+                epoch: "epoch_a",
+                resyncRequired: false,
+                snapshot: nil
+            )
+        )
+        for (seq, uptime) in [(7, 7), (8, 8), (9, 9)] {
+            await second.push(
+                JSONFixture.systemStatusEvent(
+                    seq: seq,
+                    status: JSONFixture.systemStatus(uptime: uptime)
+                )
+            )
+        }
+
+        try await waitUntil {
+            statuses.snapshot.last?.service.uptimeSeconds == 9
+        }
+        let applied = statuses.snapshot.map(\.service.uptimeSeconds)
+        XCTAssertEqual(applied, [5, 6, 7, 8, 9], "補送 7–8 與即時 9 都要套用，且不能重複")
+
+        await client.stop()
+    }
+
     private func waitUntil(
         timeout: TimeInterval = 3,
         _ condition: @Sendable () -> Bool

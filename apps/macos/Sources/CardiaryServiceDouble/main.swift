@@ -22,6 +22,9 @@ let badReply = (environment["CARDIARY_DOUBLE_BAD_REPLY"] ?? "0") == "1"
 let oversizeFrame = (environment["CARDIARY_DOUBLE_OVERSIZE"] ?? "0") == "1"
 let sendFatal = (environment["CARDIARY_DOUBLE_FATAL"] ?? "0") == "1"
 let brokerAccount = environment["CARDIARY_DOUBLE_BROKER_ACCOUNT"]
+let logHealth = (environment["CARDIARY_DOUBLE_LOG_HEALTH"] ?? "0") == "1"
+/// 只在第一次啟動時送 maintenance（用一個標記檔），讓測試能驗「重啟後狀態歸零」。
+let maintenanceOnceMarker = environment["CARDIARY_DOUBLE_MAINTENANCE_ONCE"]
 
 func milliseconds(_ raw: String?) -> Int {
     guard let raw, let value = Int(raw) else { return 0 }
@@ -162,7 +165,15 @@ if let brokerAccount {
 
 // MARK: - 維護通知
 
-if maintenanceMilliseconds > 0 {
+let shouldSendMaintenance: Bool = {
+    guard maintenanceMilliseconds > 0 else { return false }
+    guard let marker = maintenanceOnceMarker else { return true }
+    if FileManager.default.fileExists(atPath: marker) { return false }
+    FileManager.default.createFile(atPath: marker, contents: Data())
+    return true
+}()
+
+if shouldSendMaintenance {
     writeFrame([
         "v": 1,
         "kind": "notification",
@@ -202,6 +213,9 @@ while let line = reader.nextLine() {
 
     switch route {
     case "control.health":
+        if logHealth {
+            log("service-double: health pid=\(pid)")
+        }
         let uptime = Int(Date().timeIntervalSince(startedAt))
         writeFrame([
             "v": 1,

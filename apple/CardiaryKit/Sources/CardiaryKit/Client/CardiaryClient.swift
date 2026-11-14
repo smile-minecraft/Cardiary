@@ -129,6 +129,12 @@ public actor CardiaryClient {
                 update(state: .disconnected(reason: reason))
                 handlers.onDiagnostic?("客戶端連線中斷：\(reason)")
 
+                if case .incompatibleVersion = error as? CardiaryClientError {
+                    // 版本不符不是暫時性錯誤：停止重連，由畫面顯示「需要更新」。
+                    handlers.onDiagnostic?("協定版本不符，停止重連。")
+                    return
+                }
+
                 if let maxAttempts = configuration.reconnect.maxAttempts, attempt >= maxAttempts {
                     return
                 }
@@ -147,10 +153,18 @@ public actor CardiaryClient {
         )
         self.connection = connection
 
-        let handshake = try await connection.open(
-            client: configuration.client,
-            resumeSystemSeq: systemModel.cursor.lastSeq > 0 ? systemModel.cursor.lastSeq : nil
-        )
+        let handshake: CardiaryConnection.Handshake
+        do {
+            handshake = try await connection.open(
+                client: configuration.client,
+                resumeSystemSeq: systemModel.cursor.lastSeq > 0 ? systemModel.cursor.lastSeq : nil
+            )
+        } catch {
+            // 連線失敗要收掉底層 transport，否則重連會累積半開的連線。
+            await connection.close()
+            self.connection = nil
+            throw error
+        }
 
         let epochChanged = hasConnectedBefore && systemModel.cursor.epoch != nil
             && systemModel.cursor.epoch != handshake.epoch
@@ -169,13 +183,27 @@ public actor CardiaryClient {
         update(state: .connected(epoch: handshake.epoch, serverVersion: handshake.serverVersion))
 
         let parameters = systemModel.cursor.subscriptionParameters(currentEpoch: handshake.epoch)
-        let subscribe = try await connection.subscribeSystem(
-            lastSeq: parameters.lastSeq,
-            epoch: parameters.epoch
-        )
-        systemModel.applySnapshot(subscribe.snapshot, epoch: subscribe.epoch, seq: subscribe.seq)
-        if let status = systemModel.status {
-            handlers.onSystemStatus?(status)
+        let subscribe: SystemSubscribeResponsePayload
+        do {
+            subscribe = try await connection.subscribeSystem(
+                lastSeq: parameters.lastSeq,
+                epoch: parameters.epoch
+            )
+        } catch {
+            await connection.close()
+            self.connection = nil
+            throw error
+        }
+        if let snapshot = subscribe.snapshot {
+            systemModel.applySnapshot(snapshot, epoch: subscribe.epoch, seq: subscribe.seq)
+            // 只有真的套用快照才回報一次；補送的情況等事件推進，避免重複通知。
+            if let status = systemModel.status {
+                handlers.onSystemStatus?(status)
+            }
+        } else {
+            // 沒有快照代表主機要補送 lastSeq + 1 到回應 seq 的事件；保留 lastSeq，
+            // 讓補送事件推進游標，否則全部會被當成重複。
+            systemModel.adoptEpochOnly(subscribe.epoch)
         }
 
         if configuration.subscribeActiveSessions {
@@ -193,8 +221,17 @@ public actor CardiaryClient {
 
     private func subscribeActiveSessions(on connection: CardiaryConnection, epoch: String) async {
         do {
-            let page = try await connection.listSessions(limit: 50)
-            for summary in page.sessions where summary.status == .running {
+            var summaries: [SessionSummary] = []
+            var cursor: String?
+            var pageCount = 0
+            repeat {
+                let page = try await connection.listSessions(cursor: cursor, limit: 50)
+                summaries.append(contentsOf: page.sessions)
+                cursor = page.nextCursor
+                pageCount += 1
+            } while cursor != nil && pageCount < 20
+
+            for summary in summaries where summary.status == .running {
                 let existing = sessions[summary.id]
                 let parameters = (existing?.cursor ?? StreamCursor(stream: "session:\(summary.id)"))
                     .subscriptionParameters(currentEpoch: epoch)
@@ -207,7 +244,8 @@ public actor CardiaryClient {
                 if let snapshot = response.snapshot {
                     model.applySnapshot(snapshot, epoch: response.epoch, seq: response.seq)
                 } else {
-                    model.adopt(epoch: response.epoch, seq: response.seq)
+                    // 同 epoch 的補送：保留 lastSeq，等事件推進。
+                    model.adoptEpochOnly(response.epoch)
                 }
                 sessions[summary.id] = model
             }
