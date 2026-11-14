@@ -323,8 +323,13 @@ function parseInit(line: string): InitFrame {
   if (!isAbsolute(folder.path)) {
     throw new InitError("invalid_folder", "folder.path 必須是絕對路徑");
   }
-  if (frame.clientToken !== undefined && !isValidToken(frame.clientToken)) {
-    throw new InitError("invalid_token", "clientToken 格式不正確");
+  if (frame.clientToken !== undefined) {
+    if (!isValidToken(frame.clientToken)) {
+      throw new InitError("invalid_token", "clientToken 格式不正確");
+    }
+    if (frame.clientToken === frame.token || frame.clientToken === frame.brokerToken) {
+      throw new InitError("invalid_token", "clientToken 不能與控制 Token 或代理 Token 相同");
+    }
   }
   return {
     type: "init",
@@ -461,12 +466,8 @@ async function runControl(
     });
   }
   const scripts = await loadScripts(args.script);
-  const clientToken =
-    init.clientToken !== undefined &&
-    init.clientToken !== init.token &&
-    init.clientToken !== init.brokerToken
-      ? init.clientToken
-      : generateToken();
+  // 殼沒帶就自己產生一把；帶了就用殼那一把（重複在 parseInit 就被拒絕了）。
+  const clientToken = init.clientToken ?? generateToken();
   let channelRef: ControlChannel | null = null;
   const credentials = new LazyBrokerCredentials();
   const assembly = assemblyFor(args, scripts, credentials);
@@ -555,6 +556,7 @@ async function runControl(
     clientPort: host.port,
     folderId: host.service.folder.folderId,
     epoch: host.epoch,
+    clientToken,
   };
   await sink.writeLine(JSON.stringify(ready));
   channel.start();

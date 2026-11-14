@@ -23,21 +23,29 @@ enum AppPaths {
         return nil
     }
 
-    /// 服務腳本：`Contents/Resources/Service/service.mjs`。
+    /// 服務進入點。
+    ///
+    /// 正式 bundle 放的是打包後的主機服務：`Contents/Resources/Service/dist/main.js`。
+    /// `service.mjs` 只留給開發用的替身（`CARDIARY_SERVICE_SCRIPT` 或舊的開發資源）。
     static func serviceScript(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
         if let override = environment["CARDIARY_SERVICE_SCRIPT"], !override.isEmpty {
             return URL(fileURLWithPath: override)
         }
-        let bundled = bundleURL.appendingPathComponent("Contents/Resources/Service/service.mjs")
-        if FileManager.default.fileExists(atPath: bundled.path) {
-            return bundled
+        let bundled = bundleURL.appendingPathComponent("Contents/Resources/Service")
+        for candidate in ["dist/main.js", "service.mjs"] {
+            let entry = bundled.appendingPathComponent(candidate)
+            if FileManager.default.fileExists(atPath: entry.path) {
+                return entry
+            }
         }
-        // 開發時：apps/macos/Resources/Service/service.mjs（由執行檔往上找）。
+        // 開發時：apps/macos/Resources/Service/...（由執行檔往上找）。
         var directory = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
         for _ in 0..<6 {
-            let candidate = directory.appendingPathComponent("Resources/Service/service.mjs")
-            if FileManager.default.fileExists(atPath: candidate.path) {
-                return candidate
+            for candidate in ["dist/main.js", "service.mjs"] {
+                let entry = directory.appendingPathComponent("Resources/Service/\(candidate)")
+                if FileManager.default.fileExists(atPath: entry.path) {
+                    return entry
+                }
             }
             directory = directory.deletingLastPathComponent()
         }

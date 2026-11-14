@@ -315,9 +315,9 @@ export class HostService {
           reason: "folder_mismatch",
         };
       }
-      // epoch 對得上才重開快取：換了另一個資料夾時不能寫別人的 DB。
-      this.#options.storage.resumeDatabases?.();
       try {
+        // epoch 對得上才重開快取：換了另一個資料夾時不能寫別人的 DB。
+        this.#options.storage.resumeDatabases?.();
         await this.#options.engine.resume();
         // 緊急全部暫停（pause_all）也要一併解除；M0 沒有獨立的 resume_all 訊息。
         await this.#options.engine.resumeAll();
@@ -381,6 +381,8 @@ export class HostService {
         try {
           await this.#options.storage.runtime.markCleanShutdown(reason);
           await this.#options.storage.runtime.checkpointAndClose();
+          // 暫停時已經關掉的快取、引擎連線與資料夾鎖也要放掉。
+          this.#options.storage.dispose?.();
         } catch (error) {
           // 已暫停時的寫入失敗也要走致命路徑；#fatalHandled 讓 #closed 不擋住它。
           await this.failStorage(error instanceof Error ? error.message : "關閉時儲存失效");

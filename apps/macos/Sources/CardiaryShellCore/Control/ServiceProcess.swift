@@ -24,10 +24,14 @@ public struct ServiceLaunchPlan: Equatable, Sendable {
     /// - `TMPDIR`／`TMP`／`TEMP` 指到 `<folder>/tmp`。
     /// - `HOME` 與 `PATH` 明確指定，不繼承殼的環境。
     /// - `arguments` 只有 Node 的旗標與服務腳本路徑；Token 不進 argv。
+    ///
+    /// `initializeFolder` 會加上 `--initialize-folder`：空的資料夾由服務建立
+    /// `state/folder.json` 與三個資料庫；已有身分的資料夾不受影響。
     public static func make(
         nodeURL: URL,
         scriptURL: URL,
         folderPath: String,
+        initializeFolder: Bool = false,
         homeDirectory: String = NSHomeDirectory()
     ) -> ServiceLaunchPlan {
         let tmp = URL(fileURLWithPath: folderPath, isDirectory: true)
@@ -35,7 +39,8 @@ public struct ServiceLaunchPlan: Equatable, Sendable {
             .path
         return ServiceLaunchPlan(
             executableURL: nodeURL,
-            arguments: ["--disable-warning=ExperimentalWarning", scriptURL.path],
+            arguments: ["--disable-warning=ExperimentalWarning", scriptURL.path]
+                + (initializeFolder ? ["--initialize-folder"] : []),
             environment: [
                 "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
                 "HOME": homeDirectory,

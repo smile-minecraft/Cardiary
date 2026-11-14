@@ -339,7 +339,7 @@ final class ShellController: NSObject {
             log.write("找不到內嵌的 Node 或服務腳本，無法啟動服務")
             presentInfo(
                 title: L10n.text(.serviceFailed),
-                body: "Contents/Helpers/Node/node 或 Contents/Resources/Service/service.mjs 不存在。",
+                body: "Contents/Helpers/Node/node 或 Contents/Resources/Service/dist/main.js 不存在。",
                 primary: nil,
                 secondary: nil
             )
@@ -350,7 +350,9 @@ final class ShellController: NSObject {
             let plan = ServiceLaunchPlan.make(
                 nodeURL: node,
                 scriptURL: script,
-                folderPath: path
+                folderPath: path,
+                // 空的資料夾由服務初始化；已有 state/folder.json 時這個旗標不影響。
+                initializeFolder: true
             )
             let configuration = ServiceSupervisorConfiguration(launchPlan: plan)
             let broker = brokerService

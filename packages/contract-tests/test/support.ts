@@ -104,6 +104,8 @@ export interface ServiceOptions {
   readonly folder?: TestFolder;
   /** 啟動時允許初始化資料夾（`state/folder.json` 與資料庫）。 */
   readonly initializeFolder?: boolean;
+  /** 控制模式：init 不帶 clientToken，讓服務自己產生。 */
+  readonly omitClientToken?: boolean;
 }
 
 export interface SpawnedService {
@@ -245,7 +247,7 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
       token: controlToken,
       brokerToken,
       folder: { path: folder.path },
-      clientToken,
+      ...(options.omitClientToken === true ? {} : { clientToken }),
     };
     child.stdin?.write(`${JSON.stringify(initFrame)}\n`);
   }
@@ -365,7 +367,19 @@ export async function spawnFaultFlagWithoutEnv(): Promise<{
 }
 
 /** 用故意錯誤的 init 啟動控制模式，回傳退出碼與 stderr（測試 init 失敗要退出）。 */
-export async function spawnExpectInitFailure(): Promise<{
+export interface InitFailureOverride {
+  readonly protocol?: number;
+  readonly token?: string;
+  readonly brokerToken?: string;
+  readonly clientToken?: string;
+}
+
+/**
+ * 用故意錯誤的 init 啟動控制模式，回傳退出碼與 stderr。
+ *
+ * 預設是協定版本不符；其他欄位可以覆寫，用來驗證 Token 的拒絕路徑。
+ */
+export async function spawnExpectInitFailure(override: InitFailureOverride = {}): Promise<{
   readonly code: number | null;
   readonly stderr: string;
 }> {
@@ -388,10 +402,11 @@ export async function spawnExpectInitFailure(): Promise<{
   child.stdin?.write(
     `${JSON.stringify({
       type: "init",
-      protocol: 2,
-      token: "T".repeat(43),
-      brokerToken: "B".repeat(43),
+      protocol: override.protocol ?? 2,
+      token: override.token ?? "T".repeat(43),
+      brokerToken: override.brokerToken ?? "B".repeat(43),
       folder: { path: folder.path },
+      ...(override.clientToken === undefined ? {} : { clientToken: override.clientToken }),
     })}\n`,
   );
   const code = await Promise.race([

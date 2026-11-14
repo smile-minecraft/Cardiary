@@ -19,30 +19,37 @@ macOS App 的殼：首次啟動選資料夾、啟動並監管內嵌的 Node 主�
 ```sh
 cd apps/macos
 swift build
-swift test                 # 61 個測試：控制面、監管、資料夾、狀態目錄、在地化
+swift test                 # 控制面、監管、資料夾、狀態目錄、在地化、真服務 E2E
 ./Scripts/fetch-node.sh    # 下載 Node 22.19.0 到 ~/Library/Caches/CardiaryNode
+./Scripts/pack-service.sh  # 把 packages/host 打包成 build/service（build-app.sh 會呼叫）
 ./Scripts/build-app.sh     # 組裝 dist/Cardiary.app 並以 Hardened Runtime 簽章
 ./Scripts/verify-signing.sh # 驗證 allow-jit 的對照（有 → 0、沒有 → 133）
 ```
 
-`swift test` 會啟動真的子行程 `CardiaryServiceDouble`（測試替身），跑真的 pipe 與
-NDJSON，不是用假的傳輸層。
+`swift test` 會啟動真的子行程：控制面測試用 `CardiaryServiceDouble`（測試替身），
+`RealServiceEndToEndTests` 與 `BundledServiceTests` 則啟動真正的 `packages/host`
+（前者直接跑 `dist/main.js`，後者先 `pack-service.sh` 打包再跑），都是真的 pipe 與 NDJSON。
+
+`build-app.sh` 預設把**真正的主機服務**放進 `Contents/Resources/Service/`（`dist/` 加
+production 依賴，用 `pnpm deploy` 打包）；`CARDIARY_SERVICE_SCRIPT=...` 可以換成單一
+腳本，開發用的 `scripts/dev-service.mjs` 就是走這條路。
 
 ## 目錄
 
-| 路徑                            | 內容                                                                            |
-| ------------------------------- | ------------------------------------------------------------------------------- |
-| `Sources/CardiaryShellCore`     | 可測試的核心：Token、frame 編解碼、控制通道、服務監管、資料夾、狀態目錄、在地化 |
-| `Sources/CardiaryShell`         | AppKit 殼：選單列、視窗、鑰匙圈、磁碟插拔、開機自啟                             |
-| `Sources/CardiaryServiceDouble` | 測試用服務替身（不進 App bundle）                                               |
-| `Tests/CardiaryShellCoreTests`  | 單元與端到端測試                                                                |
-| `Resources`                     | `Info.plist`、殼與 Node 的 entitlements                                         |
-| `Scripts`                       | 下載 Node、組裝 `.app`、簽章驗證                                                |
-| `scripts/dev-service.mjs`       | 開發用的服務替身；真正的服務由「協定閘道」工作產出                              |
+| 路徑                            | 內容                                                                              |
+| ------------------------------- | --------------------------------------------------------------------------------- |
+| `Sources/CardiaryShellCore`     | 可測試的核心：Token、frame 編解碼、控制通道、服務監管、資料夾、狀態目錄、在地化   |
+| `Sources/CardiaryShell`         | AppKit 殼：選單列、視窗、鑰匙圈、磁碟插拔、開機自啟                               |
+| `Sources/CardiaryServiceDouble` | 測試用服務替身（不進 App bundle）                                                 |
+| `Tests/CardiaryShellCoreTests`  | 單元與端到端測試                                                                  |
+| `Resources`                     | `Info.plist`、殼與 Node 的 entitlements                                           |
+| `Scripts`                       | 下載 Node、組裝 `.app`、簽章驗證                                                  |
+| `Scripts/pack-service.sh`       | 打包 `packages/host`（dist 加 production 依賴）給 App bundle                      |
+| `scripts/dev-service.mjs`       | 開發用的服務替身；`build-app.sh` 預設不用它，只給測試與 `CARDIARY_SERVICE_SCRIPT` |
 
 ## 控制面（殼端）
 
-- 殼用 `Process` 啟動 `Contents/Helpers/Node/node --disable-warning=ExperimentalWarning service.mjs`，
+- 殼用 `Process` 啟動 `Contents/Helpers/Node/node --disable-warning=ExperimentalWarning <服務進入點>`（正式 bundle 是 `Contents/Resources/Service/dist/main.js`；空的資料夾會多帶 `--initialize-folder`），
   子行程的 stdin／stdout 是匿名 pipe。沒有 socketpair、沒有額外 fd、沒有 Unix socket。
 - `init` 是 stdin 第一行，帶 `token`（殼→服務）與 `brokerToken`（服務→殼）。Token 每次啟動
   重新產生，只經過這一行；不進 argv、環境變數、日誌或磁碟。
@@ -99,18 +106,19 @@ NDJSON，不是用假的傳輸層。
 
 ## 已知缺口（移交給後續工作）
 
-1. **client Token 的交付方式沒有定義。** `docs/design/protocol.md` 說「本機 client Token
-   由殼交給客戶端」，但 `init` 與 `ready` 都沒有這個欄位，控制面路由也沒有。殼端留了
-   `ClientTokenStore` 介面：沒有 Token 就不建立 `CardiaryKit` 連線，選單列的待審批數量
-   顯示「需要連上服務」。接上真正的閘道前，需要補一條設計（例如 `ready` 回傳，或新增
-   一個 `broker.client-token.get`）。
+1. **client Token 已接上。** 殼簽發一把，經 `init.clientToken` 交給服務，服務在
+   `ready.clientToken` 回同一把（省略時服務自己產生並回報；與控制／代理 Token 重複會
+   直接拒絕）。殼存進記憶體並建立 `CardiaryKit` 連線；細節見 `docs/design/shell-control.md`。
 2. **儲存空間面板的「殼狀態」分類在服務端。** 殼只提供 `broker.shell-state.get`
    的 `{ usedBytes, limitBytes }`；面板屬於儲存與閘道工作。
-3. **`scripts/dev-service.mjs` 是開發替身。** 它只實作控制面，不是產品服務；發行版
-   要換成「協定閘道」工作產出的 `service.mjs`。
-4. **公證未執行。** 本機用 ad-hoc 簽章；發行要 Developer ID + `--timestamp` +
+3. **內嵌服務的體積。** `packages/host` 的 production 依賴含 Pi Durable 與它帶進來的
+   AWS SDK，打包後約 130 MB（App 總計約 240 MB）。M0 先照實內嵌；之後要 trim（例如
+   把用不到的供應商 SDK 拿掉）再談發行。
+4. **GUI 內的對話沒有人工驗證。** 殼的核心層已用真服務跑完含審批的對話，但 App 內的
+   選單操作、TCC 提示與 `tccd` 歸屬仍列手動（`docs/acceptance/chapter-13.md`）。
+5. **公證未執行。** 本機用 ad-hoc 簽章；發行要 Developer ID + `--timestamp` +
    `notarytool` + `stapler`。
-5. **工具子行程的 `inherit` 拒絕與 fd 清單屬於服務端。** 殼這邊驗的是「不傳額外 fd」
+6. **工具子行程的 `inherit` 拒絕與 fd 清單屬於服務端。** 殼這邊驗的是「不傳額外 fd」
    與「控制通道只有 stdin／stdout」；spawn wrapper 的硬規則由主機服務工作實作。
 
 ## 測試涵蓋的驗收項目

@@ -29,7 +29,7 @@ final class RealServiceEndToEndTests: XCTestCase {
         guard FileManager.default.fileExists(atPath: Self.hostEntry.path) else {
             throw XCTSkip("找不到 \(Self.hostEntry.path)；先跑 pnpm build")
         }
-        guard let node = TestSupport.nodeExecutable() else {
+        guard let node = TestSupport.nodeLaunch() else {
             throw XCTSkip("找不到 Node；設定 CARDIARY_NODE 後再跑")
         }
 
@@ -48,8 +48,8 @@ final class RealServiceEndToEndTests: XCTestCase {
 
         let tmp = folder.appendingPathComponent("tmp", isDirectory: true).path
         let plan = ServiceLaunchPlan(
-            executableURL: node,
-            arguments: [
+            executableURL: node.executable,
+            arguments: node.prefix + [
                 Self.hostEntry.path,
                 "--engine", "pi",
                 "--demo",

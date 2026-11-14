@@ -29,11 +29,17 @@ if [[ ! -x "$NODE_SOURCE" ]]; then
   exit 1
 fi
 
-SERVICE_SCRIPT="${CARDIARY_SERVICE_SCRIPT:-$APP_DIR/scripts/dev-service.mjs}"
-if [[ ! -f "$SERVICE_SCRIPT" ]]; then
-  echo "找不到服務腳本：$SERVICE_SCRIPT" >&2
-  echo "主機服務由「協定閘道」工作產出；開發時可用 apps/macos/scripts/dev-service.mjs。" >&2
-  exit 1
+# 預設內嵌真正的主機服務（packages/host 的 dist 與 production 依賴）；
+# 開發或測試可以用 CARDIARY_SERVICE_SCRIPT 換成單一腳本。
+SERVICE_DIR="$APP_DIR/build/service"
+if [[ -n "${CARDIARY_SERVICE_SCRIPT:-}" ]]; then
+  SERVICE_SCRIPT="$CARDIARY_SERVICE_SCRIPT"
+  if [[ ! -f "$SERVICE_SCRIPT" ]]; then
+    echo "找不到服務腳本：$SERVICE_SCRIPT" >&2
+    exit 1
+  fi
+else
+  SERVICE_SCRIPT="$SERVICE_DIR/dist/main.js"
 fi
 
 NODE_VERSION="$("$NODE_SOURCE" --version)"
@@ -61,9 +67,20 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS" \
   "$APP_BUNDLE/Contents/Resources/Service"
 cp "$BIN_DIR/$EXECUTABLE_NAME" "$APP_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
 cp "$NODE_SOURCE" "$APP_BUNDLE/Contents/Helpers/Node/node"
-cp "$SERVICE_SCRIPT" "$APP_BUNDLE/Contents/Resources/Service/service.mjs"
 cp "$APP_DIR/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 printf 'APPL????' >"$APP_BUNDLE/Contents/PkgInfo"
+
+if [[ -n "${CARDIARY_SERVICE_SCRIPT:-}" ]]; then
+  cp "$SERVICE_SCRIPT" "$APP_BUNDLE/Contents/Resources/Service/service.mjs"
+else
+  echo "打包主機服務到 bundle…"
+  "$APP_DIR/Scripts/pack-service.sh" "$SERVICE_DIR" >/dev/null
+  rm -rf "$APP_BUNDLE/Contents/Resources/Service"
+  mkdir -p "$APP_BUNDLE/Contents/Resources/Service"
+  cp -R "$SERVICE_DIR/dist" "$SERVICE_DIR/node_modules" "$SERVICE_DIR/package.json" \
+    "$APP_BUNDLE/Contents/Resources/Service/"
+fi
+
 
 sign() {
   local target="$1"

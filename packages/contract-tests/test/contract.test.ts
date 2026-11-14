@@ -442,6 +442,43 @@ describe("以 node 直接啟動的主機服務", () => {
 });
 
 describe("私有控制面（黑箱）", () => {
+  it("ready 帶殼簽發的 clientToken，客戶端用同一把連得上", async () => {
+    const issued = "C".repeat(43);
+    const service = await boot({ control: true, clientToken: issued });
+    expect(service.ready.clientToken).toBe(issued);
+    const connected = await client(service);
+    const subscribeId = connected.request("system.subscribe", {});
+    const reply = await connected.waitForReply(subscribeId);
+    expect((reply.payload as { seq: number }).seq).toBeGreaterThanOrEqual(1);
+  });
+
+  it("init 沒帶 clientToken 時服務自己產生一把並在 ready 回報", async () => {
+    const service = await boot({ control: true, omitClientToken: true });
+    const token = service.ready.clientToken;
+    expect(typeof token).toBe("string");
+    expect(token?.length).toBe(43);
+    expect(token).not.toBe(service.controlToken);
+    expect(token).not.toBe(service.brokerToken);
+    const connected = await client(service);
+    await connected.close();
+  });
+
+  it("init.clientToken 與控制或代理 Token 重複時直接拒絕，不默默替換", async () => {
+    const duplicatedControl = await spawnExpectInitFailure({
+      protocol: 1,
+      clientToken: "T".repeat(43),
+    });
+    expect(duplicatedControl.code).toBe(2);
+    expect(duplicatedControl.stderr).toContain("init 失敗：invalid_token");
+
+    const duplicatedBroker = await spawnExpectInitFailure({
+      protocol: 1,
+      clientToken: "B".repeat(43),
+    });
+    expect(duplicatedBroker.code).toBe(2);
+    expect(duplicatedBroker.stderr).toContain("init 失敗：invalid_token");
+  });
+
   it("init／ready／hello／hello-ack、health、路由白名單與 Token 驗證", async () => {
     const service = await boot({ control: true });
     const health = await service.controlRequest("control.health");

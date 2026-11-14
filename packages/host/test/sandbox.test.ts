@@ -1,11 +1,14 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { promisify } from "node:util";
 import { WebSocket } from "ws";
+
+const run = promisify(execFile);
 
 /**
  * 資料夾外零寫入的第二種量測：用 `sandbox-exec` 的白名單只允許寫
@@ -120,8 +123,38 @@ describe.skipIf(!darwin || !existsSync("/usr/bin/sandbox-exec"))(
         ].join("\n"),
       );
 
+      // 正向對照：profile 必須真的擋住資料夾外的寫入，也要允許資料夾內的寫入。
+      // 只 grep stderr 的話，profile 寫壞了也可能看起來「沒有 deny」。
+      const outside = join(root, "outside.txt");
+      const outsideAttempt = await run("sandbox-exec", [
+        "-f",
+        profilePath,
+        "/bin/sh",
+        "-c",
+        `printf x > '${outside}'`,
+      ]).then(
+        () => "written",
+        () => "denied",
+      );
+      expect(outsideAttempt).toBe("denied");
+      expect(existsSync(outside)).toBe(false);
+
       const service = await runSandboxed(folder, scriptPath, profilePath);
       expect(service.token.length).toBe(43);
+
+      // 反向對照：同一個 profile 允許寫資料夾（服務啟動後才寫，避免影響初始化）。
+      const inside = join(folder, "inside.txt");
+      const insideAttempt = await run("sandbox-exec", [
+        "-f",
+        profilePath,
+        "/bin/sh",
+        "-c",
+        `printf x > '${inside}'`,
+      ]).then(
+        () => "written",
+        () => "denied",
+      );
+      expect(insideAttempt).toBe("written");
 
       const ws = new WebSocket(`ws://127.0.0.1:${service.port}/v1/ws`);
       await new Promise<void>((resolveOpen, reject) => {

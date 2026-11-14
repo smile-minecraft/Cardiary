@@ -45,6 +45,16 @@ enum TestSupport {
         return nil
     }
 
+    /// 啟動 Node 的方式：正常情況是 node 的絕對路徑；只有 `/usr/bin/env`
+    /// 這個 fallback 時要把 `node` 放進參數，否則會執行錯的東西。
+    static func nodeLaunch() -> (executable: URL, prefix: [String])? {
+        guard let node = nodeExecutable() else { return nil }
+        if node.path == "/usr/bin/env" {
+            return (node, ["node"])
+        }
+        return (node, [])
+    }
+
     static var serviceDoubleURL: URL {
         let bundle = Bundle(for: TestSupportAnchor.self)
         let directory = bundle.bundleURL.deletingLastPathComponent()
