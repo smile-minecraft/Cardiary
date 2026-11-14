@@ -220,6 +220,12 @@ export class MemoryRuntimeState implements RuntimeStateStore {
     this.#opened = false;
   }
 
+  async close(): Promise<void> {
+    this.calls.push("runtime.close");
+    this.#options.trace?.("runtime.close");
+    this.#opened = false;
+  }
+
   /** 測試用：重啟後的新行程看到的狀態。 */
   static restored(
     snapshot: RuntimeStateSnapshot,

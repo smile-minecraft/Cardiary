@@ -5,10 +5,18 @@ import { FakeEngine } from "@cardiary/engine-fake";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  MemoryApprovalLedger,
+  MemoryDeletionIntents,
+  MemoryEventLog,
+  MemoryRequestDedupe,
+  MemoryRuntimeState,
+  MemoryTurnIndex,
   m0PermissionGate,
   startHost,
   type HostEngine,
+  type RuntimeStateSnapshot,
   type StartHostOptions,
+  type StorageBundle,
 } from "../src/index.js";
 import { TestClient, startTestHost, waitUntil, type TestHost } from "./helpers.js";
 import type { RunningHost } from "../src/index.js";
@@ -417,6 +425,100 @@ describe("生命週期", () => {
     expect(runtimeIndex).toBeGreaterThan(-1);
     expect(firstEventIndex).toBeGreaterThan(runtimeIndex);
     void host;
+  });
+
+  it("resume 發現 epoch 不一致：釋放不可信 handle，pause 不寫入、shutdown 不寫 clean_shutdown", async () => {
+    const folder = await (await import("./helpers.js")).makeFolder();
+    const runtimeInner = new MemoryRuntimeState();
+    const runtimeCalls: string[] = [];
+    const mismatchedEpoch = "01MISMATCHMISMATCHMISMATCH";
+    const runtime = {
+      async open(): Promise<RuntimeStateSnapshot> {
+        runtimeCalls.push("open");
+        return runtimeInner.open();
+      },
+      async reopen(): Promise<RuntimeStateSnapshot> {
+        runtimeCalls.push("reopen");
+        const snapshot = await runtimeInner.reopen();
+        return { ...snapshot, epoch: mismatchedEpoch };
+      },
+      current(): RuntimeStateSnapshot | null {
+        return runtimeInner.current();
+      },
+      async markCleanShutdown(reason: string): Promise<void> {
+        runtimeCalls.push(`markCleanShutdown:${reason}`);
+        return runtimeInner.markCleanShutdown(reason);
+      },
+      async checkpointAndClose(): Promise<void> {
+        runtimeCalls.push("checkpoint");
+        return runtimeInner.checkpointAndClose();
+      },
+      async close(): Promise<void> {
+        runtimeCalls.push("close");
+        return runtimeInner.close();
+      },
+      get opened(): boolean {
+        return runtimeInner.opened;
+      },
+    };
+    const events = new MemoryEventLog();
+    const storage: StorageBundle = {
+      events,
+      runtime,
+      dedupe: new MemoryRequestDedupe(),
+      approvals: new MemoryApprovalLedger(),
+      turnIndex: new MemoryTurnIndex(),
+      deletions: new MemoryDeletionIntents(),
+      folder: {
+        path: folder.path,
+        folderId: folder.folderId,
+        displayName: "mismatch-test",
+        writable: true,
+      },
+    };
+    const host = await startHost({
+      folderPath: folder.path,
+      clientToken: "M".repeat(43),
+      demo: true,
+      storage,
+    });
+    freeHosts.push(host);
+    await host.service.pause("user", 100);
+    expect(host.service.databasesClosed).toBe(true);
+    const appends = () => events.calls.filter((call) => call.startsWith("events.append")).length;
+    const appendsBefore = appends();
+    const checkpointsBefore = runtimeCalls.filter((call) => call === "checkpoint").length;
+    const marksBefore = runtimeCalls.filter((call) => call.startsWith("markCleanShutdown")).length;
+
+    const resumed = await host.service.resume();
+    expect(resumed.state).toBe("degraded");
+    expect(resumed.reason).toBe("folder_mismatch");
+    expect(host.service.databasesClosed).toBe(true);
+    expect(runtimeCalls).toContain("close");
+    expect(runtimeCalls.filter((call) => call === "checkpoint").length).toBe(checkpointsBefore);
+    expect(events.calls).toContain("events.close");
+    expect(runtimeInner.opened).toBe(false);
+
+    await expect(host.service.pause("user", 100)).rejects.toMatchObject({
+      code: "unavailable",
+    });
+    expect(appends()).toBe(appendsBefore);
+    expect(runtimeCalls.filter((call) => call === "checkpoint").length).toBe(checkpointsBefore);
+    expect(runtimeCalls.filter((call) => call.startsWith("markCleanShutdown")).length).toBe(
+      marksBefore,
+    );
+
+    const shutdown = await host.service.shutdown("user");
+    expect(shutdown).toEqual({
+      state: "closed",
+      cleanShutdown: false,
+      reason: "folder_mismatch",
+    });
+    expect(appends()).toBe(appendsBefore);
+    expect(runtimeCalls.filter((call) => call === "checkpoint").length).toBe(checkpointsBefore);
+    expect(runtimeCalls.filter((call) => call.startsWith("markCleanShutdown")).length).toBe(
+      marksBefore,
+    );
   });
 
   it("重啟後是新的 epoch（記憶體替身沒有持久化）", async () => {

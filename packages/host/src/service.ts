@@ -182,6 +182,15 @@ export class HostService {
 
   async pause(reason: string, deadlineMs?: number): Promise<PauseResult> {
     return this.#withLifecycle("pausing", async () => {
+      // 資料夾與狀態庫不一致（例如 resume 後才發現 epoch 不同）時，
+      // 這個 handle 不可信任；pause 不能寫入、checkpoint 或關閉別人的 DB。
+      if (this.#folderState === "mismatch") {
+        this.#gateway.stopAccepting();
+        throw new ControlError(
+          "unavailable",
+          "資料夾與狀態庫不一致；請由殼重啟服務，不要在同一路徑上繼續操作。",
+        );
+      }
       // 只有「上次暫停真的把資料庫關掉」才可以直接回同一個結果；
       // 半暫停（例如上次在提交前失敗）不能回 databasesClosed:true。
       if (this.#databasesClosed) {
@@ -288,9 +297,15 @@ export class HostService {
         };
       }
       if (snapshot.epoch !== epochBefore) {
+        // 同一個路徑上換了另一個 Cardiary 資料夾：這個 handle 不可信任，
+        // 只釋放連線，不寫任何東西（不 append、不 markCleanShutdown、不 checkpoint）。
+        await this.#options.storage.events.close().catch(() => undefined);
+        await this.#options.storage.runtime.close().catch(() => undefined);
+        this.#databasesClosed = true;
         this.#folderState = "mismatch";
         this.#serviceState = "degraded";
         this.#reason = "mismatch";
+        this.#gateway.stopAccepting();
         return {
           state: "degraded" as const,
           epoch: snapshot.epoch,
@@ -332,6 +347,12 @@ export class HostService {
   async shutdown(reason: string): Promise<ShutdownResult> {
     return this.#withLifecycle("shutting-down", async () => {
       this.#closed = true;
+      if (this.#folderState === "mismatch") {
+        // 不可信任的 handle：不能把 clean_shutdown 寫進另一個資料夾的狀態庫。
+        this.#gateway.stopAccepting();
+        await this.#gateway.close().catch(() => undefined);
+        return { state: "closed" as const, cleanShutdown: false, reason: "folder_mismatch" };
+      }
       if (this.#serviceState === "paused") {
         try {
           await readFolderIdentity(this.#folder.path, { expectedFolderId: this.#folder.folderId });

@@ -60,6 +60,8 @@ export interface RuntimeStateStore {
   current(): RuntimeStateSnapshot | null;
   markCleanShutdown(reason: string): Promise<void>;
   checkpointAndClose(): Promise<void>;
+  /** 只釋放連線、不做 checkpoint；用在 epoch 不一致、不能信任的 handle。 */
+  close(): Promise<void>;
   readonly opened: boolean;
 }
 

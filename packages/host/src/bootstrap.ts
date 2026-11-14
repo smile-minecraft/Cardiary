@@ -69,6 +69,8 @@ export interface StartHostOptions {
   readonly deletionIntents?: readonly string[];
   /** 診斷與測試用：儲存操作的時間軸。 */
   readonly trace?: (entry: string) => void;
+  /** 整合與測試用：直接注入儲存 bundle，略過記憶體替身。 */
+  readonly storage?: StorageBundle;
   /** 測試故障注入：啟動 N 毫秒後關閉事件日誌，模擬儲存失效。 */
   readonly faultCloseEventLogAfterMs?: number;
   /** 測試故障注入：第一個 request_dedupe complete 不寫入。 */
@@ -102,19 +104,23 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   const logger = options.logger ?? new SilentLogger();
   const clock = options.clock ?? systemClock;
   const spawn = new SpawnRegistry();
-  const folder = await readFolderIdentity(options.folderPath);
+  const folder = options.storage?.folder ?? (await readFolderIdentity(options.folderPath));
   const trace = options.trace;
-  const runtime = new MemoryRuntimeState({
-    now: () => clock.now(),
-    ...(trace === undefined ? {} : { trace }),
-  });
+  const runtime =
+    options.storage?.runtime ??
+    new MemoryRuntimeState({
+      now: () => clock.now(),
+      ...(trace === undefined ? {} : { trace }),
+    });
   const snapshot = await runtime.open();
-  const events = new MemoryEventLog(trace === undefined ? {} : { trace });
-  const dedupe = new MemoryRequestDedupe();
-  const approvals = new MemoryApprovalLedger();
-  const turnIndex = new MemoryTurnIndex();
-  const deletions = new MemoryDeletionIntents(options.deletionIntents ?? []);
-  const storage: StorageBundle = {
+  const events =
+    options.storage?.events ?? new MemoryEventLog(trace === undefined ? {} : { trace });
+  const dedupe = options.storage?.dedupe ?? new MemoryRequestDedupe();
+  const approvals = options.storage?.approvals ?? new MemoryApprovalLedger();
+  const turnIndex = options.storage?.turnIndex ?? new MemoryTurnIndex();
+  const deletions =
+    options.storage?.deletions ?? new MemoryDeletionIntents(options.deletionIntents ?? []);
+  const storage: StorageBundle = options.storage ?? {
     events,
     runtime,
     dedupe,
