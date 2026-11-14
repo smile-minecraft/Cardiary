@@ -225,6 +225,7 @@ export class HostService {
         await this.#options.storage.events.flush();
         await this.#options.storage.runtime.checkpointAndClose();
         await this.#options.storage.events.close();
+        this.#options.storage.pauseDatabases?.();
         this.#databasesClosed = true;
         return {
           state: "paused" as const,
@@ -314,6 +315,8 @@ export class HostService {
           reason: "folder_mismatch",
         };
       }
+      // epoch 對得上才重開快取：換了另一個資料夾時不能寫別人的 DB。
+      this.#options.storage.resumeDatabases?.();
       try {
         await this.#options.engine.resume();
         // 緊急全部暫停（pause_all）也要一併解除；M0 沒有獨立的 resume_all 訊息。

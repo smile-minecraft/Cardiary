@@ -62,6 +62,10 @@ export class Storage {
   readonly maintenance: StorageMaintenance;
   #cache: Database;
   #closed = false;
+  /** 重開快取時要用的東西；一起存在實例上，暫停後才接得回來。 */
+  readonly #now: () => Date;
+  readonly #trace: ((operation: string) => void) | undefined;
+  readonly #onDatabaseFailure: (error: unknown) => void;
 
   private constructor(init: {
     layout: FolderLayout;
@@ -81,6 +85,9 @@ export class Storage {
     logs: DiagnosticLogger;
     deletions: ConversationDeletionService;
     maintenance: StorageMaintenance;
+    now: () => Date;
+    trace: ((operation: string) => void) | undefined;
+    onDatabaseFailure: (error: unknown) => void;
   }) {
     this.layout = init.layout;
     this.folder = init.folder;
@@ -99,6 +106,9 @@ export class Storage {
     this.logs = init.logs;
     this.deletions = init.deletions;
     this.maintenance = init.maintenance;
+    this.#now = init.now;
+    this.#trace = init.trace;
+    this.#onDatabaseFailure = init.onDatabaseFailure;
   }
 
   static open(options: OpenStorageOptions): Storage {
@@ -263,6 +273,9 @@ export class Storage {
         logs,
         deletions,
         maintenance,
+        now,
+        trace,
+        onDatabaseFailure,
       });
       storage = created;
       return created;
@@ -278,6 +291,44 @@ export class Storage {
   /** 目前快取資料庫；刪除流程重建快取後會換一個連線。 */
   get cache(): Database {
     return this.#cache;
+  }
+
+  /** 恢復暫停時關掉的快取連線；檔案不存在時重建。 */
+  reopenCache(): void {
+    if (!this.#cache.isClosed) {
+      return;
+    }
+    this.#cache = openCacheDatabase({
+      filePath: this.layout.absolute("cache/index.sqlite"),
+      layout: this.layout,
+      now: this.#now,
+      ...(this.#trace === undefined ? {} : { trace: this.#trace }),
+      onFailure: this.#onDatabaseFailure,
+    }).db;
+    this.registry.register({
+      relPath: "cache/index.sqlite",
+      ownerKind: "index",
+      sizeBytes: this.#cache.fileSize(),
+    });
+  }
+
+  /**
+   * 暫停時關掉快取連線，讓整個資料夾沒有開著的檔案。
+   *
+   * 正本與快取在暫停後都必須關閉，否則外接磁碟卸載不掉；
+   * 狀態庫由 `runtime.checkpointAndClose()` 負責，引擎由轉接層的
+   * `suspend()` 負責，快取由這裡負責。
+   */
+  closeCache(): void {
+    if (this.#cache.isClosed) {
+      return;
+    }
+    try {
+      this.#cache.checkpoint();
+    } catch {
+      // 快取可以重建，checkpoint 失敗不阻擋暫停。
+    }
+    this.#cache.close();
   }
 
   /** 引擎與工具子行程的暫存目錄；殼把 TMPDIR 指到這裡。 */

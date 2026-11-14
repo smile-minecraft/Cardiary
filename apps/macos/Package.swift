@@ -37,7 +37,10 @@ let package = Package(
         ),
         .testTarget(
             name: "CardiaryShellCoreTests",
-            dependencies: ["CardiaryShellCore"],
+            dependencies: [
+                "CardiaryShellCore",
+                .product(name: "CardiaryKit", package: "CardiaryKit"),
+            ],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]

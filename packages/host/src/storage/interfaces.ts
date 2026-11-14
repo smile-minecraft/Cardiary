@@ -136,6 +136,15 @@ export interface StorageBundle {
    * 快取兩條連線與資料夾鎖要放掉。記憶體替身沒有這個方法。
    */
   dispose?(): void;
+  /**
+   * 暫停時釋放還在開著的連線（正式實作是快取資料庫）。
+   *
+   * `runtime.checkpointAndClose()` 只關狀態庫、引擎由轉接層關；剩下的連線
+   * 都要在這裡放掉，外接磁碟才卸載得掉。記憶體替身沒有這個方法。
+   */
+  pauseDatabases?(): void;
+  /** 恢復時把暫停放掉的連線重開；`runtime.reopen()` 已經處理狀態庫。 */
+  resumeDatabases?(): void;
 }
 
 export type { ApprovalListFilter, ApprovalLedger, ApprovalRequest, ApprovalDecision };

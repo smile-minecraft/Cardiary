@@ -176,6 +176,75 @@ public actor CardiaryConnection {
         return response.payload
     }
 
+    /// 建立一場對話；帶 `clientRequestId` 時重送不會建立第二場。
+    public func createSession(
+        clientRequestId: String? = nil,
+        title: String? = nil,
+        options: RequestOptions = .default
+    ) async throws -> SessionCreateResponsePayload {
+        let request = SessionCreateRequest(
+            id: RequestID.next(),
+            payload: SessionCreateRequestPayload(title: title, clientRequestId: clientRequestId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .sessionCreateResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "session.create 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 送一則使用者訊息；`clientMessageId` 讓重送不會新增訊息。
+    public func sendMessage(
+        sessionId: String,
+        text: String,
+        delivery: DeliveryMode = .queue,
+        clientMessageId: String? = nil,
+        options: RequestOptions = .default
+    ) async throws -> SessionSendMessageResponsePayload {
+        let request = SessionSendMessageRequest(
+            id: RequestID.next(),
+            payload: SessionSendMessageRequestPayload(
+                sessionId: sessionId,
+                text: text,
+                delivery: delivery,
+                clientMessageId: clientMessageId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .sessionSendMessageResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "session.send_message 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 送出審批決定；`optionId` 是請求裡的選項（例如 `approve`、`deny`）。
+    public func decideApproval(
+        approvalId: String,
+        optionId: String,
+        note: String? = nil,
+        options: RequestOptions = .default
+    ) async throws -> ApprovalDecideResponsePayload {
+        let request = ApprovalDecideRequest(
+            id: RequestID.next(),
+            payload: ApprovalDecideRequestPayload(
+                approvalId: approvalId,
+                optionId: optionId,
+                note: note
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .approvalDecideResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "approval.decide 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
     public func close() async {
         guard !closed else { return }
         closed = true
