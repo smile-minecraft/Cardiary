@@ -198,6 +198,7 @@ export class FakeApprovalService implements ApprovalService {
         expiresAt:
           timeoutMs === null ? null : new Date(requestedAt.getTime() + timeoutMs).toISOString(),
         draft,
+        approvalKey: key,
       };
       this.#requests.set(request.id, request);
       this.#keyIndex.set(request.id, key);
@@ -394,17 +395,19 @@ export class FakeApprovalService implements ApprovalService {
     return this.#serialize(async () => {
       const request = await this.get(requestId);
       if (!request) {
+        const draft: ApprovalRequestDraft = {
+          action: { kind: "unknown", summary: "" },
+          risk: "unknown",
+          requestedBy: { kind: "host", component: "fake" },
+        };
         return {
           request: {
             id: requestId,
             status: "withdrawn",
             requestedAt: this.#now().toISOString(),
             expiresAt: null,
-            draft: {
-              action: { kind: "unknown", summary: "" },
-              risk: "unknown",
-              requestedBy: { kind: "host", component: "fake" },
-            },
+            draft,
+            approvalKey: keyOfDraft(draft),
           },
           outcome: "withdrawn",
           decision: null,

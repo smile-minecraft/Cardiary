@@ -44,6 +44,8 @@ import type {
   ToolOutcome,
   TurnRecovery,
   TurnTrigger,
+  ToolProcess,
+  ToolProcessSpec,
   Unsubscribe,
 } from "@cardiary/engine-adapter";
 import type { ActorRef, HumanActor } from "@cardiary/engine-adapter";
@@ -61,6 +63,7 @@ import { FakeApprovalService } from "./approvals.js";
 import { EventChannel } from "./channel.js";
 import { EngineFailure } from "./errors.js";
 import { prefixed } from "./ids.js";
+import { FakeToolSpawner } from "./spawn.js";
 import { FakeToolRegistry } from "./tools.js";
 
 /** 腳本化模型的一步。 */
@@ -182,6 +185,7 @@ export class FakeEngine implements EngineAdapter {
   readonly #conversations = new Map<ConversationId, ConversationRecord>();
   readonly #tools: FakeToolRegistry;
   readonly #approvals: FakeApprovalService;
+  readonly #spawner: FakeToolSpawner;
   readonly #listeners = new Set<(status: EngineStatus) => void>();
   readonly #approvalSubscription: Unsubscribe;
   readonly #scripts: FakeModelStep[][] = [];
@@ -210,6 +214,10 @@ export class FakeEngine implements EngineAdapter {
         }
       }
       return count;
+    });
+    this.#spawner = new FakeToolSpawner({
+      tempDir: options.environment.tempDir,
+      defaultWorkingDir: options.environment.defaultWorkingDir,
     });
     this.#approvals = new FakeApprovalService({
       ledger: options.approvals,
@@ -277,6 +285,7 @@ export class FakeEngine implements EngineAdapter {
       }
       conversation.state = "idle";
     }
+    await this.#spawner.terminateAll();
     this.#setState("paused");
   }
 
@@ -299,6 +308,7 @@ export class FakeEngine implements EngineAdapter {
       }
       conversation.channel.close();
     }
+    await this.#spawner.terminateAll();
     this.#approvalSubscription();
     this.#setState("stopped");
   }
@@ -427,6 +437,7 @@ export class FakeEngine implements EngineAdapter {
     for (const entry of conversation.recovery.splice(0)) {
       recovered.push({
         turnId: entry.turnId,
+        triggerMessageId: entry.triggerMessageId,
         outcome: entry.outcome,
         diagnostics: entry.diagnostics,
       });
@@ -1355,6 +1366,7 @@ export class FakeEngine implements EngineAdapter {
       signal,
       tempDir: this.#options.environment.tempDir,
       workingDir: this.#options.environment.defaultWorkingDir,
+      spawn: (spec: ToolProcessSpec): ToolProcess => this.#spawner.spawn(spec),
       requestApproval: async (draft: ApprovalRequestDraft): Promise<ApprovalResolution> => {
         const merged: ApprovalRequestDraft = {
           ...draft,

@@ -2,6 +2,7 @@ import type {
   ApprovalDecision,
   ApprovalListFilter,
   ApprovalLedger,
+  ApprovalRecordOutcome,
   ApprovalRequest,
 } from "@cardiary/engine-adapter";
 import type { JSONValue } from "@cardiary/protocol";
@@ -335,19 +336,52 @@ export class MemoryApprovalLedger implements ApprovalLedger {
   readonly calls: string[] = [];
   readonly #records = new Map<string, ApprovalRequest>();
   readonly #decisions = new Map<string, ApprovalDecision>();
+  /** 同一個 `approvalKey` 的寫入順序；找最新一列時用。 */
+  readonly #keyOrder: string[] = [];
 
-  async record(request: ApprovalRequest): Promise<void> {
-    this.calls.push(`approval.record:${request.id}`);
+  #latestFor(approvalKey: string): ApprovalRequest | null {
+    for (let index = this.#keyOrder.length - 1; index >= 0; index -= 1) {
+      const requestId = this.#keyOrder[index];
+      if (requestId === undefined) continue;
+      const request = this.#records.get(requestId);
+      if (request && request.approvalKey === approvalKey) return request;
+    }
+    return null;
+  }
+
+  #remember(request: ApprovalRequest): void {
+    this.#keyOrder.push(request.id);
+  }
+
+  async record(request: ApprovalRequest): Promise<ApprovalRecordOutcome> {
+    const latest = this.#latestFor(request.approvalKey);
+    if (latest) {
+      if (latest.status === "approved" || latest.status === "denied") {
+        return { kind: "decided", request: latest };
+      }
+      if (latest.status === "pending") {
+        this.calls.push(`approval.record:${request.id}:existing`);
+        return { kind: "existing", request: latest };
+      }
+    }
+    this.calls.push(`approval.record:${request.id}:created`);
     this.#records.set(request.id, request);
+    this.#remember(request);
+    return { kind: "created", request };
   }
 
   async update(request: ApprovalRequest): Promise<void> {
     this.calls.push(`approval.update:${request.id}:${request.status}`);
+    if (!this.#records.has(request.id)) this.#remember(request);
     this.#records.set(request.id, request);
   }
 
   async get(requestId: string): Promise<ApprovalRequest | null> {
     return this.#records.get(requestId) ?? null;
+  }
+
+  async findByApprovalKey(approvalKey: string): Promise<ApprovalRequest | null> {
+    return this.#latestFor(approvalKey);
   }
 
   async listPending(filter?: ApprovalListFilter): Promise<readonly ApprovalRequest[]> {
