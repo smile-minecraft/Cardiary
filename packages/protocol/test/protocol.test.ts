@@ -125,6 +125,39 @@ describe("協定 schema 與範例", () => {
     expect(validateClient(badModuleType)).toBe(false);
   });
 
+  it("epoch 與 streaming 的必填與選填規則", () => {
+    // hello 回應一定要帶 epoch：沒有它，客戶端無法判斷上次的事件歷史是否還連續。
+    const helloWithoutEpoch = structuredClone(examples.helloResponse);
+    delete helloWithoutEpoch.payload.epoch;
+    expect(validateServer(helloWithoutEpoch)).toBe(false);
+
+    const subscribeWithoutEpoch = structuredClone(examples.systemSubscribeResponse);
+    delete subscribeWithoutEpoch.payload.epoch;
+    expect(validateServer(subscribeWithoutEpoch)).toBe(false);
+
+    const sessionSubscribeWithoutEpoch = structuredClone(examples.sessionSubscribeResponse);
+    delete sessionSubscribeWithoutEpoch.payload.epoch;
+    expect(validateServer(sessionSubscribeWithoutEpoch)).toBe(false);
+
+    // 訂閱請求的 epoch 是選填；客戶端第一次連線時可以只帶 lastSeq 或都不帶。
+    const requestWithoutEpoch = structuredClone(examples.sessionSubscribeRequest);
+    delete requestWithoutEpoch.payload.epoch;
+    expect(validateClient(requestWithoutEpoch)).toBe(true);
+
+    // 快照的 streaming 是選填；進行中訊息的 text 與 messageId 是必填。
+    const snapshotWithoutStreaming = structuredClone(examples.sessionSubscribeResponse);
+    delete snapshotWithoutStreaming.payload.snapshot.streaming;
+    expect(validateServer(snapshotWithoutStreaming)).toBe(true);
+
+    const streamingMissingText = structuredClone(examples.sessionSubscribeResponse);
+    delete streamingMissingText.payload.snapshot.streaming.text;
+    expect(validateServer(streamingMissingText)).toBe(false);
+
+    const streamingWrongType = structuredClone(examples.sessionSubscribeResponse);
+    streamingWrongType.payload.snapshot.streaming.truncated = "no";
+    expect(validateServer(streamingWrongType)).toBe(false);
+  });
+
   it("schema 與設計文件沒有出現引擎的型別或欄位名稱", () => {
     const engineIdentifiers = [
       "@earendil-works",

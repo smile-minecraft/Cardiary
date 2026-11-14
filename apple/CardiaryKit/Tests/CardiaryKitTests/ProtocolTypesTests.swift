@@ -164,4 +164,98 @@ final class ProtocolTypesTests: XCTestCase {
         XCTAssertEqual(error.code, .incompatibleVersion)
         XCTAssertEqual(error.retryable, false)
     }
+
+    func testDecodesHelloResponseWithEpoch() throws {
+        let json = """
+        {
+          "v": 1,
+          "kind": "response",
+          "replyTo": "req_hello_1",
+          "type": "system.hello",
+          "payload": {
+            "protocol": { "version": 1, "min": 1, "max": 1 },
+            "server": { "name": "Cardiary", "version": "0.1.0" },
+            "connectionId": "conn_1",
+            "limits": { "maxFrameBytes": 1048576, "replayWindow": 512, "heartbeatSeconds": 20 },
+            "capabilities": { "modules": true, "files": true },
+            "epoch": "epoch_1"
+          }
+        }
+        """
+
+        let frame = try JSONDecoder().decode(ServerFrame.self, from: Data(json.utf8))
+        guard case .systemHelloResponse(let response) = frame else {
+            return XCTFail("預期 system.hello 回應")
+        }
+
+        XCTAssertEqual(response.payload.epoch, "epoch_1")
+    }
+
+    func testDecodesSessionSubscribeResponseWithStreaming() throws {
+        let json = """
+        {
+          "v": 1,
+          "kind": "response",
+          "replyTo": "req_sub_1",
+          "type": "session.subscribe",
+          "payload": {
+            "sessionId": "sess_1",
+            "stream": "session:sess_1",
+            "seq": 18,
+            "epoch": "epoch_1",
+            "resyncRequired": true,
+            "snapshot": {
+              "session": {
+                "id": "sess_1",
+                "title": "協定設計討論",
+                "status": "running",
+                "createdAt": "2026-11-14T10:06:00Z",
+                "updatedAt": "2026-11-14T10:07:20Z",
+                "messageCount": 1
+              },
+              "entries": [],
+              "streaming": {
+                "messageId": "msg_1",
+                "turnId": "turn_1",
+                "text": "我先確認資料夾狀態，",
+                "startedAt": "2026-11-14T10:07:01Z",
+                "truncated": false
+              }
+            }
+          }
+        }
+        """
+
+        let frame = try JSONDecoder().decode(ServerFrame.self, from: Data(json.utf8))
+        guard case .sessionSubscribeResponse(let response) = frame else {
+            return XCTFail("預期 session.subscribe 回應")
+        }
+
+        XCTAssertEqual(response.payload.epoch, "epoch_1")
+        let streaming = try XCTUnwrap(response.payload.snapshot?.streaming)
+        XCTAssertEqual(streaming.messageId, "msg_1")
+        XCTAssertEqual(streaming.turnId, "turn_1")
+        XCTAssertEqual(streaming.text, "我先確認資料夾狀態，")
+        XCTAssertEqual(streaming.truncated, false)
+    }
+
+    func testDecodesSessionSubscribeRequestWithoutEpoch() throws {
+        let json = """
+        {
+          "v": 1,
+          "kind": "request",
+          "id": "req_sub_1",
+          "type": "session.subscribe",
+          "payload": { "sessionId": "sess_1" }
+        }
+        """
+
+        let frame = try JSONDecoder().decode(ClientFrame.self, from: Data(json.utf8))
+        guard case .sessionSubscribeRequest(let request) = frame else {
+            return XCTFail("預期 session.subscribe 請求")
+        }
+
+        XCTAssertNil(request.payload.epoch)
+        XCTAssertNil(request.payload.lastSeq)
+    }
 }

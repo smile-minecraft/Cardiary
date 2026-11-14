@@ -219,6 +219,10 @@ export interface SystemSubscribeRequestPayload {
    * 客戶端最後收到的系統串流序號；省略代表要一份完整快照。
    */
   lastSeq?: number;
+  /**
+   * 客戶端上次收到的事件 epoch。省略或與主機不同時，lastSeq 一律視為不可用。
+   */
+  epoch?: string;
 }
 /**
  * 取消系統狀態串流。
@@ -356,6 +360,10 @@ export interface SessionSubscribeRequestPayload {
    * 客戶端最後收到的會話串流序號；省略代表要一份完整快照。
    */
   lastSeq?: number;
+  /**
+   * 客戶端上次收到的事件 epoch。省略或與主機不同時，lastSeq 一律視為不可用。
+   */
+  epoch?: string;
   /**
    * 快照最多帶幾則歷史訊息。
    */
@@ -503,6 +511,10 @@ export interface SystemHelloResponsePayload {
   connectionId: string;
   limits: ServerLimits;
   capabilities: ServerCapabilities;
+  /**
+   * 目前的事件 epoch。客戶端重連時先比對它；不同就代表上次的事件歷史已經斷了，訂閱時不要帶 lastSeq。
+   */
+  epoch: string;
 }
 export interface ProtocolInfo {
   /**
@@ -575,7 +587,11 @@ export interface SystemSubscribeResponsePayload {
    */
   seq: number;
   /**
-   * 是否附上完整快照；false 表示接下來只會補送 seq 之後的事件。
+   * 這個序號所屬的事件 epoch。與請求的 epoch 不同時，resyncRequired 一定是 true。
+   */
+  epoch: string;
+  /**
+   * 是否附上完整快照；false 表示接下來只會補送 seq 之後的耐久事件。
    */
   resyncRequired: boolean;
   snapshot?: SystemStatus;
@@ -645,7 +661,7 @@ export interface SystemStatusEvent {
    */
   stream: string;
   /**
-   * 這個串流的單調遞增序號，從 1 開始。
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
    */
   seq: number;
   /**
@@ -795,7 +811,11 @@ export interface SessionSubscribeResponsePayload {
    */
   seq: number;
   /**
-   * 是否附上完整快照；false 表示接下來只會補送 seq 之後的事件。
+   * 這個序號所屬的事件 epoch。與請求的 epoch 不同時，resyncRequired 一定是 true。
+   */
+  epoch: string;
+  /**
+   * 是否附上完整快照；false 表示接下來只會補送 seq 之後的耐久事件。
    */
   resyncRequired: boolean;
   snapshot?: SessionSnapshot;
@@ -803,11 +823,12 @@ export interface SessionSubscribeResponsePayload {
 export interface SessionSnapshot {
   session: SessionSummary;
   /**
-   * 最新一段歷史，依時間由舊到新。
+   * 最新一段已完成的歷史，依時間由舊到新。
    */
   entries: TranscriptEntry[];
   activeTurn?: TurnState;
   pendingApproval?: ApprovalRequest;
+  streaming?: StreamingMessage;
 }
 export interface UserTranscriptEntry {
   /**
@@ -990,6 +1011,31 @@ export interface ApprovalOption {
   effect: ApprovalEffect;
 }
 /**
+ * 訂閱快照中進行中的助理訊息。只在該會話有進行中的回合時出現；不落地，重啟後消失。
+ */
+export interface StreamingMessage {
+  /**
+   * 正在生長的助理訊息識別碼。
+   */
+  messageId: string;
+  /**
+   * 所屬回合。
+   */
+  turnId?: string;
+  /**
+   * 到快照邊界為止已生成的文字。客戶端用它取代本地顯示中的文字，不是附加。
+   */
+  text: string;
+  /**
+   * 開始生成時間，RFC 3339。
+   */
+  startedAt: string;
+  /**
+   * 文字是否因緩衝上限被截斷；省略代表沒有。最終訊息完成事件仍帶完整文字。
+   */
+  truncated?: boolean;
+}
+/**
  * 取消訂閱的結果。
  */
 export interface SessionUnsubscribeResponse {
@@ -1047,7 +1093,7 @@ export interface StreamTurnStartedEvent {
    */
   stream: string;
   /**
-   * 這個串流的單調遞增序號，從 1 開始。
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
    */
   seq: number;
   /**
@@ -1075,7 +1121,7 @@ export interface StreamTurnStartedEventPayload {
   startedAt: string;
 }
 /**
- * 助理文字增量。
+ * 助理文字增量；不落地、不佔序號，只沿著目前的連線送出。
  */
 export interface StreamTextDeltaEvent {
   v: 1;
@@ -1086,7 +1132,7 @@ export interface StreamTextDeltaEvent {
    */
   stream: string;
   /**
-   * 這個串流的單調遞增序號，從 1 開始。
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
    */
   seq: number;
   /**
@@ -1125,7 +1171,7 @@ export interface StreamMessageCompletedEvent {
    */
   stream: string;
   /**
-   * 這個串流的單調遞增序號，從 1 開始。
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
    */
   seq: number;
   /**
@@ -1168,7 +1214,7 @@ export interface StreamToolCallEvent {
    */
   stream: string;
   /**
-   * 這個串流的單調遞增序號，從 1 開始。
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
    */
   seq: number;
   /**
@@ -1212,7 +1258,7 @@ export interface StreamToolResultEvent {
    */
   stream: string;
   /**
-   * 這個串流的單調遞增序號，從 1 開始。
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
    */
   seq: number;
   /**
@@ -1253,7 +1299,7 @@ export interface StreamTurnStateEvent {
    */
   stream: string;
   /**
-   * 這個串流的單調遞增序號，從 1 開始。
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
    */
   seq: number;
   /**
@@ -1274,7 +1320,7 @@ export interface StreamUiEvent {
    */
   stream: string;
   /**
-   * 這個串流的單調遞增序號，從 1 開始。
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
    */
   seq: number;
   /**
@@ -1314,7 +1360,7 @@ export interface ApprovalRequestedEvent {
    */
   stream: string;
   /**
-   * 這個串流的單調遞增序號，從 1 開始。
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
    */
   seq: number;
   /**
@@ -1363,7 +1409,7 @@ export interface ApprovalDecidedEvent {
    */
   stream: string;
   /**
-   * 這個串流的單調遞增序號，從 1 開始。
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
    */
   seq: number;
   /**

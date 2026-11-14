@@ -3101,17 +3101,20 @@ public struct SessionSnapshot: Codable, Equatable, Sendable {
     public let entries: [TranscriptEntry]
     public let activeTurn: TurnState?
     public let pendingApproval: ApprovalRequest?
+    public let streaming: StreamingMessage?
 
     public init(
         session: SessionSummary,
         entries: [TranscriptEntry],
         activeTurn: TurnState? = nil,
-        pendingApproval: ApprovalRequest? = nil
+        pendingApproval: ApprovalRequest? = nil,
+        streaming: StreamingMessage? = nil
     ) {
         self.session = session
         self.entries = entries
         self.activeTurn = activeTurn
         self.pendingApproval = pendingApproval
+        self.streaming = streaming
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -3119,6 +3122,7 @@ public struct SessionSnapshot: Codable, Equatable, Sendable {
         case entries = "entries"
         case activeTurn = "activeTurn"
         case pendingApproval = "pendingApproval"
+        case streaming = "streaming"
     }
 
     public init(from decoder: Decoder) throws {
@@ -3127,11 +3131,13 @@ public struct SessionSnapshot: Codable, Equatable, Sendable {
         let entries = try container.decode([TranscriptEntry].self, forKey: .entries)
         let activeTurn = try container.decodeIfPresent(TurnState.self, forKey: .activeTurn)
         let pendingApproval = try container.decodeIfPresent(ApprovalRequest.self, forKey: .pendingApproval)
+        let streaming = try container.decodeIfPresent(StreamingMessage.self, forKey: .streaming)
         self.init(
             session: session,
             entries: entries,
             activeTurn: activeTurn,
-            pendingApproval: pendingApproval
+            pendingApproval: pendingApproval,
+            streaming: streaming
         )
     }
 
@@ -3141,6 +3147,7 @@ public struct SessionSnapshot: Codable, Equatable, Sendable {
         try container.encode(entries, forKey: .entries)
         try container.encodeIfPresent(activeTurn, forKey: .activeTurn)
         try container.encodeIfPresent(pendingApproval, forKey: .pendingApproval)
+        try container.encodeIfPresent(streaming, forKey: .streaming)
     }
 }
 
@@ -3224,21 +3231,25 @@ public struct SessionSubscribeRequest: Codable, Equatable, Sendable {
 public struct SessionSubscribeRequestPayload: Codable, Equatable, Sendable {
     public let sessionId: String
     public let lastSeq: Int?
+    public let epoch: String?
     public let historyLimit: Int?
 
     public init(
         sessionId: String,
         lastSeq: Int? = nil,
+        epoch: String? = nil,
         historyLimit: Int? = nil
     ) {
         self.sessionId = sessionId
         self.lastSeq = lastSeq
+        self.epoch = epoch
         self.historyLimit = historyLimit
     }
 
     private enum CodingKeys: String, CodingKey {
         case sessionId = "sessionId"
         case lastSeq = "lastSeq"
+        case epoch = "epoch"
         case historyLimit = "historyLimit"
     }
 
@@ -3246,10 +3257,12 @@ public struct SessionSubscribeRequestPayload: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let sessionId = try container.decode(String.self, forKey: .sessionId)
         let lastSeq = try container.decodeIfPresent(Int.self, forKey: .lastSeq)
+        let epoch = try container.decodeIfPresent(String.self, forKey: .epoch)
         let historyLimit = try container.decodeIfPresent(Int.self, forKey: .historyLimit)
         self.init(
             sessionId: sessionId,
             lastSeq: lastSeq,
+            epoch: epoch,
             historyLimit: historyLimit
         )
     }
@@ -3258,6 +3271,7 @@ public struct SessionSubscribeRequestPayload: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(sessionId, forKey: .sessionId)
         try container.encodeIfPresent(lastSeq, forKey: .lastSeq)
+        try container.encodeIfPresent(epoch, forKey: .epoch)
         try container.encodeIfPresent(historyLimit, forKey: .historyLimit)
     }
 }
@@ -3334,6 +3348,7 @@ public struct SessionSubscribeResponsePayload: Codable, Equatable, Sendable {
     public let sessionId: String
     public let stream: String
     public let seq: Int
+    public let epoch: String
     public let resyncRequired: Bool
     public let snapshot: SessionSnapshot?
 
@@ -3341,12 +3356,14 @@ public struct SessionSubscribeResponsePayload: Codable, Equatable, Sendable {
         sessionId: String,
         stream: String,
         seq: Int,
+        epoch: String,
         resyncRequired: Bool,
         snapshot: SessionSnapshot? = nil
     ) {
         self.sessionId = sessionId
         self.stream = stream
         self.seq = seq
+        self.epoch = epoch
         self.resyncRequired = resyncRequired
         self.snapshot = snapshot
     }
@@ -3355,6 +3372,7 @@ public struct SessionSubscribeResponsePayload: Codable, Equatable, Sendable {
         case sessionId = "sessionId"
         case stream = "stream"
         case seq = "seq"
+        case epoch = "epoch"
         case resyncRequired = "resyncRequired"
         case snapshot = "snapshot"
     }
@@ -3364,12 +3382,14 @@ public struct SessionSubscribeResponsePayload: Codable, Equatable, Sendable {
         let sessionId = try container.decode(String.self, forKey: .sessionId)
         let stream = try container.decode(String.self, forKey: .stream)
         let seq = try container.decode(Int.self, forKey: .seq)
+        let epoch = try container.decode(String.self, forKey: .epoch)
         let resyncRequired = try container.decode(Bool.self, forKey: .resyncRequired)
         let snapshot = try container.decodeIfPresent(SessionSnapshot.self, forKey: .snapshot)
         self.init(
             sessionId: sessionId,
             stream: stream,
             seq: seq,
+            epoch: epoch,
             resyncRequired: resyncRequired,
             snapshot: snapshot
         )
@@ -3380,6 +3400,7 @@ public struct SessionSubscribeResponsePayload: Codable, Equatable, Sendable {
         try container.encode(sessionId, forKey: .sessionId)
         try container.encode(stream, forKey: .stream)
         try container.encode(seq, forKey: .seq)
+        try container.encode(epoch, forKey: .epoch)
         try container.encode(resyncRequired, forKey: .resyncRequired)
         try container.encodeIfPresent(snapshot, forKey: .snapshot)
     }
@@ -4541,6 +4562,63 @@ public struct StreamUiEventPayload: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - StreamingMessage
+
+public struct StreamingMessage: Codable, Equatable, Sendable {
+    public let messageId: String
+    public let turnId: String?
+    public let text: String
+    public let startedAt: String
+    public let truncated: Bool?
+
+    public init(
+        messageId: String,
+        turnId: String? = nil,
+        text: String,
+        startedAt: String,
+        truncated: Bool? = nil
+    ) {
+        self.messageId = messageId
+        self.turnId = turnId
+        self.text = text
+        self.startedAt = startedAt
+        self.truncated = truncated
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case messageId = "messageId"
+        case turnId = "turnId"
+        case text = "text"
+        case startedAt = "startedAt"
+        case truncated = "truncated"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let messageId = try container.decode(String.self, forKey: .messageId)
+        let turnId = try container.decodeIfPresent(String.self, forKey: .turnId)
+        let text = try container.decode(String.self, forKey: .text)
+        let startedAt = try container.decode(String.self, forKey: .startedAt)
+        let truncated = try container.decodeIfPresent(Bool.self, forKey: .truncated)
+        self.init(
+            messageId: messageId,
+            turnId: turnId,
+            text: text,
+            startedAt: startedAt,
+            truncated: truncated
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(messageId, forKey: .messageId)
+        try container.encodeIfPresent(turnId, forKey: .turnId)
+        try container.encode(text, forKey: .text)
+        try container.encode(startedAt, forKey: .startedAt)
+        try container.encodeIfPresent(truncated, forKey: .truncated)
+    }
+}
+
 // MARK: - SystemHelloRequest
 
 public struct SystemHelloRequest: Codable, Equatable, Sendable {
@@ -4731,19 +4809,22 @@ public struct SystemHelloResponsePayload: Codable, Equatable, Sendable {
     public let connectionId: String
     public let limits: ServerLimits
     public let capabilities: ServerCapabilities
+    public let epoch: String
 
     public init(
         `protocol`: ProtocolInfo,
         server: ServerInfo,
         connectionId: String,
         limits: ServerLimits,
-        capabilities: ServerCapabilities
+        capabilities: ServerCapabilities,
+        epoch: String
     ) {
         self.`protocol` = `protocol`
         self.server = server
         self.connectionId = connectionId
         self.limits = limits
         self.capabilities = capabilities
+        self.epoch = epoch
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -4752,6 +4833,7 @@ public struct SystemHelloResponsePayload: Codable, Equatable, Sendable {
         case connectionId = "connectionId"
         case limits = "limits"
         case capabilities = "capabilities"
+        case epoch = "epoch"
     }
 
     public init(from decoder: Decoder) throws {
@@ -4761,12 +4843,14 @@ public struct SystemHelloResponsePayload: Codable, Equatable, Sendable {
         let connectionId = try container.decode(String.self, forKey: .connectionId)
         let limits = try container.decode(ServerLimits.self, forKey: .limits)
         let capabilities = try container.decode(ServerCapabilities.self, forKey: .capabilities)
+        let epoch = try container.decode(String.self, forKey: .epoch)
         self.init(
             protocol: `protocol`,
             server: server,
             connectionId: connectionId,
             limits: limits,
-            capabilities: capabilities
+            capabilities: capabilities,
+            epoch: epoch
         )
     }
 
@@ -4777,6 +4861,7 @@ public struct SystemHelloResponsePayload: Codable, Equatable, Sendable {
         try container.encode(connectionId, forKey: .connectionId)
         try container.encode(limits, forKey: .limits)
         try container.encode(capabilities, forKey: .capabilities)
+        try container.encode(epoch, forKey: .epoch)
     }
 }
 
@@ -4966,28 +5051,35 @@ public struct SystemSubscribeRequest: Codable, Equatable, Sendable {
 
 public struct SystemSubscribeRequestPayload: Codable, Equatable, Sendable {
     public let lastSeq: Int?
+    public let epoch: String?
 
     public init(
-        lastSeq: Int? = nil
+        lastSeq: Int? = nil,
+        epoch: String? = nil
     ) {
         self.lastSeq = lastSeq
+        self.epoch = epoch
     }
 
     private enum CodingKeys: String, CodingKey {
         case lastSeq = "lastSeq"
+        case epoch = "epoch"
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let lastSeq = try container.decodeIfPresent(Int.self, forKey: .lastSeq)
+        let epoch = try container.decodeIfPresent(String.self, forKey: .epoch)
         self.init(
-            lastSeq: lastSeq
+            lastSeq: lastSeq,
+            epoch: epoch
         )
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(lastSeq, forKey: .lastSeq)
+        try container.encodeIfPresent(epoch, forKey: .epoch)
     }
 }
 
@@ -5062,17 +5154,20 @@ public struct SystemSubscribeResponse: Codable, Equatable, Sendable {
 public struct SystemSubscribeResponsePayload: Codable, Equatable, Sendable {
     public let stream: String
     public let seq: Int
+    public let epoch: String
     public let resyncRequired: Bool
     public let snapshot: SystemStatus?
 
     public init(
         stream: String,
         seq: Int,
+        epoch: String,
         resyncRequired: Bool,
         snapshot: SystemStatus? = nil
     ) {
         self.stream = stream
         self.seq = seq
+        self.epoch = epoch
         self.resyncRequired = resyncRequired
         self.snapshot = snapshot
     }
@@ -5080,6 +5175,7 @@ public struct SystemSubscribeResponsePayload: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case stream = "stream"
         case seq = "seq"
+        case epoch = "epoch"
         case resyncRequired = "resyncRequired"
         case snapshot = "snapshot"
     }
@@ -5088,11 +5184,13 @@ public struct SystemSubscribeResponsePayload: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let stream = try container.decode(String.self, forKey: .stream)
         let seq = try container.decode(Int.self, forKey: .seq)
+        let epoch = try container.decode(String.self, forKey: .epoch)
         let resyncRequired = try container.decode(Bool.self, forKey: .resyncRequired)
         let snapshot = try container.decodeIfPresent(SystemStatus.self, forKey: .snapshot)
         self.init(
             stream: stream,
             seq: seq,
+            epoch: epoch,
             resyncRequired: resyncRequired,
             snapshot: snapshot
         )
@@ -5102,6 +5200,7 @@ public struct SystemSubscribeResponsePayload: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(stream, forKey: .stream)
         try container.encode(seq, forKey: .seq)
+        try container.encode(epoch, forKey: .epoch)
         try container.encode(resyncRequired, forKey: .resyncRequired)
         try container.encodeIfPresent(snapshot, forKey: .snapshot)
     }

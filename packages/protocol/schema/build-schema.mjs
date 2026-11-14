@@ -233,13 +233,16 @@ add(
   "SystemHelloResponsePayload",
   objectOf(
     "SystemHelloResponsePayload",
-    ["protocol", "server", "connectionId", "limits", "capabilities"],
+    ["protocol", "server", "connectionId", "limits", "capabilities", "epoch"],
     {
       protocol: ref("ProtocolInfo"),
       server: ref("ServerInfo"),
       connectionId: str("這次連線的識別碼；重連後會改變。"),
       limits: ref("ServerLimits"),
       capabilities: ref("ServerCapabilities"),
+      epoch: str(
+        "目前的事件 epoch。客戶端重連時先比對它；不同就代表上次的事件歷史已經斷了，訂閱時不要帶 lastSeq。",
+      ),
     },
     "版本協商與驗證的結果。",
   ),
@@ -251,6 +254,7 @@ add(
     lastSeq: int("客戶端最後收到的系統串流序號；省略代表要一份完整快照。", {
       minimum: 0,
     }),
+    epoch: str("客戶端上次收到的事件 epoch。省略或與主機不同時，lastSeq 一律視為不可用。"),
   }),
 );
 
@@ -288,10 +292,11 @@ add(
 
 add(
   "SystemSubscribeResponsePayload",
-  objectOf("SystemSubscribeResponsePayload", ["stream", "seq", "resyncRequired"], {
+  objectOf("SystemSubscribeResponsePayload", ["stream", "seq", "epoch", "resyncRequired"], {
     stream: str("串流識別碼，系統串流固定是 system。"),
     seq: int("訂閱當下的最新序號。", { minimum: 0 }),
-    resyncRequired: bool("是否附上完整快照；false 表示接下來只會補送 seq 之後的事件。"),
+    epoch: str("這個序號所屬的事件 epoch。與請求的 epoch 不同時，resyncRequired 一定是 true。"),
+    resyncRequired: bool("是否附上完整快照；false 表示接下來只會補送 seq 之後的耐久事件。"),
     snapshot: ref("SystemStatus"),
   }),
 );
@@ -514,12 +519,29 @@ add(
 );
 
 add(
+  "StreamingMessage",
+  objectOf(
+    "StreamingMessage",
+    ["messageId", "text", "startedAt"],
+    {
+      messageId: str("正在生長的助理訊息識別碼。"),
+      turnId: str("所屬回合。"),
+      text: str("到快照邊界為止已生成的文字。客戶端用它取代本地顯示中的文字，不是附加。"),
+      startedAt: str("開始生成時間，RFC 3339。", { format: "date-time" }),
+      truncated: bool("文字是否因緩衝上限被截斷；省略代表沒有。最終訊息完成事件仍帶完整文字。"),
+    },
+    "訂閱快照中進行中的助理訊息。只在該會話有進行中的回合時出現；不落地，重啟後消失。",
+  ),
+);
+
+add(
   "SessionSnapshot",
   objectOf("SessionSnapshot", ["session", "entries"], {
     session: ref("SessionSummary"),
-    entries: arrayOf(ref("TranscriptEntry"), "最新一段歷史，依時間由舊到新。"),
+    entries: arrayOf(ref("TranscriptEntry"), "最新一段已完成的歷史，依時間由舊到新。"),
     activeTurn: ref("TurnState"),
     pendingApproval: ref("ApprovalRequest"),
+    streaming: ref("StreamingMessage"),
   }),
 );
 
@@ -530,19 +552,25 @@ add(
     lastSeq: int("客戶端最後收到的會話串流序號；省略代表要一份完整快照。", {
       minimum: 0,
     }),
+    epoch: str("客戶端上次收到的事件 epoch。省略或與主機不同時，lastSeq 一律視為不可用。"),
     historyLimit: int("快照最多帶幾則歷史訊息。", { minimum: 1, maximum: 500 }),
   }),
 );
 
 add(
   "SessionSubscribeResponsePayload",
-  objectOf("SessionSubscribeResponsePayload", ["sessionId", "stream", "seq", "resyncRequired"], {
-    sessionId: str("會話識別碼。"),
-    stream: str("串流識別碼，格式是 session:<sessionId>。"),
-    seq: int("訂閱當下的最新序號。", { minimum: 0 }),
-    resyncRequired: bool("是否附上完整快照；false 表示接下來只會補送 seq 之後的事件。"),
-    snapshot: ref("SessionSnapshot"),
-  }),
+  objectOf(
+    "SessionSubscribeResponsePayload",
+    ["sessionId", "stream", "seq", "epoch", "resyncRequired"],
+    {
+      sessionId: str("會話識別碼。"),
+      stream: str("串流識別碼，格式是 session:<sessionId>。"),
+      seq: int("訂閱當下的最新序號。", { minimum: 0 }),
+      epoch: str("這個序號所屬的事件 epoch。與請求的 epoch 不同時，resyncRequired 一定是 true。"),
+      resyncRequired: bool("是否附上完整快照；false 表示接下來只會補送 seq 之後的耐久事件。"),
+      snapshot: ref("SessionSnapshot"),
+    },
+  ),
 );
 
 add(
@@ -845,7 +873,10 @@ function eventFrame(name, type, payloadName, description) {
         kind: literal("event"),
         type: literal(type),
         stream: str("串流識別碼，system 或 session:<sessionId>。"),
-        seq: int("這個串流的單調遞增序號，從 1 開始。", { minimum: 1 }),
+        seq: int(
+          "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          { minimum: 1 },
+        ),
         emittedAt: str("主機送出時間，RFC 3339。", { format: "date-time" }),
         payload: ref(payloadName),
       },
@@ -980,7 +1011,7 @@ eventFrame(
   "StreamTextDeltaEvent",
   "stream.text_delta",
   "StreamTextDeltaEventPayload",
-  "助理文字增量。",
+  "助理文字增量；不落地、不佔序號，只沿著目前的連線送出。",
 );
 eventFrame(
   "StreamMessageCompletedEvent",

@@ -26,7 +26,8 @@
       "server": { "name": "Cardiary", "version": "0.1.0" },
       "connectionId": "conn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z9",
       "limits": { "maxFrameBytes": 1048576, "replayWindow": 512, "heartbeatSeconds": 20 },
-      "capabilities": { "modules": true, "files": true }
+      "capabilities": { "modules": true, "files": true },
+      "epoch": "01JCX9A2B3C4D5E6F7G8H9J0K1"
     }
   },
   "systemSubscribeRequest": {
@@ -34,7 +35,7 @@
     "kind": "request",
     "id": "req_sys_sub_1",
     "type": "system.subscribe",
-    "payload": { "lastSeq": 41 }
+    "payload": { "lastSeq": 41, "epoch": "01JCX9A2B3C4D5E6F7G8H9J0K1" }
   },
   "systemSubscribeResponse": {
     "v": 1,
@@ -44,6 +45,7 @@
     "payload": {
       "stream": "system",
       "seq": 42,
+      "epoch": "01JCX9A2B3C4D5E6F7G8H9J0K1",
       "resyncRequired": true,
       "snapshot": {
         "folder": { "state": "ready", "displayName": "Cardiary", "writable": true },
@@ -192,6 +194,7 @@
     "payload": {
       "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
       "lastSeq": 18,
+      "epoch": "01JCX9A2B3C4D5E6F7G8H9J0K1",
       "historyLimit": 50
     }
   },
@@ -204,6 +207,7 @@
       "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
       "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
       "seq": 18,
+      "epoch": "01JCX9A2B3C4D5E6F7G8H9J0K1",
       "resyncRequired": true,
       "snapshot": {
         "session": {
@@ -235,6 +239,13 @@
           "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
           "state": "waiting_approval",
           "startedAt": "2026-11-14T10:07:00Z"
+        },
+        "streaming": {
+          "messageId": "msg_asst_01J8Z3K4Q5R6S7T8V9W0X1Y2ZJ",
+          "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+          "text": "我先確認資料夾狀態，",
+          "startedAt": "2026-11-14T10:07:01Z",
+          "truncated": false
         },
         "pendingApproval": {
           "approvalId": "appr_01J8Z3K4Q5R6S7T8V9W0X1Y2Z7",

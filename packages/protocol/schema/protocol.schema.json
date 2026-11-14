@@ -290,7 +290,7 @@
       "title": "SystemHelloResponsePayload",
       "type": "object",
       "additionalProperties": false,
-      "required": ["protocol", "server", "connectionId", "limits", "capabilities"],
+      "required": ["protocol", "server", "connectionId", "limits", "capabilities", "epoch"],
       "properties": {
         "protocol": {
           "$ref": "#/$defs/ProtocolInfo"
@@ -307,6 +307,10 @@
         },
         "capabilities": {
           "$ref": "#/$defs/ServerCapabilities"
+        },
+        "epoch": {
+          "type": "string",
+          "description": "目前的事件 epoch。客戶端重連時先比對它；不同就代表上次的事件歷史已經斷了，訂閱時不要帶 lastSeq。"
         }
       },
       "description": "版本協商與驗證的結果。"
@@ -321,6 +325,10 @@
           "type": "integer",
           "description": "客戶端最後收到的系統串流序號；省略代表要一份完整快照。",
           "minimum": 0
+        },
+        "epoch": {
+          "type": "string",
+          "description": "客戶端上次收到的事件 epoch。省略或與主機不同時，lastSeq 一律視為不可用。"
         }
       }
     },
@@ -402,7 +410,7 @@
       "title": "SystemSubscribeResponsePayload",
       "type": "object",
       "additionalProperties": false,
-      "required": ["stream", "seq", "resyncRequired"],
+      "required": ["stream", "seq", "epoch", "resyncRequired"],
       "properties": {
         "stream": {
           "type": "string",
@@ -413,9 +421,13 @@
           "description": "訂閱當下的最新序號。",
           "minimum": 0
         },
+        "epoch": {
+          "type": "string",
+          "description": "這個序號所屬的事件 epoch。與請求的 epoch 不同時，resyncRequired 一定是 true。"
+        },
         "resyncRequired": {
           "type": "boolean",
-          "description": "是否附上完整快照；false 表示接下來只會補送 seq 之後的事件。"
+          "description": "是否附上完整快照；false 表示接下來只會補送 seq 之後的耐久事件。"
         },
         "snapshot": {
           "$ref": "#/$defs/SystemStatus"
@@ -882,6 +894,36 @@
         }
       }
     },
+    "StreamingMessage": {
+      "title": "StreamingMessage",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["messageId", "text", "startedAt"],
+      "properties": {
+        "messageId": {
+          "type": "string",
+          "description": "正在生長的助理訊息識別碼。"
+        },
+        "turnId": {
+          "type": "string",
+          "description": "所屬回合。"
+        },
+        "text": {
+          "type": "string",
+          "description": "到快照邊界為止已生成的文字。客戶端用它取代本地顯示中的文字，不是附加。"
+        },
+        "startedAt": {
+          "type": "string",
+          "description": "開始生成時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "文字是否因緩衝上限被截斷；省略代表沒有。最終訊息完成事件仍帶完整文字。"
+        }
+      },
+      "description": "訂閱快照中進行中的助理訊息。只在該會話有進行中的回合時出現；不落地，重啟後消失。"
+    },
     "SessionSnapshot": {
       "title": "SessionSnapshot",
       "type": "object",
@@ -896,13 +938,16 @@
           "items": {
             "$ref": "#/$defs/TranscriptEntry"
           },
-          "description": "最新一段歷史，依時間由舊到新。"
+          "description": "最新一段已完成的歷史，依時間由舊到新。"
         },
         "activeTurn": {
           "$ref": "#/$defs/TurnState"
         },
         "pendingApproval": {
           "$ref": "#/$defs/ApprovalRequest"
+        },
+        "streaming": {
+          "$ref": "#/$defs/StreamingMessage"
         }
       }
     },
@@ -921,6 +966,10 @@
           "description": "客戶端最後收到的會話串流序號；省略代表要一份完整快照。",
           "minimum": 0
         },
+        "epoch": {
+          "type": "string",
+          "description": "客戶端上次收到的事件 epoch。省略或與主機不同時，lastSeq 一律視為不可用。"
+        },
         "historyLimit": {
           "type": "integer",
           "description": "快照最多帶幾則歷史訊息。",
@@ -933,7 +982,7 @@
       "title": "SessionSubscribeResponsePayload",
       "type": "object",
       "additionalProperties": false,
-      "required": ["sessionId", "stream", "seq", "resyncRequired"],
+      "required": ["sessionId", "stream", "seq", "epoch", "resyncRequired"],
       "properties": {
         "sessionId": {
           "type": "string",
@@ -948,9 +997,13 @@
           "description": "訂閱當下的最新序號。",
           "minimum": 0
         },
+        "epoch": {
+          "type": "string",
+          "description": "這個序號所屬的事件 epoch。與請求的 epoch 不同時，resyncRequired 一定是 true。"
+        },
         "resyncRequired": {
           "type": "boolean",
-          "description": "是否附上完整快照；false 表示接下來只會補送 seq 之後的事件。"
+          "description": "是否附上完整快照；false 表示接下來只會補送 seq 之後的耐久事件。"
         },
         "snapshot": {
           "$ref": "#/$defs/SessionSnapshot"
@@ -1622,7 +1675,7 @@
         },
         "seq": {
           "type": "integer",
-          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
           "minimum": 1
         },
         "emittedAt": {
@@ -2007,7 +2060,7 @@
         },
         "seq": {
           "type": "integer",
-          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
           "minimum": 1
         },
         "emittedAt": {
@@ -2042,7 +2095,7 @@
         },
         "seq": {
           "type": "integer",
-          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
           "minimum": 1
         },
         "emittedAt": {
@@ -2054,7 +2107,7 @@
           "$ref": "#/$defs/StreamTextDeltaEventPayload"
         }
       },
-      "description": "助理文字增量。"
+      "description": "助理文字增量；不落地、不佔序號，只沿著目前的連線送出。"
     },
     "StreamMessageCompletedEvent": {
       "title": "StreamMessageCompletedEvent",
@@ -2077,7 +2130,7 @@
         },
         "seq": {
           "type": "integer",
-          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
           "minimum": 1
         },
         "emittedAt": {
@@ -2112,7 +2165,7 @@
         },
         "seq": {
           "type": "integer",
-          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
           "minimum": 1
         },
         "emittedAt": {
@@ -2147,7 +2200,7 @@
         },
         "seq": {
           "type": "integer",
-          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
           "minimum": 1
         },
         "emittedAt": {
@@ -2182,7 +2235,7 @@
         },
         "seq": {
           "type": "integer",
-          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
           "minimum": 1
         },
         "emittedAt": {
@@ -2217,7 +2270,7 @@
         },
         "seq": {
           "type": "integer",
-          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
           "minimum": 1
         },
         "emittedAt": {
@@ -2252,7 +2305,7 @@
         },
         "seq": {
           "type": "integer",
-          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
           "minimum": 1
         },
         "emittedAt": {
@@ -2337,7 +2390,7 @@
         },
         "seq": {
           "type": "integer",
-          "description": "這個串流的單調遞增序號，從 1 開始。",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
           "minimum": 1
         },
         "emittedAt": {
