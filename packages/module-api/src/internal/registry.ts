@@ -146,7 +146,7 @@ export class ModuleRegistry implements ModuleHost {
     try {
       await entry.module.activate(context);
     } catch (error) {
-      await this.#disposeAll(handles);
+      await this.#disposeAll(handles, false);
       entry.state = "failed";
       entry.failure = {
         message: error instanceof Error ? error.message : String(error),
@@ -185,15 +185,17 @@ export class ModuleRegistry implements ModuleHost {
     for (const dependent of dependents) {
       await this.deactivate(dependent.identity.id, { ...options, cascade: true });
     }
+    const reason = options?.reason ?? "user";
     try {
-      await entry.module.deactivate?.({
-        reason: options?.reason ?? "user",
-      });
+      await entry.module.deactivate?.({ reason });
     } finally {
-      await this.#disposeAll(entry.handles);
-      for (const bundle of entry.bundles) {
-        // 停用立即退役：使用該模組的對話失去工具，呼叫回 tool-unavailable。
-        await this.#options.tools.retire(bundle.bundleId, bundle.generation);
+      await this.#disposeAll(entry.handles, reason === "reload");
+      if (reason !== "reload") {
+        for (const bundle of entry.bundles) {
+          // 停用立即退役：使用該模組的對話失去工具，呼叫回 tool-unavailable。
+          // 重載不退役：舊 generation 要留給已釘選的進行中對話。
+          await this.#options.tools.retire(bundle.bundleId, bundle.generation);
+        }
       }
       entry.handles = [];
       entry.bundles = [];
@@ -273,6 +275,7 @@ export class ModuleRegistry implements ModuleHost {
         const registration = handle(async () => {
           await this.#options.tools.retire(draft.bundleId, generation);
         });
+        (registration as { registrationId: string }).registrationId = `${registration.registrationId}:bundle`;
         void this.#options.tools.register({ ...draft, generation });
         return registration;
       },
@@ -282,8 +285,11 @@ export class ModuleRegistry implements ModuleHost {
     };
   }
 
-  async #disposeAll(handles: readonly RegistrationHandle[]): Promise<void> {
+  async #disposeAll(handles: readonly RegistrationHandle[], keepBundles: boolean): Promise<void> {
     for (const registration of [...handles].reverse()) {
+      if (keepBundles && registration.registrationId.endsWith(":bundle")) {
+        continue;
+      }
       try {
         await registration.dispose();
       } catch {

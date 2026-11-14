@@ -48,6 +48,10 @@ export interface FixtureOptions {
   readonly purger?: EngineAdapterOptions["purger"];
   readonly faux?: ReturnType<typeof fauxProvider>;
   readonly environment?: Partial<EngineEnvironment>;
+  /** 在 `open()` 之前先排好的模型回應；續跑時第一個模型請求就會用到。 */
+  readonly responses?: readonly AssistantMessage[];
+  /** 在 `open()` 之前執行；主機就是在這個時機註冊模組的工具組。 */
+  readonly beforeOpen?: (adapter: EngineAdapter) => Promise<void>;
 }
 
 /** 假模型 + SQLite 引擎的測試夾具；不需要金鑰與網路。 */
@@ -60,6 +64,9 @@ export async function createFixture(options: FixtureOptions = {}): Promise<Fixtu
     ...options.environment,
   };
   const faux = options.faux ?? fauxProvider();
+  if (options.responses !== undefined) {
+    faux.setResponses([...options.responses]);
+  }
   const modelSource: EngineModelSource = {
     async open(): Promise<unknown> {
       const models = createModels();
@@ -80,6 +87,9 @@ export async function createFixture(options: FixtureOptions = {}): Promise<Fixtu
     models: modelSource,
     ...(options.purger === undefined ? {} : { purger: options.purger }),
   });
+  if (options.beforeOpen !== undefined) {
+    await options.beforeOpen(adapter);
+  }
   await adapter.open();
   await adapter.configureModels(settingsFor());
   return {

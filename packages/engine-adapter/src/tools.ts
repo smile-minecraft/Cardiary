@@ -76,6 +76,35 @@ export interface ToolProgress {
   readonly data?: JsonValue;
 }
 
+/** 工具子行程的 stdio 設定；只允許 pipe 或 ignore，`inherit` 會把控制通道帶進工具。 */
+export type ToolProcessStdio = "pipe" | "ignore";
+
+/** 工具啟動子行程的規格；所有子行程都經轉接層的共用 wrapper。 */
+export interface ToolProcessSpec {
+  readonly command: string;
+  readonly args?: readonly string[];
+  readonly cwd?: string;
+  readonly env?: Readonly<Record<string, string>>;
+  /** 預設 `pipe`；`inherit` 會被拒絕（`invalid-request`）。 */
+  readonly stdio?: ToolProcessStdio;
+}
+
+/** 由共用 wrapper 管理的工具子行程；自成一個 process group。 */
+export interface ToolProcess {
+  readonly pid: number;
+  /** 等行程結束並取回輸出；`stdio: "ignore"` 時輸出是空字串。 */
+  collect(): Promise<{
+    readonly stdout: string;
+    readonly stderr: string;
+    readonly code: number | null;
+    readonly signal: string | null;
+  }>;
+  /** 對整個 process group 送訊號；預設 SIGTERM。 */
+  terminate(signal?: "SIGTERM" | "SIGKILL" | "SIGINT"): void;
+  /** 等到行程結束。 */
+  readonly exited: Promise<void>;
+}
+
 /**
  * 工具執行時取得的環境。
  *
@@ -94,6 +123,13 @@ export interface ToolExecutionContext {
   readonly workingDir: string;
   requestApproval(draft: ApprovalRequestDraft): Promise<ApprovalResolution>;
   reportProgress?(progress: ToolProgress): void;
+  /**
+   * 啟動子行程的唯一入口。
+   *
+   * `TMPDIR`、`TMP`、`TEMP` 一律指向 `tempDir`，stdio 只允許 pipe 或 ignore；
+   * 子行程自成一個 process group，暫停或刪除時對整個 group 送訊號。
+   */
+  spawn(spec: ToolProcessSpec): ToolProcess;
 }
 
 /** 工具定義；模組註冊工具時提供。 */

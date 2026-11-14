@@ -84,7 +84,7 @@ import type {
 import { ApprovalServiceImpl } from "./approval-service.js";
 import { BundleIndex, type RegisteredBundle } from "./bundle-index.js";
 import type { ActiveTurn, CatalogSnapshot, ConversationMeta } from "./catalog.js";
-import { CatalogDoc, emptyCatalog, readCatalog } from "./catalog.js";
+import { CatalogDoc, emptyCatalog } from "./catalog.js";
 import {
   compactAfterDelete,
   deleteEngineSubtree,
@@ -170,6 +170,7 @@ export class PiEngineAdapter implements EngineAdapter {
     }
     this.#state = "starting";
     await mkdir(resolve(this.#options.environment.tempDir), { recursive: true });
+    await mkdir(resolve(this.#options.environment.defaultWorkingDir), { recursive: true });
     // 建立 Harness 之前先完成未結束的刪除意圖；那條路徑只開引擎的連線。
     await this.#recoverDeletionIntents();
     await this.#openHarness();
@@ -495,6 +496,8 @@ export class PiEngineAdapter implements EngineAdapter {
 
     const callTempDir = join(resolve(this.#options.environment.tempDir), `tool-${input.callId}`);
     await mkdir(callTempDir, { recursive: true });
+    const workingDir = resolve(this.#options.environment.defaultWorkingDir);
+    await mkdir(workingDir, { recursive: true });
     const execute = definition.execute as (
       value: JsonValue,
       context: {
@@ -505,6 +508,13 @@ export class PiEngineAdapter implements EngineAdapter {
         signal: AbortSignal;
         tempDir: string;
         workingDir: string;
+        spawn: (spec: {
+          command: string;
+          args?: readonly string[];
+          cwd?: string;
+          env?: Readonly<Record<string, string>>;
+          stdio?: "pipe" | "ignore";
+        }) => import("./spawn.js").ManagedChild;
         requestApproval: (draft: never) => Promise<ApprovalResolution>;
         reportProgress?: (progress: ToolProgress) => void;
       },
@@ -519,7 +529,15 @@ export class PiEngineAdapter implements EngineAdapter {
         toolName: input.toolName,
         signal: input.context.abortSignal ?? new AbortController().signal,
         tempDir: callTempDir,
-        workingDir: resolve(this.#options.environment.defaultWorkingDir),
+        workingDir,
+        spawn: (spec: { command: string; args?: readonly string[]; cwd?: string; env?: Readonly<Record<string, string>>; stdio?: "pipe" | "ignore" }) =>
+          this.#supervisor.spawn({
+            command: spec.command,
+            args: spec.args ?? [],
+            cwd: spec.cwd ?? resolve(this.#options.environment.defaultWorkingDir),
+            stdio: spec.stdio ?? "pipe",
+            ...(spec.env === undefined ? {} : { env: spec.env }),
+          }),
         requestApproval: ((draft: never) =>
           this.#approvals
             .request({
@@ -636,6 +654,9 @@ export class PiEngineAdapter implements EngineAdapter {
     const meta = catalog.conversations[String(conversation.id)];
     if (meta === undefined) {
       throw engineError("internal", "對話建立後找不到中繼資料");
+    }
+    for (const pin of meta.toolBundles) {
+      this.#bundles.pin(pin.bundleId, pin.generation);
     }
     this.#emitStatus();
     return this.#summary(meta, conversation);
@@ -929,6 +950,9 @@ export class PiEngineAdapter implements EngineAdapter {
     const meta = catalog.conversations[String(fork.id)];
     if (meta === undefined) {
       throw engineError("internal", "分岔後找不到中繼資料");
+    }
+    for (const pin of meta.toolBundles) {
+      this.#bundles.pin(pin.bundleId, pin.generation);
     }
     this.#bus.publish({
       kind: "conversation.branch-created",
@@ -1311,6 +1335,9 @@ export class PiEngineAdapter implements EngineAdapter {
       BACKGROUND_CONTEXT,
     );
     const subagentId = String(fork.id);
+    for (const pin of parent.toolBundles) {
+      this.#bundles.pin(pin.bundleId, pin.generation);
+    }
     this.#subagentStatuses.set(subagentId, "running");
     const handle: SubagentHandle = {
       subagentConversationId: subagentId,
@@ -1338,7 +1365,7 @@ export class PiEngineAdapter implements EngineAdapter {
     });
     const completion = this.#completeSubagent(subagentId, parent.id, title, createdAt, send.turnId);
     if (request.waiting === "background") {
-      void completion;
+      void completion.catch(() => {});
       return handle;
     }
     const outcome = await completion;
@@ -1356,6 +1383,25 @@ export class PiEngineAdapter implements EngineAdapter {
     startedAt: string,
     turnId: TurnId | null,
   ): Promise<SubagentOutcome> {
+    if (!this.#session.isOpen) {
+      const status = "interrupted" as const;
+      this.#subagentStatuses.set(subagentId, status);
+      return {
+        handle: {
+          subagentConversationId: subagentId,
+          parentConversationId: parentId,
+          rootConversationId: parentId,
+          depth: 1,
+          title,
+          status,
+          startedAt,
+          resultCard: null,
+        },
+        status,
+        resultCard: null,
+        failure: { code: "engine-closed", message: "引擎已關閉" },
+      };
+    }
     const conversation = await this.#session.harness.conversation(engineConversationId(subagentId), BACKGROUND_CONTEXT);
     let status: SubagentOutcome["status"] = "completed";
     if (conversation !== undefined) {
@@ -1367,7 +1413,10 @@ export class PiEngineAdapter implements EngineAdapter {
     }
     const history = conversation === undefined
       ? { messages: [] as readonly ConversationMessage[], nextBefore: null }
-      : await this.#readHistory({ conversationId: subagentId, limit: 100 });
+      : await this.#readHistory({ conversationId: subagentId, limit: 100 }).catch(() => ({
+          messages: [] as readonly ConversationMessage[],
+          nextBefore: null,
+        }));
     const assistant = [...history.messages].reverse().find((message) => message.role === "assistant");
     const conclusion = assistant === undefined ? "" : contentText(assistant.content);
     const last = history.messages.at(-1);
@@ -1547,7 +1596,10 @@ export class PiEngineAdapter implements EngineAdapter {
   #catalogCache: CatalogSnapshot | null = null;
 
   async #catalog(): Promise<CatalogSnapshot> {
-    const catalog = await this.#session.harness.commit((tx) => readCatalog(tx), BACKGROUND_CONTEXT);
+    const value = await this.#session.harness.snapshot(CatalogDoc, BACKGROUND_CONTEXT);
+    const catalog = value === undefined
+      ? emptyCatalog()
+      : (JSON.parse(JSON.stringify(value)) as CatalogSnapshot);
     this.#catalogCache = catalog;
     return catalog;
   }
@@ -1592,6 +1644,17 @@ export class PiEngineAdapter implements EngineAdapter {
       }
       await purger.removeIntent(intent.rootConversationId);
     }
+  }
+
+  /** 測試用：引擎目前的任務與提交狀態。 */
+  async debugInspection(): Promise<unknown> {
+    return this.#session.harness.inspect(BACKGROUND_CONTEXT);
+  }
+
+  /** 測試用：讀目前連線的 PRAGMA 值（例如 `secure_delete`）。 */
+  async debugPragma(name: string): Promise<number> {
+    const row = await this.#session.database.get<Record<string, number>>(`PRAGMA ${name}`);
+    return Number(Object.values(row ?? {})[0] ?? 0);
   }
 
   /** 測試用：列出引擎的原始 entry 與 agent 工具，診斷工具為何沒有被呼叫。 */
