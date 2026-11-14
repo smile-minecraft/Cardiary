@@ -18,12 +18,37 @@ import type { JsonValue } from "@cardiary/engine-adapter";
 
 import { prefixed } from "./ids.js";
 
-/** 正規化 JSON：鍵排序、不含空白，用來算審批去重鍵。 */
+/** 審批去重鍵的版本前綴與分隔字元（storage 第 3.6 節：0x1F）。 */
+export const APPROVAL_KEY_VERSION = "cardiary.approval.v1";
+export const APPROVAL_KEY_SEPARATOR = "\u001f";
+
+function compareUtf8(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+}
+
+/**
+ * 正規化 JSON：物件鍵依 UTF-8 位元組排序、不輸出空白、字串用 JSON 跳脫。
+ *
+ * 數字用 JavaScript 的最短往返表示；整數不加小數點。拒絕 NaN 與 Infinity。
+ */
 export function canonicalJson(value: JsonValue): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
-  const entries = Object.entries(value).sort(([left], [right]) => (left < right ? -1 : 1));
-  return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+  const encode = (item: JsonValue): string => {
+    if (item === null) return "null";
+    if (typeof item === "boolean") return item ? "true" : "false";
+    if (typeof item === "number") {
+      if (!Number.isFinite(item)) {
+        throw new Error("canonical JSON 不接受 NaN 或 Infinity");
+      }
+      return String(item);
+    }
+    if (typeof item === "string") return JSON.stringify(item);
+    if (Array.isArray(item)) return `[${item.map((entry) => encode(entry)).join(",")}]`;
+    const entries = Object.entries(item).sort(([left], [right]) => compareUtf8(left, right));
+    return `{${entries
+      .map(([key, entry]) => `${JSON.stringify(key)}:${encode(entry as JsonValue)}`)
+      .join(",")}}`;
+  };
+  return encode(value);
 }
 
 export interface ApprovalKeyParts {
@@ -37,20 +62,26 @@ export interface ApprovalKeyParts {
   readonly payload?: JsonValue;
 }
 
-/** 審批去重鍵；規則見 storage 第 3.6 節。 */
+/** 審批去重鍵；規則見 storage 第 3.6 節（0x1F 分隔、欄位順序固定）。 */
 export function computeApprovalKey(parts: ApprovalKeyParts): string {
-  const payload = [
-    "cardiary.approval.v1",
-    parts.scope,
-    parts.conversationId ?? "",
-    parts.turnId ?? "",
-    parts.toolName ?? "",
-    parts.input === undefined ? "" : canonicalJson(parts.input),
-    parts.taskKind ?? "",
-    parts.subjectId ?? "",
-    parts.payload === undefined ? "" : canonicalJson(parts.payload),
-  ].join("\u0000");
-  return createHash("sha256").update(payload).digest("hex");
+  const segments: string[] =
+    parts.scope === "tool"
+      ? [
+          APPROVAL_KEY_VERSION,
+          "tool",
+          parts.conversationId ?? "",
+          parts.turnId ?? "",
+          parts.toolName ?? "",
+          canonicalJson(parts.input ?? null),
+        ]
+      : [
+          APPROVAL_KEY_VERSION,
+          "task",
+          parts.taskKind ?? "",
+          parts.subjectId ?? "",
+          canonicalJson(parts.payload ?? null),
+        ];
+  return createHash("sha256").update(segments.join(APPROVAL_KEY_SEPARATOR), "utf8").digest("hex");
 }
 
 interface KeyIndexEntry {

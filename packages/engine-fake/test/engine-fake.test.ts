@@ -10,7 +10,7 @@ import type {
 } from "@cardiary/engine-adapter";
 import { describe, expect, it } from "vitest";
 
-import { FakeEngine, turnIdFor } from "../src/index.js";
+import { FakeEngine, canonicalJson, computeApprovalKey, turnIdFor } from "../src/index.js";
 import type { FakeModelStep } from "../src/index.js";
 
 const clock: Clock = { now: () => new Date() };
@@ -172,6 +172,16 @@ async function waitFor<T>(check: () => T | null | undefined, ms = 3000): Promise
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
     const value = check();
+    if (value !== null && value !== undefined) return value;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("等待逾時");
+}
+
+async function waitForAsync<T>(check: () => Promise<T | null | undefined>, ms = 3000): Promise<T> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const value = await check();
     if (value !== null && value !== undefined) return value;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
@@ -361,6 +371,46 @@ describe("假引擎", () => {
     expect(await harness.engine.approvals.listPending({ conversationId })).toHaveLength(0);
   });
 
+  it("approval_key 依照 storage 3.6 的格式：0x1F、欄位順序與 canonical JSON", () => {
+    const key = computeApprovalKey({
+      scope: "tool",
+      conversationId: "conv_1",
+      turnId: "turn_msg_1",
+      toolName: "demo.echo",
+      input: { text: "hi" },
+    });
+    // 固定向量：cardiary.approval.v1\x1ftool\x1fconv_1\x1fturn_msg_1\x1fdemo.echo\x1f{"text":"hi"}
+    expect(key).toBe("04625f62bb456e55271c8a7eccf632a7c02dc595ae85e3c33bb15fe8047ab499");
+    const reordered = computeApprovalKey({
+      scope: "tool",
+      conversationId: "conv_1",
+      turnId: "turn_msg_1",
+      toolName: "demo.echo",
+      input: { text: "hi" },
+    });
+    expect(reordered).toBe(key);
+    expect(
+      computeApprovalKey({
+        scope: "tool",
+        conversationId: "conv_1",
+        turnId: "turn_msg_1",
+        toolName: "demo.echo",
+        input: { text: "hi", extra: true },
+      }),
+    ).not.toBe(key);
+    expect(
+      computeApprovalKey({
+        scope: "task",
+        taskKind: "settings-change",
+        subjectId: "s1",
+        payload: { a: 1 },
+      }),
+    ).toHaveLength(64);
+    expect(canonicalJson({ b: 1, a: 2 })).toBe('{"a":2,"b":1}');
+    expect(canonicalJson({ é: 1, z: 2 })).toBe('{"z":2,"é":1}');
+    expect(() => canonicalJson(Number.POSITIVE_INFINITY as never)).toThrow();
+  });
+
   it("兩個並行的 requestApproval 只留一筆 pending，兩個等待者拿到同一個決定", async () => {
     const { harness, conversationId } = await openWithConversation({ gate: "ask" });
     const draft = {
@@ -515,6 +565,116 @@ describe("假引擎", () => {
     expect(
       states.find((state) => state.bundleId === "demo" && state.generation === 1),
     ).toBeDefined();
+  });
+
+  it("pauseAll 保留待審批：不撤回、不再廣播，恢復後仍可決定並再送訊息", async () => {
+    const { harness, conversationId } = await openWithConversation({
+      gate: "ask",
+      gateTimeoutMs: 5000,
+    });
+    const events = watch(harness.engine, conversationId);
+    harness.engine.enqueueScript([
+      { kind: "tool", toolName: "demo.echo", input: { text: "保留" } },
+      textStep("完成"),
+    ]);
+    await harness.engine.sendMessage({
+      conversationId,
+      content: [{ type: "text", text: "開始" }],
+      delivery: "queue",
+      sender: { kind: "human", clientId: "t" },
+    });
+    const requested = await waitFor(() =>
+      events.find((event) => event.kind === "approval.requested"),
+    );
+    if (requested.kind !== "approval.requested") throw new Error("沒有審批");
+    const pause = await harness.engine.pauseAll("緊急");
+    expect(pause.pausedTurns).toHaveLength(1);
+    // 沒有 withdrawn／resolved：待審批保留。
+    expect(events.some((event) => event.kind === "approval.resolved")).toBe(false);
+    const pending = await harness.engine.approvals.listPending({ conversationId });
+    expect(pending.map((request) => request.id)).toEqual([requested.request.id]);
+    expect(harness.engine.getStatus().pendingApprovals).toBe(1);
+    const decided = await harness.engine.approvals.decide({
+      requestId: requested.request.id,
+      verdict: "approve",
+      decidedBy: { kind: "human", clientId: "a" },
+    });
+    expect(decided.outcome).toBe("accepted");
+    await harness.engine.resumeAll();
+    harness.engine.enqueueScript([textStep("恢復後")]);
+    await harness.engine.sendMessage({
+      conversationId,
+      content: [{ type: "text", text: "再送" }],
+      delivery: "queue",
+      sender: { kind: "human", clientId: "t" },
+    });
+    await waitFor(() =>
+      harness.engine.messageTexts(conversationId).includes("恢復後") ? true : null,
+    );
+  });
+
+  it("suspend 會把已串流的文字留在對話裡（中斷訊息）", async () => {
+    const { harness, conversationId } = await openWithConversation({ gate: "allow" });
+    const events = watch(harness.engine, conversationId);
+    harness.engine.enqueueScript([
+      { kind: "text", text: "x".repeat(30), chunkSize: 1, delayMs: 15 },
+    ]);
+    await harness.engine.sendMessage({
+      conversationId,
+      content: [{ type: "text", text: "開始" }],
+      delivery: "queue",
+      sender: { kind: "human", clientId: "t" },
+    });
+    await waitFor(() =>
+      events.filter((event) => event.kind === "assistant.text.delta").length >= 3 ? true : null,
+    );
+    await harness.engine.suspend();
+    const partial = harness.engine.messageTexts(conversationId);
+    expect(partial.some((text) => text.length > 0 && text !== "開始")).toBe(true);
+    const appended = events.find(
+      (event) => event.kind === "message.appended" && event.message.role === "assistant",
+    );
+    expect(
+      appended?.kind === "message.appended" ? appended.message.content[0] : null,
+    ).not.toBeNull();
+    const completed = await waitFor(() => events.find((event) => event.kind === "turn.completed"));
+    expect(completed.kind === "turn.completed" ? completed.status : null).toBe("interrupted");
+    // 解除暫停後可以再送。
+    await harness.engine.resume();
+    harness.engine.enqueueScript([textStep("再來")]);
+    await harness.engine.sendMessage({
+      conversationId,
+      content: [{ type: "text", text: "再送" }],
+      delivery: "queue",
+      sender: { kind: "human", clientId: "t" },
+    });
+    await waitFor(() =>
+      harness.engine.messageTexts(conversationId).includes("再來") ? true : null,
+    );
+  });
+
+  it("子代理的審批可用 rootConversationId 篩選", async () => {
+    const { harness, conversationId } = await openWithConversation({ gate: "ask" });
+    harness.engine.enqueueScript([
+      { kind: "tool", toolName: "demo.echo", input: { text: "子代理工具" } },
+      textStep("完成"),
+    ]);
+    const handle = await harness.engine.spawnSubagent({
+      parentConversationId: conversationId,
+      at: "cur_0",
+      depth: 1,
+      waiting: "background",
+      instruction: "子代理",
+    });
+    const pending = await waitForAsync(async () => {
+      const list = await harness.engine.approvals.listPending({
+        rootConversationId: conversationId,
+      });
+      return list.length > 0 ? list : null;
+    });
+    expect(
+      pending.some((request) => request.draft.conversationId === handle.subagentConversationId),
+    ).toBe(true);
   });
 
   it("緊急暫停中止回合並拒絕新工作；恢復後可再送", async () => {

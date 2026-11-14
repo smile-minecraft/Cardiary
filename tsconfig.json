@@ -21,6 +21,9 @@
     },
     {
       "path": "packages/engine-fake"
+    },
+    {
+      "path": "packages/contract-tests"
     }
   ]
 }

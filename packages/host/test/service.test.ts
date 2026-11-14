@@ -10,7 +10,7 @@ import {
   type HostEngine,
   type StartHostOptions,
 } from "../src/index.js";
-import { TestClient, startTestHost, type TestHost } from "./helpers.js";
+import { TestClient, startTestHost, waitUntil, type TestHost } from "./helpers.js";
 import type { RunningHost } from "../src/index.js";
 
 function wrapEngine(engine: FakeEngine, order: string[]): HostEngine {
@@ -241,6 +241,64 @@ describe("生命週期", () => {
     freeHosts.push(host);
     expect(order).toEqual(["delete:conv_pending", "open"]);
     expect(await host.storage.deletions.pending()).toEqual([]);
+  });
+
+  it("control.pause 保留已串流文字：resume 後快照仍有 interrupted 訊息", async () => {
+    const host = await boot({
+      scripts: [[{ kind: "text", text: "y".repeat(60), chunkSize: 1, delayMs: 15 }]],
+    });
+    const client = await TestClient.connect(host.url);
+    const hello = await client.hello(host.token);
+    await client.waitForReply(hello);
+    const create = client.request("session.create", { clientRequestId: "cr-partial" });
+    const created = await client.waitForReply(create);
+    const sessionId = (created.payload as { session: { id: string } }).session.id;
+    client.request("session.subscribe", { sessionId });
+    client.request("session.send_message", { sessionId, text: "開始", delivery: "queue" });
+    await client.waitForEvent("stream.text_delta");
+    await waitUntil(
+      () => client.frames.filter((frame) => frame.type === "stream.text_delta").length >= 10,
+    );
+    const accumulated = client.frames
+      .filter((frame) => frame.type === "stream.text_delta")
+      .map((frame) => (frame.payload as { delta: string }).delta)
+      .join("");
+    const paused = await host.host.service.pause("user", 200);
+    expect(paused.state).toBe("paused");
+    const resumed = await host.host.service.resume();
+    expect(resumed.state).toBe("ready");
+    const late = await TestClient.connect(host.url);
+    const lateHello = await late.hello(host.token);
+    await late.waitForReply(lateHello);
+    const subscribe = late.request("session.subscribe", { sessionId });
+    const snapshotReply = await late.waitForReply(subscribe);
+    const entries = (
+      snapshotReply.payload as {
+        snapshot: { entries: Array<{ role: string; status?: string; text: string }> };
+      }
+    ).snapshot.entries;
+    const interrupted = entries.find(
+      (entry) => entry.role === "assistant" && entry.status === "interrupted",
+    );
+    expect(interrupted).toBeDefined();
+    expect(interrupted?.text.length ?? 0).toBeGreaterThanOrEqual(accumulated.length);
+    expect(interrupted?.text.startsWith(accumulated)).toBe(true);
+    await client.close();
+    await late.close();
+  }, 15_000);
+
+  it("control.resume 採用 payload 的資料夾路徑（同一個 folderId）", async () => {
+    const { makeFolder } = await import("./helpers.js");
+    const original = await makeFolder();
+    const host = await startTestHost({ folder: original });
+    hosts.push(host);
+    await host.host.service.pause("user", 100);
+    const remounted = await makeFolder(original.folderId);
+    const resumed = await host.host.service.resume(remounted.path);
+    expect(resumed.state).toBe("ready");
+    expect(resumed.folderId).toBe(original.folderId);
+    expect(host.host.service.health().folderId).toBe(original.folderId);
+    expect(host.host.service.statusInput().displayName).toBe(remounted.path.split("/").pop());
   });
 
   it("維護通知：開始與結束各一次，health 在操作中顯示 lifecycle", async () => {

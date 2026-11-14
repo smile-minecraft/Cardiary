@@ -8,6 +8,8 @@ export interface GatewayLimits {
   readonly streamingBufferBytes: number;
   readonly maxBufferedBytes: number;
   readonly approvalTimeoutMs: number;
+  /** 單一 frame 等待寫入完成的期限；慢客戶端超過就關閉連線。 */
+  readonly sendTimeoutMs: number;
 }
 
 export const DEFAULT_LIMITS: GatewayLimits = {
@@ -19,4 +21,5 @@ export const DEFAULT_LIMITS: GatewayLimits = {
   streamingBufferBytes: 256 * 1024,
   maxBufferedBytes: 1024 * 1024,
   approvalTimeoutMs: 300_000,
+  sendTimeoutMs: 5000,
 };

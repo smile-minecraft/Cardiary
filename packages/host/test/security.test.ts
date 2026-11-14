@@ -144,6 +144,44 @@ describe("共用 spawn wrapper", () => {
   });
 });
 
+describe("慢客戶端與背壓", () => {
+  it("send 逾時會關閉連線，flush 不會永遠卡住", async () => {
+    const { ClientConnection } = await import("../src/gateway/connection.js");
+    const closed: Array<{ code: number; reason: string }> = [];
+    const stub = {
+      readyState: 1,
+      bufferedAmount: 0,
+      on() {},
+      send() {
+        // 模擬客戶端不讀取：callback 永遠不呼叫。
+      },
+      close(code: number, reason: string) {
+        closed.push({ code, reason });
+      },
+      terminate() {},
+      ping() {},
+    } as unknown as import("ws").WebSocket;
+    const connection = new ClientConnection({
+      id: "slow",
+      ws: stub,
+      maxBufferedBytes: 1024,
+      sendTimeoutMs: 20,
+      onClose: () => undefined,
+    });
+    const started = Date.now();
+    await connection.send({
+      v: 1,
+      kind: "error",
+      code: "internal",
+      message: "慢客戶端",
+      retryable: false,
+    });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(closed[0]?.code).toBe(1011);
+    expect(closed[0]?.reason).toBe("send_timeout");
+  });
+});
+
 describe("stdout 執行期守門", () => {
   it("非協定輸出被導到 stderr，stdout 只有協定 frame", async () => {
     const moduleUrl = new URL("../dist/control/stdoutGuard.js", import.meta.url).href;

@@ -5,8 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
-import Ajv2020 from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
+import { createRequire } from "node:module";
 import { WebSocket } from "ws";
 
 const HOST_ENTRY = new URL("../../host/dist/main.js", import.meta.url).pathname;
@@ -19,6 +18,12 @@ let schemaErrors: (() => string) | null = null;
 async function validateFrame(frame: unknown): Promise<void> {
   if (!schemaValidator) {
     const schema = JSON.parse(await readFile(SCHEMA_PATH, "utf8")) as object;
+    // Ajv 的 CJS 型別在 NodeNext 下無法直接 default import；測試只需要最小介面。
+    const require = createRequire(import.meta.url);
+    const Ajv2020 = require("ajv/dist/2020.js") as new (options?: object) => {
+      compile(schema: object): ((data: unknown) => boolean) & { errors?: unknown };
+    };
+    const addFormats = require("ajv-formats") as (ajv: unknown) => void;
     const ajv = new Ajv2020({ strict: false, allErrors: true });
     addFormats(ajv);
     const validator = ajv.compile(schema);
@@ -65,6 +70,10 @@ export interface ServiceOptions {
   readonly clientToken?: string;
   readonly controlToken?: string;
   readonly brokerToken?: string;
+  /** 控制模式：故意不回 hello-ack，用來驗證服務會退出。 */
+  readonly skipHelloAck?: boolean;
+  /** 控制模式：改寫 init 的內容（測試 init 失敗）。 */
+  readonly initOverride?: Record<string, unknown>;
 }
 
 export interface SpawnedService {
@@ -75,6 +84,8 @@ export interface SpawnedService {
   readonly brokerToken: string;
   readonly stderr: () => string;
   readonly stdoutLines: () => readonly string[];
+  /** 服務行程結束時 resolve；測試 init／hello 失敗要退出。 */
+  readonly exited: Promise<number | null>;
   /** 控制模式：送一則控制請求並等回應。 */
   controlRequest(
     route: string,
@@ -137,12 +148,14 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
       throw new Error(`stdout 出現非 JSON 內容：${line}`);
     }
     if (frame.kind === "hello") {
-      send({
-        v: 1,
-        kind: "hello-ack",
-        role: "shell",
-        auth: { token: controlToken },
-      });
+      if (options.skipHelloAck !== true) {
+        send({
+          v: 1,
+          kind: "hello-ack",
+          role: "shell",
+          auth: { token: controlToken },
+        });
+      }
       return;
     }
     if (frame.kind === "request" && typeof frame.route === "string") {
@@ -171,16 +184,15 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
   };
 
   if (options.control) {
-    child.stdin?.write(
-      `${JSON.stringify({
-        type: "init",
-        protocol: 1,
-        token: controlToken,
-        brokerToken,
-        folder: { path: folder.path },
-        clientToken,
-      })}\n`,
-    );
+    const initFrame = options.initOverride ?? {
+      type: "init",
+      protocol: 1,
+      token: controlToken,
+      brokerToken,
+      folder: { path: folder.path },
+      clientToken,
+    };
+    child.stdin?.write(`${JSON.stringify(initFrame)}\n`);
   }
 
   const lines = createInterface({ input: child.stdout });
@@ -211,6 +223,13 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
   });
   const timer = setTimeout(() => rejectReady?.(new Error("等不到 ready")), 10_000);
   timer.unref?.();
+  const exited = new Promise<number | null>((resolve) => {
+    if (child.exitCode !== null) {
+      resolve(child.exitCode);
+      return;
+    }
+    child.once("exit", (code) => resolve(code));
+  });
   const ready = await readyPromise;
   clearTimeout(timer);
 
@@ -223,6 +242,7 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
     brokerToken,
     stderr: () => stderrText,
     stdoutLines: () => stdoutLines,
+    exited,
     setBrokerHandler(handler) {
       brokerHandler = handler;
     },
@@ -244,6 +264,48 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
       lines.close();
     },
   };
+}
+
+/** 用故意錯誤的 init 啟動控制模式，回傳退出碼與 stderr（測試 init 失敗要退出）。 */
+export async function spawnExpectInitFailure(): Promise<{
+  readonly code: number | null;
+  readonly stderr: string;
+}> {
+  const folder = await makeFolder();
+  const child = spawn(process.execPath, [HOST_ENTRY], {
+    env: {
+      ...process.env,
+      TMPDIR: join(folder.path, "tmp"),
+      TMP: join(folder.path, "tmp"),
+      TEMP: join(folder.path, "tmp"),
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+  child.stdin?.write(
+    `${JSON.stringify({
+      type: "init",
+      protocol: 2,
+      token: "T".repeat(43),
+      brokerToken: "B".repeat(43),
+      folder: { path: folder.path },
+    })}\n`,
+  );
+  const code = await Promise.race([
+    new Promise<number | null>((resolve) => child.once("exit", (value) => resolve(value))),
+    new Promise<number | null>((resolve) => {
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve(-1);
+      }, 5000);
+      timer.unref?.();
+    }),
+  ]);
+  return { code, stderr };
 }
 
 function waitForExit(child: ChildProcess, ms: number): Promise<void> {

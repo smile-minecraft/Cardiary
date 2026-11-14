@@ -39,7 +39,7 @@ import {
   type ProtocolErrorInfo,
 } from "../errors.js";
 import type { DedupeRecord, StorageBundle } from "../storage/interfaces.js";
-import { isValidToken } from "../tokens.js";
+import { constantTimeEqual, isValidToken } from "../tokens.js";
 import {
   PROTOCOL_MAX,
   PROTOCOL_MIN,
@@ -72,6 +72,8 @@ export interface GatewayOptions {
   /** 固定前綴；由主機組好，轉接層不拆解。 */
   readonly systemContext?: () => string;
   readonly moduleHandlers?: ReadonlyMap<string, ModuleHandler>;
+  /** 緊急全部暫停時取消工具子行程；由服務接上共用 spawn wrapper。 */
+  readonly cancelToolProcesses?: (deadlineMs: number) => Promise<number>;
 }
 
 export class RequestFailure extends Error {
@@ -153,7 +155,8 @@ export class Gateway {
   readonly #sessionPending = new Map<string, Promise<SessionState>>();
   readonly #moduleHandlers = new Map<string, ModuleHandler>();
   readonly #requestCache = new Map<string, Map<string, ServerFrame | Unknown>>();
-  readonly #gatewayDecided = new Set<string>();
+  readonly #messageCounts = new Map<string, number>();
+  readonly #pendingDecided = new Map<string, { promise: Promise<void>; resolve: () => void }>();
   #http: Server | null = null;
   #wss: WebSocketServer | null = null;
   #heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -219,16 +222,7 @@ export class Gateway {
     const address = http.address();
     this.#port = typeof address === "object" && address !== null ? address.port : 0;
     this.#heartbeat = setInterval(() => {
-      for (const connection of this.#connections.values()) {
-        if (connection.closed) continue;
-        const ws = connection.ws;
-        if (ws.readyState !== ws.OPEN) continue;
-        try {
-          ws.ping();
-        } catch {
-          connection.close(1011, "heartbeat");
-        }
-      }
+      this.heartbeatTick();
     }, this.limits.heartbeatSeconds * 1000);
     this.#heartbeat.unref?.();
     return this.#port;
@@ -246,6 +240,23 @@ export class Gateway {
 
   get accepting(): boolean {
     return this.#accepting;
+  }
+
+  /** 一輪心跳：沒有回 pong 的連線直接關閉，其餘送 ping。 */
+  heartbeatTick(): void {
+    for (const connection of this.#connections.values()) {
+      if (connection.closed) continue;
+      if (!connection.alive) {
+        connection.close(1011, "heartbeat_timeout");
+        continue;
+      }
+      connection.alive = false;
+      try {
+        connection.ws.ping();
+      } catch {
+        connection.close(1011, "heartbeat");
+      }
+    }
   }
 
   /** 儲存失效時關閉所有客戶端連線；close code 由呼叫端指定（1011）。 */
@@ -359,6 +370,7 @@ export class Gateway {
       id: `conn_${Math.random().toString(36).slice(2, 10)}`,
       ws,
       maxBufferedBytes: this.limits.maxBufferedBytes,
+      sendTimeoutMs: this.limits.sendTimeoutMs,
       onClose: () => {
         this.#connections.delete(connection.id);
       },
@@ -546,7 +558,11 @@ export class Gateway {
       typeof auth === "object" && auth !== null && typeof auth.token === "string"
         ? auth.token
         : null;
-    if (headerAuth !== null && messageToken !== null && headerAuth !== messageToken) {
+    if (
+      headerAuth !== null &&
+      messageToken !== null &&
+      !constantTimeEqual(headerAuth, messageToken)
+    ) {
       await this.#sendError(
         connection,
         protocolError("auth_invalid", "標頭與訊息帶了不同的 Token。"),
@@ -555,7 +571,7 @@ export class Gateway {
       return;
     }
     const token = headerAuth ?? messageToken;
-    if (token === null || token !== this.#options.clientToken) {
+    if (token === null || !constantTimeEqual(token, this.#options.clientToken)) {
       connection.authFailures += 1;
       await this.#sendError(connection, protocolError("auth_invalid", "Token 不正確。"));
       if (connection.authFailures >= 3) connection.close(1008, "auth_invalid");
@@ -954,18 +970,25 @@ export class Gateway {
       }
       case "approval.resolved": {
         const resolution = event.resolution;
-        if (this.#gatewayDecided.delete(resolution.request.id)) return;
+        const gate = this.#pendingDecided.get(resolution.request.id);
+        // 等 approval.decide 的回應送出後才送 approval.decided（沿用協定順序），
+        // 但事件處理是同一個佇列，所以 decided 一定排在工具結果與 turn.completed 之前。
+        if (gate) await gate.promise;
         const sessionId = resolution.request.draft.conversationId ?? state.sessionId;
         const effect = resolution.outcome === "approved" ? "approve" : "reject";
         if (this.#isPendingApproval(state, resolution.request.id)) {
           state.pendingApprovalId = null;
         }
+        const decidedByClient = resolution.decision?.decidedBy.clientId;
         await this.#appendEvent(state, stream, "approval.decided", {
           approvalId: resolution.request.id,
           sessionId,
           effect,
           decidedAt: resolution.decision?.decidedAt ?? event.at,
-          decidedBy: { kind: "system" },
+          decidedBy:
+            decidedByClient === undefined
+              ? { kind: "system" }
+              : { kind: "client", clientId: decidedByClient },
         });
         const turnId = resolution.request.draft.turnId;
         if (turnId !== undefined && state.activeTurnId === turnId) {
@@ -975,6 +998,17 @@ export class Gateway {
       }
       case "turn.completed": {
         const status = turnCompletedStatus(event.status);
+        if (!state.pendingAssistant) {
+          const streaming = this.#buffer.current(state.sessionId);
+          if (streaming && streaming.turnId === event.turnId && streaming.text.length > 0) {
+            state.pendingAssistant = {
+              messageId: streaming.messageId,
+              turnId: streaming.turnId,
+              text: streaming.text,
+              createdAt: streaming.startedAt,
+            };
+          }
+        }
         await this.#flushAssistant(state, stream, status);
         this.#buffer.clear(state.sessionId);
         state.activeTurnId = null;
@@ -1006,6 +1040,20 @@ export class Gateway {
       default:
         return;
     }
+  }
+
+  #beginDecisionGate(approvalId: string): () => void {
+    let release!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.#pendingDecided.set(approvalId, { promise, resolve: release });
+    return () => {
+      const entry = this.#pendingDecided.get(approvalId);
+      if (!entry) return;
+      this.#pendingDecided.delete(approvalId);
+      entry.resolve();
+    };
   }
 
   #isPendingApproval(state: SessionState, approvalId: string): boolean {
@@ -1067,6 +1115,7 @@ export class Gateway {
     state.messageStatus.set(pending.messageId, status);
     state.messageTurns.set(pending.messageId, pending.turnId);
     state.messageCount += 1;
+    this.#messageCounts.set(state.sessionId, (this.#messageCounts.get(state.sessionId) ?? 0) + 1);
     await this.#appendEvent(state, stream, "stream.message_completed", {
       sessionId: state.sessionId,
       turnId: pending.turnId,
@@ -1191,7 +1240,7 @@ export class Gateway {
       status,
       createdAt: summary.createdAt,
       updatedAt: summary.updatedAt,
-      messageCount: state.messageCount,
+      messageCount: this.#messageCounts.get(summary.id) ?? state.messageCount,
     };
   }
 
@@ -1259,25 +1308,29 @@ export class Gateway {
     const clientRequestId = optionalString(request.payload, "clientRequestId");
     const key = clientRequestId ? `session-create:${clientRequestId}` : null;
     if (key === null) {
-      const summary = await this.#createConversation(title);
+      const summary = await this.#createConversation(title, undefined);
       return response(request.id, "session.create", { session: summary });
     }
     const dedupe = await this.#options.storage.dedupe.claim(key, "session-create");
     if (dedupe.outcome === "existing") {
       return this.#recoverCreateSession(dedupe.record, clientRequestId ?? "", request.id);
     }
-    const summary = await this.#createConversation(title);
+    const summary = await this.#createConversation(title, clientRequestId);
     await this.#options.storage.dedupe.setResource(key, summary.id);
     const payload = { session: summary };
     await this.#options.storage.dedupe.complete(key, payload as unknown as JSONValue);
     return response(request.id, "session.create", payload);
   }
 
-  async #createConversation(title: string | undefined): Promise<SessionSummary> {
+  async #createConversation(
+    title: string | undefined,
+    clientRequestId: string | undefined,
+  ): Promise<SessionSummary> {
     const settings = await this.#options.engine.getModelSettings();
     const model = settings.roles.main;
     const summary = await this.#options.engine.createConversation({
       ...(title === undefined ? {} : { title }),
+      ...(clientRequestId === undefined ? {} : { clientRequestId }),
       purpose: "conversation",
       model,
       systemContext: this.#options.systemContext?.() ?? "你是 Cardiary 的助理。",
@@ -1290,7 +1343,7 @@ export class Gateway {
       status: "idle",
       createdAt: summary.createdAt,
       updatedAt: summary.updatedAt,
-      messageCount: 0,
+      messageCount: this.#messageCounts.get(summary.id) ?? 0,
     };
   }
 
@@ -1343,7 +1396,7 @@ export class Gateway {
       status: "idle",
       createdAt: summary.createdAt,
       updatedAt: summary.updatedAt,
-      messageCount: 0,
+      messageCount: this.#messageCounts.get(summary.id) ?? 0,
     };
   }
 
@@ -1466,6 +1519,7 @@ export class Gateway {
     if (receipt.turnId) state.turnTrigger.set(receipt.turnId, receipt.messageId);
     state.messageTurns.set(receipt.messageId, receipt.turnId ?? "");
     state.messageCount += 1;
+    this.#messageCounts.set(sessionId, (this.#messageCounts.get(sessionId) ?? 0) + 1);
     if (key !== null) {
       await this.#options.storage.dedupe.setResource(key, receipt.messageId);
       await this.#options.storage.dedupe.complete(key, payload as unknown as JSONValue);
@@ -1557,7 +1611,7 @@ export class Gateway {
     if (!existing) {
       throw new RequestFailure(protocolError("not_found", "找不到這筆審批。"));
     }
-    this.#gatewayDecided.add(approvalId);
+    const releaseDecision = this.#beginDecisionGate(approvalId);
     const result = await this.#options.engine.approvals.decide({
       requestId: approvalId,
       verdict: optionId === "approve" ? "approve" : "deny",
@@ -1565,11 +1619,11 @@ export class Gateway {
       ...(note === undefined ? {} : { note }),
     });
     if (result.outcome === "not-found") {
-      this.#gatewayDecided.delete(approvalId);
+      releaseDecision();
       throw new RequestFailure(protocolError("not_found", "找不到這筆審批。"));
     }
     if (result.outcome === "expired") {
-      this.#gatewayDecided.delete(approvalId);
+      releaseDecision();
       throw new RequestFailure(
         protocolError("conflict", "這筆審批已經逾時。", {
           details: { reason: "approval_expired" },
@@ -1577,13 +1631,13 @@ export class Gateway {
       );
     }
     if (result.outcome === "withdrawn") {
-      this.#gatewayDecided.delete(approvalId);
+      releaseDecision();
       throw new RequestFailure(
         protocolError("conflict", "這筆審批已經撤回。", { details: { reason: "withdrawn" } }),
       );
     }
     if (result.outcome === "already-decided") {
-      this.#gatewayDecided.delete(approvalId);
+      releaseDecision();
       throw new RequestFailure(
         protocolError("conflict", "這筆審批已經有決定了。", {
           details: {
@@ -1604,49 +1658,27 @@ export class Gateway {
       decidedAt: decision.decidedAt,
       persisted: true,
     };
-    // 先回回應（決定已由 ledger 落地），再送 approval.decided。
+    // 先回回應（決定已由 ledger 落地）；approval.decided 由引擎事件處理，
+    // 透過 gate 排在這個回應之後、工具結果與 turn.completed 之前。
     await connection.send(response(request.id, "approval.decide", payload));
-    const sessionId = existing.draft.conversationId;
-    if (sessionId !== undefined) {
-      const state = this.#sessions.get(sessionId);
-      if (state) {
-        state.pendingApprovalId = null;
-        await this.#appendEvent(state, `session:${sessionId}`, "approval.decided", {
-          approvalId,
-          sessionId,
-          effect,
-          decidedAt: decision.decidedAt,
-          decidedBy: { kind: "client", clientId: connection.clientInstanceId },
-        });
-      }
-    }
+    releaseDecision();
     return { __handled: true };
   }
 
   async #pauseAll(request: ParsedRequest): Promise<Unknown> {
     const reason = optionalString(request.payload, "reason") ?? "使用者緊急暫停";
     const paused = await this.#options.engine.pauseAll(reason);
+    // 比照 HostService.pause：工具子行程要真的被取消，不只手停回合。
+    if (this.#options.cancelToolProcesses) {
+      await this.#options.cancelToolProcesses(5000);
+    }
     const interruptedSessionIds: string[] = [];
     for (const turn of paused.pausedTurns) {
       if (!interruptedSessionIds.includes(turn.conversationId)) {
         interruptedSessionIds.push(turn.conversationId);
       }
       const state = this.#sessions.get(turn.conversationId);
-      if (!state) continue;
-      state.activeTurnId = null;
-      const view = state.turns.get(turn.turnId);
-      state.turns.set(turn.turnId, {
-        turnId: turn.turnId,
-        phase: "interrupted",
-        startedAt: view?.startedAt ?? paused.startedAt,
-        endedAt: paused.startedAt,
-      });
-      await this.#appendEvent(state, `session:${turn.conversationId}`, "stream.turn_state", {
-        turnId: turn.turnId,
-        state: "interrupted",
-        startedAt: view?.startedAt ?? paused.startedAt,
-        endedAt: paused.startedAt,
-      });
+      if (state) state.activeTurnId = null;
     }
     return response(request.id, "approval.pause_all", {
       pausedAt: paused.startedAt,
@@ -1721,7 +1753,7 @@ export class Gateway {
       response.end(data);
     };
     const auth = parseBearer(request.headers.authorization);
-    if (auth === null || auth !== this.#options.clientToken) {
+    if (auth === null || !constantTimeEqual(auth, this.#options.clientToken)) {
       sendJson(401, {
         v: PROTOCOL_VERSION,
         kind: "error",

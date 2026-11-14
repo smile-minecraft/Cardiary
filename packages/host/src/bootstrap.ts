@@ -156,6 +156,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
       return serviceRef.statusInput();
     },
     ...(options.limits === undefined ? {} : { limits: options.limits }),
+    cancelToolProcesses: (deadlineMs) => spawn.cancelAll(deadlineMs),
     ...(options.demo === true
       ? { toolBundles: () => [{ bundleId: DEMO_BUNDLE_ID, generation: DEMO_GENERATION }] }
       : {}),

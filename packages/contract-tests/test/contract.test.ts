@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   connect,
   connectAndHello,
+  spawnExpectInitFailure,
   spawnService,
   waitUntil,
   type ProtocolClient,
@@ -500,5 +501,188 @@ describe("私有控制面（黑箱）", () => {
     expect(service.stderr()).not.toContain(service.clientToken);
     expect(service.stderr()).not.toContain(service.controlToken);
     expect(service.stderr()).not.toContain(service.brokerToken);
+  });
+});
+
+describe("審查修正的契約驗證", () => {
+  it("殼控制 Token 與代理 Token 都不能用於客戶端入口", async () => {
+    const service = await boot({ control: true });
+    for (const token of [service.controlToken, service.brokerToken]) {
+      const connected = await connect(`ws://127.0.0.1:${service.ready.clientPort}/v1/ws`);
+      clients.push(connected);
+      await connected.hello(token);
+      const error = await connected.waitFor((frame) => frame.kind === "error");
+      expect(error.code).toBe("auth_invalid");
+      expect(connected.frames.some((frame) => frame.kind === "event")).toBe(false);
+    }
+    const valid = await client(service);
+    const hello = valid.frames.find((frame) => frame.type === "system.hello");
+    expect(hello?.kind).toBe("response");
+  });
+
+  it("approval_key：同一個回合、同一個工具與輸入只問一次", async () => {
+    const service = await boot({
+      scripts: [
+        [
+          { kind: "tool", toolName: "demo.echo", input: { text: "same" } },
+          { kind: "tool", toolName: "demo.echo", input: { text: "same" } },
+          { kind: "text", text: "完成" },
+        ],
+      ],
+    });
+    const connected = await client(service);
+    const sessionId = await createSession(connected);
+    await subscribe(connected, sessionId);
+    connected.request("session.send_message", {
+      sessionId,
+      text: "重跑",
+      delivery: "queue",
+      clientMessageId: "cm-repeat",
+    });
+    const requested = await connected.waitFor((frame) => frame.type === "approval.requested");
+    const approvalId = (requested.payload as { approvalId: string }).approvalId;
+    const decide = connected.request("approval.decide", { approvalId, optionId: "approve" });
+    await connected.waitForReply(decide);
+    await connected.waitFor(
+      (frame) =>
+        frame.type === "stream.message_completed" &&
+        (frame.payload as { entry: { text: string } }).entry.text === "完成",
+      5000,
+    );
+    const approvals = connected.frames.filter((frame) => frame.type === "approval.requested");
+    expect(approvals).toHaveLength(1);
+    const results = connected.frames.filter(
+      (frame) =>
+        frame.type === "stream.tool_result" &&
+        (frame.payload as { status?: string }).status === "ok",
+    );
+    expect(results).toHaveLength(2);
+    const ui = connected.frames.find((frame) => frame.type === "stream.ui");
+    expect((ui?.payload as { renderer?: string }).renderer).toBe("demo.echo");
+  });
+
+  it("pause_all 取消工具子行程；control.resume 之後可以再送訊息", async () => {
+    const service = await boot({
+      control: true,
+      scripts: [
+        [
+          { kind: "tool", toolName: "demo.exec", input: { seconds: 5 } },
+          { kind: "text", text: "第一輪" },
+        ],
+        [{ kind: "text", text: "恢復後" }],
+      ],
+    });
+    const connected = await client(service);
+    const sessionId = await createSession(connected);
+    await subscribe(connected, sessionId);
+    connected.request("session.send_message", {
+      sessionId,
+      text: "用工具",
+      delivery: "queue",
+    });
+    const requested = await connected.waitFor((frame) => frame.type === "approval.requested");
+    const approvalId = (requested.payload as { approvalId: string }).approvalId;
+    const decide = connected.request("approval.decide", { approvalId, optionId: "approve" });
+    await connected.waitForReply(decide);
+    const toolCall = await connected.waitForEvent("stream.tool_call");
+    const toolCallId = (toolCall.payload as { toolCallId: string }).toolCallId;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const pause = connected.request("approval.pause_all", { reason: "緊急" });
+    const paused = await connected.waitForReply(pause);
+    await connected.waitFor(
+      (frame) =>
+        frame.type === "stream.turn_state" &&
+        (frame.payload as { state: string }).state === "interrupted",
+    );
+    const afterPauseIndex = connected.frames.indexOf(paused);
+    const lateResults = connected.frames.filter(
+      (frame) =>
+        frame.type === "stream.tool_result" &&
+        (frame.payload as { toolCallId?: string }).toolCallId === toolCallId &&
+        connected.frames.indexOf(frame) > afterPauseIndex,
+    );
+    expect(lateResults).toHaveLength(0);
+
+    const resumed = await service.controlRequest("control.resume", {});
+    expect((resumed.payload as { state: string }).state).toBe("ready");
+    const send = connected.request("session.send_message", {
+      sessionId,
+      text: "恢復後",
+      delivery: "queue",
+    });
+    await connected.waitForReply(send);
+    const completed = await connected.waitFor(
+      (frame) =>
+        frame.type === "stream.message_completed" &&
+        (frame.payload as { entry: { text: string } }).entry.text === "恢復後",
+      6000,
+    );
+    expect(completed.type).toBe("stream.message_completed");
+  }, 20_000);
+
+  it("init 失敗與 hello 交握失敗都會結束行程", async () => {
+    const failedInit = await spawnExpectInitFailure();
+    expect(failedInit.code).toBe(2);
+    expect(failedInit.stderr).toContain("init 失敗");
+    expect(failedInit.stderr).not.toContain("T".repeat(43));
+
+    const service = await spawnService({ demo: true, control: true, skipHelloAck: true });
+    const code = await Promise.race([
+      service.exited,
+      new Promise<number | null>((resolve) => setTimeout(() => resolve(-1), 8000)),
+    ]);
+    expect(code).toBe(2);
+    const closed = await fetch(`http://127.0.0.1:${service.ready.clientPort}/v1/blobs/x`, {
+      headers: { authorization: `Bearer ${service.clientToken}` },
+    }).catch(() => null);
+    expect(closed).toBeNull();
+  }, 20_000);
+
+  it("以協定可觀測的假引擎行為：seq、turnId、補送與冪等鍵", async () => {
+    const service = await boot({ scripts: [[{ kind: "text", text: "可觀測" }]] });
+    const connected = await client(service);
+    const create = connected.request("session.create", { clientRequestId: "cr-observe" });
+    const created = await connected.waitForReply(create);
+    const sessionId = (created.payload as { session: { id: string } }).session.id;
+    await subscribe(connected, sessionId);
+    const send = connected.request("session.send_message", {
+      sessionId,
+      text: "嗨",
+      delivery: "queue",
+      clientMessageId: "cm-observe",
+    });
+    const receipt = await connected.waitForReply(send);
+    const userMessageId = (receipt.payload as { userMessageId: string }).userMessageId;
+    const turnId = (receipt.payload as { turnId: string }).turnId;
+    expect(turnId).toBe(`turn_${userMessageId}`);
+    await connected.waitFor(
+      (frame) =>
+        frame.type === "stream.turn_state" &&
+        (frame.payload as { state: string }).state === "completed",
+    );
+    const durableSeqs = connected.frames
+      .filter((frame) => frame.kind === "event" && frame.type !== "stream.text_delta")
+      .map((frame) => frame.seq as number);
+    expect(durableSeqs[0]).toBe(1);
+    expect([...durableSeqs].sort((left, right) => left - right)).toEqual(durableSeqs);
+    const replay = await client(service);
+    const replayId = replay.request("session.subscribe", {
+      sessionId,
+      lastSeq: 1,
+      epoch: service.ready.epoch,
+    });
+    const replayReply = await replay.waitForReply(replayId);
+    expect((replayReply.payload as { resyncRequired: boolean }).resyncRequired).toBe(false);
+    const resentCreate = connected.request("session.create", { clientRequestId: "cr-observe" });
+    const resent = await connected.waitForReply(resentCreate);
+    expect((resent.payload as { session: { id: string } }).session.id).toBe(sessionId);
+    const resentSend = connected.request("session.send_message", {
+      sessionId,
+      text: "嗨",
+      delivery: "queue",
+      clientMessageId: "cm-observe",
+    });
+    const resentReceipt = await connected.waitForReply(resentSend);
+    expect((resentReceipt.payload as { userMessageId: string }).userMessageId).toBe(userMessageId);
   });
 });

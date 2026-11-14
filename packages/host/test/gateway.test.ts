@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { WebSocket } from "ws";
 
 import { TestClient, startTestHost, waitUntil, type TestHost } from "./helpers.js";
 
@@ -469,5 +470,245 @@ describe("協定閘道", () => {
     const unauthorized = await fetch(`http://127.0.0.1:${host.host.port}/v1/blobs/x`);
     expect(unauthorized.status).toBe(401);
     await host.close();
+  });
+});
+
+describe("審查修正的回歸測試", () => {
+  it("客戶端 Token 比較走常數時間函式：hello 與 HTTP 的錯誤變體都被拒絕", async () => {
+    const host = await boot();
+    const variants = [`${host.token.slice(0, 42)}B`, host.token.slice(0, 42), `${host.token}A`];
+    for (const variant of variants) {
+      const connected = await TestClient.connect(host.url);
+      await connected.hello(variant);
+      const error = await connected.waitFor(
+        (frame) => frame.kind === "error" && frame.code === "auth_invalid",
+      );
+      expect(error.code).toBe("auth_invalid");
+      await connected.close();
+    }
+    for (const variant of variants) {
+      const response = await fetch(`http://127.0.0.1:${host.host.port}/v1/blobs/x`, {
+        headers: { authorization: `Bearer ${variant}` },
+      });
+      expect(response.status).toBe(401);
+    }
+    const source = await import("node:fs/promises").then((fs) =>
+      fs.readFile(new URL("../src/gateway/server.ts", import.meta.url), "utf8"),
+    );
+    expect(source).toContain("constantTimeEqual(token, this.#options.clientToken)");
+    expect(source).toContain("constantTimeEqual(auth, this.#options.clientToken)");
+    expect(source).not.toContain("token !== this.#options.clientToken");
+  });
+
+  it("session.create 的 clientRequestId 會傳給引擎；pending 且沒有 resource_id 時補回應", async () => {
+    const host = await boot();
+    const client = await helloClient(host);
+    const first = client.request("session.create", { clientRequestId: "cr-pass-through" });
+    const created = await client.waitForReply(first);
+    const sessionId = (created.payload as { session: { id: string } }).session.id;
+    // 模擬「引擎已建立、主機還沒寫 resource_id」就中斷：pending、resource_id 為 NULL。
+    const dedupe = host.host.storage.dedupe as unknown as {
+      seed(record: {
+        key: string;
+        kind: "session-create";
+        state: "pending";
+        resourceId: null;
+        response: null;
+        claimedAt: string;
+        completedAt: null;
+      }): void;
+    };
+    dedupe.seed({
+      key: "session-create:cr-pass-through",
+      kind: "session-create",
+      state: "pending",
+      resourceId: null,
+      response: null,
+      claimedAt: new Date().toISOString(),
+      completedAt: null,
+    });
+    const retry = client.request("session.create", { clientRequestId: "cr-pass-through" });
+    const recovered = await client.waitForReply(retry);
+    expect((recovered.payload as { session: { id: string } }).session.id).toBe(sessionId);
+    await client.close();
+  });
+
+  it("approval.decided 排在回應之後、工具結果之前，且有 running turn_state", async () => {
+    const host = await boot({
+      scripts: [
+        [
+          { kind: "tool", toolName: "demo.echo", input: { text: "順序" } },
+          { kind: "text", text: "完成" },
+        ],
+      ],
+    });
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    await subscribeSession(client, sessionId);
+    client.request("session.send_message", { sessionId, text: "用工具", delivery: "queue" });
+    const requested = await client.waitForEvent("approval.requested");
+    const approvalId = (requested.payload as { approvalId: string }).approvalId;
+    const decideId = client.request("approval.decide", { approvalId, optionId: "approve" });
+    await client.waitForReply(decideId);
+    await client.waitForEvent("stream.tool_result");
+    const indexOf = (predicate: (frame: (typeof client.frames)[number]) => boolean): number =>
+      client.frames.findIndex(predicate);
+    const responseIndex = indexOf(
+      (frame) => frame.replyTo === decideId && frame.kind === "response",
+    );
+    const decidedIndex = indexOf((frame) => frame.type === "approval.decided");
+    const toolResultIndex = indexOf((frame) => frame.type === "stream.tool_result");
+    const runningIndex = indexOf(
+      (frame) =>
+        frame.type === "stream.turn_state" &&
+        (frame.payload as { state?: string } | undefined)?.state === "running" &&
+        frame.seq !== undefined &&
+        client.frames.indexOf(frame) > indexOf((f) => f.type === "approval.requested"),
+    );
+    expect(responseIndex).toBeGreaterThan(-1);
+    expect(decidedIndex).toBeGreaterThan(responseIndex);
+    expect(toolResultIndex).toBeGreaterThan(decidedIndex);
+    expect(runningIndex).toBeGreaterThan(-1);
+    await client.close();
+  });
+
+  it("pause_all 保留待審批、不重複送 interrupted、殺掉工具子行程，恢復後可再送", async () => {
+    const host = await boot({
+      scripts: [
+        [
+          { kind: "tool", toolName: "demo.exec", input: { seconds: 5 } },
+          { kind: "text", text: "第一輪" },
+        ],
+        [
+          { kind: "tool", toolName: "demo.echo", input: { text: "待審批" } },
+          { kind: "text", text: "第二輪" },
+        ],
+        [{ kind: "text", text: "恢復後" }],
+      ],
+    });
+    const first = await helloClient(host);
+    const runningSession = await createSession(first);
+    await subscribeSession(first, runningSession);
+    first.request("session.send_message", {
+      sessionId: runningSession,
+      text: "用工具",
+      delivery: "queue",
+    });
+    const requested = await first.waitForEvent("approval.requested");
+    const runningApprovalId = (requested.payload as { approvalId: string }).approvalId;
+    const decide = first.request("approval.decide", {
+      approvalId: runningApprovalId,
+      optionId: "approve",
+    });
+    await first.waitForReply(decide);
+    const toolCall = await first.waitForEvent("stream.tool_call");
+    const toolCallId = (toolCall.payload as { toolCallId: string }).toolCallId;
+    await waitUntil(() => host.host.spawn.runningCount >= 1);
+
+    const second = await helloClient(host);
+    const waitingSession = await createSession(second);
+    await subscribeSession(second, waitingSession);
+    second.request("session.send_message", {
+      sessionId: waitingSession,
+      text: "等待審批",
+      delivery: "queue",
+    });
+    const pendingRequested = await second.waitFor((frame) => frame.type === "approval.requested");
+    const pendingApprovalId = (pendingRequested.payload as { approvalId: string }).approvalId;
+
+    const pauseId = first.request("approval.pause_all", { reason: "緊急" });
+    const paused = await first.waitForReply(pauseId);
+    const interruptedIds = (paused.payload as { interruptedSessionIds: string[] })
+      .interruptedSessionIds;
+    expect(interruptedIds).toContain(runningSession);
+    expect(interruptedIds).toContain(waitingSession);
+    await waitUntil(() => host.host.spawn.runningCount === 0);
+    const interrupted = first.frames.filter(
+      (frame) =>
+        frame.type === "stream.turn_state" &&
+        (frame.payload as { state?: string } | undefined)?.state === "interrupted" &&
+        (frame.payload as { turnId?: string }).turnId !== undefined,
+    );
+    // 每個被中止的回合只有一則 interrupted；不因 pause_all 再補一則。
+    const turnIds = new Set(
+      interrupted.map((frame) => (frame.payload as { turnId: string }).turnId),
+    );
+    expect(interrupted).toHaveLength(turnIds.size);
+    expect(
+      interrupted.some(
+        (frame) =>
+          (frame.payload as { turnId: string }).turnId ===
+          (toolCall.payload as { turnId: string }).turnId,
+      ),
+    ).toBe(true);
+
+    const resultAfterPause = first.frames.filter(
+      (frame) =>
+        frame.type === "stream.tool_result" &&
+        (frame.payload as { toolCallId?: string }).toolCallId === toolCallId &&
+        first.frames.indexOf(frame) > first.frames.indexOf(paused),
+    );
+    expect(resultAfterPause).toHaveLength(0);
+
+    // 待審批保留：快照的 pendingApproval 還在，之後仍可決定。
+    const late = await helloClient(host);
+    const subscribeId = late.request("session.subscribe", { sessionId: waitingSession });
+    const snapshot = await late.waitForReply(subscribeId);
+    const pendingApproval = (
+      snapshot.payload as { snapshot?: { pendingApproval?: { approvalId?: string } } }
+    ).snapshot?.pendingApproval;
+    expect(pendingApproval?.approvalId).toBe(pendingApprovalId);
+    const decideLater = late.request("approval.decide", {
+      approvalId: pendingApprovalId,
+      optionId: "deny",
+    });
+    const decidedLater = await late.waitForReply(decideLater);
+    expect((decidedLater.payload as { persisted: boolean }).persisted).toBe(true);
+
+    // 恢復（M0 用 control.resume 解除緊急暫停）之後可以再送訊息。
+    const resumed = await host.host.service.resume();
+    expect(resumed.state).toBe("ready");
+    const send = late.request("session.send_message", {
+      sessionId: waitingSession,
+      text: "恢復後",
+      delivery: "queue",
+    });
+    await late.waitForReply(send);
+    const completed = await late.waitFor(
+      (frame) =>
+        frame.type === "stream.message_completed" &&
+        (frame.payload as { entry: { text: string } }).entry.text === "恢復後",
+      5000,
+    );
+    expect(completed.type).toBe("stream.message_completed");
+    await first.close();
+    await late.close();
+  }, 15_000);
+
+  it("heartbeat：沒有回 pong 的連線會被關閉", async () => {
+    const host = await boot({ limits: { heartbeatSeconds: 1 } });
+    const raw = new WebSocket(host.url, { autoPong: false });
+    await new Promise<void>((resolve, reject) => {
+      raw.once("open", () => resolve());
+      raw.once("error", reject);
+    });
+    await waitUntil(() => raw.readyState === WebSocket.CLOSED, 6000);
+    expect(raw.readyState).toBe(WebSocket.CLOSED);
+  }, 10_000);
+
+  it("session.list 的 messageCount 會反映已完成的訊息", async () => {
+    const host = await boot({ scripts: [[{ kind: "text", text: "計數" }]] });
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    await subscribeSession(client, sessionId);
+    client.request("session.send_message", { sessionId, text: "嗨", delivery: "queue" });
+    await client.waitForEvent("stream.message_completed");
+    const listId = client.request("session.list", { limit: 10 });
+    const list = await client.waitForReply(listId);
+    const summary = (
+      list.payload as { sessions: Array<{ id: string; messageCount: number }> }
+    ).sessions.find((session) => session.id === sessionId);
+    expect(summary?.messageCount).toBe(2);
+    await client.close();
   });
 });

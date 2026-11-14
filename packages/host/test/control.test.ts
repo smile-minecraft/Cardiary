@@ -98,6 +98,25 @@ describe("私有控制面（服務端）", () => {
     await waitUntil(() => second.channel.closed);
   });
 
+  it("缺 auth.token 回 unauthorized（不是 invalid_message）並關閉通道", async () => {
+    const harness = createHarness();
+    await handshake(harness);
+    harness.channel.onRequest("control.health", async () => ({ state: "running" }));
+    write(harness.input, {
+      v: 1,
+      kind: "request",
+      id: "no-token",
+      route: "control.health",
+      payload: {},
+    });
+    await waitUntil(() => harness.lines.some((line) => line.replyTo === "no-token"));
+    const response = harness.lines.find((line) => line.replyTo === "no-token");
+    expect((response?.error as { code: string }).code).toBe("unauthorized");
+    expect(response?.payload).toBeUndefined();
+    await waitUntil(() => harness.channel.closed);
+    expect(harness.closed).toContain("unauthorized");
+  });
+
   it("路由白名單：未知路由回 unsupported_route，通道保留", async () => {
     const harness = createHarness();
     await handshake(harness);

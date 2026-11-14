@@ -75,7 +75,7 @@ export interface HostServiceOptions {
  */
 export class HostService {
   readonly #options: HostServiceOptions;
-  readonly #folder: FolderIdentity;
+  #folder: FolderIdentity;
   readonly #gateway: Gateway;
   #folderState: InternalFolderState = "verifying";
   #serviceState: InternalServiceState = "degraded";
@@ -209,11 +209,15 @@ export class HostService {
     });
   }
 
-  async resume(): Promise<ResumeResult> {
+  async resume(requestedFolderPath?: string): Promise<ResumeResult> {
     return this.#withLifecycle("resuming", async () => {
       const epochBefore = this.#epochAtPause || this.epoch;
+      const targetPath = requestedFolderPath ?? this.#folder.path;
       try {
-        await readFolderIdentity(this.#folder.path, { expectedFolderId: this.#folder.folderId });
+        const identity = await readFolderIdentity(targetPath, {
+          expectedFolderId: this.#folder.folderId,
+        });
+        this.#folder = identity;
       } catch {
         this.#folderState = "unavailable";
         this.#serviceState = "paused";
@@ -267,6 +271,8 @@ export class HostService {
       }
       try {
         await this.#options.engine.resume();
+        // 緊急全部暫停（pause_all）也要一併解除；M0 沒有獨立的 resume_all 訊息。
+        await this.#options.engine.resumeAll();
       } catch {
         this.#serviceState = "degraded";
         this.#reason = "engine_reopen_failed";

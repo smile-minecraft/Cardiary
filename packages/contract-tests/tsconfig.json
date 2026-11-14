@@ -4,7 +4,14 @@
     "types": ["node"],
     "rootDir": ".",
     "outDir": "dist",
-    "noEmit": true
+    "esModuleInterop": true,
+    "declaration": true,
+    "emitDeclarationOnly": true
   },
-  "include": ["test"]
+  "include": ["test"],
+  "references": [
+    {
+      "path": "../protocol"
+    }
+  ]
 }

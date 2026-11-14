@@ -11,6 +11,7 @@ export class ClientConnection {
   readonly id: string;
   readonly ws: WebSocket;
   readonly #maxBufferedBytes: number;
+  readonly #sendTimeoutMs: number;
   readonly #onClose: () => void;
   readonly subscriptions = new Set<string>();
   #queue: Promise<void> = Promise.resolve();
@@ -20,17 +21,24 @@ export class ClientConnection {
   clientInstanceId = "";
   resumeSystemSeq: number | null = null;
   authFailures = 0;
+  /** heartbeat：上一輪 ping 之後有沒有收到 pong。 */
+  alive = true;
 
   constructor(options: {
     readonly id: string;
     readonly ws: WebSocket;
     readonly maxBufferedBytes: number;
+    readonly sendTimeoutMs?: number;
     readonly onClose: () => void;
   }) {
     this.id = options.id;
     this.ws = options.ws;
     this.#maxBufferedBytes = options.maxBufferedBytes;
+    this.#sendTimeoutMs = options.sendTimeoutMs ?? 5000;
     this.#onClose = options.onClose;
+    this.ws.on("pong", () => {
+      this.alive = true;
+    });
     this.ws.on("close", () => {
       this.#closed = true;
       this.#onClose();
@@ -60,7 +68,19 @@ export class ClientConnection {
             resolve();
             return;
           }
+          let settled = false;
+          const timer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            // 慢客戶端：不能讓 pause／shutdown 的 drain 卡在這裡。
+            this.close(1011, "send_timeout");
+            resolve();
+          }, this.#sendTimeoutMs);
+          timer.unref?.();
           this.ws.send(data, (error) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
             if (error) this.close(1011, "send_failed");
             resolve();
           });

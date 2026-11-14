@@ -306,6 +306,8 @@ async function runControl(
   } catch (error) {
     const reason = error instanceof InitError ? error.reason : "invalid_message";
     stderr.write(`init 失敗：${reason}\n`);
+    // stdin 的監聽會讓事件迴圈繼續活著；init 失敗時要主動收掉。
+    input.destroy();
     return 2;
   }
   if (!insideTmp(init.folder.path)) {
@@ -367,7 +369,11 @@ async function runControl(
     const result = await host.service.pause(reason, deadlineMs);
     return toJson(result);
   });
-  channel.onRequest("control.resume", async () => toJson(await host.service.resume()));
+  channel.onRequest("control.resume", async (payload) => {
+    const folder = payload.folder as Record<string, unknown> | undefined;
+    const folderPath = typeof folder?.path === "string" ? folder.path : undefined;
+    return toJson(await host.service.resume(folderPath));
+  });
   channel.onRequest("control.shutdown", async (payload) => {
     const reason = typeof payload.reason === "string" ? payload.reason : "user";
     const result = await host.service.shutdown(reason);
@@ -390,9 +396,12 @@ async function runControl(
   try {
     await channel.handshake();
   } catch {
-    logger.warn("hello 交握失敗，控制通道關閉");
+    logger.warn("hello 交握失敗，關閉控制通道與客戶端入口");
     channel.close("handshake_failed");
-    return 0;
+    await host.gateway.close().catch(() => undefined);
+    await host.service.abort("handshake_failed").catch(() => undefined);
+    input.destroy();
+    return 2;
   }
   const stop = (signal: string): void => {
     void host.service.abort(signal).then(async () => {

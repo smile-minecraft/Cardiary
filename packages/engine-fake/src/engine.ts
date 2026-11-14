@@ -189,6 +189,7 @@ export class FakeEngine implements EngineAdapter {
   readonly #limits: SubagentLimits;
   #state: EngineState = "starting";
   #pause: EmergencyPause | null = null;
+  #pendingApprovals = 0;
   #modelSettings: ModelSettings | null = null;
   #opened = false;
 
@@ -213,7 +214,10 @@ export class FakeEngine implements EngineAdapter {
     this.#approvals = new FakeApprovalService({
       ledger: options.approvals,
       clock: this.#clock,
-      isInRoot: options.isInRoot ?? ((conversationId, root) => conversationId === root),
+      isInRoot:
+        options.isInRoot ??
+        ((conversationId, root) =>
+          this.#conversations.get(conversationId)?.rootConversationId === root),
     });
     this.#approvalSubscription = this.#approvals.subscribe((update) => {
       this.#onApprovalUpdate(update);
@@ -257,6 +261,7 @@ export class FakeEngine implements EngineAdapter {
     if (this.#opened) return this.#descriptor();
     this.#opened = true;
     await this.#approvals.restore();
+    this.#pendingApprovals = (await this.#approvals.listPending()).length;
     this.#setState("running");
     return this.#descriptor();
   }
@@ -268,7 +273,7 @@ export class FakeEngine implements EngineAdapter {
       if (turn && turn.status === "running") {
         turn.status = "interrupted";
         turn.abort.abort();
-        this.#finishTurn(conversation, turn, "interrupted", true);
+        this.#finishTurn(conversation, turn, "interrupted", false);
       }
       conversation.state = "idle";
     }
@@ -277,7 +282,9 @@ export class FakeEngine implements EngineAdapter {
 
   async resume(): Promise<void> {
     if (!this.#opened) throw new EngineFailure("engine-closed", "引擎尚未開啟");
-    if (this.#state === "running") return;
+    // 恢復也解除緊急暫停：M0 的協定沒有獨立的 resume_all 訊息，
+    // control.resume 是唯一會回到 running 的路徑。
+    this.#pause = null;
     this.#setState("running");
   }
 
@@ -303,7 +310,7 @@ export class FakeEngine implements EngineAdapter {
       pause: this.#pause,
       activeConversations: values.filter((c) => c.state === "running").length,
       activeSubagents: values.filter((c) => c.depth === 1 && c.state === "running").length,
-      pendingApprovals: 0,
+      pendingApprovals: this.#pendingApprovals,
       environment: {
         stateDir: this.#options.environment.stateDir,
         tempDir: this.#options.environment.tempDir,
@@ -1264,6 +1271,7 @@ export class FakeEngine implements EngineAdapter {
       });
     }
     record.outcome = outcome;
+    if (turn.status !== "running") return;
     this.#emit(conversation, (seq) => ({
       kind: "tool.finished",
       seq,
@@ -1313,7 +1321,14 @@ export class FakeEngine implements EngineAdapter {
           ...(verdict.timeoutMs === undefined ? {} : { timeoutMs: verdict.timeoutMs }),
         };
         const request = await this.#approvals.request(draft);
-        const resolution = await this.#approvals.waitForDecision(request.id, { signal });
+        const resolution = await this.#awaitApproval(turn, request.id);
+        if (resolution === "paused" || resolution === "cancelled") {
+          return {
+            ok: false,
+            message: resolution === "paused" ? "回合已暫停，審批保留" : "回合已取消，審批撤回",
+            diagnostics: [resolution === "paused" ? { code: "paused" } : { code: "cancelled" }],
+          };
+        }
         if (resolution.outcome !== "approved") {
           return {
             ok: false,
@@ -1348,9 +1363,41 @@ export class FakeEngine implements EngineAdapter {
           toolCallId: draft.toolCallId ?? options.callId,
         };
         const request = await this.#approvals.request(merged);
-        return this.#approvals.waitForDecision(request.id, { signal });
+        const resolution = await this.#awaitApproval(turn, request.id);
+        if (resolution === "paused" || resolution === "cancelled") {
+          return { request, outcome: "withdrawn", decision: null };
+        }
+        return resolution;
       },
     });
+  }
+
+  /**
+   * 等審批決定，但把「回合被中止」與「人類還沒決定」分開。
+   *
+   * 暫停（paused／interrupted／restarted）保留 pending，不撤回；只有使用者
+   * 主動取消回合才撤回，避免緊急暫停把待審批清掉。
+   */
+  async #awaitApproval(
+    turn: TurnRuntime | null,
+    requestId: string,
+  ): Promise<ApprovalResolution | "paused" | "cancelled"> {
+    if (!turn) return this.#approvals.waitForDecision(requestId);
+    const signal = turn.abort.signal;
+    const aborted = new Promise<null>((resolve) => {
+      if (signal.aborted) {
+        resolve(null);
+        return;
+      }
+      signal.addEventListener("abort", () => resolve(null), { once: true });
+    });
+    const decision = await Promise.race([this.#approvals.waitForDecision(requestId), aborted]);
+    if (decision !== null) return decision;
+    if (turn.status === "cancelled") {
+      await this.#approvals.withdraw(requestId, "回合已取消");
+      return "cancelled";
+    }
+    return "paused";
   }
 
   #onApprovalUpdate(update: ApprovalUpdate): void {
@@ -1360,6 +1407,7 @@ export class FakeEngine implements EngineAdapter {
     const conversation = this.#conversations.get(conversationId);
     if (!conversation || conversation.deleted) return;
     if (update.kind === "requested") {
+      this.#pendingApprovals += 1;
       this.#emit(conversation, (seq) => ({
         kind: "approval.requested",
         seq,
@@ -1368,6 +1416,7 @@ export class FakeEngine implements EngineAdapter {
         request: update.request,
       }));
     } else {
+      this.#pendingApprovals = Math.max(0, this.#pendingApprovals - 1);
       this.#emit(conversation, (seq) => ({
         kind: "approval.resolved",
         seq,

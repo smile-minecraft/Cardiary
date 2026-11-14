@@ -93,8 +93,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function parseAuth(value: unknown): ControlAuth {
-  if (!isObject(value) || typeof value.token !== "string" || value.token.length === 0) {
-    throw new ControlError("invalid_message", "frame 缺少 auth.token");
+  // 缺 Token 不是「壞 frame」而是認證失敗：交給通道回 unauthorized 並關閉，
+  // 不要用 invalid_message 混淆。
+  if (!isObject(value) || typeof value.token !== "string") {
+    return { token: "" };
   }
   return { token: value.token };
 }
