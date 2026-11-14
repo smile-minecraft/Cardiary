@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   connect,
   connectAndHello,
+  makeFolder,
   spawnExpectInitFailure,
   spawnService,
   waitUntil,
@@ -684,5 +685,86 @@ describe("審查修正的契約驗證", () => {
     });
     const resentReceipt = await connected.waitForReply(resentSend);
     expect((resentReceipt.payload as { userMessageId: string }).userMessageId).toBe(userMessageId);
+  });
+});
+
+describe("複審非阻擋項", () => {
+  it("儲存失效：送 notify.fatal、客戶端 1011、行程以 70 結束", async () => {
+    const service = await boot({
+      control: true,
+      faultCloseEventLogMs: 200,
+      scripts: [[{ kind: "text", text: "不會完成" }]],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const connected = await client(service);
+    const create = connected.request("session.create", { clientRequestId: "cr-fatal" });
+    const created = await connected.waitForReply(create);
+    const sessionId = (created.payload as { session: { id: string } }).session.id;
+    connected.request("session.send_message", { sessionId, text: "觸發", delivery: "queue" });
+    await waitUntil(
+      () => service.notifications().some((frame) => frame.route === "notify.fatal"),
+      5000,
+    );
+    const fatal = service.notifications().find((frame) => frame.route === "notify.fatal");
+    expect((fatal?.payload as { reason?: string }).reason).toBe("storage_io");
+    const code = await Promise.race([
+      service.exited,
+      new Promise<number | null>((resolve) => setTimeout(() => resolve(-1), 5000)),
+    ]);
+    expect(code).toBe(70);
+    await waitUntil(() => connected.closed, 5000);
+    expect(connected.closeCode).toBe(1011);
+    expect(connected.closeReason).toBe("storage_failure");
+  }, 20_000);
+
+  it("模組事件外殼：module API 觸發的 module.* 事件可從協定觀測", async () => {
+    const service = await boot();
+    const connected = await client(service);
+    const subscribe = connected.request("system.subscribe", {});
+    await connected.waitForReply(subscribe);
+    const emit = connected.request("module.demo.emit", {
+      data: { action: "emit", value: 42 },
+    });
+    const reply = await connected.waitForReply(emit);
+    expect((reply.payload as { data: { emitted: boolean } }).data.emitted).toBe(true);
+    const event = await connected.waitFor((frame) => frame.type === "module.demo.changed");
+    expect((event.payload as { data: { value: number } }).data.value).toBe(42);
+    expect(typeof event.seq).toBe("number");
+  });
+
+  it("去重恢復：服務自己留下的 pending（resource_id 已寫）重送會補回應", async () => {
+    const service = await boot({ faultSkipDedupeComplete: true });
+    const connected = await client(service);
+    const first = connected.request("session.create", { clientRequestId: "cr-pending" });
+    const created = await connected.waitForReply(first);
+    const sessionId = (created.payload as { session: { id: string } }).session.id;
+    // 第一個 complete 被故障注入跳過：dedupe 停在 pending、resource_id 已寫。
+    const retry = connected.request("session.create", { clientRequestId: "cr-pending" });
+    const recovered = await connected.waitForReply(retry);
+    expect((recovered.payload as { session: { id: string } }).session.id).toBe(sessionId);
+    const again = connected.request("session.create", { clientRequestId: "cr-pending" });
+    const completed = await connected.waitForReply(again);
+    expect((completed.payload as { session: { id: string } }).session.id).toBe(sessionId);
+  });
+
+  it("control.resume 換路徑回 unavailable，不換資料夾也不重開狀態庫", async () => {
+    const service = await boot({ control: true });
+    const healthBefore = await service.controlRequest("control.health");
+    const folderId = (healthBefore.payload as { folderId: string }).folderId;
+    const paused = await service.controlRequest("control.pause", { reason: "user" });
+    expect((paused.payload as { state: string }).state).toBe("paused");
+    const otherPath = await makeFolder(folderId);
+    const resumed = await service.controlRequest("control.resume", {
+      folder: { path: otherPath.path },
+    });
+    expect(resumed.ok).toBe(false);
+    expect((resumed.error as { code: string }).code).toBe("unavailable");
+    const healthAfter = await service.controlRequest("control.health");
+    expect((healthAfter.payload as { state: string }).state).toBe("paused");
+    expect((healthAfter.payload as { folderId: string }).folderId).toBe(folderId);
+    const samePath = await service.controlRequest("control.resume", {
+      folder: { path: service.folder.path },
+    });
+    expect((samePath.payload as { state: string }).state).toBe("ready");
   });
 });

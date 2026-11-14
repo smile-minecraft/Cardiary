@@ -74,6 +74,8 @@ export interface GatewayOptions {
   readonly moduleHandlers?: ReadonlyMap<string, ModuleHandler>;
   /** 緊急全部暫停時取消工具子行程；由服務接上共用 spawn wrapper。 */
   readonly cancelToolProcesses?: (deadlineMs: number) => Promise<number>;
+  /** 測試用故障注入：讓第一個 request_dedupe complete 不寫入，模擬中斷窗口。 */
+  readonly faultSkipDedupeComplete?: boolean;
 }
 
 export class RequestFailure extends Error {
@@ -157,6 +159,9 @@ export class Gateway {
   readonly #requestCache = new Map<string, Map<string, ServerFrame | Unknown>>();
   readonly #messageCounts = new Map<string, number>();
   readonly #pendingDecided = new Map<string, { promise: Promise<void>; resolve: () => void }>();
+  #storageFailureHandler: ((detail: string) => void) | null = null;
+  #storageFailed = false;
+  #faultSkipComplete: boolean;
   #http: Server | null = null;
   #wss: WebSocketServer | null = null;
   #heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -173,6 +178,7 @@ export class Gateway {
     this.#buffer = new StreamingBuffer(this.limits.streamingBufferBytes);
     this.#logger = options.logger;
     this.#clock = options.clock ?? { now: () => new Date() };
+    this.#faultSkipComplete = options.faultSkipDedupeComplete === true;
     for (const [namespace, handler] of options.moduleHandlers ?? []) {
       this.#moduleHandlers.set(namespace, handler);
     }
@@ -188,6 +194,19 @@ export class Gateway {
 
   registerModuleNamespace(namespace: string, handler: ModuleHandler): void {
     this.#moduleHandlers.set(namespace, handler);
+  }
+
+  /** 由服務接上：儲存失效時停止寫入、送 notify.fatal、關閉客戶端。 */
+  setStorageFailureHandler(handler: (detail: string) => void): void {
+    this.#storageFailureHandler = handler;
+  }
+
+  #reportStorageFailure(error: unknown): void {
+    if (this.#storageFailed) return;
+    this.#storageFailed = true;
+    const detail = errorMessage(error);
+    this.#logger.error("儲存失效，停止寫入", { detail });
+    this.#storageFailureHandler?.(detail);
   }
 
   async listen(port = 0): Promise<number> {
@@ -816,6 +835,11 @@ export class Gateway {
         try {
           await this.#handleEngineEvent(state, event);
         } catch (error) {
+          if (isStorageFailure(error)) {
+            this.#reportStorageFailure(error);
+            state.closed = true;
+            return;
+          }
           this.#logger.error("處理引擎事件失敗", {
             sessionId: state.sessionId,
             kind: event.kind,
@@ -975,10 +999,16 @@ export class Gateway {
         // 但事件處理是同一個佇列，所以 decided 一定排在工具結果與 turn.completed 之前。
         if (gate) await gate.promise;
         const sessionId = resolution.request.draft.conversationId ?? state.sessionId;
-        const effect = resolution.outcome === "approved" ? "approve" : "reject";
         if (this.#isPendingApproval(state, resolution.request.id)) {
           state.pendingApprovalId = null;
         }
+        const decided = resolution.outcome === "approved" || resolution.outcome === "denied";
+        if (!decided) {
+          // expired／withdrawn 沒有對應的協定 effect；只更新快照（pendingApproval
+          // 消失），不送 approval.decided，避免把逾時或撤回誤報成「拒絕」。
+          return;
+        }
+        const effect = resolution.outcome === "approved" ? "approve" : "reject";
         const decidedByClient = resolution.decision?.decidedBy.clientId;
         await this.#appendEvent(state, stream, "approval.decided", {
           approvalId: resolution.request.id,
@@ -1197,13 +1227,22 @@ export class Gateway {
 
   // ---- 快照 -------------------------------------------------------------
 
+  async #oldestPending(sessionId: string): Promise<EngineApprovalRequest | null> {
+    const pending = await this.#options.engine.approvals.listPending({
+      conversationId: sessionId,
+    });
+    const sorted = [...pending].sort((left, right) => {
+      if (left.requestedAt === right.requestedAt) return left.id.localeCompare(right.id);
+      return left.requestedAt.localeCompare(right.requestedAt);
+    });
+    return sorted[0] ?? null;
+  }
+
   async #sessionSnapshot(state: SessionState, historyLimit: number): Promise<SessionSnapshot> {
     const summary = await this.#options.engine.getConversation(state.sessionId);
     if (!summary) throw new RequestFailure(protocolError("not_found", "找不到這場會話。"));
     const entries = await this.#entries(state, historyLimit);
-    const pending = await this.#options.engine.approvals.listPending({
-      conversationId: state.sessionId,
-    });
+    const oldest = await this.#oldestPending(state.sessionId);
     const activeTurn = state.activeTurnId
       ? this.#turnState(state.turns.get(state.activeTurnId))
       : null;
@@ -1212,7 +1251,7 @@ export class Gateway {
       session: this.#sessionSummary(summary, state),
       entries,
       ...(activeTurn ? { activeTurn } : {}),
-      ...(pending[0] ? { pendingApproval: this.#approvalProjection(pending[0]) } : {}),
+      ...(oldest ? { pendingApproval: this.#approvalProjection(oldest) } : {}),
       ...(streaming ? { streaming } : {}),
     };
   }
@@ -1318,7 +1357,12 @@ export class Gateway {
     const summary = await this.#createConversation(title, clientRequestId);
     await this.#options.storage.dedupe.setResource(key, summary.id);
     const payload = { session: summary };
-    await this.#options.storage.dedupe.complete(key, payload as unknown as JSONValue);
+    if (this.#faultSkipComplete) {
+      // 測試故障注入：模擬「引擎已建立、回應前中斷」，dedupe 停在 pending。
+      this.#faultSkipComplete = false;
+    } else {
+      await this.#options.storage.dedupe.complete(key, payload as unknown as JSONValue);
+    }
     return response(request.id, "session.create", payload);
   }
 
@@ -1471,6 +1515,18 @@ export class Gateway {
     }
     const clientMessageId = optionalString(request.payload, "clientMessageId");
     const state = await this.#ensureSession(sessionId);
+    // M0 的會話快照只有一個 pendingApproval：還有未決定的審批時，不開始新回合，
+    // 避免同一場會話同時出現兩筆待審批。排隊／插話在回合進行中不受影響。
+    if (state.activeTurnId === null) {
+      const oldest = await this.#oldestPending(sessionId);
+      if (oldest) {
+        throw new RequestFailure(
+          protocolError("busy", "這場會話還有未決定的審批，請先決定。", {
+            details: { reason: "pending_approval", approvalId: oldest.id },
+          }),
+        );
+      }
+    }
     const key = clientMessageId ? `send-message:${sessionId}:${clientMessageId}` : null;
     if (key !== null) {
       const dedupe = await this.#options.storage.dedupe.claim(key, "send-message");
@@ -1943,6 +1999,14 @@ function isLoopbackOrigin(origin: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isStorageFailure(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "storage-unavailable"
+  );
 }
 
 const ENGINE_ERROR_CODES = new Set([

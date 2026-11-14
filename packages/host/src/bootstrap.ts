@@ -5,7 +5,7 @@ import type {
   ProviderCredential,
   CredentialRef,
 } from "@cardiary/engine-adapter";
-import type { JSONValue } from "@cardiary/protocol";
+import type { JSONObject, JSONValue } from "@cardiary/protocol";
 import { join } from "node:path";
 
 import { BrokerCredentialSource } from "./control/broker.js";
@@ -69,6 +69,10 @@ export interface StartHostOptions {
   readonly deletionIntents?: readonly string[];
   /** 診斷與測試用：儲存操作的時間軸。 */
   readonly trace?: (entry: string) => void;
+  /** 測試故障注入：啟動 N 毫秒後關閉事件日誌，模擬儲存失效。 */
+  readonly faultCloseEventLogAfterMs?: number;
+  /** 測試故障注入：第一個 request_dedupe complete 不寫入。 */
+  readonly faultSkipDedupeComplete?: boolean;
 }
 
 export interface RunningHost {
@@ -157,6 +161,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
     },
     ...(options.limits === undefined ? {} : { limits: options.limits }),
     cancelToolProcesses: (deadlineMs) => spawn.cancelAll(deadlineMs),
+    ...(options.faultSkipDedupeComplete === true ? { faultSkipDedupeComplete: true } : {}),
     ...(options.demo === true
       ? { toolBundles: () => [{ bundleId: DEMO_BUNDLE_ID, generation: DEMO_GENERATION }] }
       : {}),
@@ -164,6 +169,22 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   });
   if (options.demo === true) {
     await registerDemoTools(engine, approvals, spawn);
+    // 模組事件外殼的示範：module.demo.emit 經模組 API 觸發一個 module.* 事件。
+    gateway.registerModuleNamespace("demo", async (payload) => {
+      if (payload.action === "emit") {
+        const data: JSONObject =
+          typeof payload.data === "object" && payload.data !== null && !Array.isArray(payload.data)
+            ? (payload.data as JSONObject)
+            : { value: payload.value ?? null };
+        await gateway.emitModuleEvent({
+          type: "module.demo.changed",
+          stream: "system",
+          data,
+        });
+        return { emitted: true };
+      }
+      return { pong: true };
+    });
   }
   for (const script of options.scripts ?? []) {
     if (engine instanceof FakeEngine) engine.enqueueScript(script);
@@ -185,6 +206,14 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
     ...(options.fatalNotifier === undefined ? {} : { onFatal: options.fatalNotifier }),
   });
   serviceRef = service;
+  gateway.setStorageFailureHandler((detail) => {
+    void service.failStorage(detail);
+  });
+  if (options.faultCloseEventLogAfterMs !== undefined) {
+    setTimeout(() => {
+      void events.close();
+    }, options.faultCloseEventLogAfterMs).unref?.();
+  }
   await service.start();
   return { service, gateway, engine, storage, port, epoch: snapshot.epoch, spawn };
 }

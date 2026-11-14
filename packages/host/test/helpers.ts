@@ -75,11 +75,17 @@ export class TestClient {
   readonly frames: Frame[] = [];
   readonly #ws: WebSocket;
   #counter = 0;
+  closeCode: number | null = null;
+  closeReason = "";
 
   private constructor(ws: WebSocket) {
     this.#ws = ws;
     ws.on("message", (data) => {
       this.frames.push(JSON.parse(data.toString()) as Frame);
+    });
+    ws.on("close", (code, reason) => {
+      this.closeCode = code;
+      this.closeReason = reason.toString();
     });
   }
 

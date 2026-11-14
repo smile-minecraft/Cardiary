@@ -40,11 +40,13 @@ export interface TestFolder {
   readonly folderId: string;
 }
 
-export async function makeFolder(): Promise<TestFolder> {
+export async function makeFolder(requestedFolderId?: string): Promise<TestFolder> {
   const path = await mkdtemp(join(tmpdir(), "cardiary-contract-"));
   await mkdir(join(path, "state"), { recursive: true });
   await mkdir(join(path, "tmp"), { recursive: true });
-  const folderId = `contract_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const folderId =
+    requestedFolderId ??
+    `contract_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   await writeFile(
     join(path, "state", "folder.json"),
     JSON.stringify({ format: 1, folderId, createdAt: new Date().toISOString(), createdBy: "test" }),
@@ -74,6 +76,10 @@ export interface ServiceOptions {
   readonly skipHelloAck?: boolean;
   /** 控制模式：改寫 init 的內容（測試 init 失敗）。 */
   readonly initOverride?: Record<string, unknown>;
+  /** 測試故障注入：啟動 N 毫秒後關閉事件日誌。 */
+  readonly faultCloseEventLogMs?: number;
+  /** 測試故障注入：讓第一個 request_dedupe complete 不寫入。 */
+  readonly faultSkipDedupeComplete?: boolean;
 }
 
 export interface SpawnedService {
@@ -84,6 +90,8 @@ export interface SpawnedService {
   readonly brokerToken: string;
   readonly stderr: () => string;
   readonly stdoutLines: () => readonly string[];
+  /** 控制模式收到的通知（notify.*）。 */
+  readonly notifications: () => readonly Record<string, unknown>[];
   /** 服務行程結束時 resolve；測試 init／hello 失敗要退出。 */
   readonly exited: Promise<number | null>;
   /** 控制模式：送一則控制請求並等回應。 */
@@ -118,6 +126,12 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
   }
   if (options.demo) args.push("--demo");
   if (scriptPath) args.push("--script", scriptPath);
+  if (options.faultCloseEventLogMs !== undefined) {
+    args.push("--fault-close-event-log", String(options.faultCloseEventLogMs));
+  }
+  if (options.faultSkipDedupeComplete === true) {
+    args.push("--fault-skip-dedupe-complete");
+  }
   const child = spawn(process.execPath, args, {
     env: {
       ...process.env,
@@ -128,6 +142,7 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
     stdio: ["pipe", "pipe", "pipe"],
   });
   const stdoutLines: string[] = [];
+  const notifications: Array<Record<string, unknown>> = [];
   let stderrText = "";
   const responses = new Map<string, (frame: Record<string, unknown>) => void>();
   let brokerHandler:
@@ -146,6 +161,10 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
       frame = JSON.parse(line) as Record<string, unknown>;
     } catch {
       throw new Error(`stdout 出現非 JSON 內容：${line}`);
+    }
+    if (frame.kind === "notification") {
+      notifications.push(frame);
+      return;
     }
     if (frame.kind === "hello") {
       if (options.skipHelloAck !== true) {
@@ -242,6 +261,7 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
     brokerToken,
     stderr: () => stderrText,
     stdoutLines: () => stdoutLines,
+    notifications: () => notifications,
     exited,
     setBrokerHandler(handler) {
       brokerHandler = handler;
@@ -338,6 +358,8 @@ export interface ProtocolClient {
   waitForReply(replyTo: string, ms?: number): Promise<Record<string, unknown>>;
   waitForEvent(type: string, ms?: number): Promise<Record<string, unknown>>;
   readonly closed: boolean;
+  readonly closeCode: number | null;
+  readonly closeReason: string;
   close(): Promise<void>;
 }
 
@@ -352,6 +374,8 @@ export async function connect(url: string): Promise<ProtocolClient> {
   const waiters: Array<() => void> = [];
   let counter = 0;
   let closed = false;
+  let closeCode: number | null = null;
+  let closeReason = "";
   ws.on("message", (data) => {
     const frame = JSON.parse(data.toString()) as Record<string, unknown>;
     void validateFrame(frame).then(() => {
@@ -359,8 +383,10 @@ export async function connect(url: string): Promise<ProtocolClient> {
       for (const waiter of waiters.splice(0)) waiter();
     });
   });
-  ws.on("close", () => {
+  ws.on("close", (code, reason) => {
     closed = true;
+    closeCode = code;
+    closeReason = reason.toString();
     for (const waiter of waiters.splice(0)) waiter();
   });
   const client: ProtocolClient = {
@@ -402,6 +428,12 @@ export async function connect(url: string): Promise<ProtocolClient> {
     },
     get closed() {
       return closed;
+    },
+    get closeCode() {
+      return closeCode;
+    },
+    get closeReason() {
+      return closeReason;
     },
     async close() {
       if (closed) return;

@@ -1,4 +1,5 @@
 import type { Clock, EngineLogger } from "@cardiary/engine-adapter";
+import { resolve } from "node:path";
 
 import { ControlError } from "./errors.js";
 import type { HostEngine } from "./engine/types.js";
@@ -213,11 +214,15 @@ export class HostService {
     return this.#withLifecycle("resuming", async () => {
       const epochBefore = this.#epochAtPause || this.epoch;
       const targetPath = requestedFolderPath ?? this.#folder.path;
+      if (resolve(targetPath) !== resolve(this.#folder.path)) {
+        // M0 的儲存與引擎路徑在啟動時固定；換路徑等於要重綁兩個資料庫，
+        // 先要求殼重啟服務，不假裝恢復成功。
+        throw new ControlError("unavailable", "資料夾路徑與暫停時不同；M0 請由殼重啟服務。");
+      }
       try {
-        const identity = await readFolderIdentity(targetPath, {
+        this.#folder = await readFolderIdentity(targetPath, {
           expectedFolderId: this.#folder.folderId,
         });
-        this.#folder = identity;
       } catch {
         this.#folderState = "unavailable";
         this.#serviceState = "paused";

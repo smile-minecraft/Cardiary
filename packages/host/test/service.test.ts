@@ -287,18 +287,25 @@ describe("生命週期", () => {
     await late.close();
   }, 15_000);
 
-  it("control.resume 採用 payload 的資料夾路徑（同一個 folderId）", async () => {
+  it("control.resume 只接受同一個資料夾路徑：不同路徑回 unavailable，不換資料夾", async () => {
     const { makeFolder } = await import("./helpers.js");
     const original = await makeFolder();
     const host = await startTestHost({ folder: original });
     hosts.push(host);
     await host.host.service.pause("user", 100);
-    const remounted = await makeFolder(original.folderId);
-    const resumed = await host.host.service.resume(remounted.path);
+    const reopensBefore = runtimeCalls(host).filter((call) => call === "runtime.reopen").length;
+    const otherPath = await makeFolder(original.folderId);
+    await expect(host.host.service.resume(otherPath.path)).rejects.toMatchObject({
+      code: "unavailable",
+    });
+    expect(runtimeCalls(host).filter((call) => call === "runtime.reopen").length).toBe(
+      reopensBefore,
+    );
+    expect(host.host.service.health().folderId).toBe(original.folderId);
+    expect(host.host.service.statusInput().displayName).toBe(original.path.split("/").pop());
+    const resumed = await host.host.service.resume(original.path);
     expect(resumed.state).toBe("ready");
     expect(resumed.folderId).toBe(original.folderId);
-    expect(host.host.service.health().folderId).toBe(original.folderId);
-    expect(host.host.service.statusInput().displayName).toBe(remounted.path.split("/").pop());
   });
 
   it("維護通知：開始與結束各一次，health 在操作中顯示 lifecycle", async () => {

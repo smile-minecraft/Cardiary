@@ -696,6 +696,169 @@ describe("審查修正的回歸測試", () => {
     expect(raw.readyState).toBe(WebSocket.CLOSED);
   }, 10_000);
 
+  it("儲存失效：事件日誌失效後送訊息，fatalNotifier 被呼叫且客戶端收到 1011", async () => {
+    const failures: string[] = [];
+    const host = await boot({
+      fatalNotifier: async (reason, detail) => {
+        failures.push(`${reason}:${detail}`);
+      },
+    });
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    await subscribeSession(client, sessionId);
+    await (host.host.storage.events as unknown as { close(): Promise<void> }).close();
+    client.request("session.send_message", { sessionId, text: "觸發", delivery: "queue" });
+    await waitUntil(() => failures.length > 0, 4000);
+    expect(failures[0]?.startsWith("storage_io:")).toBe(true);
+    await waitUntil(() => client.closed, 4000);
+    expect(client.closeCode).toBe(1011);
+    expect(client.closeReason).toBe("storage_failure");
+    expect(host.host.service.health().state).toBe("storage-failed");
+  });
+
+  it("expired 與 withdrawn 不送 approval.decided，也不會被誤報成 reject", async () => {
+    const host = await boot();
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    await subscribeSession(client, sessionId);
+    const draft = {
+      conversationId: sessionId,
+      turnId: "turn_manual",
+      action: {
+        kind: "tool-execution" as const,
+        summary: "手動審批",
+        toolName: "demo.echo",
+        toolInput: { text: "expire" },
+      },
+      risk: "unknown" as const,
+      requestedBy: { kind: "tool" as const, toolName: "demo.echo" },
+      timeoutMs: 30,
+    };
+    const expiring = await host.host.engine.approvals.request(draft);
+    await client.waitFor(
+      (frame) =>
+        frame.type === "approval.requested" &&
+        (frame.payload as { approvalId?: string }).approvalId === expiring.id,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(client.frames.some((frame) => frame.type === "approval.decided")).toBe(false);
+    const expiringSnapshot = await helloClient(host);
+    const expiringSubscribe = expiringSnapshot.request("session.subscribe", { sessionId });
+    const expiringReply = await expiringSnapshot.waitForReply(expiringSubscribe);
+    expect(
+      (expiringReply.payload as { snapshot?: { pendingApproval?: unknown } }).snapshot
+        ?.pendingApproval,
+    ).toBeUndefined();
+
+    const withdrawn = await host.host.engine.approvals.request({
+      ...draft,
+      action: { ...draft.action, toolInput: { text: "withdraw" } },
+      timeoutMs: 5000,
+    });
+    await client.waitFor(
+      (frame) =>
+        frame.type === "approval.requested" &&
+        (frame.payload as { approvalId?: string }).approvalId === withdrawn.id,
+    );
+    await host.host.engine.approvals.withdraw(withdrawn.id, "測試撤回");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(client.frames.some((frame) => frame.type === "approval.decided")).toBe(false);
+    await client.close();
+    await expiringSnapshot.close();
+  });
+
+  it("M0 只顯示最舊的待審批；有 pending 時拒絕新回合，決定後才放行", async () => {
+    const host = await boot();
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    await subscribeSession(client, sessionId);
+    const base = {
+      conversationId: sessionId,
+      turnId: "turn_manual",
+      action: {
+        kind: "tool-execution" as const,
+        summary: "手動審批",
+        toolName: "demo.echo",
+      },
+      risk: "unknown" as const,
+      requestedBy: { kind: "tool" as const, toolName: "demo.echo" },
+      timeoutMs: 5000,
+    };
+    const first = await host.host.engine.approvals.request({
+      ...base,
+      action: { ...base.action, toolInput: { text: "first" } },
+    });
+    await client.waitFor(
+      (frame) =>
+        frame.type === "approval.requested" &&
+        (frame.payload as { approvalId?: string }).approvalId === first.id,
+    );
+    const second = await host.host.engine.approvals.request({
+      ...base,
+      action: { ...base.action, toolInput: { text: "second" } },
+    });
+    await client.waitFor(
+      (frame) =>
+        frame.type === "approval.requested" &&
+        (frame.payload as { approvalId?: string }).approvalId === second.id,
+    );
+    const subscribeId = client.request("session.subscribe", { sessionId });
+    const snapshot = await client.waitForReply(subscribeId);
+    expect(
+      (snapshot.payload as { snapshot?: { pendingApproval?: { approvalId?: string } } }).snapshot
+        ?.pendingApproval?.approvalId,
+    ).toBe(first.id);
+    const blocked = client.request("session.send_message", {
+      sessionId,
+      text: "先送",
+      delivery: "queue",
+    });
+    const blockedReply = await client.waitForReply(blocked);
+    expect(blockedReply.code).toBe("busy");
+    expect((blockedReply.details as { reason?: string }).reason).toBe("pending_approval");
+    expect((blockedReply.details as { approvalId?: string }).approvalId).toBe(first.id);
+    await host.host.engine.approvals.decide({
+      requestId: first.id,
+      verdict: "approve",
+      decidedBy: { kind: "human", clientId: "a" },
+    });
+    await waitUntil(() => client.frames.some((frame) => frame.type === "approval.decided"));
+    const subscribeAgain = client.request("session.subscribe", { sessionId });
+    const snapshotAgain = await client.waitForReply(subscribeAgain);
+    expect(
+      (snapshotAgain.payload as { snapshot?: { pendingApproval?: { approvalId?: string } } })
+        .snapshot?.pendingApproval?.approvalId,
+    ).toBe(second.id);
+    const blockedAgain = client.request("session.send_message", {
+      sessionId,
+      text: "還是先送",
+      delivery: "queue",
+    });
+    expect((await client.waitForReply(blockedAgain)).code).toBe("busy");
+    await host.host.engine.approvals.decide({
+      requestId: second.id,
+      verdict: "deny",
+      decidedBy: { kind: "human", clientId: "a" },
+    });
+    await waitUntil(
+      () => client.frames.filter((frame) => frame.type === "approval.decided").length >= 2,
+    );
+    const send = client.request("session.send_message", {
+      sessionId,
+      text: "可以送了",
+      delivery: "queue",
+    });
+    const sent = await client.waitForReply(send);
+    expect(sent.kind).toBe("response");
+    await client.waitFor(
+      (frame) =>
+        frame.type === "stream.message_completed" &&
+        (frame.payload as { entry: { text: string } }).entry.text === "收到。",
+      5000,
+    );
+    await client.close();
+  });
+
   it("session.list 的 messageCount 會反映已完成的訊息", async () => {
     const host = await boot({ scripts: [[{ kind: "text", text: "計數" }]] });
     const client = await helloClient(host);

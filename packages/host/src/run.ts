@@ -45,6 +45,8 @@ interface ParsedArgs {
   readonly demo: boolean;
   readonly script?: string;
   readonly control: boolean;
+  readonly faultCloseEventLogMs?: number;
+  readonly faultSkipDedupeComplete: boolean;
 }
 
 class InitError extends Error {
@@ -63,6 +65,8 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let demo = false;
   let script: string | undefined;
   let control = false;
+  let faultCloseEventLogMs: number | undefined;
+  let faultSkipDedupeComplete = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     switch (arg) {
@@ -88,6 +92,15 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       case "--control":
         control = true;
         break;
+      case "--fault-close-event-log": {
+        const value = argv[index + 1];
+        faultCloseEventLogMs = value === undefined ? undefined : Number.parseInt(value, 10);
+        index += 1;
+        break;
+      }
+      case "--fault-skip-dedupe-complete":
+        faultSkipDedupeComplete = true;
+        break;
       default:
         break;
     }
@@ -98,6 +111,8 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     demo,
     ...(script === undefined ? {} : { script }),
     control,
+    ...(faultCloseEventLogMs === undefined ? {} : { faultCloseEventLogMs }),
+    faultSkipDedupeComplete,
   };
 }
 
@@ -264,6 +279,13 @@ async function runIndependent(
       demo: args.demo,
       scripts,
       ...(args.port === undefined ? {} : { port: args.port }),
+      ...(args.faultCloseEventLogMs === undefined
+        ? {}
+        : { faultCloseEventLogAfterMs: args.faultCloseEventLogMs }),
+      ...(args.faultSkipDedupeComplete ? { faultSkipDedupeComplete: true } : {}),
+      fatalNotifier: async () => {
+        setTimeout(() => process.exit(70), 50).unref?.();
+      },
     });
   } catch (error) {
     stderr.write(`服務啟動失敗：${messageOf(error)}\n`);
@@ -332,10 +354,19 @@ async function runControl(
       demo: args.demo,
       scripts,
       ...(args.port === undefined ? {} : { port: args.port }),
+      ...(args.faultCloseEventLogMs === undefined
+        ? {}
+        : { faultCloseEventLogAfterMs: args.faultCloseEventLogMs }),
+      ...(args.faultSkipDedupeComplete ? { faultSkipDedupeComplete: true } : {}),
       maintenanceNotifier: async (lifecycle, operationId) => {
         await channelRef
           ?.notify("notify.maintenance", { lifecycle, operationId })
           .catch(() => undefined);
+      },
+      fatalNotifier: async (reason, detail) => {
+        await channelRef?.notify("notify.fatal", { reason, detail }).catch(() => undefined);
+        // 留一點時間讓 notify.fatal 與客戶端的 1011 close frame 送出去。
+        setTimeout(() => process.exit(70), 50).unref?.();
       },
     });
   } catch (error) {
