@@ -35,6 +35,11 @@ async function validateFrame(frame: unknown): Promise<void> {
   }
 }
 
+/** 這一輪契約測試要跑的組裝；`CARDIARY_CONTRACT_ENGINE=pi` 切到產品組裝。 */
+export function engineUnderTest(): "fake" | "pi" {
+  return process.env.CARDIARY_CONTRACT_ENGINE === "pi" ? "pi" : "fake";
+}
+
 export interface TestFolder {
   readonly path: string;
   readonly folderId: string;
@@ -88,7 +93,12 @@ export interface ServiceOptions {
   readonly faultSkipDedupeComplete?: boolean;
   /** 測試故障注入：啟動 N 毫秒後關閉執行期狀態庫。 */
   readonly faultCloseRuntimeMs?: number;
-  /** 引擎組裝；預設 `fake`，`pi` 用 Pi Durable 加腳本化模型。 */
+  /**
+   * 引擎組裝；預設 `fake`，`pi` 用 Pi Durable 加腳本化模型。
+   *
+   * 也可以用環境變數 `CARDIARY_CONTRACT_ENGINE=pi` 切換，讓同一份契約測試
+   * 對兩種組裝各跑一次。
+   */
   readonly engine?: "fake" | "pi";
   /** 重用既有資料夾；驗證重開後接回同一份資料。 */
   readonly folder?: TestFolder;
@@ -126,7 +136,7 @@ export interface SpawnedService {
 
 /** 啟動一個獨立執行的主機服務（控制面或獨立模式），回傳埠與 Token。 */
 export async function spawnService(options: ServiceOptions = {}): Promise<SpawnedService> {
-  const engine = options.engine ?? "fake";
+  const engine = options.engine ?? engineUnderTest();
   const folder = options.folder ?? (engine === "pi" ? await makeEmptyFolder() : await makeFolder());
   const args = [HOST_ENTRY];
   const clientToken = options.clientToken ?? "C".repeat(43);

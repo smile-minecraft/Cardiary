@@ -76,6 +76,44 @@ describe("對話生命週期", () => {
     }
   });
 
+  it("訊息的 createdAt 是真正的時間，不是 entry 流水號", async () => {
+    const fixture = await createFixture();
+    try {
+      const conversation = await fixture.adapter.createConversation({
+        title: "時間",
+        model: { provider: "faux", model: "faux-1" },
+        systemContext: "你是測試助理",
+        toolBundles: [],
+      });
+      fixture.faux.setResponses(answer("帶時間的回覆"));
+      const before = Date.now();
+      await fixture.adapter.sendMessage({
+        conversationId: conversation.id,
+        content: [{ type: "text", text: "現在幾點" }],
+        delivery: "queue",
+        sender: { kind: "human", clientId: "test" },
+      });
+      await waitFor(async () => {
+        const history = await fixture.adapter.readConversationHistory({
+          conversationId: conversation.id,
+        });
+        return history.messages.some((message) => message.role === "assistant") ? true : undefined;
+      }, "助理訊息");
+      const history = await fixture.adapter.readConversationHistory({
+        conversationId: conversation.id,
+      });
+      expect(history.messages.length).toBeGreaterThanOrEqual(2);
+      for (const message of history.messages) {
+        const at = Date.parse(message.createdAt);
+        expect(Number.isFinite(at)).toBe(true);
+        // entry 流水號很小，拿它當毫秒會落在 1970；真正的時間一定晚於測試開始。
+        expect(at).toBeGreaterThanOrEqual(before - 1000);
+      }
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it("用 clientRequestId 建立後重啟仍找得到同一場對話", async () => {
     const fixture = await createFixture();
     const conversation = await fixture.adapter.createConversation({

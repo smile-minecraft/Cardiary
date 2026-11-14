@@ -208,7 +208,23 @@ function assemblyFor(
   if (scripts.length === 0) {
     return { assembly: "pi", credentials };
   }
-  const scripted = createScriptedModels();
+  // 腳本若指定了分段與間隔，換成對應的串流速度；這樣同一份契約測試
+  // 在 Pi 組裝下也看得到逐步的文字增量。
+  const paced = scripts
+    .flat()
+    .find(
+      (step) => step.kind === "text" && step.chunkSize !== undefined && step.delayMs !== undefined,
+    );
+  const scripted =
+    paced !== undefined &&
+    paced.kind === "text" &&
+    paced.chunkSize !== undefined &&
+    paced.delayMs !== undefined
+      ? createScriptedModels({
+          tokensPerSecond: Math.max(1, Math.round(1000 / paced.delayMs)),
+          tokenSize: { min: paced.chunkSize, max: paced.chunkSize },
+        })
+      : createScriptedModels();
   for (const turn of scripts) {
     for (const step of turn) {
       if (step.kind === "text") {

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   connect,
   connectAndHello,
+  engineUnderTest,
   makeFolder,
   spawnExpectInitFailure,
   spawnFaultFlagWithoutEnv,
@@ -415,6 +416,29 @@ describe("以 node 直接啟動的主機服務", () => {
     const reply = await connected.waitForReply(id);
     expect(reply.code).toBe("not_found");
   });
+
+  // 假引擎是記憶體替身，重啟後沒有資料可接；這一項只在產品組裝跑。
+  it.skipIf(engineUnderTest() === "fake")(
+    "重開服務後同一個資料夾續用，同一筆 clientRequestId 不會建立第二個對話",
+    async () => {
+      const service = await boot();
+      const first = await client(service);
+      const created = first.request("session.create", { clientRequestId: "restart-1" });
+      const createdReply = await first.waitForReply(created);
+      const sessionId = (createdReply.payload as { session: { id: string } }).session.id;
+      await first.close();
+      await service.stop();
+      services.splice(services.indexOf(service), 1);
+
+      const again = await spawnService({ demo: true, folder: service.folder });
+      services.push(again);
+      const connected = await client(again);
+      const replay = connected.request("session.create", { clientRequestId: "restart-1" });
+      const replayReply = await connected.waitForReply(replay);
+      expect((replayReply.payload as { session: { id: string } }).session.id).toBe(sessionId);
+      await connected.close();
+    },
+  );
 });
 
 describe("私有控制面（黑箱）", () => {
@@ -591,11 +615,12 @@ describe("審查修正的契約驗證", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     const pause = connected.request("approval.pause_all", { reason: "緊急" });
     const paused = await connected.waitForReply(pause);
-    await connected.waitFor(
+    const interruptedFrame = await connected.waitFor(
       (frame) =>
         frame.type === "stream.turn_state" &&
         (frame.payload as { state: string }).state === "interrupted",
     );
+    const pausedTurnId = (interruptedFrame.payload as { turnId: string }).turnId;
     const afterPauseIndex = connected.frames.indexOf(paused);
     const lateResults = connected.frames.filter(
       (frame) =>
@@ -613,10 +638,13 @@ describe("審查修正的契約驗證", () => {
       delivery: "queue",
     });
     await connected.waitForReply(send);
+    // 這裡驗的是「恢復後還能再跑完一個回合」，不是文字內容：緊急暫停會
+    // 影響腳本化的模型回應被哪一輪用掉，兩種組裝不保證同一段文字。
     const completed = await connected.waitFor(
       (frame) =>
         frame.type === "stream.message_completed" &&
-        (frame.payload as { entry: { text: string } }).entry.text === "恢復後",
+        (frame.payload as { entry: { status: string } }).entry.status === "complete" &&
+        (frame.payload as { turnId: string }).turnId !== pausedTurnId,
       6000,
     );
     expect(completed.type).toBe("stream.message_completed");

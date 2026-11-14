@@ -29,8 +29,18 @@ export interface ScriptedModels {
  * 正式產品由殼提供供應商 SDK 與金鑰；契約測試與端到端測試用這個來源，
  * 讓 Pi Durable 的轉接層跑真正的引擎，但模型回應是固定的。
  */
-export function createScriptedModels(): ScriptedModels {
-  const faux = fauxProvider();
+export interface ScriptedModelsOptions {
+  /** 每秒串流幾個片段；省略時一次送完。 */
+  readonly tokensPerSecond?: number;
+  /** 每個片段的字元數；省略時由 provider 決定。 */
+  readonly tokenSize?: { readonly min?: number; readonly max?: number };
+}
+
+export function createScriptedModels(options: ScriptedModelsOptions = {}): ScriptedModels {
+  const faux = fauxProvider({
+    ...(options.tokensPerSecond === undefined ? {} : { tokensPerSecond: options.tokensPerSecond }),
+    ...(options.tokenSize === undefined ? {} : { tokenSize: options.tokenSize }),
+  });
   const queue: AssistantMessage[] = [];
   const flush = (): void => {
     faux.setResponses([...queue]);

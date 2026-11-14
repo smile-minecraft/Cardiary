@@ -217,6 +217,13 @@ class PersistentEventLog implements EventLogStore {
 class PersistentRuntimeState implements RuntimeStateStore {
   readonly #storage: Storage;
   #opened = false;
+  /**
+   * 最近一次讀到的快照。
+   *
+   * `control.health` 在暫停後（狀態庫已關閉）仍要回答 epoch，所以記憶體裡
+   * 留一份；資料庫開著時以資料庫為準。
+   */
+  #snapshot: RuntimeStateSnapshot | null = null;
 
   constructor(storage: Storage) {
     this.#storage = storage;
@@ -228,22 +235,34 @@ class PersistentRuntimeState implements RuntimeStateStore {
 
   async open(): Promise<RuntimeStateSnapshot> {
     this.#opened = true;
-    return snapshotOf(this.#storage.runtime.open());
+    this.#snapshot = snapshotOf(this.#storage.runtime.open());
+    return this.#snapshot;
   }
 
   async reopen(): Promise<RuntimeStateSnapshot> {
-    const snapshot = this.#storage.runtime.reopen();
+    const snapshot = snapshotOf(this.#storage.runtime.reopen());
     this.#opened = true;
-    return snapshotOf(snapshot);
+    this.#snapshot = snapshot;
+    return snapshot;
   }
 
   current(): RuntimeStateSnapshot | null {
-    const snapshot = this.#storage.runtime.read();
-    return snapshot === null ? null : snapshotOf(snapshot);
+    if (!this.#storage.state.isClosed) {
+      try {
+        const snapshot = this.#storage.runtime.read();
+        if (snapshot !== null) {
+          this.#snapshot = snapshotOf(snapshot);
+          return this.#snapshot;
+        }
+      } catch {
+        // 讀不到就用最後一次的快照；健康檢查不能因此失敗。
+      }
+    }
+    return this.#snapshot;
   }
 
   async markCleanShutdown(reason: string): Promise<void> {
-    this.#storage.runtime.markCleanShutdown(reason);
+    this.#snapshot = snapshotOf(this.#storage.runtime.markCleanShutdown(reason));
   }
 
   async checkpointAndClose(): Promise<void> {

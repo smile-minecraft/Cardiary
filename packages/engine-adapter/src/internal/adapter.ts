@@ -117,6 +117,24 @@ export class PiEngineAdapter implements EngineAdapter {
   readonly #announcedApprovals = new Set<string>();
   /** 工具呼叫的執行結果；`tool.finished` 的 `ok` 從這裡來。 */
   readonly #toolOutcomes = new Map<ToolCallId, boolean>();
+  /**
+   * 被中斷的回合。
+   *
+   * 引擎的 submission 在 abort 之後仍可能以 `done` 結束；不記下來的話
+   * `turn.completed` 會把中斷的回合說成完成。這一組只在行程內有效，
+   * 重啟後的恢復走 `restoreConversation` 的回報。
+   */
+  readonly #interruptedTurns = new Set<TurnId>();
+  /**
+   * 工具結果的內容與給介面用的資料。
+   *
+   * 引擎只持久化模型看得到的文字；`metadata` 不進引擎的紀錄，但 `tool.finished`
+   * 事件要把它交給主機產生介面資料，所以執行時先留在記憶體（上限同 outcomes）。
+   */
+  readonly #toolResults = new Map<
+    ToolCallId,
+    { readonly text: string; readonly metadata?: JsonValue }
+  >();
   readonly #statusListeners = new Set<(status: EngineStatus) => void>();
 
   constructor(options: EngineAdapterOptions) {
@@ -407,16 +425,25 @@ export class PiEngineAdapter implements EngineAdapter {
     details?: JsonValue;
   }> {
     const result = await this.#executeTool(input);
-    this.#recordToolOutcome(input.callId, result.isError !== true);
+    this.#recordToolOutcome(input.callId, result.isError !== true, {
+      text: result.output.map((block) => block.text).join("\n"),
+      ...(result.details === undefined ? {} : { metadata: result.details }),
+    });
     return result;
   }
 
-  #recordToolOutcome(callId: ToolCallId, ok: boolean): void {
+  #recordToolOutcome(
+    callId: ToolCallId,
+    ok: boolean,
+    result: { readonly text: string; readonly metadata?: JsonValue },
+  ): void {
     this.#toolOutcomes.set(callId, ok);
+    this.#toolResults.set(callId, result);
     if (this.#toolOutcomes.size > 1000) {
       const oldest = this.#toolOutcomes.keys().next().value;
       if (oldest !== undefined) {
         this.#toolOutcomes.delete(oldest);
+        this.#toolResults.delete(oldest);
       }
     }
   }
@@ -989,7 +1016,7 @@ export class PiEngineAdapter implements EngineAdapter {
       BACKGROUND_CONTEXT,
     );
     const messages = page.items
-      .map((entry) => entryToMessage(entry))
+      .map((entry) => entryToMessage(entry, this.#clock.now().toISOString()))
       .filter((message): message is ConversationMessage => message !== null)
       .reverse();
     const oldest = page.items.at(-1)?.id;
@@ -1393,7 +1420,7 @@ export class PiEngineAdapter implements EngineAdapter {
         );
         for (const entry of page.items) {
           lastSeen = Math.max(lastSeen, entry.id);
-          const message = entryToMessage(entry);
+          const message = entryToMessage(entry, this.#clock.now().toISOString());
           if (message !== null) {
             this.#bus.publish({
               kind: "message.appended",
@@ -1448,7 +1475,10 @@ export class PiEngineAdapter implements EngineAdapter {
       });
     }
     await settledPromise;
-    const finalStatus = (settled ?? "completed") as CompletedTurnStatus;
+    const interrupted = this.#interruptedTurns.delete(turnId);
+    const finalStatus = (
+      interrupted ? "interrupted" : (settled ?? "completed")
+    ) as CompletedTurnStatus;
     await this.#finishTurn(conversationId, turnId, finalStatus);
     this.#bus.publish({
       kind: "turn.completed",
@@ -1520,22 +1550,40 @@ export class PiEngineAdapter implements EngineAdapter {
       code: (diagnostic.code ?? "interrupted") as ToolDiagnostic["code"],
       ...(diagnostic.message === undefined ? {} : { message: diagnostic.message }),
     }));
+    const callId = data?.callId ?? `call_${entry.id}`;
+    const recorded = this.#toolResults.get(callId);
+    const message = entry.model?.[0] as
+      | {
+          isError?: boolean;
+          content?: readonly { type?: string; text?: string }[];
+          details?: JsonValue;
+        }
+      | undefined;
+    const text =
+      recorded?.text ??
+      (message?.content ?? [])
+        .filter((block) => block.type === "text" && typeof block.text === "string")
+        .map((block) => block.text as string)
+        .join("\n");
     this.#bus.publish({
       kind: "tool.finished",
       at: this.#clock.now().toISOString(),
       conversationId,
       turnId,
-      callId: data?.callId ?? `call_${entry.id}`,
+      callId,
       toolName: data?.name ?? "unknown",
       outcome: {
         ok:
-          (entry.model?.[0] as { isError?: boolean } | undefined)?.isError === false
+          message?.isError === false
             ? true
-            : (entry.model?.[0] as { isError?: boolean } | undefined) === undefined
-              ? (this.#toolOutcomes.get(data?.callId ?? `call_${entry.id}`) ?? false)
+            : message === undefined
+              ? (this.#toolOutcomes.get(callId) ?? false)
               : false,
-        content: [{ type: "text", text: "" }],
+        content: [{ type: "text", text }],
         diagnostics,
+        ...((recorded?.metadata ?? message?.details) === undefined
+          ? {}
+          : { metadata: (recorded?.metadata ?? message?.details) as JsonValue }),
       } as ToolOutcome,
     });
   }
@@ -1599,6 +1647,13 @@ export class PiEngineAdapter implements EngineAdapter {
       throw engineError("conversation-not-found", `找不到對話 ${request.conversationId}`);
     }
     const turnId = request.turnId ?? this.#activeTurns.get(request.conversationId)?.turnId;
+    if (turnId !== undefined) {
+      this.#interruptedTurns.add(turnId);
+      if (this.#interruptedTurns.size > 500) {
+        const oldest = this.#interruptedTurns.values().next().value;
+        if (oldest !== undefined) this.#interruptedTurns.delete(oldest);
+      }
+    }
     await conversation.abort(BACKGROUND_CONTEXT);
     if (turnId !== undefined) {
       await this.#finishTurn(request.conversationId, turnId, "cancelled");
@@ -1911,13 +1966,18 @@ export class PiEngineAdapter implements EngineAdapter {
     const pausedTurns: { conversationId: ConversationId; turnId: TurnId }[] = [];
     for (const [conversationId, active] of this.#activeTurns) {
       pausedTurns.push({ conversationId, turnId: active.turnId });
+      this.#interruptedTurns.add(active.turnId);
+    }
+    // 先殺工具子行程再 abort：abort 會等工具任務收尾，順序顛倒的話
+    // 緊急暫停要等工具自己跑完才回得去。
+    await this.#supervisor.terminateAll();
+    for (const { conversationId } of pausedTurns) {
       const conversation = await this.#session.harness.conversation(
         engineConversationId(conversationId),
         BACKGROUND_CONTEXT,
       );
       await conversation?.abort(BACKGROUND_CONTEXT);
     }
-    await this.#supervisor.terminateAll();
     this.#pause = {
       pauseId: `pause_${this.#clock.now().getTime()}`,
       reason,
@@ -2073,7 +2133,14 @@ function contentText(content: readonly ContentBlock[]): string {
     .join("\n");
 }
 
-function entryToMessage(entry: EntryRecord): ConversationMessage | null {
+/**
+ * 把引擎的 entry 轉成協定的訊息。
+ *
+ * `createdAt` 取訊息自己的 `timestamp`（pi-ai 的訊息都帶毫秒時間）；
+ * entry 的 `id` 是單調遞增的流水號，不是時間，不能拿來當時間戳。
+ * 沒有時間的訊息用呼叫端提供的當下時間。
+ */
+function entryToMessage(entry: EntryRecord, fallbackAt: string): ConversationMessage | null {
   if (!entry.kind.startsWith("pi.")) {
     return null;
   }
@@ -2081,17 +2148,22 @@ function entryToMessage(entry: EntryRecord): ConversationMessage | null {
   if (model.length === 0) {
     return null;
   }
-  const message = model[0] as { role?: string; content?: unknown };
+  const message = model[0] as { role?: string; content?: unknown; timestamp?: unknown };
   if (message === undefined || message.role === "system") {
     return null;
   }
   const role =
     entry.kind === "pi.user" ? "user" : entry.kind === "pi.tool-result" ? "tool" : "assistant";
+  const timestamp = message.timestamp;
+  const createdAt =
+    typeof timestamp === "number" && Number.isFinite(timestamp) && timestamp > 0
+      ? new Date(timestamp).toISOString()
+      : fallbackAt;
   return {
     id: String(entry.id),
     role,
     content: [{ type: "text", text: textOfModel(message.content) }],
-    createdAt: new Date(entry.id).toISOString(),
+    createdAt,
     cursor: String(entry.id),
   };
 }
