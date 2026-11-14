@@ -48,7 +48,7 @@ export class Storage {
   readonly folder: FolderManager;
   readonly folderResult: FolderOpenResult;
   readonly state: Database;
-  readonly engine: Database;
+  engine: Database;
   readonly runtime: RuntimeStateStore;
   readonly events: EventLog;
   readonly approvals: ApprovalLedger;
@@ -291,6 +291,36 @@ export class Storage {
   /** 目前快取資料庫；刪除流程重建快取後會換一個連線。 */
   get cache(): Database {
     return this.#cache;
+  }
+
+  /**
+   * 暫停時關掉引擎資料庫連線。
+   *
+   * 轉接層自己有解析引擎的路徑與連線（Harness）；儲存層為了刪除與每日維護
+   * 另外開了一條，暫停時兩條都要關，磁碟才卸載得掉。
+   */
+  closeEngine(): void {
+    if (this.#closed || this.engine.isClosed) {
+      return;
+    }
+    try {
+      this.engine.checkpoint();
+    } catch {
+      // 引擎的 checkpoint 失敗不阻擋暫停；Harness 那邊有自己的錯誤處理。
+    }
+    this.engine.close();
+  }
+
+  /** 恢復暫停時關掉的引擎連線；刪除與維護都要用它。 */
+  reopenEngine(): void {
+    if (!this.engine.isClosed) {
+      return;
+    }
+    this.engine = openEngineDatabase({
+      filePath: this.layout.absolute("state/engine.sqlite"),
+      ...(this.#trace === undefined ? {} : { trace: this.#trace }),
+      onFailure: this.#onDatabaseFailure,
+    });
   }
 
   /** 恢復暫停時關掉的快取連線；檔案不存在時重建。 */

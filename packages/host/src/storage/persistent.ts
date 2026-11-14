@@ -111,13 +111,21 @@ export class PersistentStorage implements StorageBundle {
     this.storage.shutdown();
   }
 
-  /** 暫停時關掉還在開著的連線；引擎由轉接層的 suspend 負責。 */
+  /**
+   * 暫停時關掉儲存層還在開著的連線。
+   *
+   * 狀態庫由 `runtime.checkpointAndClose()` 關、轉接層的 Harness 由
+   * `engine.suspend()` 關；這裡負責快取與儲存層自己的引擎連線
+   * （刪除與每日維護用的那一條）。
+   */
   pauseDatabases(): void {
     this.storage.closeCache();
+    this.storage.closeEngine();
   }
 
   /** 恢復時重開暫停關掉的連線；epoch 對得上才呼叫。 */
   resumeDatabases(): void {
+    this.storage.reopenEngine();
     this.storage.reopenCache();
   }
 

@@ -122,19 +122,21 @@ describe.skipIf(!enabled)("可卸載磁碟", () => {
     hosts.splice(hosts.indexOf(host), 1);
   }, 120_000);
 
-  it("強制卸載：服務行程收到 SIGBUS 結束，重開換 epoch，不在 /Volumes 留下空資料夾", async () => {
+  it("強制卸載：重開換 epoch，不在 /Volumes 留下空資料夾", async () => {
     const { mount, folder } = await createImage("forced");
     const before = await readdir("/Volumes");
-    // 強制卸載會讓同一個行程直接吃到 SIGBUS；被測的服務要跑在子行程裡，
-    // 測試 runner 才不會跟著死掉。
+    // 強制卸載會讓同一個行程的檔案句柄失效；服務跑在子行程裡，測試 runner
+    // 才不會跟著受影響。
     const child = spawnHostProcess(folder, true);
     const firstEpoch = await child.ready;
     expect(firstEpoch.length).toBeGreaterThan(0);
 
-    await run("hdiutil", ["detach", mount, "-force"]).catch(() => undefined);
+    await run("hdiutil", ["detach", mount, "-force"]);
     mounted = null;
-    const exit = await child.exited;
-    expect(exit.signal === "SIGBUS" || exit.code !== 0).toBe(true);
+    // 強制卸載不一定當場送 SIGBUS（要看行程有沒有碰到已卸載的頁面）；
+    // 這裡驗的是「下次啟動換 epoch」與「不留空資料夾」，SIGBUS 本身列手動。
+    child.stop();
+    await child.exited;
 
     const after = await readdir("/Volumes");
     expect(after.filter((entry) => !before.includes(entry))).toEqual([]);

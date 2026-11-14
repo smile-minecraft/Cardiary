@@ -167,7 +167,13 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
     turnIndex,
     deletions,
     folder,
-    ...(persistent === null ? {} : { dispose: () => persistent.close() }),
+    ...(persistent === null
+      ? {}
+      : {
+          dispose: () => persistent.close(),
+          pauseDatabases: () => persistent.pauseDatabases(),
+          resumeDatabases: () => persistent.resumeDatabases(),
+        }),
   };
   const credentials = options.credentials ?? new UnavailableCredentials();
   const environment = {
