@@ -38,6 +38,8 @@ export interface MemoryStoreOptions {
   readonly cleanShutdown?: boolean;
   readonly startedAt?: string;
   readonly deletionIntents?: readonly string[];
+  /** 診斷用：把儲存操作記到同一條時間軸，測試可以驗先後順序。 */
+  readonly trace?: (entry: string) => void;
 }
 
 function nowIso(options: MemoryStoreOptions): string {
@@ -53,10 +55,11 @@ function nowIso(options: MemoryStoreOptions): string {
 export class MemoryEventLog implements EventLogStore {
   readonly calls: string[] = [];
   readonly #events: StoredEvent[] = [];
+  readonly #options: MemoryStoreOptions;
   #closed = false;
 
-  constructor(_options: MemoryStoreOptions = {}) {
-    void _options;
+  constructor(options: MemoryStoreOptions = {}) {
+    this.#options = options;
   }
 
   #assertOpen(): void {
@@ -69,11 +72,13 @@ export class MemoryEventLog implements EventLogStore {
   ): Promise<StoredEvent> {
     this.#assertOpen();
     this.calls.push(`events.append:${entry.stream}:${entry.kind}`);
+    this.#options.trace?.(`events.append:${entry.stream}:${entry.kind}`);
     if (projection) await projection();
     const seq = await this.lastSeq(entry.stream, entry.epoch);
     const stored: StoredEvent = { ...entry, seq: seq + 1 };
     this.#events.push(stored);
     this.calls.push(`events.committed:${entry.stream}:${stored.seq}`);
+    this.#options.trace?.(`events.committed:${entry.stream}:${stored.seq}`);
     return stored;
   }
 
@@ -106,6 +111,11 @@ export class MemoryEventLog implements EventLogStore {
       .sort((left, right) => left.seq - right.seq);
   }
 
+  async reopen(): Promise<void> {
+    this.calls.push("events.reopen");
+    this.#closed = false;
+  }
+
   async deleteStream(stream: string): Promise<void> {
     this.#assertOpen();
     this.calls.push(`events.deleteStream:${stream}`);
@@ -131,6 +141,7 @@ export class MemoryEventLog implements EventLogStore {
     if (this.#closed) return;
     this.#closed = true;
     this.calls.push("events.close");
+    this.#options.trace?.("events.close");
   }
 
   get closed(): boolean {
@@ -171,6 +182,7 @@ export class MemoryRuntimeState implements RuntimeStateStore {
 
   async open(): Promise<RuntimeStateSnapshot> {
     this.calls.push("runtime.open");
+    this.#options.trace?.("runtime.open");
     const now = nowIso(this.#options);
     if (this.#snapshot === null) {
       this.#snapshot = {
@@ -189,6 +201,7 @@ export class MemoryRuntimeState implements RuntimeStateStore {
 
   async reopen(): Promise<RuntimeStateSnapshot> {
     this.calls.push("runtime.reopen");
+    this.#options.trace?.("runtime.reopen");
     if (!this.#snapshot) throw new StorageFailure("狀態庫沒有可重開的資料");
     this.#opened = true;
     return this.#snapshot;
@@ -196,12 +209,14 @@ export class MemoryRuntimeState implements RuntimeStateStore {
 
   async markCleanShutdown(reason: string): Promise<void> {
     this.calls.push(`runtime.markCleanShutdown:${reason}`);
+    this.#options.trace?.(`runtime.markCleanShutdown:${reason}`);
     if (!this.#opened || !this.#snapshot) throw new StorageFailure("狀態庫未開啟");
     this.#snapshot = { ...this.#snapshot, cleanShutdown: true };
   }
 
   async checkpointAndClose(): Promise<void> {
     this.calls.push("runtime.checkpointAndClose");
+    this.#options.trace?.("runtime.checkpointAndClose");
     this.#opened = false;
   }
 

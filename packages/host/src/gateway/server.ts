@@ -744,6 +744,7 @@ export class Gateway {
     if (epoch === undefined || epoch !== this.epoch) return true;
     if (lastSeq > boundary) return true;
     if (lastSeq === boundary) return false;
+    if (boundary - lastSeq > this.limits.replayWindow) return true;
     const oldest = await this.#options.storage.events.oldestSeq(stream, this.epoch);
     if (oldest === null) return true;
     return lastSeq + 1 < oldest;
@@ -822,7 +823,8 @@ export class Gateway {
     const stream = `session:${state.sessionId}`;
     switch (event.kind) {
       case "turn.started": {
-        const triggerMessageId = state.turnTrigger.get(event.turnId) ?? event.turnId;
+        const triggerMessageId =
+          state.turnTrigger.get(event.turnId) ?? deriveTriggerMessageId(event.turnId);
         const startedAt = event.at;
         state.turns.set(event.turnId, { turnId: event.turnId, phase: "running", startedAt });
         state.activeTurnId = event.turnId;
@@ -1837,6 +1839,11 @@ function toProtocolJson(value: EngineJsonValue): JSONValue {
     result[key] = toProtocolJson(item as EngineJsonValue);
   }
   return result;
+}
+
+/** 設計定案：`turnId = "turn_" + 觸發訊息 ID`；沒有對照時由這裡還原。 */
+function deriveTriggerMessageId(turnId: string): string {
+  return turnId.startsWith("turn_") ? turnId.slice(5) : turnId;
 }
 
 function textOf(content: readonly { readonly type: string; readonly text?: string }[]): string {

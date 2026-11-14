@@ -67,7 +67,8 @@ export class EventChannel {
 
   publish(make: (seq: number) => EngineEvent): EngineEvent {
     if (this.#closed) {
-      throw new Error("事件通道已關閉");
+      // 對話已刪除或引擎已關閉：事件直接丟棄，不再改動序號。
+      return make(this.#seq);
     }
     this.#seq += 1;
     const event = make(this.#seq);

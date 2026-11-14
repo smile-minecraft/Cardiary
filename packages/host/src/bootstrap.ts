@@ -64,6 +64,11 @@ export interface StartHostOptions {
     lifecycle: "deleting" | "vacuuming" | "idle",
     operationId: string,
   ) => Promise<void>;
+  readonly fatalNotifier?: (reason: "storage_io" | "internal", detail: string) => Promise<void>;
+  /** 整合與恢復測試用：預置未完成的刪除意圖。 */
+  readonly deletionIntents?: readonly string[];
+  /** 診斷與測試用：儲存操作的時間軸。 */
+  readonly trace?: (entry: string) => void;
 }
 
 export interface RunningHost {
@@ -90,13 +95,17 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   const clock = options.clock ?? systemClock;
   const spawn = new SpawnRegistry();
   const folder = await readFolderIdentity(options.folderPath);
-  const runtime = new MemoryRuntimeState({ now: () => clock.now() });
+  const trace = options.trace;
+  const runtime = new MemoryRuntimeState({
+    now: () => clock.now(),
+    ...(trace === undefined ? {} : { trace }),
+  });
   const snapshot = await runtime.open();
-  const events = new MemoryEventLog();
+  const events = new MemoryEventLog(trace === undefined ? {} : { trace });
   const dedupe = new MemoryRequestDedupe();
   const approvals = new MemoryApprovalLedger();
   const turnIndex = new MemoryTurnIndex();
-  const deletions = new MemoryDeletionIntents();
+  const deletions = new MemoryDeletionIntents(options.deletionIntents ?? []);
   const storage: StorageBundle = {
     events,
     runtime,
@@ -170,6 +179,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
     ...(options.maintenanceNotifier === undefined
       ? {}
       : { onMaintenance: options.maintenanceNotifier }),
+    ...(options.fatalNotifier === undefined ? {} : { onFatal: options.fatalNotifier }),
   });
   serviceRef = service;
   await service.start();

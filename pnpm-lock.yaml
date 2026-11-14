@@ -30,6 +30,25 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6))
 
+  packages/contract-tests:
+    dependencies:
+      '@cardiary/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
+      ajv-formats:
+        specifier: 3.0.1
+        version: 3.0.1(ajv@8.20.0)
+      ws:
+        specifier: 8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
+
   packages/domain: {}
 
   packages/engine-adapter: {}
@@ -1318,18 +1337,6 @@ packages:
     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==}
     engines: {node: '>=0.10.0'}
 
-  ws@8.18.3:
-    resolution: {integrity: sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
   ws@8.23.0:
     resolution: {integrity: sha512-wCkmX8QMOrKjgO8HW2WyDbTSGeqkocxgDzS9iR79rEAexty6/2qzilx3Ag8Tqf9ykop3irLKle0MtVn5qjVnoQ==}
     engines: {node: '>=10.0.0'}
@@ -1674,7 +1681,7 @@ snapshots:
       google-auth-library: 10.9.1
       p-retry: 4.6.2
       protobufjs: 7.6.6
-      ws: 8.18.3
+      ws: 8.23.0
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -2587,8 +2594,6 @@ snapshots:
   why-is-node-running@3.2.1: {}
 
   word-wrap@1.2.5: {}
-
-  ws@8.18.3: {}
 
   ws@8.23.0: {}
 

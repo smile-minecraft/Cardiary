@@ -12,7 +12,7 @@ import {
 } from "./gateway/status.js";
 import { prefixed, uptimeSeconds } from "./ids.js";
 import type { SpawnRegistry } from "./spawn/wrapper.js";
-import { readFolderIdentity } from "./storage/folder.js";
+import { FolderError, readFolderIdentity } from "./storage/folder.js";
 import type { FolderIdentity, StorageBundle } from "./storage/interfaces.js";
 
 export type Lifecycle =
@@ -240,6 +240,19 @@ export class HostService {
           reason: "state_reopen_failed",
         };
       }
+      try {
+        await this.#options.storage.events.reopen();
+      } catch {
+        this.#serviceState = "paused";
+        this.#reason = "state_reopen_failed";
+        return {
+          state: "paused" as const,
+          epoch: snapshot.epoch,
+          folderId: this.#folder.folderId,
+          engineReopened: false,
+          reason: "state_reopen_failed",
+        };
+      }
       if (snapshot.epoch !== epochBefore) {
         this.#folderState = "mismatch";
         this.#serviceState = "degraded";
@@ -285,8 +298,15 @@ export class HostService {
       if (this.#serviceState === "paused") {
         try {
           await readFolderIdentity(this.#folder.path, { expectedFolderId: this.#folder.folderId });
-        } catch {
-          return { state: "closed" as const, cleanShutdown: false, reason: "storage_unavailable" };
+        } catch (error) {
+          const mismatched =
+            error instanceof FolderError &&
+            (error.reason === "mismatch" || error.reason === "invalid_identity");
+          return {
+            state: "closed" as const,
+            cleanShutdown: false,
+            reason: mismatched ? "folder_mismatch" : "storage_unavailable",
+          };
         }
         let snapshot;
         try {

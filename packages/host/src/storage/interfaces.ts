@@ -34,6 +34,8 @@ export interface EventLogStore {
   lastSeq(stream: string, epoch: string): Promise<number>;
   oldestSeq(stream: string, epoch: string): Promise<number | null>;
   readRange(stream: string, epoch: string, from: number, to: number): Promise<StoredEvent[]>;
+  /** 重開連線（resume 用）；不換 epoch、不重建資料。 */
+  reopen(): Promise<void>;
   deleteStream(stream: string): Promise<void>;
   pruneOtherEpochs(epoch: string): Promise<void>;
   flush(): Promise<void>;

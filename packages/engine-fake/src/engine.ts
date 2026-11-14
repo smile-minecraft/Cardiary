@@ -70,6 +70,8 @@ export type FakeModelStep =
       readonly text: string;
       /** 每個增量事件的字元數；省略時一次送完。 */
       readonly chunkSize?: number;
+      /** 每個增量之間的等待毫秒數；測試串流中的插話與快照用。 */
+      readonly delayMs?: number;
     }
   | { readonly kind: "tool"; readonly toolName: ToolName; readonly input?: JsonValue }
   | {
@@ -281,6 +283,13 @@ export class FakeEngine implements EngineAdapter {
 
   async close(): Promise<void> {
     for (const conversation of this.#conversations.values()) {
+      const turn = conversation.activeTurn;
+      if (turn) {
+        turn.status = "restarted";
+        turn.abort.abort();
+        conversation.activeTurn = null;
+        conversation.state = "idle";
+      }
       conversation.channel.close();
     }
     this.#approvalSubscription();
@@ -988,19 +997,29 @@ export class FakeEngine implements EngineAdapter {
     for (const conversation of this.#conversations.values()) {
       const turn = conversation.activeTurn;
       if (turn) {
-        const diagnostics: ToolDiagnostic[] = [...conversation.toolCalls.values()]
-          .filter((call) => call.outcome === null)
-          .map((call) => {
-            const definition = this.#tools.resolve(conversation.toolBundles, call.toolName);
-            if (definition && definition.replay === "safe") {
-              return { code: "interrupted", message: "重跑安全工具會重跑一次" };
-            }
-            return { code: "interrupted", message: "非重跑安全的工具不會重跑" };
-          });
+        const inFlight = [...conversation.toolCalls.values()].filter(
+          (call) => call.outcome === null,
+        );
+        const diagnostics: ToolDiagnostic[] = inFlight.map((call) => {
+          const definition = this.#tools.resolve(conversation.toolBundles, call.toolName);
+          if (definition && definition.replay === "safe") {
+            return { code: "interrupted", message: "重跑安全工具會重跑一次" };
+          }
+          return { code: "interrupted", message: "非重跑安全的工具不會重跑" };
+        });
+        const safeInFlight = inFlight.filter((call) => {
+          const definition = this.#tools.resolve(conversation.toolBundles, call.toolName);
+          return definition?.replay === "safe";
+        });
         conversation.recovery.push({
           turnId: turn.turnId,
           triggerMessageId: turn.triggerMessageId,
-          outcome: diagnostics.length === 0 ? "completed" : "resumed",
+          outcome:
+            inFlight.length === 0
+              ? "completed"
+              : safeInFlight.length > 0
+                ? "resumed"
+                : "interrupted",
           diagnostics,
         });
         turn.status = "restarted";
@@ -1051,7 +1070,13 @@ export class FakeEngine implements EngineAdapter {
         if (turn.status !== "running") break;
         await this.#applySteers(conversation, turn);
         if (step.kind === "text") {
-          await this.#emitText(conversation, turn, step.text, step.chunkSize ?? step.text.length);
+          await this.#emitText(
+            conversation,
+            turn,
+            step.text,
+            step.chunkSize ?? step.text.length,
+            step.delayMs ?? 0,
+          );
         } else if (step.kind === "tool") {
           await this.#runToolStep(conversation, turn, step.toolName, step.input ?? {});
         } else {
@@ -1115,10 +1140,15 @@ export class FakeEngine implements EngineAdapter {
     turn: TurnRuntime,
     text: string,
     chunkSize: number,
+    delayMs: number,
   ): Promise<void> {
     const size = Math.max(1, chunkSize);
     for (let offset = 0; offset < text.length; offset += size) {
       if (turn.status !== "running") return;
+      if (offset > 0 && delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        if (turn.status !== "running") return;
+      }
       const delta = text.slice(offset, offset + size);
       turn.text += delta;
       this.#emit(conversation, (seq) => ({

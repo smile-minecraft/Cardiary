@@ -156,7 +156,7 @@ function readInit(
       buffer = "";
       settled = true;
       clearTimeout(timer);
-      input.removeListener("data", onData);
+      // 保留監聽：init 之後的資料全部轉給控制通道。
       resolvePromise({ line, remainder });
     };
     input.on("data", onData);
