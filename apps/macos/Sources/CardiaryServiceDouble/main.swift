@@ -91,6 +91,14 @@ guard let folder = initObject["folder"] as? [String: Any],
 else {
     fail(2, "folder.path 不是絕對路徑")
 }
+// 殼簽發的客戶端 Token：有帶來就驗格式並在 ready 原樣回傳，讓殼確認兩邊一致。
+let issuedClientToken = initObject["clientToken"] as? String
+if let issuedClientToken, !token(issuedClientToken) {
+    fail(2, "clientToken 格式不合法")
+}
+if issuedClientToken == controlToken || issuedClientToken == brokerToken {
+    fail(2, "clientToken 不能與控制 Token 或代理 Token 相同")
+}
 var isDirectory: ObjCBool = false
 guard FileManager.default.fileExists(atPath: folderPath, isDirectory: &isDirectory),
     isDirectory.boolValue
@@ -100,14 +108,18 @@ else {
 
 let pid = ProcessInfo.processInfo.processIdentifier
 let readyProtocol = failProtocol ? 2 : 1
-writeFrame([
+var readyFrame: [String: Any] = [
     "type": "ready",
     "protocol": readyProtocol,
     "pid": Int(pid),
     "clientPort": 49_152,
     "folderId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
     "epoch": "01JCX8Q3W7Z9K5V2N4M6P8R0T2",
-])
+]
+if let issuedClientToken {
+    readyFrame["clientToken"] = issuedClientToken
+}
+writeFrame(readyFrame)
 
 writeFrame([
     "v": 1,

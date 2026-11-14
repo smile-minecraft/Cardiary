@@ -21,3 +21,29 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+
+  macos:
+    # 殼與 CardiaryKit 只能在 macOS 建置；與 ubuntu 的 check 平行跑。
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 契約測試會啟動建置後的主機服務，所以先跑 TypeScript 那一半。
+      - name: TypeScript 檢查
+        run: pnpm check
+      - name: CardiaryKit 測試
+        working-directory: apple/CardiaryKit
+        run: swift test
+      - name: 殼測試
+        working-directory: apps/macos
+        run: swift test
+      - name: 組裝 App
+        working-directory: apps/macos
+        run: ./Scripts/build-app.sh
+        env:
+          CONFIGURATION: debug

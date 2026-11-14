@@ -89,6 +89,8 @@ public final class ControlChannel: @unchecked Sendable {
     private let transport: any ServiceProcessHandle
     private let controlToken: ControlToken
     private let brokerToken: ControlToken
+    /// 殼簽發的客戶端 Token；只在記憶體，寫進 `init` 交給服務。
+    private let clientToken: ControlToken
     private let limits: Limits
     private let queue = DispatchQueue(label: "com.cardiary.shell.control-channel")
 
@@ -112,11 +114,13 @@ public final class ControlChannel: @unchecked Sendable {
         transport: any ServiceProcessHandle,
         controlToken: ControlToken,
         brokerToken: ControlToken,
+        clientToken: ControlToken = ControlToken.generate(),
         limits: Limits = .default
     ) {
         self.transport = transport
         self.controlToken = controlToken
         self.brokerToken = brokerToken
+        self.clientToken = clientToken
         self.limits = limits
 
         transport.setDataHandler { [weak self] data in
@@ -138,7 +142,8 @@ public final class ControlChannel: @unchecked Sendable {
             InitMessage(
                 token: controlToken.value,
                 brokerToken: brokerToken.value,
-                folderPath: folderPath
+                folderPath: folderPath,
+                clientToken: clientToken.value
             )
         )
         try queue.sync {

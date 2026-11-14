@@ -80,8 +80,13 @@ public struct InitMessage: Encodable, Sendable {
     public let brokerToken: String
     public let folder: Folder
     public let limits: Limits
+    /// 殼簽發的客戶端 Token；服務用它驗證客戶端連線。
+    ///
+    /// 與控制 Token、代理 Token 分開：客戶端協定看得到這一組，控制面看不到。
+    /// 省略時服務自己產生，並在 `ready` 回給殼。
+    public let clientToken: String?
 
-    public init(token: String, brokerToken: String, folderPath: String) {
+    public init(token: String, brokerToken: String, folderPath: String, clientToken: String? = nil) {
         self.protocol = ControlProtocol.version
         self.token = token
         self.brokerToken = brokerToken
@@ -90,6 +95,7 @@ public struct InitMessage: Encodable, Sendable {
             maxFrameBytes: ControlProtocol.maxFrameBytes,
             healthIntervalMs: ControlProtocol.healthIntervalMilliseconds
         )
+        self.clientToken = clientToken
     }
 }
 
@@ -100,9 +106,14 @@ public struct ReadyMessage: Decodable, Equatable, Sendable {
     public let clientPort: UInt16
     public let folderId: String
     public let epoch: String
+    /// 服務實際使用的客戶端 Token。
+    ///
+    /// 有帶 `init.clientToken` 時是同一把；沒有帶時是服務自己產生的。
+    /// 舊版服務沒有這個欄位，解碼後是 `nil`。
+    public let clientToken: String?
 
     private enum CodingKeys: String, CodingKey {
-        case `protocol`, pid, clientPort, folderId, epoch
+        case `protocol`, pid, clientPort, folderId, epoch, clientToken
     }
 }
 

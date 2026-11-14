@@ -11,6 +11,7 @@ final class ControlPlaneIntegrationTests: XCTestCase {
         let ready: ReadyMessage
         let controlToken: ControlToken
         let brokerToken: ControlToken
+        let clientToken: ControlToken
     }
 
     private func start(
@@ -22,10 +23,12 @@ final class ControlPlaneIntegrationTests: XCTestCase {
         let handle = try ProcessServiceHandle(plan: plan)
         let control = ControlToken.generate()
         let broker = ControlToken.generate()
+        let client = ControlToken.generate()
         let channel = ControlChannel(
             transport: handle,
             controlToken: control,
             brokerToken: broker,
+            clientToken: client,
             limits: limits
         )
         let ready = try await channel.handshake(folderPath: folder.path)
@@ -34,7 +37,8 @@ final class ControlPlaneIntegrationTests: XCTestCase {
             channel: channel,
             ready: ready,
             controlToken: control,
-            brokerToken: broker
+            brokerToken: broker,
+            clientToken: client
         )
     }
 
@@ -76,6 +80,33 @@ final class ControlPlaneIntegrationTests: XCTestCase {
         XCTAssertFalse(arguments.contains(running.brokerToken.value), "代理 Token 不能出現在 argv")
         XCTAssertFalse(environment.contains(running.controlToken.value), "控制 Token 不能出現在環境變數")
         XCTAssertFalse(environment.contains(running.brokerToken.value), "代理 Token 不能出現在環境變數")
+
+        _ = try await running.channel.request(route: ControlRoute.shutdown, timeout: 2)
+        running.handle.closeStdin()
+        _ = await waitForExit(running.handle, timeout: 3)
+    }
+
+    /// 客戶端 Token 由殼簽發、經 `init` 交給服務，服務在 `ready` 回同一把；
+    /// 它不能出現在 argv、環境變數或日誌，也不能與另外兩把相同。
+    func testClientTokenRoundTripsOnStdinOnly() async throws {
+        let folder = try TestSupport.makeTemporaryFolder()
+        let running = try await start(folder: folder)
+        defer { running.handle.kill() }
+
+        XCTAssertEqual(running.ready.clientToken, running.clientToken.value)
+        XCTAssertNotEqual(running.clientToken.value, running.controlToken.value)
+        XCTAssertNotEqual(running.clientToken.value, running.brokerToken.value)
+        XCTAssertTrue(running.clientToken.isValidFormat)
+
+        let pid = running.handle.pid
+        XCTAssertFalse(
+            TestSupport.processArguments(pid: pid).contains(running.clientToken.value),
+            "客戶端 Token 不能出現在 argv"
+        )
+        XCTAssertFalse(
+            TestSupport.processEnvironment(pid: pid).contains(running.clientToken.value),
+            "客戶端 Token 不能出現在環境變數"
+        )
 
         _ = try await running.channel.request(route: ControlRoute.shutdown, timeout: 2)
         running.handle.closeStdin()

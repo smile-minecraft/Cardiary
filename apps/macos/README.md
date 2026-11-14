@@ -1,8 +1,11 @@
 # Cardiary macOS 殼
 
 macOS App 的殼：首次啟動選資料夾、啟動並監管內嵌的 Node 主機服務、關閉視窗後留在選單列，
-以私有控制面與服務通訊。客戶端協定的連線層（`apple/CardiaryKit`）已具備，待 client Token 接入後
-才會實際連上服務；在那之前選單列的待審批數量顯示「需要連上服務」。
+以私有控制面與服務通訊，並用客戶端協定（`apple/CardiaryKit`）連上服務。
+
+客戶端 Token 由殼簽發：殼每次啟動服務時產生一把，經 `init.clientToken` 走 stdin 交給服務，
+服務在 `ready.clientToken` 回同一把。Token 只在殼與服務的記憶體裡，不進 argv、環境變數、
+日誌或磁碟；服務換行程就換一把，殼收到新的就重連。
 
 設計依據：
 

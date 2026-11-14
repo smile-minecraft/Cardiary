@@ -161,6 +161,8 @@ public final class ServiceSupervisor: @unchecked Sendable {
     private var channel: ControlChannel?
     private var controlToken = ControlToken(value: "")
     private var brokerToken = ControlToken(value: "")
+    /// 殼簽發給客戶端協定的 Token；只在記憶體，隨每次啟動換新。
+    private var clientToken = ControlToken(value: "")
     private var generation = 0
     private var lifecycleInFlight = false
     private var intentionalStop = false
@@ -169,6 +171,8 @@ public final class ServiceSupervisor: @unchecked Sendable {
 
     public var onStatusChange: (@Sendable (ServiceStatusSnapshot) -> Void)?
     public var onLog: (@Sendable (String) -> Void)?
+    /// 服務就緒後拿到客戶端 Token；殼用它建立客戶端連線，不寫進日誌或磁碟。
+    public var onClientToken: (@Sendable (String) -> Void)?
 
     public init(
         configuration: ServiceSupervisorConfiguration,
@@ -273,7 +277,7 @@ public final class ServiceSupervisor: @unchecked Sendable {
     }
 
     private func launch(isRestart: Bool) {
-        let tokens = (ControlToken.generate(), ControlToken.generate())
+        let tokens = (ControlToken.generate(), ControlToken.generate(), ControlToken.generate())
         var launchGeneration = 0
         var plan = configuration.launchPlan
         var previous: (any ServiceProcessHandle, ControlChannel?)? = nil
@@ -289,6 +293,7 @@ public final class ServiceSupervisor: @unchecked Sendable {
             launchGeneration = generation
             controlToken = tokens.0
             brokerToken = tokens.1
+            clientToken = tokens.2
             if isRestart { status.restarts += 1 }
             status.phase = .starting
             status.lastError = nil
@@ -340,6 +345,7 @@ public final class ServiceSupervisor: @unchecked Sendable {
             transport: process,
             controlToken: tokens.0,
             brokerToken: tokens.1,
+            clientToken: tokens.2,
             limits: configuration.channelLimits
         )
         channel.brokerHandler = brokerHandler
@@ -386,6 +392,9 @@ public final class ServiceSupervisor: @unchecked Sendable {
                 self.log(
                     "服務就緒：epoch \(ready.epoch)、clientPort \(ready.clientPort)、folderId \(ready.folderId)"
                 )
+                // 舊版服務沒有 clientToken 欄位；用殼送出的那一把。
+                let issued = self.queue.sync { self.clientToken }
+                self.onClientToken?(ready.clientToken ?? issued.value)
             } catch let error as ControlChannel.ChannelError {
                 if case .unsupportedProtocol(let version) = error {
                     self.log("服務的協定版本 \(version) 與殼不符，停止重啟")

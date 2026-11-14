@@ -7,9 +7,8 @@ import CardiaryShellCore
 final class ShellController: NSObject {
     /// 客戶端 Token 的來源。
     ///
-    /// M0 的設計沒有定義 client Token 如何從服務交給殼（`init` 與 `ready` 都沒有
-    /// 這個欄位），所以殼先把介面留著：沒有 Token 就不建立客戶端連線，選單列的
-    /// 待審批數量顯示「需要連上服務」。這件事記在交接事項裡。
+    /// 殼在每次啟動服務時簽發一把，經 `init.clientToken` 交給服務，服務在
+    /// `ready.clientToken` 回同一把。Token 只在記憶體，不寫日誌或磁碟。
     private final class ClientTokenStore: @unchecked Sendable {
         private let lock = NSLock()
         private var token: String?
@@ -370,6 +369,9 @@ final class ShellController: NSObject {
                 let log = self?.log
                 Task { @MainActor in log?.write(message) }
             }
+            supervisor.onClientToken = { [weak self] token in
+                Task { @MainActor in self?.acceptClientToken(token) }
+            }
             supervisor.authorizedVolumeUUID = authorization?.volumeUUID
             self.supervisor = supervisor
         }
@@ -388,6 +390,9 @@ final class ShellController: NSObject {
 
         if snapshot.phase == .running, let port = snapshot.clientPort {
             connectClientIfPossible(port: port)
+        } else if snapshot.phase != .starting {
+            // 服務停了或換了行程：舊的 Token 與連線都失效。
+            dropClientConnection()
         }
         if let error = snapshot.lastError, error.hasPrefix("version_mismatch"), !reportedVersionMismatch {
             reportedVersionMismatch = true
@@ -402,16 +407,37 @@ final class ShellController: NSObject {
         refreshMenu()
     }
 
+    /// 服務就緒時回報的客戶端 Token；換一把就重連。
+    private func acceptClientToken(_ token: String) {
+        let changed = clientTokens.current != token
+        clientTokens.set(token)
+        if changed {
+            dropClientConnection()
+        }
+        if serviceSnapshot.phase == .running, let port = serviceSnapshot.clientPort {
+            connectClientIfPossible(port: port)
+        }
+    }
+
+    /// 收掉客戶端連線；Token 留在 store，等新的進程換掉。
+    private func dropClientConnection() {
+        guard let existing = client else { return }
+        client = nil
+        approvalCount = nil
+        Task { await existing.stop() }
+        refreshMenu()
+    }
+
     private func connectClientIfPossible(port: UInt16) {
         guard client == nil else { return }
         guard let token = clientTokens.current else {
-            // 設計沒有定義 client Token 的交付方式；沒有 Token 就不連線，只記一次。
             if !loggedMissingClientToken {
                 loggedMissingClientToken = true
-                log.write("沒有 client Token，暫不建立客戶端連線（見交接事項）。")
+                log.write("還沒有 client Token，等服務就緒後再建立客戶端連線。")
             }
             return
         }
+        loggedMissingClientToken = false
         guard let endpoint = URL(string: "ws://127.0.0.1:\(port)/v1/ws") else { return }
 
         let info = ClientInfoFactory.make()
