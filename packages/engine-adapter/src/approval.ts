@@ -73,7 +73,30 @@ export interface ApprovalRequest {
   readonly requestedAt: IsoInstant;
   readonly expiresAt: IsoInstant | null;
   readonly draft: ApprovalRequestDraft;
+  /**
+   * 決定性的去重鍵；同一個 `scope`、對話、回合、工具名稱與正規化輸入算出同一個值。
+   * 重跑時用它找回同一筆請求與決定，不再詢問已回答的問題。
+   */
+  readonly approvalKey: string;
+  /**
+   * 已有的決定；`status` 是 `approved`／`denied` 時一定有值。
+   * 從 ledger 讀回時由 `decision_json` 還原，重啟後仍看得到同一個決定。
+   */
+  readonly decision?: ApprovalDecision | null;
 }
+
+/**
+ * `ApprovalLedger.record` 的結果。
+ *
+ * `created` 表示這次真的插入了一筆 `pending`；`existing` 表示接上既有的
+ * `pending`；`decided` 表示同一個鍵已有 `approved`／`denied`，直接續跑。
+ * 不得回傳已過期的 `pending` 當成 `existing`：ledger 要先把它標成 `expired`
+ * 再插一列新的 `pending`。
+ */
+export type ApprovalRecordOutcome =
+  | { readonly kind: "created"; readonly request: ApprovalRequest }
+  | { readonly kind: "existing"; readonly request: ApprovalRequest }
+  | { readonly kind: "decided"; readonly request: ApprovalRequest };
 
 /**
  * 按下核准或拒絕的人。
@@ -156,9 +179,23 @@ export type ApprovalUpdate =
  * 工具或任務重跑時先查這份紀錄，才不會重複詢問已決定的事。
  */
 export interface ApprovalLedger {
-  record(request: ApprovalRequest): Promise<void>;
+  /**
+   * 在同一個 `BEGIN IMMEDIATE` 交易裡先讀 `approvalKey` 的最新列，再決定是否插入。
+   *
+   * 已有 `pending`（且未過期）回 `existing`，已有 `approved`／`denied` 回 `decided`，
+   * 沒有列或只有 `expired`／`withdrawn` 才插入新的 `pending` 並回 `created`。
+   * 插入用 `INSERT ... ON CONFLICT DO NOTHING`，衝突時重讀最新列再判斷；
+   * `pending` 的唯一性由 partial unique index 保證。`busy` 由 ledger 在交易外圍
+   * 重試，重試用完才把錯誤往上報。
+   */
+  record(request: ApprovalRequest): Promise<ApprovalRecordOutcome>;
   update(request: ApprovalRequest): Promise<void>;
   get(requestId: ApprovalRequestId): Promise<ApprovalRequest | null>;
+  /**
+   * 用去重鍵找最新一列：`pending` 優先，沒有 `pending` 才取最新的一列。
+   * 同毫秒時以 `rowid DESC` 當 tie-breaker；找不到回 `null`。
+   */
+  findByApprovalKey(approvalKey: string): Promise<ApprovalRequest | null>;
   listPending(filter?: ApprovalListFilter): Promise<readonly ApprovalRequest[]>;
   /**
    * 原子地寫入決定。

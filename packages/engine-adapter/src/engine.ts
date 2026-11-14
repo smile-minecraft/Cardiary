@@ -83,6 +83,43 @@ export interface EngineDescriptor {
   readonly capabilities: EngineCapabilities;
 }
 
+/**
+ * 引擎模型的宿主端接縫。
+ *
+ * 供應商 SDK 與金鑰的接線由宿主（macOS 殼與主機服務）負責，轉接層只把
+ * `ModelSettings` 交給它，並在 `configureModels` 之後換用新的模型集合。
+ * 回傳值是引擎專用的 handle，只有轉接層與宿主的實作看得懂；
+ * 公開介面不引用任何引擎型別。
+ */
+export interface EngineModelSource {
+  open(settings: ModelSettings): Promise<unknown>;
+  close(handle: unknown): Promise<void>;
+}
+
+/** 刪除意圖；兩個資料庫之間的恢復依據（storage 第 3.11 節）。 */
+export interface DeletionIntent {
+  readonly rootConversationId: ConversationId;
+  readonly conversationIds: readonly ConversationId[];
+  readonly clientRequestIds: readonly string[];
+  readonly phase: "rows" | "vacuum";
+}
+
+/**
+ * Cardiary 資料庫那一半的刪除工作；由儲存層實作。
+ *
+ * 轉接層負責引擎的資料（`state/engine.sqlite`）與整個流程的順序；
+ * `event_log`、`approvals`、`turn_index`、`request_dedupe`、`subagent_runs`、
+ * `file_registry` 與意圖列本身屬於 Cardiary 的資料庫，由這個接縫處理。
+ */
+export interface ConversationDataPurger {
+  putIntent(intent: DeletionIntent): Promise<void>;
+  listIntents(): Promise<readonly DeletionIntent[]>;
+  setIntentPhase(rootConversationId: ConversationId, phase: DeletionIntent["phase"]): Promise<void>;
+  removeIntent(rootConversationId: ConversationId): Promise<void>;
+  /** 刪 Cardiary 交易裡的列；必須冪等，重跑時找不到列也要成功。 */
+  purge(intent: DeletionIntent): Promise<void>;
+}
+
 /** 建立轉接層的參數；由主機服務組裝。 */
 export interface EngineAdapterOptions {
   readonly environment: EngineEnvironment;
@@ -97,6 +134,17 @@ export interface EngineAdapterOptions {
   readonly clock?: Clock;
   /** 事件補送緩衝的筆數上限；超過時回報 `gap`。 */
   readonly eventBufferSize?: number;
+  /** 引擎模型的建立方式；省略時只有測試模式可以使用。 */
+  readonly models?: EngineModelSource;
+  /**
+   * Cardiary 資料庫那一半的刪除接縫；省略時刪除只處理引擎的資料。
+   * 正式的主機服務一定要提供。
+   */
+  readonly purger?: ConversationDataPurger;
+  /** 工具子行程的環境；省略時沿用 `process.env`。 */
+  readonly processEnvironment?: Readonly<Record<string, string | undefined>>;
+  /** 同時跑的工具子行程上限；省略時不限。 */
+  readonly maxConcurrentTools?: number;
   /**
    * 子代理上限；省略時用產品預設值：同時 4 個、深度 1、結果卡 800 tokens。
    * 轉接層用這組數字拒絕超額請求；`maxConcurrentPerParent` 與 `maxDepth`
@@ -114,6 +162,16 @@ export interface EngineAdapterOptions {
 export interface EngineAdapter {
   /** 開啟引擎與儲存；重複呼叫回傳同一個結果。 */
   open(): Promise<EngineDescriptor>;
+  /**
+   * 暫停引擎：停止受理新工作、等寫入完成、checkpoint 後關閉 Harness 與連線。
+   * 不刪任何資料，也不換 epoch；恢復前所有新工作都送不進去。
+   */
+  suspend(): Promise<void>;
+  /**
+   * 恢復引擎：重開 `state/engine.sqlite` 與 Harness、重新註冊釘選的
+   * generation、恢復對話的 `pi.agent` 名稱與佇列中的任務。
+   */
+  resume(): Promise<void>;
   /** 關閉引擎；進行中的工作會被中斷，恢復後由斷點續跑接上。 */
   close(): Promise<void>;
   getStatus(): EngineStatus;
@@ -143,6 +201,24 @@ export interface EngineAdapter {
    * 所有工具組版本，否則工具呼叫會得到 `tool-unavailable`。
    */
   restoreConversation(conversationId: ConversationId): Promise<RestoreConversationResult>;
+
+  /**
+   * 用 `clientRequestId` 找建立時寫下的對話；找不到回 `null`，不拋錯。
+   *
+   * 建立對話與索引在同一個 commit 寫入，重啟後仍是索引點查；
+   * 對話刪除後索引一起消失，回 `null`，不會回已刪除的資源。
+   */
+  findConversationByClientRequestId(clientRequestId: string): Promise<ConversationSummary | null>;
+
+  /**
+   * 用 `clientMessageId` 找訊息；找不到回 `null`，不拋錯。
+   *
+   * 重送同一個 `clientMessageId` 會回同一個訊息與回合，不會新增訊息。
+   */
+  findMessageByClientId(
+    conversationId: ConversationId,
+    clientMessageId: string,
+  ): Promise<MessageReceipt | null>;
 
   /**
    * 刪除對話與它的引擎資料。

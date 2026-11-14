@@ -104,6 +104,11 @@ export interface SendMessageRequest {
   readonly content: readonly ContentBlock[];
   readonly delivery: MessageDelivery;
   readonly sender: ActorRef;
+  /**
+   * 呼叫端提供的訊息識別碼；同一個值重送不會新增訊息，重啟後仍查得回來。
+   * 對應引擎的 `SubmissionDraft.requestId`。
+   */
+  readonly clientMessageId?: string;
 }
 
 /** 送訊息被接受的方式。 */
@@ -153,6 +158,11 @@ export interface ConversationUpdate {
 /** 恢復對話時，引擎回報的進行中工作。 */
 export interface TurnRecovery {
   readonly turnId: TurnId;
+  /**
+   * 觸發這一輪的使用者訊息 ID；`turnId` 由它推導（`turn_` 加訊息 ID）。
+   * 來源依序是 `pi.live.run.first`、`run.inputs[0]` 的 submission entry、`turn_index`。
+   */
+  readonly triggerMessageId: MessageId;
   readonly outcome: "completed" | "resumed" | "interrupted" | "failed";
   readonly diagnostics: readonly ToolDiagnostic[];
 }
@@ -167,8 +177,9 @@ export interface RestoreConversationResult {
 /** 刪除對話的選項。 */
 export interface DeleteConversationOptions {
   /**
-   * 一起刪除所有子代理支線；預設 true，因為支線生命週期跟著主線。
-   * 刪除其他對話的支線會被拒絕。
+   * 支線生命週期跟著主線，因此刪除**一定**連同所有子代理支線。
+   * 這個欄位只是保留給呼叫端表達意圖；`false` 會被拒絕（`invalid-request`），
+   * 因為留下祖先被刪的支線會讓引擎的 Session 進入 `failed`。
    */
   readonly includeBranches?: boolean;
 }
