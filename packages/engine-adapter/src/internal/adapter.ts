@@ -877,6 +877,25 @@ export class PiEngineAdapter implements EngineAdapter {
       .map((id) => catalog.conversations[id]?.clientRequestId ?? null)
       .filter((value): value is string => value !== null);
 
+    // 先在同一個 commit 清掉目錄與 clientRequestId 的正反向索引，再關 Harness
+    // 刪引擎的列；重送回同一個 clientRequestId 才不會指到已刪的資源。
+    await this.#session.harness.commit(async (tx) => {
+      const draft = await tx.doc(CatalogDoc);
+      for (const id of subtreeIds) {
+        const meta = draft.conversations[id];
+        if (meta?.clientRequestId != null) {
+          delete draft.clientRequests[meta.clientRequestId];
+          await tx.retireDoc(ClientRequestIndex, meta.clientRequestId);
+        }
+        delete draft.conversations[id];
+        for (const [turnId, turn] of Object.entries(draft.turns)) {
+          if (turn.conversationId === id) {
+            delete draft.turns[turnId];
+          }
+        }
+      }
+    }, BACKGROUND_CONTEXT);
+
     await this.#supervisor.terminateAll();
     if (wasOpen) {
       await this.#session.close();
