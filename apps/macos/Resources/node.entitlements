@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Hardened Runtime 下，V8 建立可執行程式記憶體需要這個 entitlement。
+	  沒有它，任何 JS 執行都會被系統以 SIGTRAP 結束（退出碼 133）。
+
+	  規格第 2 章要求內嵌 Node 只帶這一項：不得有
+	  com.apple.security.get-task-allow，也不得加 keychain-access-groups。
+	  `Scripts/verify-signing.sh` 會實際跑一次有／沒有這項的對照。
+	-->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+</dict>
+</plist>

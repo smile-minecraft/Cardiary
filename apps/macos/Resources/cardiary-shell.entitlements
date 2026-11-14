@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  殼本身不執行 JS，不需要 JIT、不需要放寬程式庫驗證，所以 entitlements 是空的。
+
+	  App Sandbox 關閉（官網直下載）：隔離由 Hardened Runtime、Developer ID 簽章、
+	  公證與權限規則承擔。不得加入 com.apple.security.get-task-allow 或
+	  keychain-access-groups。內嵌 Node 的 entitlement 只有
+	  com.apple.security.cs.allow-jit，見 node.entitlements。
+	-->
+</dict>
+</plist>
