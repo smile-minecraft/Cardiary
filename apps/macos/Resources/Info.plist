@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_TW</string>
+	<key>CFBundleDisplayName</key>
+	<string>Cardiary</string>
+	<key>CFBundleExecutable</key>
+	<string>CardiaryShell</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.cardiary</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Cardiary</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<!-- 只留選單列，不佔 Dock。關閉視窗後服務仍在執行。 -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Cardiary</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Cardiary 需要讀寫你放在桌面的資料夾，用來存放卡片與附件。</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Cardiary 需要讀寫你放在文件的資料夾，用來存放卡片與附件。</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Cardiary 需要讀取你下載的檔案，用來匯入卡片。</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Cardiary 需要讀寫外接硬碟上的 Cardiary 資料夾。</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Cardiary 需要讀寫網路磁碟上的 Cardiary 資料夾。</string>
+</dict>
+</plist>
