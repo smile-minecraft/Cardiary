@@ -78,6 +78,8 @@ export interface RunningHost {
   readonly storage: StorageBundle;
   readonly port: number;
   readonly epoch: string;
+  /** 共用子行程註冊表；測試與整合驗證「pause 後沒有工具存活」用。 */
+  readonly spawn: SpawnRegistry;
 }
 
 const DEMO_BUNDLE_ID = "demo";
@@ -183,7 +185,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   });
   serviceRef = service;
   await service.start();
-  return { service, gateway, engine, storage, port, epoch: snapshot.epoch };
+  return { service, gateway, engine, storage, port, epoch: snapshot.epoch, spawn };
 }
 
 /** 示範工具：讓契約測試能走完審批、串流與介面資料，不需要真模型。 */

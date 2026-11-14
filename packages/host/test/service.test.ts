@@ -108,6 +108,7 @@ describe("生命週期", () => {
     expect(Math.max(...statusIndexes)).toBeLessThan(checkpointIndex);
     const calls = eventsCalls(host);
     expect(host.host.storage.events.closed).toBe(true);
+    expect(host.host.spawn.runningCount).toBe(0);
     expect(host.host.engine.getStatus().state).toBe("paused");
     const appended = calls.filter((call) => call.startsWith("events.append:system:")).length;
     await host.host.service.pause("user", 200);
@@ -175,6 +176,23 @@ describe("生命週期", () => {
       before,
     );
   });
+
+  it("執行中的 shutdown 取消工具並等它們結束", async () => {
+    const host = await boot({
+      scripts: [
+        [
+          { kind: "tool", toolName: "demo.exec", input: { seconds: 5 } },
+          { kind: "text", text: "完成" },
+        ],
+      ],
+    });
+    const client = await startToolTurn(host);
+    expect(host.host.spawn.runningCount).toBeGreaterThanOrEqual(1);
+    const result = await host.host.service.shutdown("user");
+    expect(result.cleanShutdown).toBe(true);
+    expect(host.host.spawn.runningCount).toBe(0);
+    await client.close();
+  }, 15_000);
 
   it("執行中的 shutdown 先提交 clean_shutdown 再 checkpoint 與關閉", async () => {
     const host = await boot();
@@ -258,6 +276,16 @@ describe("生命週期", () => {
     const first = host.host.service.pause("user", 100);
     await expect(host.host.service.resume()).rejects.toMatchObject({ code: "busy" });
     await first;
+  });
+
+  it("啟動順序：先讀 runtime_state，才寫第一則事件", async () => {
+    const timeline: string[] = [];
+    const host = await boot({ trace: (entry) => timeline.push(entry) });
+    const runtimeIndex = timeline.indexOf("runtime.open");
+    const firstEventIndex = timeline.findIndex((entry) => entry.startsWith("events.append:"));
+    expect(runtimeIndex).toBeGreaterThan(-1);
+    expect(firstEventIndex).toBeGreaterThan(runtimeIndex);
+    void host;
   });
 
   it("重啟後是新的 epoch（記憶體替身沒有持久化）", async () => {

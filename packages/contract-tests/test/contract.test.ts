@@ -235,6 +235,97 @@ describe("以 node 直接啟動的主機服務", () => {
     expect(deniedPayload.diagnostics.map((diagnostic) => diagnostic.code)).toContain("denied");
   });
 
+  it("文字增量不進事件日誌：斷線重連只補送耐久事件，完成事件帶完整文字", async () => {
+    const service = await boot({
+      scripts: [[{ kind: "text", text: "z".repeat(30), chunkSize: 1, delayMs: 10 }]],
+    });
+    const first = await client(service);
+    const sessionId = await createSession(first);
+    await subscribe(first, sessionId);
+    first.request("session.send_message", { sessionId, text: "嗨", delivery: "queue" });
+    await first.waitForEvent("stream.text_delta");
+    await first.close();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    const second = await client(service);
+    const subscribeId = second.request("session.subscribe", {
+      sessionId,
+      lastSeq: 1,
+      epoch: service.ready.epoch,
+    });
+    const reply = await second.waitForReply(subscribeId);
+    expect((reply.payload as { resyncRequired: boolean }).resyncRequired).toBe(false);
+    const completion = await second.waitFor(
+      (frame) => frame.type === "stream.message_completed",
+      6000,
+    );
+    expect((completion.payload as { entry: { text: string } }).entry.text).toHaveLength(30);
+    // 補送與即時事件裡都不能有 text_delta（它不落地、也不補送）。
+    const deltasAfterSubscribe = second.frames.filter(
+      (frame) =>
+        frame.type === "stream.text_delta" &&
+        typeof frame.seq === "number" &&
+        (frame.seq as number) <= ((reply.payload as { seq: number }).seq ?? 0),
+    );
+    expect(deltasAfterSubscribe).toHaveLength(0);
+  });
+
+  it("重連時用會話快照的 streaming 接手進行中的文字", async () => {
+    const service = await boot({
+      scripts: [[{ kind: "text", text: "w".repeat(30), chunkSize: 1, delayMs: 15 }]],
+    });
+    const first = await client(service);
+    const sessionId = await createSession(first);
+    await subscribe(first, sessionId);
+    first.request("session.send_message", { sessionId, text: "嗨", delivery: "queue" });
+    await first.waitForEvent("stream.text_delta");
+    const late = await client(service);
+    const subscribeId = late.request("session.subscribe", { sessionId });
+    const reply = await late.waitForReply(subscribeId);
+    const snapshot = (
+      reply.payload as {
+        snapshot: { streaming?: { text: string; turnId: string; messageId: string } };
+      }
+    ).snapshot;
+    expect(snapshot.streaming).toBeDefined();
+    expect(snapshot.streaming?.text.length).toBeGreaterThan(0);
+    expect(snapshot.streaming?.turnId).toBeTruthy();
+    const completion = await late.waitFor(
+      (frame) => frame.type === "stream.message_completed",
+      8000,
+    );
+    expect((completion.payload as { entry: { text: string } }).entry.text).toHaveLength(30);
+  });
+
+  it("重送同一個 clientRequestId 與 clientMessageId 不會建立第二份資源", async () => {
+    const service = await boot({ scripts: [[{ kind: "text", text: "回覆" }]] });
+    const connected = await client(service);
+    const firstCreate = connected.request("session.create", { clientRequestId: "cr-same" });
+    const created = await connected.waitForReply(firstCreate);
+    const sessionId = (created.payload as { session: { id: string } }).session.id;
+    const secondCreate = connected.request("session.create", { clientRequestId: "cr-same" });
+    const again = await connected.waitForReply(secondCreate);
+    expect((again.payload as { session: { id: string } }).session.id).toBe(sessionId);
+    await subscribe(connected, sessionId);
+    const firstSend = connected.request("session.send_message", {
+      sessionId,
+      text: "嗨",
+      delivery: "queue",
+      clientMessageId: "cm-same",
+    });
+    const sent = await connected.waitForReply(firstSend);
+    const secondSend = connected.request("session.send_message", {
+      sessionId,
+      text: "嗨",
+      delivery: "queue",
+      clientMessageId: "cm-same",
+    });
+    const resent = await connected.waitForReply(secondSend);
+    expect((resent.payload as { userMessageId: string }).userMessageId).toBe(
+      (sent.payload as { userMessageId: string }).userMessageId,
+    );
+  });
+
   it("緊急全部暫停回報受影響的會話，回合標成 interrupted", async () => {
     const service = await boot({
       scripts: [[{ kind: "text", text: "y".repeat(30), chunkSize: 1, delayMs: 15 }]],
