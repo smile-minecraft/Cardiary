@@ -425,6 +425,14 @@ describe("刪除對話", () => {
     expect(engine.count("SELECT COUNT(*) AS n FROM conversations WHERE id = 9")).toBe(1);
   });
 
+  it("request_dedupe 只靠 resource_id 指向子樹也會被刪", async () => {
+    const { storage } = seed();
+    storage.dedupe.claim("resource-only-key", "send-message");
+    storage.dedupe.setResource("resource-only-key", "1");
+    await storage.deletions.deleteConversation("1");
+    expect(storage.dedupe.lookup("resource-only-key")).toBeNull();
+  });
+
   it("刪除是冪等的：再呼叫一次不丟錯，也不留下新的列", async () => {
     const { storage } = seed();
     await storage.deletions.deleteConversation("1");
