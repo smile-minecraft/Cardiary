@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -110,6 +110,20 @@ describe("資料庫 header 與表結構", () => {
     cleanups.push(() => second.close());
     expect(second.state.countRows("schema_migrations")).toBe(count);
     expect(Number(second.state.pragma("user_version"))).toBe(1);
+  });
+
+  it("資料庫檔是符號連結時拒絕開啟，不碰外部檔案", () => {
+    const directory = scratch();
+    const outside = path.join(directory, "outside.sqlite");
+    const target = path.join(directory, "db.sqlite");
+    writeFileSync(outside, "keep");
+    symlinkSync(outside, target);
+    expect(() =>
+      Database.open(target, {
+        create: { applicationId: STATE_APPLICATION_ID },
+      }),
+    ).toThrowError(/符號連結/);
+    expect(readFileSync(outside, "utf8")).toBe("keep");
   });
 
   it("引擎檔案可以只建立 header，之後由引擎自己建表", () => {

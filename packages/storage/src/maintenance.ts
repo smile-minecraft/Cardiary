@@ -64,7 +64,7 @@ export class StorageMaintenance {
     const dedupe = new RequestDedupeStore(this.#state, { now: this.#now });
     const prunedEvents = events.prune({ now: this.#now(), retainDays: this.#retainDays });
     approvals.prune({ now: this.#now(), retainDays: this.#retainDays });
-    dedupe.prune({ now: this.#now(), retainDays: this.#retainDays });
+    dedupe.prune({ now: this.#now() });
 
     for (const db of [this.#state, this.#engine]) {
       db.checkpoint();

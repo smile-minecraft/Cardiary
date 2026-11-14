@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -140,6 +149,70 @@ describe("初始化與身分", () => {
     expect(readFileSync(folderIdentityPath(first.layout), "utf8")).toBe(identityBefore);
   });
 
+  it("state 是符號連結：mismatch，不開 DB、不寫 service.lock、外部沒有新檔", () => {
+    const tempRoot = temp();
+    const first = open(tempRoot);
+    const outside = path.join(tempRoot.root, "outside-state");
+    first.close();
+    renameSync(path.join(tempRoot.folder, "state"), outside);
+    symlinkSync(outside, path.join(tempRoot.folder, "state"));
+    const before = new Map(
+      readdirSync(outside)
+        .sort()
+        .map((name) => [name, readFileSync(path.join(outside, name), "utf8").length]),
+    );
+    const manager = new FolderManager(new FolderLayout(tempRoot.folder));
+    const result = manager.open();
+    expect(result.state).toBe("mismatch");
+    expect(existsSync(path.join(outside, "service.lock"))).toBe(false);
+    const after = new Map(
+      readdirSync(outside)
+        .sort()
+        .map((name) => [name, readFileSync(path.join(outside, name), "utf8").length]),
+    );
+    expect(after).toEqual(before);
+  });
+
+  it("cache 是符號連結：mismatch，不在外部建立索引或寫入", () => {
+    const tempRoot = temp();
+    const first = open(tempRoot);
+    const outside = path.join(tempRoot.root, "outside-cache");
+    first.close();
+    renameSync(path.join(tempRoot.folder, "cache"), outside);
+    symlinkSync(outside, path.join(tempRoot.folder, "cache"));
+    const before = new Map(
+      readdirSync(outside)
+        .sort()
+        .map((name) => [name, readFileSync(path.join(outside, name), "utf8").length]),
+    );
+    const manager = new FolderManager(new FolderLayout(tempRoot.folder));
+    const result = manager.open();
+    expect(result.state).toBe("mismatch");
+    expect(result.reason).toBe("structure_missing");
+    const after = new Map(
+      readdirSync(outside)
+        .sort()
+        .map((name) => [name, readFileSync(path.join(outside, name), "utf8").length]),
+    );
+    expect(after).toEqual(before);
+  });
+
+  it("folder.json 是符號連結：mismatch，不跟隨讀取", () => {
+    const tempRoot = temp();
+    const first = open(tempRoot);
+    first.close();
+    const outside = path.join(tempRoot.root, "outside-folder.json");
+    const original = readFileSync(folderIdentityPath(first.layout), "utf8");
+    writeFileSync(outside, original);
+    rmSync(folderIdentityPath(first.layout), { force: true });
+    symlinkSync(outside, folderIdentityPath(first.layout));
+    const manager = new FolderManager(new FolderLayout(tempRoot.folder));
+    const result = manager.open();
+    expect(result.state).toBe("mismatch");
+    expect(result.reason).toBe("invalid_identity");
+    expect(readFileSync(outside, "utf8")).toBe(original);
+  });
+
   it("state 目錄或資料庫不見了：mismatch，不自動重建", () => {
     const tempRoot = temp();
     const first = open(tempRoot);
@@ -172,6 +245,19 @@ describe("可重建的區域", () => {
     for (const name of ["cache", "tmp", "logs"]) {
       expect(existsSync(path.join(tempRoot.folder, name)), name).toBe(true);
     }
+  });
+
+  it("只重建 cache/index.sqlite，不碰 cache/thumbs 的既有檔案", () => {
+    const tempRoot = temp();
+    const first = open(tempRoot);
+    const thumb = path.join(tempRoot.folder, "cache/thumbs/keep.png");
+    mkdirSync(path.dirname(thumb), { recursive: true });
+    writeFileSync(thumb, "keep");
+    first.close();
+    rmSync(path.join(tempRoot.folder, "cache/index.sqlite"), { force: true });
+    const second = open(tempRoot);
+    expect(second.folderState).toBe("ready");
+    expect(readFileSync(thumb, "utf8")).toBe("keep");
   });
 
   it("刪除整個快取區後重新啟動，快取資料庫以正確 header 重建", () => {

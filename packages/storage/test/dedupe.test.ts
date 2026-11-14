@@ -93,6 +93,23 @@ describe("claim / complete / lookup", () => {
     expect(parseSendMessageKey("session-create:x")).toBeNull();
   });
 
+  it("保留期限是 30 天，不是 60 天", () => {
+    const storage = openTestStorage(temp("dedupe-retention"));
+    cleanups.push(() => storage.close());
+    const claimedAt = "2026-01-01T00:00:00.000Z";
+    const store = new RequestDedupeStore(storage.state, { now: () => new Date(claimedAt) });
+    store.claim(sessionCreateKey("thirty-days"), "session-create", { now: claimedAt });
+    expect(store.lookup(sessionCreateKey("thirty-days"))?.expiresAt).toBe(
+      "2026-01-31T00:00:00.000Z",
+    );
+    // 第 29 天還在。
+    expect(store.prune({ now: new Date("2026-01-30T00:00:00.000Z") })).toBe(0);
+    expect(store.lookup(sessionCreateKey("thirty-days"))).not.toBeNull();
+    // 第 31 天已被清掉。
+    expect(store.prune({ now: new Date("2026-02-01T00:00:00.000Z") })).toBe(1);
+    expect(store.lookup(sessionCreateKey("thirty-days"))).toBeNull();
+  });
+
   it("過期列由維護清理，不在請求路徑刪", () => {
     const storage = openTestStorage(temp());
     cleanups.push(() => storage.close());
@@ -102,7 +119,7 @@ describe("claim / complete / lookup", () => {
       retainDays: 30,
     });
     expect(store.count()).toBe(1);
-    store.prune({ now: new Date(), retainDays: 30 });
+    store.prune({ now: new Date() });
     expect(store.count()).toBe(0);
   });
 });

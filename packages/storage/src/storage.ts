@@ -128,6 +128,7 @@ export class Storage {
         filePath: statePath,
         appVersion,
         backupDirectory,
+        layout,
         now,
         ...(trace === undefined ? {} : { trace }),
         onFailure: onDatabaseFailure,
@@ -165,6 +166,7 @@ export class Storage {
       state = openState().db;
       cache = openCacheDatabase({
         filePath: layout.absolute("cache/index.sqlite"),
+        layout,
         now,
         ...(trace === undefined ? {} : { trace }),
         onFailure: onDatabaseFailure,
@@ -205,6 +207,7 @@ export class Storage {
         }
         const reopened = openCacheDatabase({
           filePath: layout.absolute("cache/index.sqlite"),
+          layout,
           now,
           ...(trace === undefined ? {} : { trace }),
           onFailure: onDatabaseFailure,

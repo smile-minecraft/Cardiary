@@ -15,6 +15,7 @@ import { createTempRoot } from "./helpers/temp.js";
 import {
   FolderLayout,
   MAX_RELATIVE_PATH_BYTES,
+  zoneForRelativePath,
   StorageError,
   readFileNoFollow,
   removeFileSafely,
@@ -58,6 +59,19 @@ describe("相對路徑規則", () => {
     for (const input of invalid) {
       expect(() => validateRelativePath(input), input).toThrowError(StorageError);
     }
+  });
+
+  it("原型名稱不能當成九個子資料夾之一", () => {
+    expect(() => validateRelativePath("__proto__/x")).not.toThrow();
+    const temp = createTempRoot("paths-proto");
+    cleanups.push(temp.cleanup);
+    const layout = new FolderLayout(temp.folder);
+    for (const first of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+      expect(() => layout.absolute(`${first}/x`), first).toThrowError(/九個子資料夾/);
+      expect(() => removeFileSafely(layout, layout.absolute(`cache/${first}`))).not.toThrow();
+    }
+    expect(zoneForRelativePath("__proto__/x")).toBeNull();
+    expect(zoneForRelativePath("constructor")).toBeNull();
   });
 
   it("拒絕超過 1024 bytes 的路徑", () => {

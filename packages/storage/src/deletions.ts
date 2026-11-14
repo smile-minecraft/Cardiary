@@ -33,6 +33,8 @@ export interface DeletionHooks {
   readonly onAfterCardiaryCommit?: () => void;
   /** 測試注入：真空階段開始前中斷。 */
   readonly onVacuumStart?: () => void;
+  /** 測試注入：每刪完一個登記檔後呼叫；用來模擬檔案刪一半的崩潰窗口。 */
+  readonly onAfterFileDelete?: (relativePath: string) => void;
   /** M1 的工具呼叫識別碼；有值時一併清掉對應的登記列。 */
   readonly toolCallIds?: readonly string[];
 }
@@ -143,63 +145,75 @@ export class ConversationDeletionService {
    */
   async deleteConversation(rootId: string, hooks: DeletionHooks = {}): Promise<DeletionReport> {
     await hooks.stopTools?.();
-    await hooks.closeHarness?.();
+    // 提早返回或任何例外都要把 Harness 回到原本開著的狀態；真正行程崩潰
+    // 不會執行 finally，下一次啟動由刪除意圖恢復。
+    const shouldReopenHarness = hooks.closeHarness !== undefined;
+    try {
+      await hooks.closeHarness?.();
 
-    const existing = this.getIntent(rootId);
-    let intent = existing;
-    if (intent === null) {
-      const conversationIds = listConversationSubtree(this.#engine, rootId);
-      if (conversationIds.length === 0) {
-        // 找不到對話列時仍清掉殘留索引與 record_ids；這是冪等重試的一部分。
-        this.cleanupResidualEngine();
-        return emptyReport(rootId);
+      const existing = this.getIntent(rootId);
+      let intent = existing;
+      if (intent === null) {
+        const conversationIds = listConversationSubtree(this.#engine, rootId);
+        if (conversationIds.length === 0) {
+          // 找不到對話列時仍清掉殘留索引與 record_ids；這是冪等重試的一部分。
+          this.cleanupResidualEngine();
+          return emptyReport(rootId);
+        }
+        const clientRequestIds = listClientRequestIds(this.#engine, conversationIds);
+        intent = {
+          rootId,
+          conversationIds,
+          clientRequestIds,
+          phase: "rows",
+          requestedAt: nowIso(this.#now),
+          updatedAt: nowIso(this.#now),
+        };
+        this.insertIntent(intent);
       }
-      const clientRequestIds = listClientRequestIds(this.#engine, conversationIds);
-      intent = {
+
+      const stateSizeBefore = this.#state.fileSize();
+      const engineSizeBefore = this.#engine.fileSize();
+
+      let counts = emptyCounts();
+      if (intent.phase === "rows") {
+        const taskIds = listTaskIds(this.#engine, intent.conversationIds);
+        counts = this.deleteCardiaryRows(
+          intent,
+          taskIds,
+          hooks.toolCallIds ?? [],
+          hooks.onAfterFileDelete,
+        );
+        hooks.onAfterCardiaryCommit?.();
+        const engineCounts = deleteEngineRows(
+          this.#engine,
+          intent.conversationIds,
+          intent.clientRequestIds,
+        );
+        counts = { ...counts, ...engineCounts };
+        this.updatePhase(rootId, "vacuum");
+      }
+
+      hooks.onVacuumStart?.();
+      this.vacuum(intent);
+      this.deleteIntent(rootId);
+      this.#trace("deletion:complete");
+
+      return {
         rootId,
-        conversationIds,
-        clientRequestIds,
-        phase: "rows",
-        requestedAt: nowIso(this.#now),
-        updatedAt: nowIso(this.#now),
+        deleted: true,
+        conversationIds: intent.conversationIds,
+        counts,
+        stateSizeBefore,
+        stateSizeAfter: this.#state.fileSize(),
+        engineSizeBefore,
+        engineSizeAfter: this.#engine.fileSize(),
       };
-      this.insertIntent(intent);
+    } finally {
+      if (shouldReopenHarness) {
+        await hooks.openHarness?.();
+      }
     }
-
-    const stateSizeBefore = this.#state.fileSize();
-    const engineSizeBefore = this.#engine.fileSize();
-
-    let counts = emptyCounts();
-    if (intent.phase === "rows") {
-      const taskIds = listTaskIds(this.#engine, intent.conversationIds);
-      counts = this.deleteCardiaryRows(intent, taskIds, hooks.toolCallIds ?? []);
-      hooks.onAfterCardiaryCommit?.();
-      const engineCounts = deleteEngineRows(
-        this.#engine,
-        intent.conversationIds,
-        intent.clientRequestIds,
-      );
-      counts = { ...counts, ...engineCounts };
-      this.updatePhase(rootId, "vacuum");
-    }
-
-    hooks.onVacuumStart?.();
-    this.vacuum(intent);
-    this.deleteIntent(rootId);
-    this.#trace("deletion:complete");
-
-    const report: DeletionReport = {
-      rootId,
-      deleted: true,
-      conversationIds: intent.conversationIds,
-      counts,
-      stateSizeBefore,
-      stateSizeAfter: this.#state.fileSize(),
-      engineSizeBefore,
-      engineSizeAfter: this.#engine.fileSize(),
-    };
-    await hooks.openHarness?.();
-    return report;
   }
 
   /**
@@ -276,6 +290,7 @@ export class ConversationDeletionService {
     intent: ConversationDeletionIntent,
     taskIds: readonly string[],
     toolCallIds: readonly string[],
+    onAfterFileDelete?: (relativePath: string) => void,
   ): DeletionTableCounts {
     const events = new EventLog(this.#state, { now: this.#now });
     const approvals = new ApprovalLedger(this.#state, { now: this.#now });
@@ -324,7 +339,7 @@ export class ConversationDeletionService {
     });
 
     // 交易已提交；現在刪檔案。中途當機只會留下孤兒檔案，掃描會處理。
-    deleteRegisteredFiles(this.#layout, registryFiles);
+    deleteRegisteredFiles(this.#layout, registryFiles, onAfterFileDelete);
     return counts;
   }
 
@@ -671,7 +686,11 @@ function collectRegistryFiles(
   return paths;
 }
 
-function deleteRegisteredFiles(layout: FolderLayout, relativePaths: readonly string[]): void {
+function deleteRegisteredFiles(
+  layout: FolderLayout,
+  relativePaths: readonly string[],
+  onAfterFileDelete?: (relativePath: string) => void,
+): void {
   for (const relativePath of relativePaths) {
     try {
       const absolutePath = layout.absolute(relativePath);
@@ -679,6 +698,7 @@ function deleteRegisteredFiles(layout: FolderLayout, relativePaths: readonly str
     } catch {
       // 壞路徑或已不存在：掃描會留下可診斷的痕跡，不在刪除路徑再拋錯。
     }
+    onAfterFileDelete?.(relativePath);
   }
 }
 

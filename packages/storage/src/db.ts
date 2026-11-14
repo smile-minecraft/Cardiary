@@ -1,4 +1,4 @@
-import { existsSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, rmSync, statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
 import { StorageError, asStorageError, isBusyError, isFatalStorageError } from "./errors.js";
@@ -60,6 +60,7 @@ export class Database implements Queryable {
   }
 
   static open(filePath: string, options: DatabaseOpenOptions = {}): Database {
+    assertNoSymlinkDatabaseFiles(filePath);
     const database = new Database(filePath, options);
     if (!existsSync(filePath)) {
       if (options.create === undefined) {
@@ -356,8 +357,13 @@ export class Database implements Queryable {
   }
 }
 
-/** 建立空資料庫並寫入 header；呼叫端必須先確認上層資料夾存在。 */
+/**
+ * 建立空資料庫並寫入 header；呼叫端必須先確認上層資料夾存在。
+ *
+ * 失敗時只刪除這次剛建立的檔案（呼叫端已確認呼叫前不存在）；不碰任何既有檔案。
+ */
 function createDatabaseFile(filePath: string, settings: DatabaseCreateSettings): void {
+  assertNoSymlinkDatabaseFiles(filePath);
   const db = new DatabaseSync(filePath);
   try {
     db.exec(`PRAGMA page_size = ${settings.pageSize ?? DEFAULT_PAGE_SIZE}`);
@@ -368,8 +374,24 @@ function createDatabaseFile(filePath: string, settings: DatabaseCreateSettings):
     db.exec("VACUUM");
   } catch (error) {
     db.close();
+    // 只刪這次剛建立的檔；`Database.open` 只在檔案不存在時呼叫這個函式。
     rmSync(filePath, { force: true });
     throw asStorageError(error, "storage-failed");
   }
   db.close();
+}
+
+function assertNoSymlinkDatabaseFiles(filePath: string): void {
+  for (const target of [filePath, `${filePath}-wal`, `${filePath}-shm`]) {
+    try {
+      if (lstatSync(target).isSymbolicLink()) {
+        throw new StorageError("protected-path", "資料庫檔或側車檔是符號連結", { target });
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+  }
 }

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -177,6 +177,25 @@ describe("pause 與 shutdown 的順序", () => {
     expect(row?.clean_shutdown).toBe(0);
   });
 
+  it("SIGTERM 類的未標記關閉：clean_shutdown 保持 0，下次 open 換 epoch", () => {
+    const tempRoot = temp();
+    const first = openTestStorage(tempRoot);
+    const epoch = first.runtime.read()?.epoch as string;
+    const coordinator = new LifecycleCoordinator({
+      runtime: first.runtime,
+      events: first.events,
+      supervisor: supervisor([]),
+    });
+    coordinator.closeAfterDisconnect();
+    first.close();
+
+    const second = openTestStorage(tempRoot);
+    cleanups.push(() => second.close());
+    const snapshot = second.runtime.read();
+    expect(snapshot?.epoch).not.toBe(epoch);
+    expect(snapshot?.cleanShutdown).toBe(false);
+  });
+
   it("工具還在執行時 pause 不繼續關閉", async () => {
     const tempRoot = temp();
     const storage = openTestStorage(tempRoot);
@@ -253,6 +272,46 @@ describe("暫停中關閉與資料夾身分", () => {
         ?.clean_shutdown,
     ).toBe(0);
     raw.close();
+  });
+
+  it("資料夾不在時 paused shutdown 回 false", () => {
+    const tempRoot = temp();
+    const storage = openTestStorage(tempRoot);
+    const folderId = storage.folderId as string;
+    const epoch = storage.runtime.read()?.epoch as string;
+    const moved = path.join(tempRoot.root, "Cardiary-moved");
+    storage.runtime.checkpointAndClose();
+    renameSync(tempRoot.folder, moved);
+    try {
+      const result = storage.runtime.shutdownWhilePaused({
+        layout: storage.layout,
+        expectedFolderId: folderId,
+        expectedEpoch: epoch,
+      });
+      expect(result).toBe(false);
+    } finally {
+      renameSync(moved, tempRoot.folder);
+      storage.close();
+    }
+  });
+
+  it("狀態庫 reopen 失敗時 paused shutdown 回 false", () => {
+    const tempRoot = temp();
+    const storage = openTestStorage(tempRoot);
+    cleanups.push(() => storage.close());
+    const folderId = storage.folderId as string;
+    const epoch = storage.runtime.read()?.epoch as string;
+    storage.runtime.checkpointAndClose();
+    const databasePath = path.join(tempRoot.folder, "state/cardiary.sqlite");
+    rmSync(databasePath, { force: true });
+    mkdirSync(databasePath);
+    const result = storage.runtime.shutdownWhilePaused({
+      layout: storage.layout,
+      expectedFolderId: folderId,
+      expectedEpoch: epoch,
+    });
+    expect(result).toBe(false);
+    rmSync(databasePath, { recursive: true, force: true });
   });
 
   it("epoch 不符回 false，也不寫 1", async () => {

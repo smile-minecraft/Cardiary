@@ -1,4 +1,12 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -96,6 +104,48 @@ describe("刪除意圖與啟動恢復", () => {
     });
     expect(recovered).toBe(1);
     expect(order).toEqual(["harness"]);
+    expect(byteSearch(tempRoot.folder, [MARKER])).toEqual([]);
+  });
+
+  it("Cardiary 交易提交後、檔案刪一半：恢復完成列刪除，孤兒檔由掃描回收", async () => {
+    const tempRoot = temp();
+    const first = open(tempRoot);
+    const engine = seedSmall(first);
+    const cacheDir = path.join(tempRoot.folder, "cache/thumbs");
+    mkdirSync(cacheDir, { recursive: true });
+    const firstFile = path.join(cacheDir, "a.png");
+    const secondFile = path.join(cacheDir, "b.png");
+    writeFileSync(firstFile, `${MARKER}-a`);
+    writeFileSync(secondFile, `${MARKER}-b`);
+    first.registry.register({
+      relPath: "cache/thumbs/a.png",
+      ownerKind: "conversation",
+      ownerId: "1",
+    });
+    first.registry.register({
+      relPath: "cache/thumbs/b.png",
+      ownerKind: "conversation",
+      ownerId: "1",
+    });
+
+    await expect(
+      first.deletions.deleteConversation("1", {
+        onAfterFileDelete: () => {
+          throw new Error("crash after one file");
+        },
+      }),
+    ).rejects.toThrowError("crash after one file");
+    expect(first.deletions.getIntent("1")?.phase).toBe("rows");
+    expect(existsSync(firstFile) || existsSync(secondFile)).toBe(true);
+    first.close();
+
+    const second = open(tempRoot);
+    await second.deletions.recoverAtStartup({});
+    expect(second.deletions.getIntent("1")).toBeNull();
+    expect(engine.count("SELECT COUNT(*) AS n FROM conversations WHERE id IN (1, 2)")).toBe(0);
+    // 設計接受的窗口：登記列已刪、孤兒檔還在，等掃描回收。
+    expect(byteSearch(tempRoot.folder, [MARKER]).length).toBeGreaterThan(0);
+    second.registry.scan({ now: new Date() });
     expect(byteSearch(tempRoot.folder, [MARKER])).toEqual([]);
   });
 

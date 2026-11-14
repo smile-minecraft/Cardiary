@@ -1,4 +1,12 @@
-import { appendFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  openSync,
+  readdirSync,
+  statSync,
+  writeSync,
+} from "node:fs";
 import path from "node:path";
 
 import { StorageError } from "./errors.js";
@@ -65,6 +73,7 @@ export class DiagnosticLogger {
   readonly #now: () => Date;
   readonly #maxBytes: number;
   readonly #retainDays: number;
+  #skippedWrites = 0;
 
   constructor(layout: FolderLayout, options: DiagnosticLoggerOptions = {}) {
     this.#layout = layout;
@@ -101,7 +110,12 @@ export class DiagnosticLogger {
     if (Buffer.byteLength(line, "utf8") > MAX_LINE_BYTES) {
       throw new StorageError("invalid-log-field", "日誌行過長");
     }
-    appendFileSync(this.#filePath(), line, "utf8");
+    this.writeLine(this.#filePath(), line);
+  }
+
+  /** 因為日誌檔不是一般檔案而跳過的寫入次數；測試與診斷使用。 */
+  get skippedWrites(): number {
+    return this.#skippedWrites;
   }
 
   /** 只記錄錯誤碼，不記錄原始訊息，避免把內容帶進日誌。 */
@@ -157,6 +171,38 @@ export class DiagnosticLogger {
   /** 目前日誌檔的絕對路徑；同一天共用一個檔。 */
   currentFile(): string {
     return this.#filePath();
+  }
+
+  /**
+   * 用 `O_NOFOLLOW` 開檔並追加；日誌檔是符號連結時不跟隨，記錄後跳過。
+   *
+   * 這是唯一寫日誌的位置；`rotate()` 只刪 `service-*.log`，也走安全刪除。
+   */
+  private writeLine(filePath: string, line: string): void {
+    let fd: number | null = null;
+    try {
+      fd = openSync(
+        filePath,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW,
+        0o600,
+      );
+      writeSync(fd, line, null, "utf8");
+    } catch {
+      this.#skippedWrites += 1;
+      if (this.#skippedWrites === 1) {
+        process.stderr.write(
+          "cardiary: log file is not a regular file; diagnostic write skipped\n",
+        );
+      }
+    } finally {
+      if (fd !== null) {
+        try {
+          closeSync(fd);
+        } catch {
+          // 已關閉或寫入失敗；不影響呼叫端。
+        }
+      }
+    }
   }
 
   #filePath(): string {

@@ -168,6 +168,8 @@ function seed(): Seeded {
   storage.dedupe.setResource(dedupe.record.key, String(root));
   storage.dedupe.complete(dedupe.record.key, JSON.stringify({ marker: STATE_MARKER }));
   storage.dedupe.claim(`send-message:${root}:msg-pending`, "send-message");
+  storage.dedupe.claim("opaque-resource-key", "send-message");
+  storage.dedupe.setResource("opaque-resource-key", String(root));
   storage.dedupe.claim("send-message:3:msg-keep", "send-message");
   storage.dedupe.complete("send-message:3:msg-keep", JSON.stringify({ keep: true }));
 
@@ -395,6 +397,32 @@ describe("刪除對話", () => {
     expect(
       engine.count("SELECT COUNT(*) AS n FROM record_ids WHERE id IN (30, 300, 402, 502, 503)"),
     ).toBe(5);
+  });
+
+  it("刪不存在的對話會重開 Harness，之後仍能開新回合", async () => {
+    const { storage, engine } = seed();
+    const harness = {
+      open: false,
+      newTurn(): boolean {
+        if (!this.open) {
+          throw new Error("harness is closed");
+        }
+        return true;
+      },
+    };
+    const report = await storage.deletions.deleteConversation("999", {
+      closeHarness: async () => {
+        harness.open = false;
+      },
+      openHarness: async () => {
+        harness.open = true;
+      },
+    });
+    expect(report.deleted).toBe(false);
+    expect(harness.open).toBe(true);
+    expect(harness.newTurn()).toBe(true);
+    engine.insertConversation(9, { text: "after-noop-delete" });
+    expect(engine.count("SELECT COUNT(*) AS n FROM conversations WHERE id = 9")).toBe(1);
   });
 
   it("刪除是冪等的：再呼叫一次不丟錯，也不留下新的列", async () => {

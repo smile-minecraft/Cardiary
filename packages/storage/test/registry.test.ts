@@ -2,10 +2,11 @@ import {
   existsSync,
   linkSync,
   mkdirSync,
+  readFileSync,
+  readdirSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
-  readFileSync,
 } from "node:fs";
 import path from "node:path";
 
@@ -106,6 +107,22 @@ describe("掃描與回收", () => {
     expect(removed).toBe(1);
     expect(existsSync(inside)).toBe(false);
     expect(existsSync(outside)).toBe(true);
+  });
+
+  it("跑完任務後 clearZone('tmp') 讓暫存區為空，正本不動", () => {
+    const tempRoot = temp();
+    const storage = open(tempRoot);
+    write(tempRoot.folder, "tmp/tool-run/output.txt");
+    write(tempRoot.folder, "tmp/tmp-ABC123/pi-output-x.log");
+    write(tempRoot.folder, "cards/keep.md", "keep");
+    storage.registry.register({
+      relPath: "tmp/tool-run/output.txt",
+      ownerKind: "tool-call",
+      ownerId: "c1",
+    });
+    expect(storage.registry.clearZone("tmp")).toBeGreaterThanOrEqual(2);
+    expect(readdirSync(path.join(tempRoot.folder, "tmp"))).toEqual([]);
+    expect(existsSync(path.join(tempRoot.folder, "cards/keep.md"))).toBe(true);
   });
 
   it("啟動時清空整個 tmp", () => {
@@ -238,6 +255,17 @@ describe("診斷日誌", () => {
     ).toThrowError(/白名單/);
     const hits = byteSearch(path.join(tempRoot.folder, "logs"), ["DELETED_MARKER_SHOULD_NOT_LOG"]);
     expect(hits).toEqual([]);
+  });
+
+  it("日誌檔是符號連結時不跟隨寫入，外部檔案不變", () => {
+    const tempRoot = temp();
+    const storage = open(tempRoot);
+    const outside = path.join(tempRoot.root, "outside.log");
+    writeFileSync(outside, "keep");
+    symlinkSync(outside, storage.logs.currentFile());
+    storage.logs.log("info", "turn.completed", { sessionId: "conversation-1" });
+    expect(readFileSync(outside, "utf8")).toBe("keep");
+    expect(storage.logs.skippedWrites).toBe(1);
   });
 
   it("輪替會刪掉超過天數與超過大小的舊檔", () => {

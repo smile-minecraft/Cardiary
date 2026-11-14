@@ -3,6 +3,8 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { Database } from "./db.js";
+import type { FolderLayout } from "./paths.js";
+import { removeFileSafely } from "./paths.js";
 import { StorageError } from "./errors.js";
 import { nowIso } from "./util.js";
 import { sha256 } from "./json.js";
@@ -274,6 +276,8 @@ export interface MigrateOptions {
   readonly onBackup?: (absolutePath: string) => void;
   /** 遷移成功、刪除備份後呼叫。 */
   readonly onBackupRemoved?: (absolutePath: string) => void;
+  /** 有值時，備份與快取檔的刪除也走路徑範圍檢查。 */
+  readonly layout?: FolderLayout;
 }
 
 export interface MigrationOutcome {
@@ -368,7 +372,7 @@ export function migrate(db: Database, options: MigrateOptions): MigrationOutcome
   }
 
   if (backupPath !== null) {
-    removeDatabaseFiles(backupPath);
+    removeDatabaseFiles(backupPath, options.layout, "tmp");
     options.onBackupRemoved?.(backupPath);
   }
   return {
@@ -406,9 +410,27 @@ function verifyBackup(backupPath: string, version: number): void {
   }
 }
 
-function removeDatabaseFiles(databasePath: string): void {
+/**
+ * 刪除資料庫主檔與 SQLite 側車檔。
+ *
+ * 有 `layout` 時走 `removeFileSafely` 的範圍檢查；沒有時只刪傳入路徑的
+ * 主檔與側車檔（呼叫端只會傳快取或遷移備份這種衍生檔案），不碰正本。
+ */
+function removeDatabaseFiles(
+  databasePath: string,
+  layout: FolderLayout | undefined,
+  zone: "cache" | "tmp",
+): void {
   for (const suffix of ["", "-wal", "-shm"]) {
-    rmSync(`${databasePath}${suffix}`, { force: true });
+    const target = `${databasePath}${suffix}`;
+    if (layout !== undefined) {
+      if (existsSync(target)) {
+        removeFileSafely(layout, target, [zone]);
+      }
+      continue;
+    }
+    // 沒有 layout 的呼叫端是測試或內部建立流程；只刪已知的資料庫檔名。
+    rmSync(target, { force: true });
   }
 }
 
@@ -421,6 +443,7 @@ export interface StateDatabaseOptions {
   readonly onFailure?: (error: unknown, filePath: string) => void;
   readonly onBackup?: (absolutePath: string) => void;
   readonly onBackupRemoved?: (absolutePath: string) => void;
+  readonly layout?: FolderLayout;
 }
 
 export interface StateDatabaseHandle {
@@ -447,6 +470,7 @@ export function openStateDatabase(options: StateDatabaseOptions): StateDatabaseH
       ...(options.onBackupRemoved === undefined
         ? {}
         : { onBackupRemoved: options.onBackupRemoved }),
+      ...(options.layout === undefined ? {} : { layout: options.layout }),
     });
     return { db, migration };
   } catch (error) {
@@ -460,6 +484,7 @@ export interface CacheDatabaseOptions {
   readonly now?: () => Date;
   readonly trace?: (operation: string) => void;
   readonly onFailure?: (error: unknown, filePath: string) => void;
+  readonly layout?: FolderLayout;
 }
 
 export interface CacheDatabaseHandle {
@@ -492,7 +517,7 @@ export function openCacheDatabase(options: CacheDatabaseOptions): CacheDatabaseH
     } catch {
       rebuilt = true;
     }
-    removeDatabaseFiles(options.filePath);
+    removeDatabaseFiles(options.filePath, options.layout, "cache");
   }
 
   const db = Database.open(options.filePath, {

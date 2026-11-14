@@ -6,7 +6,6 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
-  readFileSync,
   rmdirSync,
   rmSync,
   statSync,
@@ -24,6 +23,7 @@ import {
   type FolderIdentity,
 } from "./identity.js";
 import { newUlid } from "./ids.js";
+import { readFileNoFollow } from "./paths.js";
 import {
   RECREATABLE_SUBFOLDERS,
   SUBFOLDERS,
@@ -354,19 +354,30 @@ export class FolderManager {
   }
 
   private structureIsValid(): boolean {
-    if (!existsSync(this.#layout.subfolderPath("state"))) {
-      this.#reason = "state_missing";
-      return false;
-    }
-    for (const name of ["cards", "assets", "boards", "skills", "modules"] as const) {
+    // 九個子資料夾都必須是真目錄；state 是符號連結時不能開 DB 或寫鎖檔。
+    for (const name of SUBFOLDERS) {
       const target = this.#layout.subfolderPath(name);
-      if (!existsSync(target) || !lstatSync(target).isDirectory()) {
+      if (!existsSync(target)) {
+        if (name === "cache" || name === "tmp" || name === "logs") {
+          continue;
+        }
+        this.#reason = name === "state" ? "state_missing" : "structure_missing";
+        return false;
+      }
+      const stats = lstatSync(target);
+      if (stats.isSymbolicLink() || !stats.isDirectory()) {
         this.#reason = "structure_missing";
         return false;
       }
     }
     for (const file of ["cardiary.sqlite", "engine.sqlite"]) {
-      if (!existsSync(this.#layout.absolute(`state/${file}`))) {
+      const target = this.#layout.absolute(`state/${file}`);
+      if (!existsSync(target)) {
+        this.#reason = "state_missing";
+        return false;
+      }
+      const stats = lstatSync(target);
+      if (stats.isSymbolicLink() || !stats.isFile()) {
         this.#reason = "state_missing";
         return false;
       }
@@ -394,6 +405,7 @@ export class FolderManager {
         }
         this.#lock = {
           release: () => {
+            // 只刪這台服務自己建立的鎖檔；固定路徑，不是使用者資料。
             rmSync(lockPath, { force: true });
           },
         };
@@ -407,8 +419,12 @@ export class FolderManager {
         if (existing !== null && processIsAlive(existing.pid)) {
           return { kind: "failed", reason: "already_running" };
         }
-        // 上次被 SIGKILL 留下的鎖檔：刪掉後重建。
-        rmSync(lockPath, { force: true });
+        // 上次被 SIGKILL 留下的鎖檔：只刪固定路徑的鎖檔，不是正本。
+        try {
+          rmSync(lockPath, { force: true });
+        } catch {
+          return { kind: "failed", reason: "io_error" };
+        }
       }
     }
     return { kind: "failed", reason: "already_running" };
@@ -416,7 +432,10 @@ export class FolderManager {
 
   private readLock(): LockFileContent | null {
     try {
-      const raw = readFileSync(this.#layout.absolute("state/service.lock"), "utf8");
+      const raw = readFileNoFollow(
+        this.#layout,
+        this.#layout.absolute("state/service.lock"),
+      ).toString("utf8");
       const parsed = JSON.parse(raw) as Partial<LockFileContent>;
       if (typeof parsed.pid !== "number") {
         return null;
@@ -437,6 +456,9 @@ export class FolderManager {
   }
 
   private cleanupFailedInitialization(): void {
+    // 只刪這次初始化剛建立的兩個 DB、它們的側車檔與身分檔；
+    // 這些路徑都在 `state/`，不能用一般回收的 `assertDeletable`（正本區），
+    // 所以逐一列出固定檔名，不掃描目錄，也不碰其他正本。
     for (const file of ["cardiary.sqlite", "engine.sqlite"]) {
       for (const suffix of ["", "-wal", "-shm"]) {
         rmSync(this.#layout.absolute(`state/${file}${suffix}`), { force: true });
@@ -445,6 +467,7 @@ export class FolderManager {
     rmSync(folderIdentityPath(this.#layout), { force: true });
     for (const name of [...SUBFOLDERS].reverse()) {
       try {
+        // 只移除空目錄；若有任何檔案（包含使用者的）就保留。
         rmdirSync(this.#layout.subfolderPath(name));
       } catch {
         // 非空目錄保留；下一次啟動會看到非空且有 `folder.json` 的資料夾。

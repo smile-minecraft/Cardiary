@@ -6,14 +6,14 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
-  readFileSync,
   readdirSync,
   readSync,
   renameSync,
   rmdirSync,
+  rmSync,
   statfsSync,
   unlinkSync,
-  writeFileSync,
+  writeSync,
 } from "node:fs";
 import path from "node:path";
 
@@ -113,7 +113,7 @@ export function validateRelativePath(input: string): string {
 /** 回傳相對路徑所屬的區域；第一段不是九個子資料夾時回 null。 */
 export function zoneForRelativePath(relativePath: string): Zone | null {
   const [first] = relativePath.split("/");
-  if (first === undefined || !(first in ZONE_BY_SUBFOLDER)) {
+  if (first === undefined || !Object.hasOwn(ZONE_BY_SUBFOLDER, first)) {
     return null;
   }
   return ZONE_BY_SUBFOLDER[first as Subfolder];
@@ -518,16 +518,38 @@ export function isEffectivelyEmpty(root: string): boolean {
 }
 
 /** 原子寫入資料夾身分檔；先寫暫存檔再 rename。 */
-export function writeFileAtomic(absolutePath: string, content: string): void {
-  const temporary = `${absolutePath}.tmp-${process.pid}`;
-  writeFileSync(temporary, content, { encoding: "utf8", flag: "w" });
-  renameSync(temporary, absolutePath);
+export function writeFileAtomic(layout: FolderLayout, absolutePath: string, content: string): void {
+  layout.assertInside(absolutePath);
+  assertNoSymlinkAncestors(layout, absolutePath);
+  const temporary = `${absolutePath}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
+  const fd = openSync(
+    temporary,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    writeSync(fd, content, null, "utf8");
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    renameSync(temporary, absolutePath);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
 }
 
-/** 讀取文字檔；不存在時回 null。 */
-export function readTextIfExists(absolutePath: string): string | null {
-  if (!existsSync(absolutePath)) {
-    return null;
+/** 檔案存在且是符號連結時拒絕；不存在視為可建立。 */
+export function assertNotSymbolicLink(absolutePath: string): void {
+  try {
+    if (lstatSync(absolutePath).isSymbolicLink()) {
+      throw new StorageError("protected-path", "路徑是符號連結，拒絕跟隨", { absolutePath });
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+    throw error;
   }
-  return readFileSync(absolutePath, "utf8");
 }

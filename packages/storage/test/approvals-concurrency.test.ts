@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -52,26 +55,50 @@ function runWorker(options: { workerData: Record<string, unknown> }): {
   return { done, worker };
 }
 
-describe("兩個獨立連線的並行審批", () => {
-  it("兩個 worker 同時 record，只留一筆 pending", async () => {
+const distPath = path.join(process.cwd(), "packages/storage/dist/index.js");
+
+describe.skipIf(!existsSync(distPath))("production ApprovalLedger 的並行", () => {
+  it("兩個 worker 直接 import production 程式，5 輪後只留一筆 pending", async () => {
     const tempRoot = temp();
     const storage = openTestStorage(tempRoot);
     cleanups.push(() => storage.close());
-    const dbPath = storage.state.filePath;
+    const distUrl = pathToFileURL(distPath).href;
+    const first = new Worker(new URL("./helpers/ledger-worker.mjs", import.meta.url), {
+      workerData: {
+        dbPath: storage.state.filePath,
+        distUrl,
+        approvalKey: "parallel-key",
+        rounds: 5,
+      },
+    });
+    const second = new Worker(new URL("./helpers/ledger-worker.mjs", import.meta.url), {
+      workerData: {
+        dbPath: storage.state.filePath,
+        distUrl,
+        approvalKey: "parallel-key",
+        rounds: 5,
+      },
+    });
+    const collect = (worker: Worker) =>
+      new Promise<Array<{ id: string; status: string }>>((resolve, reject) => {
+        worker.once("message", (message: { results: Array<{ id: string; status: string }> }) =>
+          resolve(message.results),
+        );
+        worker.once("error", reject);
+      });
+    const [left, right] = await Promise.all([collect(first), collect(second)]);
+    await Promise.all([first.terminate(), second.terminate()]);
 
-    const first = runWorker(workerOptions(dbPath, "record"));
-    const second = runWorker(workerOptions(dbPath, "record"));
-    const [left, right] = await Promise.all([first.done, second.done]);
-    await Promise.all([first.worker.terminate(), second.worker.terminate()]);
-
-    expect(left.status).toBe("pending");
-    expect(right.status).toBe("pending");
-    expect(left.id).toBe(right.id);
+    const results = [...left, ...right];
+    expect(results.every((result) => result.status === "pending")).toBe(true);
+    expect(new Set(results.map((result) => result.id)).size).toBe(1);
     const ledger = new ApprovalLedger(storage.state);
     expect(ledger.countPendingForKey("parallel-key")).toBe(1);
     expect(storage.state.countRows("approvals")).toBe(1);
   });
+});
 
+describe("兩個獨立連線的並行審批", () => {
   it("兩個獨立連線先後 record 也拿到同一列", () => {
     const tempRoot = temp();
     const storage = openTestStorage(tempRoot);

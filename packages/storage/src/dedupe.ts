@@ -171,13 +171,16 @@ export class RequestDedupeStore {
     return deleted;
   }
 
-  /** 清掉過期列；每日維護使用。 */
-  prune(options: { readonly now?: Date; readonly retainDays?: number } = {}): number {
+  /**
+   * 清掉超過保留期限的列；每日維護使用。
+   *
+   * `expires_at` 在 `claim` 時已設成「宣告時間 + 30 天」，所以門檻直接
+   * 比 `expires_at`，不再從 `now` 往前推 30 天（那會變成 60 天）。
+   */
+  prune(options: { readonly now?: Date } = {}): number {
     const now = options.now ?? this.#now();
-    const cutoff = new Date(
-      now.getTime() - (options.retainDays ?? 30) * 24 * 60 * 60 * 1000,
-    ).toISOString();
-    return this.#db.run("DELETE FROM request_dedupe WHERE expires_at < ?", cutoff).changes;
+    return this.#db.run("DELETE FROM request_dedupe WHERE expires_at < ?", now.toISOString())
+      .changes;
   }
 
   /** 診斷與測試：目前總列數。 */
