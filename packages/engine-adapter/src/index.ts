@@ -11,3 +11,8 @@ export type * from "./permission.js";
 export type * from "./runtime.js";
 export type * from "./subagent.js";
 export type * from "./tools.js";
+
+export { createEngineAdapter } from "./internal/factory.js";
+export { EngineAdapterFailure, engineError } from "./internal/errors.js";
+export { canonicalJson, computeApprovalKey } from "./internal/canonical.js";
+export { createInMemoryApprovalLedger } from "./testing/in-memory-approval-ledger.js";
