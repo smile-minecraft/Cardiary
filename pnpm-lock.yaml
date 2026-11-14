@@ -76,16 +76,16 @@ importers:
     dependencies:
       '@cardiary/engine-adapter':
         specifier: workspace:*
-        version: file:packages/engine-adapter(@aws-sdk/credential-provider-node@3.972.97)(@smithy/signature-v4@5.7.5)(ws@8.23.0)
+        version: link:../engine-adapter
       '@cardiary/engine-fake':
         specifier: workspace:*
-        version: file:packages/engine-fake(@aws-sdk/credential-provider-node@3.972.97)(@smithy/signature-v4@5.7.5)(ws@8.23.0)
+        version: link:../engine-fake
       '@cardiary/protocol':
         specifier: workspace:*
-        version: file:packages/protocol
+        version: link:../protocol
       '@cardiary/storage':
         specifier: workspace:*
-        version: file:packages/storage
+        version: link:../storage
       ws:
         specifier: 8.23.0
         version: 8.23.0
@@ -93,15 +93,6 @@ importers:
       '@types/ws':
         specifier: 8.18.1
         version: 8.18.1
-    dependenciesMeta:
-      '@cardiary/engine-adapter':
-        injected: true
-      '@cardiary/engine-fake':
-        injected: true
-      '@cardiary/protocol':
-        injected: true
-      '@cardiary/storage':
-        injected: true
 
   packages/module-api:
     dependencies:
@@ -246,18 +237,6 @@ packages:
 
   '@cacheable/utils@2.5.0':
     resolution: {integrity: sha512-buipgOVDkkPXNR5+xBpDw7Zk2n1EvU7qBJCNUcL7rhQ//kfpOXPAvQ511Os0vpLYJ1pZnvudNytkQt2hst3wqA==}
-
-  '@cardiary/engine-adapter@file:packages/engine-adapter':
-    resolution: {directory: packages/engine-adapter, type: directory}
-
-  '@cardiary/engine-fake@file:packages/engine-fake':
-    resolution: {directory: packages/engine-fake, type: directory}
-
-  '@cardiary/protocol@file:packages/protocol':
-    resolution: {directory: packages/protocol, type: directory}
-
-  '@cardiary/storage@file:packages/storage':
-    resolution: {directory: packages/storage, type: directory}
 
   '@earendil-works/chord@1.5.2':
     resolution: {integrity: sha512-3g088g7qVXL2cpRAKWjj9za6RLls9FBnuUo5c0hBZ0xCftBQjae0opS+34M22vdXTVE7BNqkRG/FPc9BsM7eEg==}
@@ -1602,51 +1581,6 @@ snapshots:
     dependencies:
       hashery: 1.5.1
       keyv: 5.6.0
-
-  '@cardiary/engine-adapter@file:packages/engine-adapter(@aws-sdk/credential-provider-node@3.972.97)(@smithy/signature-v4@5.7.5)(ws@8.23.0)':
-    dependencies:
-      '@earendil-works/chord': 1.5.2(ws@8.23.0)
-      '@earendil-works/pi-ai': 1.5.2(@aws-sdk/credential-provider-node@3.972.97)(@smithy/signature-v4@5.7.5)(ws@8.23.0)
-      '@earendil-works/pi-durable': 1.5.2(@aws-sdk/credential-provider-node@3.972.97)(@smithy/signature-v4@5.7.5)(ws@8.23.0)
-      '@earendil-works/pi-schema': 1.5.2
-    transitivePeerDependencies:
-      - '@aws-sdk/credential-provider-node'
-      - '@modelcontextprotocol/sdk'
-      - '@smithy/hash-node'
-      - '@smithy/signature-v4'
-      - bufferutil
-      - esbuild
-      - kerberos
-      - react
-      - supports-color
-      - undici
-      - utf-8-validate
-      - ws
-      - zod
-
-  '@cardiary/engine-fake@file:packages/engine-fake(@aws-sdk/credential-provider-node@3.972.97)(@smithy/signature-v4@5.7.5)(ws@8.23.0)':
-    dependencies:
-      '@cardiary/engine-adapter': file:packages/engine-adapter(@aws-sdk/credential-provider-node@3.972.97)(@smithy/signature-v4@5.7.5)(ws@8.23.0)
-    transitivePeerDependencies:
-      - '@aws-sdk/credential-provider-node'
-      - '@modelcontextprotocol/sdk'
-      - '@smithy/hash-node'
-      - '@smithy/signature-v4'
-      - bufferutil
-      - esbuild
-      - kerberos
-      - react
-      - supports-color
-      - undici
-      - utf-8-validate
-      - ws
-      - zod
-
-  '@cardiary/protocol@file:packages/protocol': {}
-
-  '@cardiary/storage@file:packages/storage':
-    dependencies:
-      '@cardiary/protocol': file:packages/protocol
 
   '@earendil-works/chord@1.5.2(ws@8.23.0)':
     dependencies:
