@@ -1941,6 +1941,10 @@ export class PiEngineAdapter implements EngineAdapter {
     if (this.#pause !== null) {
       throw engineError("engine-paused", "引擎處於緊急暫停");
     }
+    if (this.#state === "paused") {
+      // 緊急暫停、suspend 與刪除期間都走這條；呼叫端可以重試。
+      throw engineError("engine-paused", "引擎暫停中，暫時不受理新工作");
+    }
     if (this.#state !== "running" && this.#state !== "starting") {
       throw engineError("engine-closed", "引擎尚未開啟或已關閉");
     }

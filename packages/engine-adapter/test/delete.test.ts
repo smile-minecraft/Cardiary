@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { openNodeSqliteDatabase } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { describe, expect, it } from "vitest";
 
-import { answer, bundleOf, createFixture, gateWith, toolThenAnswer } from "./support.js";
+import { answer, bundleOf, createFixture, gateWith, toolThenAnswer, waitFor } from "./support.js";
 import type { DeletionIntent, EngineAdapter, ToolDefinition } from "../src/index.js";
 
 const echo: ToolDefinition = {
@@ -114,6 +114,82 @@ describe("刪除對話", () => {
       await fixture.cleanup();
     }
   }, 30000);
+
+  it("刪除期間整個引擎暫停受理新工作，完成後恢復", async () => {
+    const sleeping: ToolDefinition = {
+      name: "sleep",
+      description: "睡到被刪除為止",
+      replay: "unsafe",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      async execute(_input, context) {
+        const child = context.spawn({ command: "/bin/sleep", args: ["30"] });
+        await child.exited;
+        return { ok: true, content: [{ type: "text", text: "被叫醒了" }] };
+      },
+    };
+    // 用 purger 把刪除停在「已暫停、還沒刪完」的窗口，才能確定測到拒絕。
+    let releasePurge: () => void = () => {};
+    const purgeGate = new Promise<void>((resolvePurge) => {
+      releasePurge = resolvePurge;
+    });
+    const purger = {
+      putIntent: async () => {},
+      listIntents: async () => [],
+      setIntentPhase: async () => {},
+      removeIntent: async () => {},
+      purge: async () => {
+        await purgeGate;
+      },
+    };
+    const fixture = await createFixture({ gate: gateWith({ kind: "allow" }), purger });
+    try {
+      await fixture.adapter.tools.register(bundleOf("test.long", [sleeping], 1));
+      const conversation = await fixture.adapter.createConversation({
+        model: { provider: "faux", model: "faux-1" },
+        systemContext: "前綴",
+        toolBundles: [{ bundleId: "test.long", generation: 1 }],
+      });
+      fixture.faux.setResponses(toolThenAnswer("sleep", {}, "完成"));
+      await fixture.adapter.sendMessage({
+        conversationId: conversation.id,
+        content: [{ type: "text", text: "開始" }],
+        delivery: "queue",
+        sender: { kind: "human", clientId: "test" },
+      });
+      await waitFor(async () => {
+        const current = await fixture.adapter.getConversation(conversation.id);
+        return current?.state === "running" ? true : undefined;
+      }, "工具開始執行");
+
+      const deletion = fixture.adapter.deleteConversation(conversation.id);
+      await waitFor(
+        () => (fixture.adapter.getStatus().state === "paused" ? true : undefined),
+        "刪除開始",
+      );
+      await expect(
+        fixture.adapter.sendMessage({
+          conversationId: conversation.id,
+          content: [{ type: "text", text: "刪除中送訊息" }],
+          delivery: "queue",
+          sender: { kind: "human", clientId: "test" },
+        }),
+      ).rejects.toMatchObject({ code: "engine-paused" });
+      await expect(
+        fixture.adapter.createConversation({
+          model: { provider: "faux", model: "faux-1" },
+          systemContext: "前綴",
+          toolBundles: [],
+        }),
+      ).rejects.toMatchObject({ code: "engine-paused" });
+
+      releasePurge();
+      await deletion;
+      expect(await fixture.adapter.getConversation(conversation.id)).toBeNull();
+      expect(fixture.adapter.getStatus().state).toBe("running");
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 40000);
 
   it("刪除後同一個 clientRequestId 可以建立新對話，不會回已刪除的資源", async () => {
     const fixture = await createFixture();

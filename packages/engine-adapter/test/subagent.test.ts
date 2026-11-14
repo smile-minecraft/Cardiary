@@ -9,6 +9,7 @@ import {
   createFixture,
   gateWith,
   toolThenAnswer,
+  waitFor,
 } from "./support.js";
 import type { EngineAdapter, ToolDefinition } from "../src/index.js";
 
@@ -108,6 +109,74 @@ describe("子代理", () => {
         cardIds: [],
       });
       expect(["queued", "unsupported"]).toContain(injection.outcome);
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 30000);
+
+  it("子代理的審批請求帶來源，主線的待審批查詢含支線", async () => {
+    const fixture = await createFixture();
+    try {
+      await fixture.adapter.tools.register(
+        bundleOf("test.sub-approval", [approvalTool({ name: "hold" })], 1),
+      );
+      const parent = await fixture.adapter.createConversation({
+        model: { provider: "faux", model: "faux-1" },
+        systemContext: "前綴",
+        toolBundles: [{ bundleId: "test.sub-approval", generation: 1 }],
+      });
+      fixture.faux.setResponses(answer("暖身"));
+      await fixture.adapter.sendMessage({
+        conversationId: parent.id,
+        content: [{ type: "text", text: "暖身" }],
+        delivery: "queue",
+        sender: { kind: "human", clientId: "test" },
+      });
+      await idle(fixture.adapter, parent.id);
+      const history = await fixture.adapter.readConversationHistory({ conversationId: parent.id });
+      const cursor = history.messages[0]?.cursor ?? "1";
+
+      fixture.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("hold", {}) as ToolCall], { stopReason: "toolUse" }),
+        fauxAssistantMessage("支線完成"),
+      ]);
+      const pendingSpawn = fixture.adapter.spawnSubagent({
+        parentConversationId: parent.id,
+        at: cursor,
+        depth: 1,
+        waiting: "blocking",
+        instruction: "需要核准的工作",
+        title: "支線",
+      });
+
+      const pending = await waitFor(async () => {
+        const list = await fixture.adapter.approvals.listPending({
+          rootConversationId: parent.id,
+        });
+        return list.length > 0 ? list : undefined;
+      }, "支線的審批請求");
+      expect(pending[0]?.draft.subagent).toEqual({
+        parentConversationId: parent.id,
+        rootConversationId: parent.id,
+        depth: 1,
+        forkedAt: cursor,
+      });
+      expect(pending[0]?.draft.conversationId).not.toBe(parent.id);
+
+      // 同一個佇列也查得到（不需要另外訂閱支線）。
+      const byConversation = await fixture.adapter.approvals.listPending({
+        conversationId: pending[0]!.draft.conversationId,
+      });
+      expect(byConversation.map((request) => request.id)).toEqual([pending[0]!.id]);
+
+      await fixture.adapter.approvals.decide({
+        requestId: pending[0]!.id,
+        verdict: "approve",
+        decidedBy: { kind: "human", clientId: "test" },
+      });
+      const handle = await pendingSpawn;
+      expect(handle.status).toBe("completed");
+      expect(handle.resultCard?.conclusion).toContain("支線完成");
     } finally {
       await fixture.cleanup();
     }
