@@ -16,7 +16,10 @@ interface Harness {
   readonly closed: string[];
 }
 
-function createHarness(options?: { readonly brokerTimeoutMs?: number }): Harness {
+function createHarness(options?: {
+  readonly brokerTimeoutMs?: number;
+  readonly onStorageFailure?: (detail: string) => void;
+}): Harness {
   const input = new PassThrough();
   const lines: Array<Record<string, unknown>> = [];
   const closed: string[] = [];
@@ -33,6 +36,9 @@ function createHarness(options?: { readonly brokerTimeoutMs?: number }): Harness
     brokerTimeoutMs: options?.brokerTimeoutMs ?? 50,
     handshakeTimeoutMs: 500,
     onClose: (reason) => closed.push(reason),
+    ...(options?.onStorageFailure === undefined
+      ? {}
+      : { onStorageFailure: options.onStorageFailure }),
   });
   channel.start();
   return { input, lines, channel, closed };
@@ -96,6 +102,28 @@ describe("私有控制面（服務端）", () => {
     await handshake(second);
     write(second.input, { v: 1, kind: "request", id: "c2", route: "control.health", payload: {} });
     await waitUntil(() => second.channel.closed);
+  });
+
+  it("路由處理中的 StorageFailure 走 onStorageFailure 並回 unavailable，不是 internal", async () => {
+    const failures: string[] = [];
+    const harness = createHarness({ onStorageFailure: (detail) => failures.push(detail) });
+    await handshake(harness);
+    harness.channel.onRequest("control.pause", async () => {
+      throw Object.assign(new Error("事件日誌已關閉"), { code: "storage-unavailable" });
+    });
+    write(harness.input, {
+      v: 1,
+      kind: "request",
+      id: "st1",
+      route: "control.pause",
+      auth: { token: TOKEN },
+      payload: { reason: "unmount" },
+    });
+    await waitUntil(() => harness.lines.some((line) => line.replyTo === "st1"));
+    const response = harness.lines.find((line) => line.replyTo === "st1");
+    expect(response?.ok).toBe(false);
+    expect((response?.error as { code: string }).code).toBe("unavailable");
+    expect(failures).toEqual(["事件日誌已關閉"]);
   });
 
   it("缺 auth.token 回 unauthorized（不是 invalid_message）並關閉通道", async () => {

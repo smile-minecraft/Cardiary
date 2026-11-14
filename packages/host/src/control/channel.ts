@@ -2,7 +2,7 @@ import type { Readable } from "node:stream";
 import type { EngineLogger } from "@cardiary/engine-adapter";
 import type { JSONObject } from "@cardiary/protocol";
 
-import { ControlError } from "../errors.js";
+import { ControlError, isStorageFailure } from "../errors.js";
 import { constantTimeEqual } from "../tokens.js";
 import {
   BROKER_ROUTES,
@@ -30,6 +30,8 @@ export interface ControlChannelOptions {
   readonly handshakeTimeoutMs?: number;
   /** 通道關閉時通知呼叫端；`stdin_end` 表示殼不見了。 */
   readonly onClose?: (reason: string) => void;
+  /** 路由處理中出現 StorageFailure 時的通報（由服務走 failStorage）。 */
+  readonly onStorageFailure?: (detail: string) => Promise<void> | void;
 }
 
 interface PendingBrokerRequest {
@@ -278,6 +280,23 @@ export class ControlChannel {
       const payload = await handler(frame.payload);
       await this.#send(controlResponse(frame.id, frame.id, payload, this.#options.brokerToken));
     } catch (error) {
+      if (isStorageFailure(error)) {
+        // 控制面路由與客戶端入口集中攔截：儲存失效一律走致命路徑，
+        // 不要被包成 internal 後讓殼以為可以重試。
+        await this.#options.onStorageFailure?.(error instanceof Error ? error.message : "儲存失效");
+        await this.#send(
+          controlErrorResponse(
+            frame.id,
+            frame.id,
+            this.#options.brokerToken,
+            "unavailable",
+            "儲存已停止寫入。",
+            false,
+          ),
+        );
+        this.#inFlightRoutes.delete(frame.route);
+        return;
+      }
       const code = error instanceof ControlError ? error.code : "internal";
       const message = error instanceof Error ? error.message : "控制面發生未預期的錯誤";
       await this.#send(

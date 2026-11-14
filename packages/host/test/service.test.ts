@@ -177,6 +177,25 @@ describe("生命週期", () => {
     );
   });
 
+  it("pause 在提交前失敗會走 failStorage，不回假的 paused，重試也不是 databasesClosed:true", async () => {
+    const failures: string[] = [];
+    const host = await boot({
+      fatalNotifier: async (reason, detail) => {
+        failures.push(`${reason}:${detail}`);
+      },
+    });
+    await (host.host.storage.events as unknown as { close(): Promise<void> }).close();
+    await expect(host.host.service.pause("unmount", 100)).rejects.toMatchObject({
+      code: "unavailable",
+    });
+    expect(failures[0]?.startsWith("storage_io:")).toBe(true);
+    expect(host.host.service.health().state).toBe("storage-failed");
+    await expect(host.host.service.pause("unmount", 100)).rejects.toMatchObject({
+      code: "unavailable",
+    });
+    expect(failures).toHaveLength(1);
+  });
+
   it("執行中的 shutdown 取消工具並等它們結束", async () => {
     const host = await boot({
       scripts: [

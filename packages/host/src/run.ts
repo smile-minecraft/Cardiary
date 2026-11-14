@@ -247,6 +247,12 @@ export async function run(
   const stderr = streams.stderr ?? process.stderr;
   const input = streams.input ?? process.stdin;
   const args = parseArgs(argv);
+  const usesFaultInjection =
+    args.faultCloseEventLogMs !== undefined || args.faultSkipDedupeComplete;
+  if (usesFaultInjection && process.env.CARDIARY_TEST_FAULTS !== "1") {
+    stderr.write("故障注入旗標只供測試使用；需要 CARDIARY_TEST_FAULTS=1。\n");
+    return 2;
+  }
   if (args.folder === undefined) {
     return runControl(args, sink, logger, stderr, input);
   }
@@ -365,8 +371,8 @@ async function runControl(
       },
       fatalNotifier: async (reason, detail) => {
         await channelRef?.notify("notify.fatal", { reason, detail }).catch(() => undefined);
-        // 留一點時間讓 notify.fatal 與客戶端的 1011 close frame 送出去。
-        setTimeout(() => process.exit(70), 50).unref?.();
+        // 留一點時間讓 notify.fatal、control.pause 的回應與客戶端 1011 送出去。
+        setTimeout(() => process.exit(70), 150).unref?.();
       },
     });
   } catch (error) {
@@ -383,6 +389,9 @@ async function runControl(
     ...(init.limits?.maxFrameBytes === undefined
       ? {}
       : { maxFrameBytes: init.limits.maxFrameBytes }),
+    onStorageFailure: async (detail) => {
+      await host.service.failStorage(detail);
+    },
     onClose: (reason) => {
       if (reason === "stdin_end" || reason === "write_failed") {
         void host.service.abort(`control_${reason}`).then(async () => {

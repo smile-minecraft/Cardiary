@@ -21,7 +21,7 @@ export type Lifecycle =
 
 export interface PauseResult {
   readonly state: "paused";
-  readonly databasesClosed: true;
+  readonly databasesClosed: boolean;
   readonly interruptedSessionIds: string[];
   readonly terminatedProcesses: number;
 }
@@ -84,6 +84,7 @@ export class HostService {
   #lifecycle: Lifecycle = "idle";
   #interrupted: string[] = [];
   #epochAtPause = "";
+  #databasesClosed = false;
   #closed = false;
 
   constructor(options: HostServiceOptions) {
@@ -175,38 +176,53 @@ export class HostService {
 
   async pause(reason: string, deadlineMs?: number): Promise<PauseResult> {
     return this.#withLifecycle("pausing", async () => {
-      if (this.#serviceState === "paused") {
+      // 只有「上次暫停真的把資料庫關掉」才可以直接回同一個結果；
+      // 半暫停（例如上次在提交前失敗）不能回 databasesClosed:true。
+      if (this.#databasesClosed) {
         return {
           state: "paused" as const,
-          databasesClosed: true as const,
+          databasesClosed: true,
           interruptedSessionIds: this.#interrupted,
           terminatedProcesses: 0,
         };
       }
-      this.#gateway.stopAccepting();
-      const interrupted = this.#gateway.interruptedSessionIds();
-      const terminated = await this.#options.spawn.cancelAll(
-        deadlineMs ?? this.#options.pauseDeadlineMs ?? 5000,
-      );
-      await this.#options.engine.suspend();
-      await this.#gateway.drain();
-      this.#epochAtPause = this.epoch;
-      this.#interrupted = interrupted;
-      this.#folderState = "paused";
-      this.#serviceState = "paused";
-      this.#reason = reason === "unmount" ? "unmounting" : "paused";
-      // 先提交最後一則 system.status，提交後才 checkpoint 與關閉資料庫。
-      await this.#gateway.emitSystemStatus();
-      await this.#gateway.drain();
-      await this.#options.storage.events.flush();
-      await this.#options.storage.runtime.checkpointAndClose();
-      await this.#options.storage.events.close();
-      return {
-        state: "paused" as const,
-        databasesClosed: true as const,
-        interruptedSessionIds: interrupted,
-        terminatedProcesses: terminated,
-      };
+      if (this.#serviceState === "paused") {
+        await this.failStorage("暫停狀態不完整，資料庫仍在開啟");
+        throw new ControlError("unavailable", "暫停狀態不完整，儲存已停止寫入。");
+      }
+      try {
+        this.#gateway.stopAccepting();
+        const interrupted = this.#gateway.interruptedSessionIds();
+        const terminated = await this.#options.spawn.cancelAll(
+          deadlineMs ?? this.#options.pauseDeadlineMs ?? 5000,
+        );
+        await this.#options.engine.suspend();
+        await this.#gateway.drain();
+        this.#epochAtPause = this.epoch;
+        this.#interrupted = interrupted;
+        // 為了讓最後一則 system.status 帶 paused，先投影狀態；但真正的
+        // 「已暫停」要等提交、checkpoint 與關閉都成功才成立。
+        this.#folderState = "paused";
+        this.#serviceState = "paused";
+        this.#reason = reason === "unmount" ? "unmounting" : "paused";
+        await this.#gateway.emitSystemStatus();
+        await this.#gateway.drain();
+        await this.#options.storage.events.flush();
+        await this.#options.storage.runtime.checkpointAndClose();
+        await this.#options.storage.events.close();
+        this.#databasesClosed = true;
+        return {
+          state: "paused" as const,
+          databasesClosed: true,
+          interruptedSessionIds: interrupted,
+          terminatedProcesses: terminated,
+        };
+      } catch (error) {
+        this.#databasesClosed = false;
+        // 提交、checkpoint 或關閉失敗都算儲存失效，不假裝暫停成功。
+        await this.failStorage(error instanceof Error ? error.message : "暫停時儲存失效");
+        throw new ControlError("unavailable", "儲存失效，暫停未完成。");
+      }
     });
   }
 
@@ -292,6 +308,7 @@ export class HostService {
       this.#folderState = "ready";
       this.#serviceState = "running";
       this.#reason = undefined;
+      this.#databasesClosed = false;
       this.#gateway.allowAccepting();
       await this.#gateway.emitSystemStatus();
       return {

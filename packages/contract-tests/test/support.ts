@@ -99,6 +99,7 @@ export interface SpawnedService {
     route: string,
     payload?: Record<string, unknown>,
     token?: string,
+    timeoutMs?: number,
   ): Promise<Record<string, unknown>>;
   /** 控制模式：送一則原始 frame（測試壞 frame）。 */
   controlRaw(line: string): void;
@@ -138,6 +139,7 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
       TMPDIR: join(folder.path, "tmp"),
       TMP: join(folder.path, "tmp"),
       TEMP: join(folder.path, "tmp"),
+      CARDIARY_TEST_FAULTS: "1",
     },
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -269,13 +271,18 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
     controlRaw(line) {
       child.stdin?.write(`${line}\n`);
     },
-    async controlRequest(route, payload = {}, token = controlToken) {
+    async controlRequest(route, payload = {}, token = controlToken, timeoutMs = 10_000) {
       const id = `ctl_${Math.random().toString(36).slice(2, 10)}`;
       const promise = new Promise<Record<string, unknown>>((resolve) => {
         responses.set(id, resolve);
       });
       send({ v: 1, kind: "request", id, route, auth: { token }, payload });
-      return promise;
+      if (timeoutMs <= 0) return promise;
+      const timeout = new Promise<Record<string, unknown>>((resolve) => {
+        const timer = setTimeout(() => resolve({ __timeout: true }), timeoutMs);
+        timer.unref?.();
+      });
+      return Promise.race([promise, timeout]);
     },
     async stop() {
       if (child.exitCode !== null) return;
@@ -284,6 +291,43 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
       lines.close();
     },
   };
+}
+
+/** 帶故障注入旗標但不給測試環境變數：正式入口應該拒絕。 */
+export async function spawnFaultFlagWithoutEnv(): Promise<{
+  readonly code: number | null;
+  readonly stderr: string;
+}> {
+  const folder = await makeFolder();
+  const child = spawn(
+    process.execPath,
+    [HOST_ENTRY, "--folder", folder.path, "--fault-close-event-log", "100"],
+    {
+      env: {
+        ...process.env,
+        TMPDIR: join(folder.path, "tmp"),
+        TMP: join(folder.path, "tmp"),
+        TEMP: join(folder.path, "tmp"),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+  const code = await Promise.race([
+    new Promise<number | null>((resolve) => child.once("exit", (value) => resolve(value))),
+    new Promise<number | null>((resolve) => {
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve(-1);
+      }, 5000);
+      timer.unref?.();
+    }),
+  ]);
+  return { code, stderr };
 }
 
 /** 用故意錯誤的 init 啟動控制模式，回傳退出碼與 stderr（測試 init 失敗要退出）。 */
@@ -298,6 +342,7 @@ export async function spawnExpectInitFailure(): Promise<{
       TMPDIR: join(folder.path, "tmp"),
       TMP: join(folder.path, "tmp"),
       TEMP: join(folder.path, "tmp"),
+      CARDIARY_TEST_FAULTS: "1",
     },
     stdio: ["pipe", "pipe", "pipe"],
   });

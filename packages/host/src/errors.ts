@@ -137,6 +137,15 @@ function mapDiagnosticCode(code: ToolDiagnosticCode): string {
   }
 }
 
+/** 儲存層停止寫入時回報的錯誤（Memory 替身與 SQLite 實作共用這個 code）。 */
+export function isStorageFailure(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "storage-unavailable"
+  );
+}
+
 /** 控制面的錯誤碼；不進客戶端協定。 */
 export type ControlErrorCode =
   | "unauthorized"

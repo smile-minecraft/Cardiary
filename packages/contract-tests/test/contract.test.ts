@@ -7,6 +7,7 @@ import {
   connectAndHello,
   makeFolder,
   spawnExpectInitFailure,
+  spawnFaultFlagWithoutEnv,
   spawnService,
   waitUntil,
   type ProtocolClient,
@@ -767,4 +768,54 @@ describe("複審非阻擋項", () => {
     });
     expect((samePath.payload as { state: string }).state).toBe("ready");
   });
+});
+
+describe("第三次審查的必須先修", () => {
+  it("control.pause 遇到儲存失效：notify.fatal、1011、exit 70，重試不是 databasesClosed:true", async () => {
+    const service = await boot({ control: true, faultCloseEventLogMs: 300 });
+    const connected = await client(service);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const pause = await service.controlRequest(
+      "control.pause",
+      { reason: "unmount" },
+      service.controlToken,
+      3000,
+    );
+    expect(pause.ok).toBe(false);
+    expect((pause.error as { code: string }).code).toBe("unavailable");
+    expect((pause.payload as { databasesClosed?: boolean } | undefined)?.databasesClosed).not.toBe(
+      true,
+    );
+    const retry = await service.controlRequest(
+      "control.pause",
+      { reason: "unmount" },
+      service.controlToken,
+      500,
+    );
+    const retryTimeout = (retry as { __timeout?: boolean }).__timeout === true;
+    expect(retryTimeout || retry.ok === false).toBe(true);
+    expect((retry.payload as { databasesClosed?: boolean } | undefined)?.databasesClosed).not.toBe(
+      true,
+    );
+    await waitUntil(
+      () => service.notifications().some((frame) => frame.route === "notify.fatal"),
+      5000,
+    );
+    const fatal = service.notifications().find((frame) => frame.route === "notify.fatal");
+    expect((fatal?.payload as { reason?: string }).reason).toBe("storage_io");
+    const code = await Promise.race([
+      service.exited,
+      new Promise<number | null>((resolve) => setTimeout(() => resolve(-1), 5000)),
+    ]);
+    expect(code).toBe(70);
+    await waitUntil(() => connected.closed, 5000);
+    expect(connected.closeCode).toBe(1011);
+    expect(connected.closeReason).toBe("storage_failure");
+  }, 20_000);
+
+  it("故障注入旗標在正式入口被拒絕（需要 CARDIARY_TEST_FAULTS=1）", async () => {
+    const result = await spawnFaultFlagWithoutEnv();
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("故障注入旗標只供測試使用");
+  }, 10_000);
 });

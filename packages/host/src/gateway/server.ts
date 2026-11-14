@@ -33,6 +33,7 @@ import type { WebSocket } from "ws";
 
 import type { HostEngine } from "../engine/types.js";
 import {
+  isStorageFailure,
   protocolDiagnostic,
   protocolError,
   protocolErrorFromEngine,
@@ -518,6 +519,17 @@ export class Gateway {
     } catch (error) {
       if (error instanceof RequestFailure) {
         await this.#sendError(connection, error.info, id);
+        return;
+      }
+      if (isStorageFailure(error)) {
+        // 儲存失效要先於引擎錯誤碼處理：storage-unavailable 也在引擎碼表裡，
+        // 但這條必須走致命路徑（notify.fatal、1011、exit 70），不能只回錯誤。
+        this.#reportStorageFailure(error);
+        await this.#sendError(
+          connection,
+          protocolError("unavailable", "儲存已停止寫入。", { details: { reason: "storage" } }),
+          id,
+        );
         return;
       }
       if (isEngineError(error)) {
@@ -1999,14 +2011,6 @@ function isLoopbackOrigin(origin: string): boolean {
   } catch {
     return false;
   }
-}
-
-function isStorageFailure(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: unknown }).code === "storage-unavailable"
-  );
 }
 
 const ENGINE_ERROR_CODES = new Set([

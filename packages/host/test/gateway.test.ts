@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 
 import { TestClient, startTestHost, waitUntil, type TestHost } from "./helpers.js";
@@ -6,6 +6,7 @@ import { TestClient, startTestHost, waitUntil, type TestHost } from "./helpers.j
 const hosts: TestHost[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const host of hosts.splice(0)) {
     await host.close();
   }
@@ -714,6 +715,59 @@ describe("審查修正的回歸測試", () => {
     expect(client.closeCode).toBe(1011);
     expect(client.closeReason).toBe("storage_failure");
     expect(host.host.service.health().state).toBe("storage-failed");
+  });
+
+  it("客戶端請求入口的 StorageFailure 也走 fatal：module 寫事件失敗會關閉 1011", async () => {
+    const failures: string[] = [];
+    const host = await boot({
+      fatalNotifier: async (reason, detail) => {
+        failures.push(`${reason}:${detail}`);
+      },
+    });
+    const client = await helloClient(host);
+    await (host.host.storage.events as unknown as { close(): Promise<void> }).close();
+    client.request("module.demo.emit", { data: { action: "emit", value: 1 } });
+    await waitUntil(() => failures.length > 0, 4000);
+    expect(failures[0]?.startsWith("storage_io:")).toBe(true);
+    await waitUntil(() => client.closed, 4000);
+    expect(client.closeCode).toBe(1011);
+    expect(client.closeReason).toBe("storage_failure");
+  });
+
+  it("去重恢復走 resource_id 的 getConversation，不被假引擎自己的回查找遮蔽", async () => {
+    const host = await boot();
+    const client = await helloClient(host);
+    const create = client.request("session.create", { title: "spy" });
+    const created = await client.waitForReply(create);
+    const sessionId = (created.payload as { session: { id: string } }).session.id;
+    const getConversation = vi.spyOn(host.host.engine, "getConversation");
+    const findByRequest = vi.spyOn(host.host.engine, "findConversationByClientRequestId");
+    const dedupe = host.host.storage.dedupe as unknown as {
+      seed(record: {
+        key: string;
+        kind: "session-create";
+        state: "pending";
+        resourceId: string;
+        response: null;
+        claimedAt: string;
+        completedAt: null;
+      }): void;
+    };
+    dedupe.seed({
+      key: "session-create:cr-spy",
+      kind: "session-create",
+      state: "pending",
+      resourceId: sessionId,
+      response: null,
+      claimedAt: new Date().toISOString(),
+      completedAt: null,
+    });
+    const retry = client.request("session.create", { clientRequestId: "cr-spy" });
+    const recovered = await client.waitForReply(retry);
+    expect((recovered.payload as { session: { id: string } }).session.id).toBe(sessionId);
+    expect(getConversation).toHaveBeenCalledWith(sessionId);
+    expect(findByRequest).not.toHaveBeenCalled();
+    await client.close();
   });
 
   it("expired 與 withdrawn 不送 approval.decided，也不會被誤報成 reject", async () => {
