@@ -83,6 +83,9 @@ importers:
       '@cardiary/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@cardiary/storage':
+        specifier: workspace:*
+        version: link:../storage
       ws:
         specifier: 8.23.0
         version: 8.23.0

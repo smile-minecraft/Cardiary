@@ -40,6 +40,12 @@ export interface TestFolder {
   readonly folderId: string;
 }
 
+/** 還沒有 `folder.json` 的空資料夾；服務以 `--initialize-folder` 建立結構。 */
+export async function makeEmptyFolder(): Promise<TestFolder> {
+  const path = await mkdtemp(join(tmpdir(), "cardiary-contract-"));
+  return { path, folderId: "" };
+}
+
 export async function makeFolder(requestedFolderId?: string): Promise<TestFolder> {
   const path = await mkdtemp(join(tmpdir(), "cardiary-contract-"));
   await mkdir(join(path, "state"), { recursive: true });
@@ -82,6 +88,12 @@ export interface ServiceOptions {
   readonly faultSkipDedupeComplete?: boolean;
   /** 測試故障注入：啟動 N 毫秒後關閉執行期狀態庫。 */
   readonly faultCloseRuntimeMs?: number;
+  /** 引擎組裝；預設 `fake`，`pi` 用 Pi Durable 加腳本化模型。 */
+  readonly engine?: "fake" | "pi";
+  /** 重用既有資料夾；驗證重開後接回同一份資料。 */
+  readonly folder?: TestFolder;
+  /** 啟動時允許初始化資料夾（`state/folder.json` 與資料庫）。 */
+  readonly initializeFolder?: boolean;
 }
 
 export interface SpawnedService {
@@ -114,7 +126,8 @@ export interface SpawnedService {
 
 /** 啟動一個獨立執行的主機服務（控制面或獨立模式），回傳埠與 Token。 */
 export async function spawnService(options: ServiceOptions = {}): Promise<SpawnedService> {
-  const folder = await makeFolder();
+  const engine = options.engine ?? "fake";
+  const folder = options.folder ?? (engine === "pi" ? await makeEmptyFolder() : await makeFolder());
   const args = [HOST_ENTRY];
   const clientToken = options.clientToken ?? "C".repeat(43);
   const controlToken = options.controlToken ?? "T".repeat(43);
@@ -126,6 +139,10 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
   }
   if (!options.control) {
     args.push("--folder", folder.path);
+  }
+  args.push("--engine", engine);
+  if (options.initializeFolder === true || (engine === "pi" && options.folder === undefined)) {
+    args.push("--initialize-folder");
   }
   if (options.demo) args.push("--demo");
   if (scriptPath) args.push("--script", scriptPath);

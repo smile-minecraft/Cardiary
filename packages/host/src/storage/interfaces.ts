@@ -118,6 +118,13 @@ export interface StorageBundle {
   readonly turnIndex: TurnIndexStore;
   readonly deletions: DeletionIntentStore;
   readonly folder: FolderIdentity;
+  /**
+   * 釋放儲存層自己持有的連線與資料夾鎖。
+   *
+   * `runtime.checkpointAndClose()` 只關狀態資料庫；持久化實作還有引擎、
+   * 快取兩條連線與資料夾鎖要放掉。記憶體替身沒有這個方法。
+   */
+  dispose?(): void;
 }
 
 export type { ApprovalListFilter, ApprovalLedger, ApprovalRequest, ApprovalDecision };

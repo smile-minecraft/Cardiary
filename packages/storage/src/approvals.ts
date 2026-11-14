@@ -243,9 +243,18 @@ export class ApprovalLedger {
     });
   }
 
+  /** 把一筆仍是 `pending` 的請求標成 `expired`；已決定或已撤回時不動。 */
+  expireOne(approvalId: string, now: string = this.#now().toISOString()): ApprovalRecord | null {
+    this.#db.run(
+      "UPDATE approvals SET status = 'expired', decided_at = ? WHERE id = ? AND status = 'pending'",
+      now,
+      approvalId,
+    );
+    return this.get(approvalId);
+  }
+
   /** 把逾時的 `pending` 標成 `expired`；回傳變更筆數。 */
-  expirePending(now: string = this.#now().toISOString()): number {
-    return this.#db.run(
+  expirePending(now: string = this.#now().toISOString()): number {    return this.#db.run(
       "UPDATE approvals SET status = 'expired', decided_at = ? WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?",
       now,
       now,

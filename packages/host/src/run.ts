@@ -2,9 +2,13 @@ import { PassThrough, type Readable } from "node:stream";
 import { isAbsolute, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type { JSONObject } from "@cardiary/protocol";
+import { createScriptedModels, scriptedModelSettings } from "@cardiary/engine-adapter";
+import type { EngineModelSource, ModelSettings, ProviderCredentialSource } from "@cardiary/engine-adapter";
+import type { CredentialRef, ProviderCredential } from "@cardiary/engine-adapter";
 
-import { startHost, type RunningHost } from "./bootstrap.js";
+import { startHost, UnavailableCredentials, type RunningHost } from "./bootstrap.js";
 import type { FolderInfo } from "./control/broker.js";
+import { BrokerClient, BrokerCredentialSource } from "./control/broker.js";
 import { ControlChannel } from "./control/channel.js";
 import { CONTROL_PROTOCOL } from "./control/frames.js";
 import type { ProtocolSink } from "./control/stdoutGuard.js";
@@ -45,6 +49,8 @@ interface ParsedArgs {
   readonly demo: boolean;
   readonly script?: string;
   readonly control: boolean;
+  readonly engine: "pi" | "fake";
+  readonly initializeFolder: boolean;
   readonly faultCloseEventLogMs?: number;
   readonly faultCloseRuntimeMs?: number;
   readonly faultSkipDedupeComplete: boolean;
@@ -66,12 +72,20 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let demo = false;
   let script: string | undefined;
   let control = false;
+  let engine: "pi" | "fake" = "pi";
+  let initializeFolder = false;
   let faultCloseEventLogMs: number | undefined;
   let faultCloseRuntimeMs: number | undefined;
   let faultSkipDedupeComplete = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     switch (arg) {
+      case "--engine": {
+        const value = argv[index + 1];
+        engine = value === "fake" ? "fake" : "pi";
+        index += 1;
+        break;
+      }
       case "--folder": {
         folder = argv[index + 1];
         index += 1;
@@ -85,6 +99,9 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       }
       case "--demo":
         demo = true;
+        break;
+      case "--initialize-folder":
+        initializeFolder = true;
         break;
       case "--script": {
         script = argv[index + 1];
@@ -119,6 +136,8 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     demo,
     ...(script === undefined ? {} : { script }),
     control,
+    engine,
+    initializeFolder,
     ...(faultCloseEventLogMs === undefined ? {} : { faultCloseEventLogMs }),
     ...(faultCloseRuntimeMs === undefined ? {} : { faultCloseRuntimeMs }),
     faultSkipDedupeComplete,
@@ -141,6 +160,66 @@ async function loadScripts(
   const parsed: unknown = JSON.parse(raw);
   if (!Array.isArray(parsed)) throw new InitError("script_invalid", "腳本必須是陣列");
   return parsed as FakeModelStep[][];
+}
+
+/**
+ * 控制面的金鑰來源：通道建立前一律回報不可用，建立後改問殼。
+ *
+ * 轉接層只會在真的要呼叫模型時取值，所以這裡可以晚一步接到 broker。
+ */
+class LazyBrokerCredentials implements ProviderCredentialSource {
+  #source: ProviderCredentialSource | null = null;
+
+  use(source: ProviderCredentialSource): void {
+    this.#source = source;
+  }
+
+  async resolve(ref: CredentialRef): Promise<ProviderCredential> {
+    if (this.#source === null) {
+      throw Object.assign(new Error("控制面尚未建立，沒有金鑰來源"), {
+        code: "model-unavailable",
+      });
+    }
+    return this.#source.resolve(ref);
+  }
+}
+
+/**
+ * 依 `--engine` 決定組裝；Pi Durable 需要模型來源，測試用腳本化的模型
+ * 把 `--script` 的每一步轉成一則固定回應。
+ */
+function assemblyFor(
+  args: ParsedArgs,
+  scripts: readonly (readonly FakeModelStep[])[],
+  credentials: ProviderCredentialSource,
+): {
+  readonly assembly: "pi" | "fake";
+  readonly credentials: ProviderCredentialSource;
+  readonly models?: EngineModelSource;
+  readonly modelSettings?: ModelSettings;
+} {
+  if (args.engine === "fake") {
+    return { assembly: "fake", credentials };
+  }
+  if (scripts.length === 0) {
+    return { assembly: "pi", credentials };
+  }
+  const scripted = createScriptedModels();
+  for (const turn of scripts) {
+    for (const step of turn) {
+      if (step.kind === "text") {
+        scripted.text(step.text);
+      } else if (step.kind === "tool") {
+        scripted.toolCall(step.toolName, step.input ?? null);
+      }
+    }
+  }
+  return {
+    assembly: "pi",
+    credentials,
+    models: scripted.source,
+    modelSettings: scriptedModelSettings(),
+  };
 }
 
 /** 讀 stdin 的第一行（`init`），其餘資料留給控制通道。 */
@@ -287,6 +366,8 @@ async function runIndependent(
   }
   const clientToken = generateToken();
   const scripts = await loadScripts(args.script);
+  const credentials = new UnavailableCredentials();
+  const assembly = assemblyFor(args, scripts, credentials);
   let host: RunningHost;
   try {
     host = await startHost({
@@ -295,6 +376,7 @@ async function runIndependent(
       logger,
       demo: args.demo,
       scripts,
+      ...assembly,
       ...(args.port === undefined ? {} : { port: args.port }),
       ...(args.faultCloseEventLogMs === undefined
         ? {}
@@ -365,6 +447,8 @@ async function runControl(
       ? init.clientToken
       : generateToken();
   let channelRef: ControlChannel | null = null;
+  const credentials = new LazyBrokerCredentials();
+  const assembly = assemblyFor(args, scripts, credentials);
   let host: RunningHost;
   try {
     host = await startHost({
@@ -373,6 +457,7 @@ async function runControl(
       logger,
       demo: args.demo,
       scripts,
+      ...assembly,
       ...(args.port === undefined ? {} : { port: args.port }),
       ...(args.faultCloseEventLogMs === undefined
         ? {}
@@ -419,6 +504,7 @@ async function runControl(
     },
   });
   channelRef = channel;
+  credentials.use(new BrokerCredentialSource(new BrokerClient(channel)));
   channel.onRequest("control.health", async () => toJson(host.service.health()));
   channel.onRequest("control.pause", async (payload) => {
     const reason = typeof payload.reason === "string" ? payload.reason : "user";

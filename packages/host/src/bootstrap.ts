@@ -1,10 +1,13 @@
 import type {
   Clock,
   EngineLogger,
+  EngineModelSource,
+  ModelSettings,
   ProviderCredentialSource,
   ProviderCredential,
   CredentialRef,
 } from "@cardiary/engine-adapter";
+import { createEngineAdapter } from "@cardiary/engine-adapter";
 import type { JSONObject, JSONValue } from "@cardiary/protocol";
 import { join } from "node:path";
 
@@ -29,11 +32,12 @@ import {
   MemoryTurnIndex,
   StorageFailure,
 } from "./storage/memory.js";
+import { PersistentPurger, PersistentStorage } from "./storage/persistent.js";
 import { generateToken } from "./tokens.js";
 import { SERVER_VERSION } from "./version.js";
 
 /** 沒有私有通道時的金鑰來源：一律回不可用。 */
-class UnavailableCredentials implements ProviderCredentialSource {
+export class UnavailableCredentials implements ProviderCredentialSource {
   async resolve(ref: CredentialRef): Promise<ProviderCredential> {
     throw Object.assign(new Error(`沒有可用的憑證來源：${ref}`), {
       code: "model-unavailable",
@@ -48,6 +52,14 @@ export interface StartHostOptions {
   readonly clock?: Clock;
   readonly port?: number;
   readonly limits?: Partial<GatewayLimits>;
+  /**
+   * 引擎與儲存的組裝方式。
+   *
+   * `pi` 是產品組裝：`@cardiary/storage` 的持久化儲存加上 Pi Durable 轉接層。
+   * `fake` 是契約測試與主機單元測試用的替身組裝：記憶體儲存加假引擎。
+   * 明確注入 `storage` 或 `engineFactory` 時，這一項只決定引擎的預設值。
+   */
+  readonly assembly?: "pi" | "fake";
   /** 開發與契約測試用：註冊示範工具並釘選第一代。 */
   readonly demo?: boolean;
   /** 開發與契約測試用：每個回合依序取用的腳本。 */
@@ -59,6 +71,12 @@ export interface StartHostOptions {
     readonly credentials: ProviderCredentialSource;
     readonly spawn: SpawnRegistry;
   }) => HostEngine;
+  /** 殼提供的金鑰來源；省略時一律回報不可用。 */
+  readonly credentials?: ProviderCredentialSource;
+  /** Pi Durable 的模型來源；正式產品由殼提供，測試用腳本化模型。 */
+  readonly models?: EngineModelSource;
+  /** 引擎開啟後立刻套用的模型設定；省略時不呼叫 `configureModels`。 */
+  readonly modelSettings?: ModelSettings;
   readonly version?: string;
   readonly maintenanceNotifier?: (
     lifecycle: "deleting" | "vacuuming" | "idle",
@@ -69,8 +87,10 @@ export interface StartHostOptions {
   readonly deletionIntents?: readonly string[];
   /** 診斷與測試用：儲存操作的時間軸。 */
   readonly trace?: (entry: string) => void;
-  /** 整合與測試用：直接注入儲存 bundle，略過記憶體替身。 */
+  /** 整合與測試用：直接注入儲存 bundle，略過預設組裝。 */
   readonly storage?: StorageBundle;
+  /** 空資料夾時允許初始化（`state/folder.json` 與三個資料庫）。 */
+  readonly initializeFolder?: boolean;
   /** 測試故障注入：啟動 N 毫秒後關閉事件日誌，模擬儲存失效。 */
   readonly faultCloseEventLogAfterMs?: number;
   /** 測試故障注入：第一個 request_dedupe complete 不寫入。 */
@@ -94,32 +114,47 @@ const DEMO_BUNDLE_ID = "demo";
 const DEMO_GENERATION = 1;
 
 /**
- * 組裝並啟動主機服務：資料夾身分（只讀）、記憶體儲存替身、假引擎、
- * 協定閘道與生命週期。
+ * 組裝並啟動主機服務。
  *
- * 正式版本會由 `@cardiary/storage` 提供持久化實作、由引擎轉接層工作提供
- * `HostEngine`；這個函式是兩者的接縫。
+ * 產品組裝（`assembly: "pi"`）用 `@cardiary/storage` 的持久化儲存與
+ * `@cardiary/engine-adapter` 的 Pi Durable 轉接層；契約測試與主機單元測試
+ * 用 `assembly: "fake"` 的記憶體儲存與假引擎。兩者共用同一個閘道與生命週期。
  */
 export async function startHost(options: StartHostOptions): Promise<RunningHost> {
   const logger = options.logger ?? new SilentLogger();
   const clock = options.clock ?? systemClock;
   const spawn = new SpawnRegistry();
-  const folder = options.storage?.folder ?? (await readFolderIdentity(options.folderPath));
+  const assembly = options.assembly ?? "pi";
+  const persistent =
+    options.storage === undefined && assembly === "pi"
+      ? PersistentStorage.open({
+          path: options.folderPath,
+          ...(options.initializeFolder === undefined
+            ? {}
+            : { initialize: options.initializeFolder }),
+          now: () => clock.now(),
+          ...(options.trace === undefined ? {} : { trace: options.trace }),
+        })
+      : null;
+  const folder =
+    options.storage?.folder ?? persistent?.folder ?? (await readFolderIdentity(options.folderPath));
   const trace = options.trace;
   const runtime =
     options.storage?.runtime ??
+    persistent?.runtime ??
     new MemoryRuntimeState({
       now: () => clock.now(),
       ...(trace === undefined ? {} : { trace }),
     });
   const snapshot = await runtime.open();
-  const events =
-    options.storage?.events ?? new MemoryEventLog(trace === undefined ? {} : { trace });
-  const dedupe = options.storage?.dedupe ?? new MemoryRequestDedupe();
-  const approvals = options.storage?.approvals ?? new MemoryApprovalLedger();
-  const turnIndex = options.storage?.turnIndex ?? new MemoryTurnIndex();
+  const events = options.storage?.events ?? persistent?.events ?? new MemoryEventLog(trace === undefined ? {} : { trace });
+  const dedupe = options.storage?.dedupe ?? persistent?.dedupe ?? new MemoryRequestDedupe();
+  const approvals = options.storage?.approvals ?? persistent?.approvals ?? new MemoryApprovalLedger();
+  const turnIndex = options.storage?.turnIndex ?? persistent?.turnIndex ?? new MemoryTurnIndex();
   const deletions =
-    options.storage?.deletions ?? new MemoryDeletionIntents(options.deletionIntents ?? []);
+    options.storage?.deletions ??
+    persistent?.deletions ??
+    new MemoryDeletionIntents(options.deletionIntents ?? []);
   const storage: StorageBundle = options.storage ?? {
     events,
     runtime,
@@ -128,8 +163,9 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
     turnIndex,
     deletions,
     folder,
+    ...(persistent === null ? {} : { dispose: () => persistent.close() }),
   };
-  const credentials = new UnavailableCredentials();
+  const credentials = options.credentials ?? new UnavailableCredentials();
   const environment = {
     stateDir: join(folder.path, "state"),
     tempDir: join(folder.path, "tmp"),
@@ -137,14 +173,28 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   };
   const engine =
     options.engineFactory?.({ storage, logger, clock, credentials, spawn }) ??
-    new FakeEngine({
-      environment,
-      approvals,
-      permissionGate: m0PermissionGate,
-      credentials,
-      logger,
-      clock,
-    });
+    (assembly === "fake"
+      ? new FakeEngine({
+          environment,
+          approvals,
+          permissionGate: m0PermissionGate,
+          credentials,
+          logger,
+          clock,
+        })
+      : createEngineAdapter({
+          environment,
+          approvals,
+          permissionGate: m0PermissionGate,
+          credentials,
+          logger,
+          clock,
+          ...(options.models === undefined ? {} : { models: options.models }),
+          ...(persistent === null ? {} : { purger: new PersistentPurger(persistent.storage) }),
+        }));
+  if (options.modelSettings !== undefined) {
+    await engine.configureModels(options.modelSettings);
+  }
   let serviceRef: HostService | null = null;
   const gateway = new Gateway({
     engine,

@@ -46,6 +46,7 @@ export async function startTestHost(
   const token = "A".repeat(43);
   const host = await startHost({
     demo: true,
+    assembly: "fake",
     ...rest,
     folderPath: folder.path,
     clientToken: token,

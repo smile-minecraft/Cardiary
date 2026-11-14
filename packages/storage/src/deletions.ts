@@ -249,6 +249,50 @@ export class ConversationDeletionService {
     return row === undefined ? null : rowToIntent(row);
   }
 
+  /**
+   * 寫入刪除意圖；同一個 root 已有意圖時保留原本的內容。
+   *
+   * 給跨資料庫刪除的呼叫端使用：引擎轉接層先把意圖落地，才開始刪任何列。
+   */
+  putIntent(intent: ConversationDeletionIntent): void {
+    if (this.getIntent(intent.rootId) !== null) {
+      return;
+    }
+    this.insertIntent(intent);
+  }
+
+  /** 推進意圖的階段；只有 `rows` 與 `vacuum` 兩個值。 */
+  setIntentPhase(rootId: string, phase: DeletionPhase): void {
+    this.updatePhase(rootId, phase);
+  }
+
+  /** 刪掉意圖列；刪除完成或呼叫端已自行完成收斂時使用。 */
+  removeIntent(rootId: string): void {
+    this.deleteIntent(rootId);
+  }
+
+  /**
+   * 只清 Cardiary 這一半的列：事件、審批、回合對照、去重、子代理與登記簿。
+   *
+   * 引擎的列由轉接層自己刪；這個方法讓兩個資料庫各自只有一個權威，
+   * 但共用同一份意圖與同一段交易順序。
+   */
+  purgeCardiaryRows(intent: {
+    readonly rootId: string;
+    readonly conversationIds: readonly string[];
+    readonly clientRequestIds: readonly string[];
+  }): DeletionTableCounts {
+    const full: ConversationDeletionIntent = {
+      rootId: intent.rootId,
+      conversationIds: intent.conversationIds,
+      clientRequestIds: intent.clientRequestIds,
+      phase: "rows",
+      requestedAt: "",
+      updatedAt: "",
+    };
+    return this.deleteCardiaryRows(full, listTaskIds(this.#engine, intent.conversationIds), []);
+  }
+
   private insertIntent(intent: ConversationDeletionIntent): void {
     this.#state.run(
       `INSERT INTO conversation_deletions

@@ -311,7 +311,7 @@ describe("生命週期", () => {
         return wrapEngine(engine, order);
       },
     };
-    const host = await startHost(options);
+    const host = await startHost({ ...options, assembly: "fake" });
     freeHosts.push(host);
     expect(order).toEqual(["delete:conv_pending", "open"]);
     expect(await host.storage.deletions.pending()).toEqual([]);
@@ -481,6 +481,7 @@ describe("生命週期", () => {
       clientToken: "M".repeat(43),
       demo: true,
       storage,
+      assembly: "fake",
     });
     freeHosts.push(host);
     await host.service.pause("user", 100);
@@ -526,7 +527,11 @@ describe("生命週期", () => {
     const first = await startTestHost({ folder });
     const firstEpoch = first.host.epoch;
     await first.host.service.abort("test");
-    const second = await startHost({ folderPath: folder.path, clientToken: "G".repeat(43) });
+    const second = await startHost({
+      folderPath: folder.path,
+      clientToken: "G".repeat(43),
+      assembly: "fake",
+    });
     freeHosts.push(second);
     expect(second.epoch).not.toBe(firstEpoch);
   });

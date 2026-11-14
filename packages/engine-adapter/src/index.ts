@@ -23,3 +23,8 @@ export { ProcessSupervisor } from "./internal/spawn.js";
 export { EngineAdapterFailure, engineError } from "./internal/errors.js";
 export { canonicalJson, computeApprovalKey } from "./internal/canonical.js";
 export { createInMemoryApprovalLedger } from "./testing/in-memory-approval-ledger.js";
+export {
+  createScriptedModels,
+  scriptedModelSettings,
+  type ScriptedModels,
+} from "./testing/scripted-models.js";

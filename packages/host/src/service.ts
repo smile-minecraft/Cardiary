@@ -396,6 +396,7 @@ export class HostService {
         await this.#options.storage.runtime.markCleanShutdown(reason);
         await this.#options.storage.runtime.checkpointAndClose();
         await this.#options.storage.events.close();
+        this.#options.storage.dispose?.();
       } catch (error) {
         // flush／markCleanShutdown／checkpoint／close 失敗都是儲存失效；
         // 不能因為 shutdown 先把 #closed 設起來就吞掉 fatal。
@@ -424,6 +425,7 @@ export class HostService {
     await this.#options.storage.events.flush().catch(() => undefined);
     await this.#options.storage.events.close().catch(() => undefined);
     await this.#options.storage.runtime.checkpointAndClose().catch(() => undefined);
+    this.#options.storage.dispose?.();
     this.#fatalHandled = true;
     this.#options.logger.info("服務結束（未經殼確認，不設 clean_shutdown）", { reason });
   }

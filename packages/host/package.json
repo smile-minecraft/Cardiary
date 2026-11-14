@@ -15,6 +15,7 @@
     "@cardiary/engine-adapter": "workspace:*",
     "@cardiary/engine-fake": "workspace:*",
     "@cardiary/protocol": "workspace:*",
+    "@cardiary/storage": "workspace:*",
     "ws": "8.23.0"
   },
   "devDependencies": {
