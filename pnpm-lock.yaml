@@ -54,7 +54,11 @@ importers:
         specifier: 16.0.0
         version: 16.0.0
 
-  packages/storage: {}
+  packages/storage:
+    dependencies:
+      '@cardiary/protocol':
+        specifier: workspace:*
+        version: link:../protocol
 
   spikes/pi-durable:
     dependencies:
