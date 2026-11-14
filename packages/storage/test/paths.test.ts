@@ -162,7 +162,25 @@ describe("符號連結與硬連結", () => {
     });
     const link = layout.absolute("cache/read-link");
     symlinkSync(outside, link);
-    expect(() => readFileNoFollow(link)).toThrow();
+    expect(() => readFileNoFollow(layout, link)).toThrow();
+  });
+
+  it("上層目錄是符號連結時，不刪除區外的檔案", () => {
+    const { root, layout } = fixture();
+    const outsideDir = path.join(path.dirname(root), "outside-parent");
+    mkdirSync(outsideDir);
+    writeFileSync(path.join(outsideDir, "victim.txt"), "keep");
+    cleanups.push(() => {
+      try {
+        rmSync(outsideDir, { recursive: true, force: true });
+      } catch {
+        // 已不存在。
+      }
+    });
+    symlinkSync(outsideDir, layout.absolute("cache/parent-link"));
+    const insidePath = layout.absolute("cache/parent-link/victim.txt");
+    expect(() => removeFileSafely(layout, insidePath)).toThrowError(/符號連結|符號/);
+    expect(readFileSync(path.join(outsideDir, "victim.txt"), "utf8")).toBe("keep");
   });
 
   it("目錄符號連結整棵跳過，不跟隨", () => {

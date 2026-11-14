@@ -156,6 +156,14 @@ describe("掃描與回收", () => {
     expect(readFileSync(target, "utf8")).toBe("same");
   });
 
+  it("同一個路徑重複登記只更新原本那一列", () => {
+    const storage = open(temp());
+    storage.registry.register({ relPath: "tmp/a.txt", ownerKind: "task", ownerId: "t1" });
+    storage.registry.register({ relPath: "tmp/a.txt", ownerKind: "task", ownerId: "t2" });
+    expect(storage.registry.list().filter((row) => row.relPath === "tmp/a.txt")).toHaveLength(1);
+    expect(storage.registry.get("tmp/a.txt")?.ownerId).toBe("t2");
+  });
+
   it("登記簿拒絕正本區的路徑", () => {
     const storage = open(temp());
     expect(() =>

@@ -264,6 +264,10 @@ export class FolderLayout {
   listTree(absoluteDirectory: string): TreeEntry[] {
     const base = this.relative(absoluteDirectory);
     const entries: TreeEntry[] = [];
+    const rootStats = lstatSync(absoluteDirectory);
+    if (rootStats.isSymbolicLink()) {
+      return entries;
+    }
     const walk = (currentRelative: string): void => {
       const absolute = currentRelative === "" ? absoluteDirectory : this.absolute(currentRelative);
       const dirents = readdirSync(absolute, { withFileTypes: true });
@@ -301,6 +305,7 @@ export function removeFileSafely(
   allowedZones: readonly Zone[] = ["cache", "tmp", "logs"],
 ): RemoveFileResult {
   layout.assertDeletable(absolutePath, allowedZones);
+  assertNoSymlinkAncestors(layout, absolutePath);
   let stats;
   try {
     stats = lstatSync(absolutePath);
@@ -331,7 +336,18 @@ export function removeTreeSafely(
   allowedZones: readonly Zone[] = ["cache", "tmp", "logs"],
 ): RemoveTreeReport {
   layout.assertDeletable(absoluteDirectory, allowedZones);
+  assertNoSymlinkAncestors(layout, absoluteDirectory);
   const report = { removedFiles: 0, removedLinks: 0, skippedHardLinks: 0, keptDirectories: 0 };
+  const targetStats = lstatSync(absoluteDirectory);
+  if (targetStats.isSymbolicLink()) {
+    unlinkSync(absoluteDirectory);
+    report.removedLinks = 1;
+    return report;
+  }
+  if (!targetStats.isDirectory()) {
+    report.keptDirectories = 1;
+    return report;
+  }
   const walk = (absolute: string): void => {
     const dirents = readdirSync(absolute, { withFileTypes: true });
     for (const dirent of dirents) {
@@ -377,7 +393,18 @@ export function clearDirectorySafely(
   allowedZones: readonly Zone[] = ["cache", "tmp", "logs"],
 ): RemoveTreeReport {
   layout.assertDeletable(absoluteDirectory, allowedZones);
+  assertNoSymlinkAncestors(layout, absoluteDirectory);
   const report = { removedFiles: 0, removedLinks: 0, skippedHardLinks: 0, keptDirectories: 0 };
+  const targetStats = lstatSync(absoluteDirectory);
+  if (targetStats.isSymbolicLink()) {
+    unlinkSync(absoluteDirectory);
+    report.removedLinks = 1;
+    return report;
+  }
+  if (!targetStats.isDirectory()) {
+    report.keptDirectories = 1;
+    return report;
+  }
   for (const dirent of readdirSync(absoluteDirectory, { withFileTypes: true })) {
     const child = path.join(absoluteDirectory, dirent.name);
     const stats = lstatSync(child);
@@ -406,7 +433,9 @@ export function clearDirectorySafely(
 }
 
 /** 以 `O_NOFOLLOW` 開檔讀取；符號連結會直接失敗。 */
-export function readFileNoFollow(absolutePath: string): Buffer {
+export function readFileNoFollow(layout: FolderLayout, absolutePath: string): Buffer {
+  layout.assertInside(absolutePath);
+  assertNoSymlinkAncestors(layout, absolutePath);
   const fd = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stats = fstatSync(fd);
@@ -425,6 +454,39 @@ export function readFileNoFollow(absolutePath: string): Buffer {
     return buffer.subarray(0, offset);
   } finally {
     closeSync(fd);
+  }
+}
+
+/**
+ * 確認目標的每一層上層目錄都是真正的目錄，不是符號連結。
+ *
+ * 避免 `cache/link -> /outside` 這種上層連結讓刪除或讀取跑到資料夾外。
+ */
+function assertNoSymlinkAncestors(layout: FolderLayout, absolutePath: string): void {
+  const relativePath = layout.relative(absolutePath);
+  const segments = relativePath.split("/");
+  let current = layout.root;
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    current = path.join(current, segments[index] as string);
+    let stats;
+    try {
+      stats = lstatSync(current);
+    } catch {
+      // 上層目錄不存在時，後續操作會得到 ENOENT，不需要在這裡拋錯。
+      return;
+    }
+    if (stats.isSymbolicLink()) {
+      throw new StorageError("protected-path", "上層目錄是符號連結，拒絕跟隨", {
+        relativePath,
+        linkedAncestor: layout.relative(current),
+      });
+    }
+    if (!stats.isDirectory()) {
+      throw new StorageError("protected-path", "上層路徑不是目錄", {
+        relativePath,
+        ancestor: layout.relative(current),
+      });
+    }
   }
 }
 

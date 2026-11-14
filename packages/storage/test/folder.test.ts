@@ -109,6 +109,25 @@ describe("初始化與身分", () => {
     expect(existsSync(path.join(tempRoot.folder, "cards"))).toBe(false);
   });
 
+  it("初始化中途失敗：不留下 folder.json，重試可以成功", () => {
+    const tempRoot = temp();
+    const manager = new FolderManager(new FolderLayout(tempRoot.folder));
+    expect(() =>
+      manager.open({
+        initialize: true,
+        createdBy: "test",
+        createDatabases: () => {
+          throw new Error("database create failed");
+        },
+      }),
+    ).toThrowError("database create failed");
+    expect(existsSync(folderIdentityPath(manager.layout))).toBe(false);
+    expect(existsSync(path.join(tempRoot.folder, "state/cardiary.sqlite"))).toBe(false);
+    const retry = manager.open({ initialize: true, createdBy: "test", createDatabases: () => {} });
+    expect(retry.state).toBe("ready");
+    manager.close();
+  });
+
   it("folderId 與殼記錄的不符：mismatch，不寫入", () => {
     const tempRoot = temp();
     const first = open(tempRoot);
@@ -264,10 +283,15 @@ describe("儲存失效", () => {
     storage.events.append({ stream: "system", kind: "system.status", payload: { ok: true } });
     storage.state.failForTests(new Error("SQLITE_IOERR: disk I/O error"));
     expect(storage.state.failed).toBe(true);
+    expect(storage.engine.failed).toBe(true);
+    expect(storage.cache.failed).toBe(true);
     expect(storage.folder.state).toBe("unavailable");
     expect(storage.folder.reason).toBe("io_error");
     expect(() =>
       storage.events.append({ stream: "system", kind: "system.status", payload: { after: true } }),
+    ).toThrowError(/storage-failed/);
+    expect(() =>
+      storage.engine.run("CREATE TABLE IF NOT EXISTS probe (id INTEGER PRIMARY KEY) STRICT"),
     ).toThrowError(/storage-failed/);
     expect(() => storage.state.reopen()).toThrowError(StorageError);
     try {

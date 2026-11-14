@@ -229,6 +229,15 @@ function seed(): Seeded {
     ownerId: String(kept),
   });
 
+  const cacheFile = path.join(tempRoot.folder, "cache/thumbs/root.png");
+  mkdirSync(path.dirname(cacheFile), { recursive: true });
+  writeFileSync(cacheFile, TMP_MARKER);
+  storage.registry.register({
+    relPath: "cache/thumbs/root.png",
+    ownerKind: "conversation",
+    ownerId: String(root),
+  });
+
   storage.cache.exec("CREATE TABLE IF NOT EXISTS fts_probe (body TEXT)");
   storage.cache.run("INSERT INTO fts_probe (body) VALUES (?)", CACHE_MARKER);
   storage.logs.log("info", "deletion.test", { sessionId: String(root), count: 1 });
@@ -355,6 +364,7 @@ describe("刪除對話", () => {
     expect(hits).toEqual([]);
     expect(existsSync(path.join(tempRoot.folder, "tmp/conversation-1/output.txt"))).toBe(false);
     expect(existsSync(path.join(tempRoot.folder, "tmp/task-100/output.txt"))).toBe(false);
+    expect(existsSync(path.join(tempRoot.folder, "cache/thumbs/root.png"))).toBe(false);
 
     // 大小：incremental_vacuum 後再 checkpoint，主檔真的下降。
     expect(report.stateSizeAfter).toBeLessThan(report.stateSizeBefore);
@@ -363,6 +373,28 @@ describe("刪除對話", () => {
     expect(report.engineSizeAfter).toBeLessThan(report.engineSizeBefore * 0.8);
     expect(storage.state.integrityCheck()).toBe("ok");
     expect(storage.engine.integrityCheck()).toBe("ok");
+  });
+
+  it("找不到對話列時仍清掉殘留索引與 record_ids", async () => {
+    const { engine, storage } = seed();
+    // 模擬上一次中斷：對話、entry、task、submission 列已刪，索引與 record_ids 留著。
+    engine.db.exec("DELETE FROM conversations WHERE id IN (1, 2)");
+    engine.db.exec("DELETE FROM entries WHERE conversation_id IN (1, 2)");
+    engine.db.exec("DELETE FROM tasks WHERE conversation_id IN (1, 2)");
+    engine.db.exec("DELETE FROM submissions WHERE conversation_id IN (1, 2)");
+    const report = await storage.deletions.deleteConversation("1");
+    expect(report.deleted).toBe(false);
+    expect(engine.count("SELECT COUNT(*) AS n FROM documents WHERE id IN (500, 501)")).toBe(0);
+    expect(
+      engine.count(
+        "SELECT COUNT(*) AS n FROM record_ids WHERE id IN (10, 11, 20, 100, 200, 500, 501)",
+      ),
+    ).toBe(0);
+    // 保留對話的索引與 record_ids 不動。
+    expect(engine.count("SELECT COUNT(*) AS n FROM documents WHERE id IN (502, 503)")).toBe(2);
+    expect(
+      engine.count("SELECT COUNT(*) AS n FROM record_ids WHERE id IN (30, 300, 402, 502, 503)"),
+    ).toBe(5);
   });
 
   it("刪除是冪等的：再呼叫一次不丟錯，也不留下新的列", async () => {

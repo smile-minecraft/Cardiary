@@ -6,7 +6,7 @@ import { RequestDedupeStore } from "./dedupe.js";
 import { ConversationDeletionService } from "./deletions.js";
 import { EventLog } from "./events.js";
 import { StorageError } from "./errors.js";
-import { FolderManager, type FolderOpenResult } from "./folder.js";
+import { FolderManager, type FolderOpenResult, type FolderState } from "./folder.js";
 import { FolderLayout, removeFileSafely } from "./paths.js";
 import { DiagnosticLogger } from "./logs.js";
 import { StorageMaintenance } from "./maintenance.js";
@@ -113,8 +113,15 @@ export class Storage {
     const enginePath = layout.absolute("state/engine.sqlite");
     const backupDirectory = layout.subfolderPath("tmp");
 
-    const onDatabaseFailure = (): void => {
+    let state: Database | null = null;
+    let engine: Database | null = null;
+    let cache: Database | null = null;
+    const onDatabaseFailure = (error: unknown): void => {
       folder.markStorageFailed();
+      // 任何一條連線失效都停止整個儲存層的寫入，不只失效的那一個。
+      for (const database of [state, engine, cache]) {
+        database?.markFailed(error);
+      }
     };
     const openState = (): ReturnType<typeof openStateDatabase> =>
       openStateDatabase({
@@ -154,9 +161,6 @@ export class Storage {
       });
     }
 
-    let state: Database | null = null;
-    let engine: Database | null = null;
-    let cache: Database | null = null;
     try {
       state = openState().db;
       cache = openCacheDatabase({
@@ -286,7 +290,7 @@ export class Storage {
     return this.layout.subfolderPath("logs");
   }
 
-  get folderState(): string {
+  get folderState(): FolderState {
     return this.folder.state;
   }
 

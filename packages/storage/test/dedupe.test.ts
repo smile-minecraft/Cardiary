@@ -70,6 +70,20 @@ describe("claim / complete / lookup", () => {
     expect(JSON.parse(record?.responseJson ?? "{}")).toEqual({ userMessageId: "message-1" });
   });
 
+  it("宣告後當機：重開後同一個 clientRequestId 仍是 pending，不會被當成新請求", () => {
+    const tempRoot = temp("dedupe-crash");
+    const first = openTestStorage(tempRoot);
+    const key = sessionCreateKey("req-crash");
+    expect(first.dedupe.claim(key, "session-create").claimed).toBe(true);
+    first.close();
+
+    const second = openTestStorage(tempRoot);
+    cleanups.push(() => second.close());
+    const again = second.dedupe.claim(key, "session-create");
+    expect(again.claimed).toBe(false);
+    expect(again.record.state).toBe("pending");
+  });
+
   it("send-message 的鍵可以解析回會話與訊息", () => {
     const key = sendMessageKey("conversation-1", "msg:with:colons");
     expect(parseSendMessageKey(key)).toEqual({

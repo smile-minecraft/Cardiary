@@ -57,6 +57,7 @@ describe("資料庫 header 與表結構", () => {
     expect(String(storage.state.pragma("journal_mode"))).toBe("wal");
     expect(Number(storage.state.pragma("secure_delete"))).toBe(1);
     expect(Number(storage.state.pragma("foreign_keys"))).toBe(1);
+    expect(M0_TABLES).toHaveLength(12);
     for (const table of M0_TABLES) {
       expect(storage.state.tableExists(table), table).toBe(true);
     }
@@ -80,6 +81,24 @@ describe("資料庫 header 與表結構", () => {
     expect(Number(storage.engine.pragma("secure_delete"))).toBe(1);
     expect(Number(storage.cache.pragma("application_id"))).toBe(CACHE_APPLICATION_ID);
     expect(Number(storage.cache.pragma("secure_delete"))).toBe(1);
+  });
+
+  it("runtime_state 只接受單列，turn_index 的對話與觸發訊息唯一", () => {
+    const storage = openTestStorage(temp());
+    cleanups.push(() => storage.close());
+    expect(() =>
+      storage.state.run(
+        "INSERT INTO runtime_state (id, epoch, clean_shutdown, started_at) VALUES (2, 'e', 0, 'now')",
+      ),
+    ).toThrowError(/CHECK/);
+    storage.state.run(
+      "INSERT INTO turn_index (turn_id, conversation_id, trigger_message_id, started_at) VALUES ('turn_a', 'c1', 'm1', 'now')",
+    );
+    expect(() =>
+      storage.state.run(
+        "INSERT INTO turn_index (turn_id, conversation_id, trigger_message_id, started_at) VALUES ('turn_b', 'c1', 'm1', 'now')",
+      ),
+    ).toThrowError(/UNIQUE/);
   });
 
   it("重複開啟不重跑遷移", () => {

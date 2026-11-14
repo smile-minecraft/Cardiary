@@ -252,6 +252,11 @@ export class FileRegistry {
         seen.add(relPath);
 
         const record = rows.get(relPath);
+        if (record === undefined && relPath === "cache/index.sqlite") {
+          // 索引檔由儲存層自己管理；即使登記列暫時不見，也不能在連線開著時刪掉。
+          kept += 1;
+          continue;
+        }
         if (record === undefined) {
           if (activeToolCalls > 0 && isEngineOverflowPath(relPath)) {
             skippedOverflow += 1;

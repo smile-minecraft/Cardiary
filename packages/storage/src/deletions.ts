@@ -2,7 +2,7 @@ import type { Database, Queryable } from "./db.js";
 import { ApprovalLedger } from "./approvals.js";
 import { RequestDedupeStore } from "./dedupe.js";
 import { StorageError } from "./errors.js";
-import type { FolderLayout } from "./paths.js";
+import { removeFileSafely, type FolderLayout } from "./paths.js";
 import { EventLog } from "./events.js";
 import type { FileRegistry } from "./registry.js";
 import { TurnIndex } from "./turns.js";
@@ -115,6 +115,7 @@ export class ConversationDeletionService {
   readonly #resetCacheIndex: () => void;
   readonly #now: () => Date;
   readonly #trace: (operation: string) => void;
+  readonly #layout: FolderLayout;
 
   constructor(options: DeletionServiceOptions) {
     this.#state = options.state;
@@ -123,6 +124,7 @@ export class ConversationDeletionService {
     this.#resetCacheIndex = options.resetCacheIndex;
     this.#now = options.now ?? (() => new Date());
     this.#trace = options.trace ?? (() => {});
+    this.#layout = options.layout;
   }
 
   /** 列出尚未完成的刪除意圖；啟動時在開 Harness 之前處理。 */
@@ -148,6 +150,8 @@ export class ConversationDeletionService {
     if (intent === null) {
       const conversationIds = listConversationSubtree(this.#engine, rootId);
       if (conversationIds.length === 0) {
+        // 找不到對話列時仍清掉殘留索引與 record_ids；這是冪等重試的一部分。
+        this.cleanupResidualEngine();
         return emptyReport(rootId);
       }
       const clientRequestIds = listClientRequestIds(this.#engine, conversationIds);
@@ -260,6 +264,14 @@ export class ConversationDeletionService {
     this.#state.run("DELETE FROM conversation_deletions WHERE root_id = ?", rootId);
   }
 
+  private cleanupResidualEngine(): void {
+    this.#engine.transaction((tx) => {
+      deleteOrphanSessionIndexes(tx);
+      deleteOrphanRecordIds(tx);
+    });
+    this.#engine.checkpoint();
+  }
+
   private deleteCardiaryRows(
     intent: ConversationDeletionIntent,
     taskIds: readonly string[],
@@ -271,6 +283,13 @@ export class ConversationDeletionService {
     const dedupe = new RequestDedupeStore(this.#state, { now: this.#now });
     const streams = intent.conversationIds.map((id) => `session:${id}` as const);
     const counts = { ...emptyCounts() };
+    // 刪列先於刪檔：先記下要刪的檔案，交易提交後再刪。
+    const registryFiles = collectRegistryFiles(
+      this.#registry,
+      intent.conversationIds,
+      taskIds,
+      toolCallIds,
+    );
 
     this.#state.transaction((tx) => {
       const eventLog = events.deleteStreams(streams, tx);
@@ -304,9 +323,8 @@ export class ConversationDeletionService {
       });
     });
 
-    // 刪列先於刪檔；中途當機只會留下孤兒檔案，掃描會處理。
-    this.#registry.purgeOwner("conversation", intent.conversationIds);
-    this.#registry.purgeOwner("task", taskIds);
+    // 交易已提交；現在刪檔案。中途當機只會留下孤兒檔案，掃描會處理。
+    deleteRegisteredFiles(this.#layout, registryFiles);
     return counts;
   }
 
@@ -358,12 +376,14 @@ export function listConversationSubtree(engine: Database, rootId: string): strin
     return [];
   }
   const result: string[] = [];
+  const visited = new Set<string>();
   const queue = [rootId];
   while (queue.length > 0) {
     const current = queue.shift();
-    if (current === undefined) {
-      break;
+    if (current === undefined || visited.has(current)) {
+      continue;
     }
+    visited.add(current);
     result.push(current);
     queue.push(...(children.get(current) ?? []));
   }
@@ -451,14 +471,17 @@ export function deleteEngineRows(
     const taskCount = deleteByIds(tx, "tasks", "conversation_id", conversationIds.map(Number));
     const entryCount = deleteByIds(tx, "entries", "conversation_id", conversationIds.map(Number));
     const conversationCount = deleteByIds(tx, "conversations", "id", conversationIds.map(Number));
-    const recordIdCount = deleteByIds(tx, "record_ids", "id", allRecordIds);
+    const knownRecordIdCount = deleteByIds(tx, "record_ids", "id", allRecordIds);
+    // 涵蓋上一次中斷留下的索引文件與孤兒 record_ids；id 1 是引擎保留的 root。
+    const orphanDocuments = deleteOrphanSessionIndexes(tx);
+    const recordIdCount = knownRecordIdCount + deleteOrphanRecordIds(tx);
 
     return {
       engineConversations: conversationCount,
       engineEntries: entryCount,
       engineTasks: taskCount,
       engineSubmissions: submissionCount,
-      engineDocuments: documentCount,
+      engineDocuments: documentCount + orphanDocuments,
       engineDocumentRevisions: revisionCount,
       engineRecordIds: recordIdCount,
     };
@@ -580,6 +603,83 @@ function countNextTurnRows(tx: Queryable, conversationIds: readonly string[]): n
     count += Number(row?.n ?? 0);
   }
   return count;
+}
+
+function deleteOrphanSessionIndexes(tx: Queryable): number {
+  const rows = tx.all<DocumentRow>(
+    "SELECT id, kind, key_value, scope_kind, owner_id, record FROM documents WHERE scope_kind = 'session' AND kind IN (?, ?)",
+    CLIENT_REQUEST_FORWARD_KIND,
+    CLIENT_REQUEST_REVERSE_KIND,
+  );
+  const orphanIds: number[] = [];
+  for (const row of rows) {
+    const record = parseRecord(row.record);
+    let conversationId = readString(record, "conversationId");
+    if (conversationId === null && row.kind === CLIENT_REQUEST_REVERSE_KIND) {
+      const key = parseScalar(row.key_value);
+      conversationId = typeof key === "string" || typeof key === "number" ? String(key) : null;
+    }
+    if (conversationId === null) {
+      continue;
+    }
+    const exists = tx.get<{ one: number }>(
+      "SELECT 1 AS one FROM conversations WHERE id = ? LIMIT 1",
+      Number(conversationId),
+    );
+    if (exists === undefined) {
+      orphanIds.push(Number(row.id));
+    }
+  }
+  if (orphanIds.length === 0) {
+    return 0;
+  }
+  for (const documentId of orphanIds) {
+    tx.run("DELETE FROM document_revisions WHERE document_id = ?", documentId);
+    tx.run("DELETE FROM documents WHERE id = ?", documentId);
+  }
+  return orphanIds.length;
+}
+
+function deleteOrphanRecordIds(tx: Queryable): number {
+  return tx.run(
+    `DELETE FROM record_ids
+     WHERE id <> 1
+       AND id NOT IN (SELECT id FROM conversations)
+       AND id NOT IN (SELECT id FROM entries)
+       AND id NOT IN (SELECT id FROM tasks)
+       AND id NOT IN (SELECT id FROM submissions)
+       AND id NOT IN (SELECT id FROM documents)`,
+  ).changes;
+}
+
+function collectRegistryFiles(
+  registry: FileRegistry,
+  conversationIds: readonly string[],
+  taskIds: readonly string[],
+  toolCallIds: readonly string[],
+): string[] {
+  const paths: string[] = [];
+  for (const conversationId of conversationIds) {
+    paths.push(...registry.listByOwner("conversation", conversationId).map((row) => row.relPath));
+  }
+  for (const taskId of taskIds) {
+    paths.push(...registry.listByOwner("task", taskId).map((row) => row.relPath));
+  }
+  for (const toolCallId of toolCallIds) {
+    paths.push(...registry.listByOwner("tool-call", toolCallId).map((row) => row.relPath));
+  }
+  return paths;
+}
+
+function deleteRegisteredFiles(layout: FolderLayout, relativePaths: readonly string[]): void {
+  for (const relativePath of relativePaths) {
+    try {
+      const absolutePath = layout.absolute(relativePath);
+      removeFileSafely(layout, absolutePath);
+    } catch {
+      // 壞路徑或已不存在：掃描會留下可診斷的痕跡，不在刪除路徑再拋錯。
+    }
+  }
 }
 
 function readParentId(row: ConversationRow): string | null {
