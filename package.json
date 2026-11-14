@@ -16,7 +16,8 @@
     "format:write": "prettier --write .",
     "check": "pnpm lint && pnpm format && pnpm build && pnpm test",
     "test:swift": "swift test --package-path apple/CardiaryKit && swift test --package-path apps/macos",
-    "test:contract:pi": "CARDIARY_CONTRACT_ENGINE=pi vitest run packages/contract-tests"
+    "test:contract:pi": "CARDIARY_CONTRACT_ENGINE=pi vitest run packages/contract-tests",
+    "test:removable-disk": "CARDIARY_HDIUTIL_TESTS=1 vitest run packages/host/test/removable-disk.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
