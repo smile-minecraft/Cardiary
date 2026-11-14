@@ -36,6 +36,15 @@ jobs:
       # 契約測試會啟動建置後的主機服務，所以先跑 TypeScript 那一半。
       - name: TypeScript 檢查
         run: pnpm check
+      # 本機用 Xcode 27.2 開發；runner 有這個版本就用它，沒有就用預設版本
+      # （殼的程式碼已改成不依賴編譯器的名稱解析順序，兩個版本都要能編）。
+      - name: 選擇 Xcode 27.2
+        continue-on-error: true
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "27.2"
+      - name: 顯示 Xcode 版本
+        run: xcodebuild -version
       - name: CardiaryKit 測試
         working-directory: apple/CardiaryKit
         run: swift test

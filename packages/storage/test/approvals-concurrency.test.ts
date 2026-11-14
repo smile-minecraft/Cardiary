@@ -129,25 +129,64 @@ describe("兩個獨立連線的並行審批", () => {
     const tempRoot = temp();
     const storage = openTestStorage(tempRoot);
     cleanups.push(() => storage.close());
-    const hold = runWorker(workerOptions(storage.state.filePath, "hold", { holdMs: 150 }));
-    // 讓 worker 先拿到 BEGIN IMMEDIATE。
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    const ledger = new ApprovalLedger(storage.state);
-    const input = {
-      id: newUlid(),
-      approvalKey: "busy-key",
-      sessionId: "session-1",
-      turnId: "turn_1",
-      toolName: "bash",
-      actionKind: "tool-execution",
-      requestJson: "{}",
-      requestedAt: new Date().toISOString(),
+    // 用 SharedArrayBuffer 握手，不用「等 30 毫秒」猜 worker 有沒有拿到鎖：
+    //   slot 0：hold worker 已 BEGIN IMMEDIATE
+    //   slot 1：主執行緒放行，hold worker 可以 COMMIT
+    //   slot 2：record worker 已開始呼叫 record
+    const sync = new SharedArrayBuffer(12);
+    const view = new Int32Array(sync);
+    const hold = runWorker(workerOptions(storage.state.filePath, "hold", { sync }));
+    const waitForSlot = async (index: number, label: string): Promise<void> => {
+      const deadline = Date.now() + 10_000;
+      while (Atomics.load(view, index) === 0) {
+        if (Date.now() > deadline) {
+          throw new Error(`等待 ${label} 逾時`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
     };
-    const startedAt = Date.now();
-    const outcome = ledger.record(input);
-    expect(outcome.status).toBe("pending");
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100);
+    await waitForSlot(0, "hold worker 取得寫入鎖");
+
+    const distUrl = pathToFileURL(distPath).href;
+    const recorder = new Worker(new URL("./helpers/busy-record-worker.mjs", import.meta.url), {
+      workerData: {
+        dbPath: storage.state.filePath,
+        distUrl,
+        sync,
+        input: {
+          id: newUlid(),
+          approvalKey: "busy-key",
+          sessionId: "session-1",
+          turnId: "turn_1",
+          toolName: "bash",
+          actionKind: "tool-execution",
+          requestJson: "{}",
+          requestedAt: new Date().toISOString(),
+        },
+      },
+    });
+    const recorded = new Promise<{
+      ok: boolean;
+      id?: string;
+      status?: string;
+      releasedWhenDone?: boolean;
+      message?: string;
+    }>((resolve, reject) => {
+      recorder.once("message", resolve);
+      recorder.once("error", reject);
+    });
+    // record 已經開始（此時鎖還握在 hold worker 手上），才放行。
+    await waitForSlot(2, "record worker 開始 record");
+    Atomics.store(view, 1, 1);
+    Atomics.notify(view, 1);
+
+    const result = await recorded;
     await hold.done;
-    await hold.worker.terminate();
-  });
+    await Promise.all([hold.worker.terminate(), recorder.terminate()]);
+    expect(result.message).toBeUndefined();
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe("pending");
+    // 真正證明「等到鎖放開」：record 完成時，主執行緒已經放行過。
+    expect(result.releasedWhenDone).toBe(true);
+  }, 60_000);
 });

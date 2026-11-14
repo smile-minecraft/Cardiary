@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { fstatSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
@@ -116,19 +116,22 @@ describe("工具子行程", () => {
   it("工具的 fd 0／1／2 與服務的 stdin／stdout 不同", async () => {
     const fixture = await createFixture({ gate: gateWith({ kind: "allow" }) });
     try {
-      const script = [
-        'echo "inode0=$(stat -f %i /dev/fd/0)"',
-        'echo "inode1=$(stat -f %i /dev/fd/1)"',
-        'echo "inode2=$(stat -f %i /dev/fd/2)"',
-      ].join("\n");
+      // 用 Node 的 fstatSync 讀 inode，不用 /usr/bin/stat：BSD 的 `-f` 在
+      // Ubuntu 是別的意思，這個測試要在兩個平台都能跑。
+      const program =
+        'const fs=require("node:fs");for(const fd of [0,1,2])console.log("inode"+fd+"="+fs.fstatSync(fd).ino)';
+      const script = `"${process.execPath}" -e '${program}'`;
       const output = await runAndRead(fixture, scriptTool(script));
-      const read = (name: string): number =>
-        Number(new RegExp(`${name}=(\\d+)`).exec(output)?.[1] ?? "-1");
-      const serviceInode = Number(
-        execFileSync("/usr/bin/stat", ["-f", "%i", "/dev/fd/0"]).toString().trim(),
-      );
+      const read = (name: string): number => {
+        const value = new RegExp(`${name}=(\\d+)`).exec(output)?.[1];
+        expect(value, `找不到 ${name}：${output}`).toBeDefined();
+        return Number(value);
+      };
+      const serviceInode = Number(fstatSync(0).ino);
+      const serviceOut = Number(fstatSync(1).ino);
       expect(read("inode0")).toBeGreaterThan(0);
       expect(read("inode0")).not.toBe(serviceInode);
+      expect(read("inode1")).not.toBe(serviceOut);
       expect(read("inode1")).not.toBe(read("inode0"));
     } finally {
       await fixture.cleanup();

@@ -280,27 +280,30 @@ public final class ServiceSupervisor: @unchecked Sendable {
         let tokens = (ControlToken.generate(), ControlToken.generate(), ControlToken.generate())
         var launchGeneration = 0
         var plan = configuration.launchPlan
-        var previous: (any ServiceProcessHandle, ControlChannel?)? = nil
+        // 具名元素與明確的 self：`launch` 後半段有一個同名的區域 `channel`，
+        // 舊版 Swift 會讓閉包裡的 `channel` 解析到那個區域變數（型別不是 optional），
+        // 因而編不過。全部寫成 `self.` 就不依賴編譯器的名稱解析順序。
+        var previous: (process: any ServiceProcessHandle, channel: ControlChannel?)? = nil
         let currentFolder = queue.sync { () -> FolderSnapshot in
             // 先收掉舊的行程與通道，避免兩個服務同時碰同一個資料夾。
-            if let old = handle {
-                previous = (old, channel)
-                handle = nil
-                channel = nil
-                status.pid = 0
+            if let old = self.handle {
+                previous = (old, self.channel)
+                self.handle = nil
+                self.channel = nil
+                self.status.pid = 0
             }
-            generation += 1
-            launchGeneration = generation
+            self.generation += 1
+            launchGeneration = self.generation
             controlToken = tokens.0
             brokerToken = tokens.1
             clientToken = tokens.2
-            if isRestart { status.restarts += 1 }
-            status.phase = .starting
-            status.lastError = nil
-            status.maintenanceInProgress = false
-            status.lifecycle = "idle"
+            if isRestart { self.status.restarts += 1 }
+            self.status.phase = .starting
+            self.status.lastError = nil
+            self.status.maintenanceInProgress = false
+            self.status.lifecycle = "idle"
             launchStartedAt = Date()
-            return folder
+            return self.folder
         }
 
         if let (oldProcess, oldChannel) = previous {
@@ -440,13 +443,35 @@ public final class ServiceSupervisor: @unchecked Sendable {
         }
     }
 
-    private func healthTick() async {
-        let snapshot = queue.sync { () -> (ServicePhase, Bool, Bool, ControlChannel?) in
-            (status.phase, lifecycleInFlight, status.maintenanceInProgress, channel)
+    /// 健康檢查要看的状态。
+    ///
+    /// 用具名結構而不是閉包回傳的 tuple：舊版 Swift 對「閉包回傳含 optional
+    /// 的自訂型別」推斷較差，會報 circular reference。
+    private struct HealthSnapshot {
+        let phase: ServicePhase
+        let lifecycleBusy: Bool
+        let maintenance: Bool
+        let channel: ControlChannel?
+    }
+
+    private func healthSnapshot() -> HealthSnapshot {
+        queue.sync {
+            HealthSnapshot(
+                phase: self.status.phase,
+                lifecycleBusy: self.lifecycleInFlight,
+                maintenance: self.status.maintenanceInProgress,
+                channel: self.channel
+            )
         }
-        let (phase, lifecycleBusy, maintenance, channel) = snapshot
+    }
+
+    private func healthTick() async {
+        let snapshot = healthSnapshot()
+        let phase = snapshot.phase
         guard phase == .running || phase == .paused else { return }
-        guard !lifecycleBusy, !maintenance, let channel else { return }
+        guard !snapshot.lifecycleBusy, !snapshot.maintenance, let channel = snapshot.channel else {
+            return
+        }
 
         do {
             let payload = try await channel.request(
@@ -523,9 +548,9 @@ public final class ServiceSupervisor: @unchecked Sendable {
             status.clientPort = nil
             status.maintenanceInProgress = false
             status.lifecycle = "idle"
-            handle = nil
-            channel?.invalidate(reason: .closed)
-            channel = nil
+            self.handle = nil
+            self.channel?.invalidate(reason: .closed)
+            self.channel = nil
             return (wasIntentional, folder, status.consecutiveFailures, 0, true)
         }
 
@@ -728,14 +753,14 @@ public final class ServiceSupervisor: @unchecked Sendable {
         }
 
         queue.sync {
-            handle = nil
-            channel?.invalidate(reason: .closed)
-            channel = nil
-            status.pid = 0
-            status.clientPort = nil
-            status.phase = .stopped
-            status.lifecycle = "idle"
-            status.maintenanceInProgress = false
+            self.handle = nil
+            self.channel?.invalidate(reason: .closed)
+            self.channel = nil
+            self.status.pid = 0
+            self.status.clientPort = nil
+            self.status.phase = .stopped
+            self.status.lifecycle = "idle"
+            self.status.maintenanceInProgress = false
         }
         publishStatus()
         log("服務已停止（執行過強制結束：\(forced)）")
@@ -783,11 +808,11 @@ public final class ServiceSupervisor: @unchecked Sendable {
             process.kill()
         }
         queue.sync {
-            handle = nil
-            channel?.invalidate(reason: .closed)
-            channel = nil
-            status.pid = 0
-            status.phase = .stopped
+            self.handle = nil
+            self.channel?.invalidate(reason: .closed)
+            self.channel = nil
+            self.status.pid = 0
+            self.status.phase = .stopped
         }
         publishStatus()
     }

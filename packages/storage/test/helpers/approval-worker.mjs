@@ -21,7 +21,19 @@ function latest(key) {
 
 if (workerData.mode === "hold") {
   db.exec("BEGIN IMMEDIATE");
-  sleep(workerData.holdMs ?? 150);
+  if (workerData.sync) {
+    // 握手：拿到鎖才通知主執行緒（slot 0），等主執行緒放行（slot 1）才提交。
+    // 不用時間門檻，CI 再快也不會漏掉「已持鎖」這件事。
+    const sync = new Int32Array(workerData.sync);
+    Atomics.store(sync, 0, 1);
+    Atomics.notify(sync, 0);
+    const deadline = Date.now() + 10_000;
+    while (Atomics.load(sync, 1) === 0 && Date.now() < deadline) {
+      Atomics.wait(sync, 1, 0, 50);
+    }
+  } else {
+    sleep(workerData.holdMs ?? 150);
+  }
   db.exec("COMMIT");
   parentPort.postMessage({ held: true });
   db.close();
