@@ -14,7 +14,8 @@
     "lint": "eslint .",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
-    "check": "pnpm lint && pnpm format && pnpm build && pnpm test"
+    "check": "pnpm lint && pnpm format && pnpm build && pnpm test",
+    "test:swift": "swift test --package-path apple/CardiaryKit && swift test --package-path apps/macos"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
