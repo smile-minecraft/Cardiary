@@ -2015,54 +2015,15 @@ export class PiEngineAdapter implements EngineAdapter {
     }
   }
 
-  /** 測試用：引擎目前的任務與提交狀態。 */
-  async debugInspection(): Promise<unknown> {
-    return this.#session.harness.inspect(BACKGROUND_CONTEXT);
-  }
-
   /** 測試用：讀目前連線的 PRAGMA 值（例如 `secure_delete`）。 */
   async debugPragma(name: string): Promise<number> {
     const row = await this.#session.database.get<Record<string, number>>(`PRAGMA ${name}`);
     return Number(Object.values(row ?? {})[0] ?? 0);
   }
 
-  /** 測試用：列出引擎的原始 entry 與 agent 工具，診斷工具為何沒有被呼叫。 */
-  async debugEntries(conversationId: string): Promise<unknown> {
-    const conversation = await this.#session.harness.conversation(
-      engineConversationId(conversationId),
-      BACKGROUND_CONTEXT,
-    );
-    const page = await conversation?.entries(
-      { order: "ascending" },
-      50,
-      undefined,
-      BACKGROUND_CONTEXT,
-    );
-    const agent = await conversation?.agent(BACKGROUND_CONTEXT);
-    return {
-      tools: agent?.tools.map((tool) => tool.name),
-      entries: page?.items.map((entry) => ({
-        kind: entry.kind,
-        data: entry.data,
-        model: entry.model,
-      })),
-    };
-  }
-
   /** 讀取目前的對話目錄；測試與主機的診斷用。 */
   async describeCatalog(): Promise<CatalogSnapshot> {
     return this.#catalog();
-  }
-
-  /** 目前釘選與可用的工具組版本。 */
-  bundleState(): readonly ToolBundleState[] {
-    return this.#bundles.list();
-  }
-
-  /** 等待所有進行中的子代理；測試用。 */
-  async settleSubagents(): Promise<void> {
-    this.#session.harness.resume();
-    await this.#session.harness.waitForIdle(BACKGROUND_CONTEXT);
   }
 }
 

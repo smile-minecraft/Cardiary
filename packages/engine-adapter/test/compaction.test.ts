@@ -84,15 +84,6 @@ describe("壓縮時換版", () => {
         delivery: "queue",
         sender: { kind: "human", clientId: "test" },
       });
-      await new Promise((r) => setTimeout(r, 500));
-      console.log(
-        "DEBUG entries",
-        JSON.stringify(
-          await (
-            fixture.adapter as unknown as { debugEntries(id: string): Promise<unknown> }
-          ).debugEntries(conversation.id),
-        ).slice(0, 1500),
-      );
       await waitUntil(async () => {
         const history = await fixture.adapter.readConversationHistory({
           conversationId: conversation.id,
