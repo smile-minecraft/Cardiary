@@ -898,7 +898,7 @@
       "title": "StreamingMessage",
       "type": "object",
       "additionalProperties": false,
-      "required": ["messageId", "text", "startedAt"],
+      "required": ["messageId", "turnId", "text", "startedAt"],
       "properties": {
         "messageId": {
           "type": "string",

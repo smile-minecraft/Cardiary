@@ -4566,14 +4566,14 @@ public struct StreamUiEventPayload: Codable, Equatable, Sendable {
 
 public struct StreamingMessage: Codable, Equatable, Sendable {
     public let messageId: String
-    public let turnId: String?
+    public let turnId: String
     public let text: String
     public let startedAt: String
     public let truncated: Bool?
 
     public init(
         messageId: String,
-        turnId: String? = nil,
+        turnId: String,
         text: String,
         startedAt: String,
         truncated: Bool? = nil
@@ -4596,7 +4596,7 @@ public struct StreamingMessage: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let messageId = try container.decode(String.self, forKey: .messageId)
-        let turnId = try container.decodeIfPresent(String.self, forKey: .turnId)
+        let turnId = try container.decode(String.self, forKey: .turnId)
         let text = try container.decode(String.self, forKey: .text)
         let startedAt = try container.decode(String.self, forKey: .startedAt)
         let truncated = try container.decodeIfPresent(Bool.self, forKey: .truncated)
@@ -4612,7 +4612,7 @@ public struct StreamingMessage: Codable, Equatable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(messageId, forKey: .messageId)
-        try container.encodeIfPresent(turnId, forKey: .turnId)
+        try container.encode(turnId, forKey: .turnId)
         try container.encode(text, forKey: .text)
         try container.encode(startedAt, forKey: .startedAt)
         try container.encodeIfPresent(truncated, forKey: .truncated)

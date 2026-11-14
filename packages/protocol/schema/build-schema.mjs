@@ -522,7 +522,7 @@ add(
   "StreamingMessage",
   objectOf(
     "StreamingMessage",
-    ["messageId", "text", "startedAt"],
+    ["messageId", "turnId", "text", "startedAt"],
     {
       messageId: str("正在生長的助理訊息識別碼。"),
       turnId: str("所屬回合。"),

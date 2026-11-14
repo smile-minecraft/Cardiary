@@ -1021,7 +1021,7 @@ export interface StreamingMessage {
   /**
    * 所屬回合。
    */
-  turnId?: string;
+  turnId: string;
   /**
    * 到快照邊界為止已生成的文字。客戶端用它取代本地顯示中的文字，不是附加。
    */

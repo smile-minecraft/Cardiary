@@ -144,10 +144,14 @@ describe("協定 schema 與範例", () => {
     delete requestWithoutEpoch.payload.epoch;
     expect(validateClient(requestWithoutEpoch)).toBe(true);
 
-    // 快照的 streaming 是選填；進行中訊息的 text 與 messageId 是必填。
+    // 快照的 streaming 是選填；進行中訊息的 messageId、turnId、text 與 startedAt 是必填。
     const snapshotWithoutStreaming = structuredClone(examples.sessionSubscribeResponse);
     delete snapshotWithoutStreaming.payload.snapshot.streaming;
     expect(validateServer(snapshotWithoutStreaming)).toBe(true);
+
+    const streamingMissingTurnId = structuredClone(examples.sessionSubscribeResponse);
+    delete streamingMissingTurnId.payload.snapshot.streaming.turnId;
+    expect(validateServer(streamingMissingTurnId)).toBe(false);
 
     const streamingMissingText = structuredClone(examples.sessionSubscribeResponse);
     delete streamingMissingText.payload.snapshot.streaming.text;
