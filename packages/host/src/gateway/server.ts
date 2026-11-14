@@ -890,12 +890,8 @@ export class Gateway {
             triggerMessageId,
             startedAt,
           },
-          async () => {
-            await this.#options.storage.turnIndex.record(
-              state.sessionId,
-              triggerMessageId,
-              event.turnId,
-            );
+          () => {
+            this.#options.storage.turnIndex.record(state.sessionId, triggerMessageId, event.turnId);
           },
         );
         await this.#appendTurnState(state, stream, event.turnId, "running", startedAt);

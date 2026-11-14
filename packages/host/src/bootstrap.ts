@@ -147,9 +147,13 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
       ...(trace === undefined ? {} : { trace }),
     });
   const snapshot = await runtime.open();
-  const events = options.storage?.events ?? persistent?.events ?? new MemoryEventLog(trace === undefined ? {} : { trace });
+  const events =
+    options.storage?.events ??
+    persistent?.events ??
+    new MemoryEventLog(trace === undefined ? {} : { trace });
   const dedupe = options.storage?.dedupe ?? persistent?.dedupe ?? new MemoryRequestDedupe();
-  const approvals = options.storage?.approvals ?? persistent?.approvals ?? new MemoryApprovalLedger();
+  const approvals =
+    options.storage?.approvals ?? persistent?.approvals ?? new MemoryApprovalLedger();
   const turnIndex = options.storage?.turnIndex ?? persistent?.turnIndex ?? new MemoryTurnIndex();
   const deletions =
     options.storage?.deletions ??

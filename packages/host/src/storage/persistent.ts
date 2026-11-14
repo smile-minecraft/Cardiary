@@ -133,10 +133,7 @@ class PersistentEventLog implements EventLogStore {
     }
   }
 
-  async append(
-    entry: EventLogEntry,
-    projection?: () => void | Promise<void>,
-  ): Promise<StoredEvent> {
+  async append(entry: EventLogEntry, projection?: () => void): Promise<StoredEvent> {
     this.#assertOpen();
     const record = this.#storage.events.appendWithState(
       {
@@ -147,12 +144,7 @@ class PersistentEventLog implements EventLogStore {
         createdAt: entry.at,
       },
       () => {
-        if (projection === undefined) return;
-        const result = projection();
-        if (result instanceof Promise) {
-          // 交易是同步的；非同步投影會讓事件在狀態之外提交。
-          throw new PersistentStorageFailure("事件投影必須同步執行");
-        }
+        projection?.();
       },
     );
     return {
@@ -330,8 +322,7 @@ function dedupeRecordOf(record: {
     kind: record.kind,
     state: record.state,
     resourceId: record.resourceId,
-    response:
-      record.responseJson === null ? null : (JSON.parse(record.responseJson) as JSONValue),
+    response: record.responseJson === null ? null : (JSON.parse(record.responseJson) as JSONValue),
     claimedAt: record.claimedAt,
     completedAt: record.completedAt,
   };
@@ -347,7 +338,7 @@ class PersistentTurnIndex implements TurnIndexStore {
     this.#now = options.now ?? (() => new Date());
   }
 
-  async record(conversationId: string, userMessageId: string, turnId: string): Promise<void> {
+  record(conversationId: string, userMessageId: string, turnId: string): void {
     this.#storage.turns.record({
       turnId,
       conversationId,
@@ -391,7 +382,8 @@ export class PersistentApprovalLedger implements ApprovalLedger {
   constructor(storage: Storage, options: PersistentStorageOptions = { path: "" }) {
     this.#storage = storage;
     this.#isInRoot =
-      options.isInRoot ?? ((conversationId, rootConversationId) => conversationId === rootConversationId);
+      options.isInRoot ??
+      ((conversationId, rootConversationId) => conversationId === rootConversationId);
   }
 
   async record(request: ApprovalRequest): Promise<ApprovalRecordOutcome> {
@@ -448,7 +440,9 @@ export class PersistentApprovalLedger implements ApprovalLedger {
     const records = this.#storage.approvals.listPending(
       filter?.conversationId === undefined ? {} : { sessionId: filter.conversationId },
     );
-    const pending = records.map(requestOf).filter((request): request is ApprovalRequest => request !== null);
+    const pending = records
+      .map(requestOf)
+      .filter((request): request is ApprovalRequest => request !== null);
     if (filter?.rootConversationId === undefined) return pending;
     const root = filter.rootConversationId;
     return pending.filter((request) => {

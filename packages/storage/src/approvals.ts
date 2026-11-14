@@ -254,7 +254,8 @@ export class ApprovalLedger {
   }
 
   /** 把逾時的 `pending` 標成 `expired`；回傳變更筆數。 */
-  expirePending(now: string = this.#now().toISOString()): number {    return this.#db.run(
+  expirePending(now: string = this.#now().toISOString()): number {
+    return this.#db.run(
       "UPDATE approvals SET status = 'expired', decided_at = ? WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?",
       now,
       now,

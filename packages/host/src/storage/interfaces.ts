@@ -30,7 +30,13 @@ export interface EventLogEntry {
  * `projection` 在同一個交易裡執行（狀態投影）；提交成功後才把事件送給客戶端。
  */
 export interface EventLogStore {
-  append(entry: EventLogEntry, projection?: () => void | Promise<void>): Promise<StoredEvent>;
+  /**
+   * 附加一則耐久事件；`projection` 在同一個交易內同步執行。
+   *
+   * 投影必須是同步的：交易提交前不能讓事件先被看到，也不能 await 一個
+   * 不屬於這個交易的寫入。需要非同步的後續動作時，等 `append` 回傳再做。
+   */
+  append(entry: EventLogEntry, projection?: () => void): Promise<StoredEvent>;
   lastSeq(stream: string, epoch: string): Promise<number>;
   oldestSeq(stream: string, epoch: string): Promise<number | null>;
   readRange(stream: string, epoch: string, from: number, to: number): Promise<StoredEvent[]>;
@@ -89,9 +95,14 @@ export interface RequestDedupeStore {
   deleteByKey(key: string): Promise<void>;
 }
 
-/** 回合對照：`userMessageId → turnId`，回合開始時寫入。 */
+/**
+ * 回合對照：`userMessageId → turnId`，回合開始時寫入。
+ *
+ * `record` 在寫 `stream.turn_started` 的同一個交易內呼叫，因此必須同步；
+ * `get` 只給診斷與測試用，可以是非同步的。
+ */
 export interface TurnIndexStore {
-  record(conversationId: string, userMessageId: string, turnId: string): Promise<void>;
+  record(conversationId: string, userMessageId: string, turnId: string): void;
   get(conversationId: string, userMessageId: string): Promise<string | null>;
 }
 

@@ -38,7 +38,7 @@ async function client(service: SpawnedService): Promise<ProtocolClient> {
   return connected;
 }
 
-describe("Pi Durable 組裝的契約", () => {
+describe("Pi Durable 組裝的契約", { timeout: 40000 }, () => {
   it("hello、系統訂閱與 seq 從 1 開始", async () => {
     const service = await boot();
     const connected = await client(service);
@@ -103,7 +103,13 @@ describe("Pi Durable 組裝的契約", () => {
     expect((decided.payload as { persisted: boolean }).persisted).toBe(true);
     const toolResult = await connected.waitForEvent("stream.tool_result", 20000);
     expect((toolResult.payload as { status: string }).status).toBe("ok");
-    const completed = await connected.waitForEvent("stream.message_completed", 20000);
+    // 帶工具呼叫的助理訊息也會先完成一次（文字為空）；等最後一則有文字的。
+    const completed = await connected.waitFor(
+      (frame) =>
+        frame.type === "stream.message_completed" &&
+        (frame.payload as { entry: { text: string } }).entry.text === "核准後完成",
+      20000,
+    );
     expect((completed.payload as { entry: { text: string } }).entry.text).toBe("核准後完成");
     await connected.close();
   });

@@ -134,7 +134,9 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
   const brokerToken = options.brokerToken ?? "B".repeat(43);
   let scriptPath: string | null = null;
   if (options.scripts) {
-    scriptPath = join(folder.path, "script.json");
+    // 腳本不能放進資料夾：初始化要求資料夾只有空的子目錄。
+    const scriptDir = await mkdtemp(join(tmpdir(), "cardiary-script-"));
+    scriptPath = join(scriptDir, "script.json");
     await writeFile(scriptPath, JSON.stringify(options.scripts));
   }
   if (!options.control) {

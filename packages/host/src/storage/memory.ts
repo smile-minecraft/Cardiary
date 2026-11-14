@@ -301,7 +301,7 @@ export class MemoryRequestDedupe implements RequestDedupeStore {
 export class MemoryTurnIndex implements TurnIndexStore {
   readonly #entries = new Map<string, string>();
 
-  async record(conversationId: string, userMessageId: string, turnId: string): Promise<void> {
+  record(conversationId: string, userMessageId: string, turnId: string): void {
     this.#entries.set(`${conversationId}:${userMessageId}`, turnId);
   }
 

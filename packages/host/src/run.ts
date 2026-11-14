@@ -3,7 +3,11 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type { JSONObject } from "@cardiary/protocol";
 import { createScriptedModels, scriptedModelSettings } from "@cardiary/engine-adapter";
-import type { EngineModelSource, ModelSettings, ProviderCredentialSource } from "@cardiary/engine-adapter";
+import type {
+  EngineModelSource,
+  ModelSettings,
+  ProviderCredentialSource,
+} from "@cardiary/engine-adapter";
 import type { CredentialRef, ProviderCredential } from "@cardiary/engine-adapter";
 
 import { startHost, UnavailableCredentials, type RunningHost } from "./bootstrap.js";
@@ -376,6 +380,7 @@ async function runIndependent(
       logger,
       demo: args.demo,
       scripts,
+      initializeFolder: args.initializeFolder,
       ...assembly,
       ...(args.port === undefined ? {} : { port: args.port }),
       ...(args.faultCloseEventLogMs === undefined
@@ -457,6 +462,7 @@ async function runControl(
       logger,
       demo: args.demo,
       scripts,
+      initializeFolder: args.initializeFolder,
       ...assembly,
       ...(args.port === undefined ? {} : { port: args.port }),
       ...(args.faultCloseEventLogMs === undefined
