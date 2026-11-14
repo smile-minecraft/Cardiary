@@ -134,6 +134,9 @@ function mapDiagnosticCode(code: ToolDiagnosticCode): string {
       return "approval_expired";
     case "tool-unavailable":
       return "tool_unavailable";
+    default:
+      // 協定要求每個診斷都有 code；不認識的值不能讓它變成 undefined。
+      return "interrupted";
   }
 }
 

@@ -1547,7 +1547,9 @@ export class PiEngineAdapter implements EngineAdapter {
         }
       | undefined;
     const diagnostics = (data?.diagnostics ?? []).map((diagnostic) => ({
-      code: (diagnostic.code ?? "interrupted") as ToolDiagnostic["code"],
+      // 引擎自己的診斷碼（例如 `aborted`）不在協定的列舉裡；對外一律回
+      // `interrupted`，客戶端才不會收到沒有 `code` 的診斷。
+      code: normalizeToolDiagnosticCode(diagnostic.code),
       ...(diagnostic.message === undefined ? {} : { message: diagnostic.message }),
     }));
     const callId = data?.callId ?? `call_${entry.id}`;
@@ -2198,6 +2200,22 @@ function textOfModel(content: unknown): string {
       return "";
     })
     .join("");
+}
+
+/** 把引擎的診斷碼收斂到協定的列舉；不認識的一律當成中斷。 */
+function normalizeToolDiagnosticCode(code: string | undefined): ToolDiagnostic["code"] {
+  const known: readonly ToolDiagnostic["code"][] = [
+    "interrupted",
+    "paused",
+    "cancelled",
+    "timed-out",
+    "output-truncated",
+    "permission-denied",
+    "approval-denied",
+    "approval-expired",
+    "tool-unavailable",
+  ];
+  return known.find((candidate) => candidate === code) ?? "interrupted";
 }
 
 function toolError(
