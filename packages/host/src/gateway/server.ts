@@ -1,5 +1,6 @@
+import { once } from "node:events";
 import { createServer } from "node:http";
-import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import type { IncomingHttpHeaders, IncomingMessage, Server, ServerResponse } from "node:http";
 import type {
   ApprovalRequest as EngineApprovalRequest,
   Clock,
@@ -10,9 +11,17 @@ import type {
   EngineLogger,
 } from "@cardiary/engine-adapter";
 import type {
+  ModuleHttpRequest,
+  ModuleHttpResponse,
+  ModuleLifecycleErrorCode,
+  ProtocolEventIntent,
+  ProtocolRequestContext,
+} from "@cardiary/module-api";
+import type {
   ApprovalRequestedEvent,
   ApprovalRequest as ProtocolApprovalRequest,
   AssistantTranscriptEntry,
+  ErrorCode,
   JSONObject,
   JSONValue,
   ModuleEvent,
@@ -39,6 +48,9 @@ import {
   protocolErrorFromEngine,
   type ProtocolErrorInfo,
 } from "../errors.js";
+import type { ModuleHostBridge } from "../modules/contract.js";
+import { ProtocolHandlerError } from "../modules/contract.js";
+import { lifecycleErrorCode } from "../modules/registry.js";
 import type { DedupeRecord, StorageBundle } from "../storage/interfaces.js";
 import { constantTimeEqual, isValidToken } from "../tokens.js";
 import {
@@ -49,6 +61,7 @@ import {
   SERVER_VERSION,
 } from "../version.js";
 import { ClientConnection } from "./connection.js";
+import { mapEventIntent, validateEventPayload } from "./events.js";
 import { DEFAULT_LIMITS, type GatewayLimits } from "./limits.js";
 import { systemStatus, type HostStatusInput } from "./status.js";
 import { StreamLog, type StoredEvent } from "./streams.js";
@@ -73,6 +86,8 @@ export interface GatewayOptions {
   /** 固定前綴；由主機組好，轉接層不拆解。 */
   readonly systemContext?: () => string;
   readonly moduleHandlers?: ReadonlyMap<string, ModuleHandler>;
+  /** 第一方模組主機；省略時 `system.modules.get` 回空清單。 */
+  readonly modules?: ModuleHostBridge;
   /** 緊急全部暫停時取消工具子行程；由服務接上共用 spawn wrapper。 */
   readonly cancelToolProcesses?: (deadlineMs: number) => Promise<number>;
   /** 測試用故障注入：讓第一個 request_dedupe complete 不寫入，模擬中斷窗口。 */
@@ -157,6 +172,7 @@ export class Gateway {
   readonly #sessions = new Map<string, SessionState>();
   readonly #sessionPending = new Map<string, Promise<SessionState>>();
   readonly #moduleHandlers = new Map<string, ModuleHandler>();
+  #modules: ModuleHostBridge | null;
   readonly #requestCache = new Map<string, Map<string, ServerFrame | Unknown>>();
   readonly #messageCounts = new Map<string, number>();
   readonly #pendingDecided = new Map<string, { promise: Promise<void>; resolve: () => void }>();
@@ -180,6 +196,7 @@ export class Gateway {
     this.#logger = options.logger;
     this.#clock = options.clock ?? { now: () => new Date() };
     this.#faultSkipComplete = options.faultSkipDedupeComplete === true;
+    this.#modules = options.modules ?? null;
     for (const [namespace, handler] of options.moduleHandlers ?? []) {
       this.#moduleHandlers.set(namespace, handler);
     }
@@ -195,6 +212,11 @@ export class Gateway {
 
   registerModuleNamespace(namespace: string, handler: ModuleHandler): void {
     this.#moduleHandlers.set(namespace, handler);
+  }
+
+  /** 接上（或換掉）第一方模組主機；組合根在載入模組之後呼叫。 */
+  setModuleHost(modules: ModuleHostBridge | null): void {
+    this.#modules = modules;
   }
 
   /** 由服務接上：儲存失效時停止寫入、送 notify.fatal、關閉客戶端。 */
@@ -213,7 +235,15 @@ export class Gateway {
   async listen(port = 0): Promise<number> {
     if (this.#http) return this.#port;
     const http = createServer((request, response) => {
-      this.#handleHttp(request, response);
+      void this.#handleHttp(request, response).catch((error: unknown) => {
+        this.#logger.error("HTTP 請求處理失敗", { message: errorMessage(error) });
+        if (!response.headersSent) {
+          response.writeHead(500, { "content-type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ v: PROTOCOL_VERSION, kind: "error", code: "internal" }));
+        } else {
+          response.destroy();
+        }
+      });
     });
     const wss = new WebSocketServer({ noServer: true, maxPayload: this.limits.maxFrameBytes });
     http.on("upgrade", (request, socket, head) => {
@@ -345,6 +375,10 @@ export class Gateway {
       data: input.data,
       ...(input.schemaVersion === undefined ? {} : { schemaVersion: input.schemaVersion }),
     };
+    const issue = validateEventPayload(input.type, payload);
+    if (issue !== null) {
+      throw new Error(`模組事件不符 schema：${issue}`);
+    }
     const stored = await this.streamLog.append({
       stream: input.stream,
       kind: input.type,
@@ -353,6 +387,50 @@ export class Gateway {
     });
     this.#broadcast(stored);
     return stored.seq;
+  }
+
+  /**
+   * 模組事件意圖：轉成正式事件、用 schema 驗證、配號、落地、廣播。
+   *
+   * 模組不能指定串流或 `seq`；壞掉的事件只記診斷，不進 `event_log`。
+   */
+  emitIntent(intent: ProtocolEventIntent): void {
+    void this.#emitIntent(intent);
+  }
+
+  async #emitIntent(intent: ProtocolEventIntent): Promise<void> {
+    const mapped = mapEventIntent(intent);
+    if ("error" in mapped) {
+      this.#logger.warn("丟棄模組事件意圖", { reason: mapped.error });
+      return;
+    }
+    for (const event of mapped.events) {
+      const issue = validateEventPayload(event.type, event.payload);
+      if (issue !== null) {
+        this.#logger.warn("丟棄不符 schema 的模組事件", { type: event.type, reason: issue });
+        return;
+      }
+    }
+    try {
+      for (const event of mapped.events) {
+        const stored = await this.streamLog.append({
+          stream: event.stream,
+          kind: event.type,
+          payload: event.payload,
+          at: this.#clock.now().toISOString(),
+        });
+        this.#broadcast(stored);
+      }
+    } catch (error) {
+      if (isStorageFailure(error)) {
+        this.#reportStorageFailure(error);
+        return;
+      }
+      this.#logger.error("模組事件落地失敗", {
+        type: intent.kind,
+        message: errorMessage(error),
+      });
+    }
   }
 
   async close(): Promise<void> {
@@ -653,6 +731,12 @@ export class Gateway {
     connection: ClientConnection,
     request: ParsedRequest,
   ): Promise<ServerFrame | Unknown> {
+    // 分派順序（modules.md 第 3.2 節）：精確型別 → 核心 switch → 前綴 →
+    // module.* → unsupported。精確型別在最前面，模組才能用 `session.archive`
+    // 擴充核心命名空間；核心型別已在註冊時被保留清單擋下。
+    if (this.#modules?.hasExactHandler(request.type) === true) {
+      return this.#moduleProtocolRequest(connection, request);
+    }
     switch (request.type) {
       case "system.subscribe":
         return this.#subscribeSystem(connection, request);
@@ -683,7 +767,14 @@ export class Gateway {
         return this.#decideApproval(connection, request);
       case "approval.pause_all":
         return this.#pauseAll(request);
+      case "system.modules.get":
+        return this.#listModules(request);
+      case "system.modules.set_enabled":
+        return this.#setModuleEnabled(request);
       default:
+        if (this.#modules?.hasPrefixHandler(request.type) === true) {
+          return this.#moduleProtocolRequest(connection, request);
+        }
         if (request.type.startsWith("module.")) {
           return this.#moduleRequest(connection, request);
         }
@@ -693,6 +784,88 @@ export class Gateway {
           }),
         );
     }
+  }
+
+  // ---- 第一方模組 -------------------------------------------------------
+
+  async #moduleProtocolRequest(
+    connection: ClientConnection,
+    request: ParsedRequest,
+  ): Promise<Unknown> {
+    const modules = this.#modules;
+    if (modules === null) {
+      throw new RequestFailure(protocolError("unsupported", `主機不支援 ${request.type}。`));
+    }
+    const sessionId =
+      typeof request.payload.sessionId === "string" ? request.payload.sessionId : undefined;
+    const context: ProtocolRequestContext = {
+      type: request.type,
+      payload: request.payload as EngineJsonValue,
+      ...(sessionId === undefined ? {} : { sessionId }),
+      clientId: connection.clientInstanceId || connection.id,
+    };
+    try {
+      const result = await modules.dispatchProtocol(context);
+      return response(request.id, request.type, result);
+    } catch (error) {
+      if (error instanceof ProtocolHandlerError) {
+        throw new RequestFailure(
+          protocolError(error.code, error.message, {
+            ...(error.details === undefined ? {} : { details: error.details }),
+          }),
+        );
+      }
+      throw error;
+    }
+  }
+
+  #listModules(request: ParsedRequest): Unknown {
+    const modules = this.#modules;
+    return response(request.id, "system.modules.get", {
+      modules: modules === null ? [] : [...modules.listModules()],
+    });
+  }
+
+  async #setModuleEnabled(request: ParsedRequest): Promise<Unknown> {
+    const modules = this.#modules;
+    if (modules === null) {
+      throw new RequestFailure(
+        protocolError("unsupported", "主機沒有載入模組。", { details: { reason: "modules" } }),
+      );
+    }
+    const moduleId = requiredString(request.payload, "moduleId");
+    const enabled = request.payload.enabled;
+    if (typeof enabled !== "boolean") {
+      throw new RequestFailure(
+        protocolError("invalid_message", "enabled 必須是布林。", {
+          details: { field: "enabled" },
+        }),
+      );
+    }
+    requiredString(request.payload, "clientRequestId");
+    const before = modules.listModules().find((module) => module.moduleId === moduleId) ?? null;
+    let info;
+    try {
+      info = await modules.setModuleEnabled(moduleId, enabled);
+    } catch (error) {
+      if (isModuleLifecycleError(error)) {
+        throw new RequestFailure(
+          protocolError(lifecycleErrorCode(error.code), error.message, {
+            details: { moduleId, reason: error.code },
+          }),
+        );
+      }
+      throw error;
+    }
+    // 狀態真的變了才送事件；重複設定同一個狀態是安全的，但不是 change。
+    if (before === null || before.state !== info.state || before.enabled !== info.enabled) {
+      // 回應之前先落地事件，客戶端拿到回應時 system 串流上已經有它。
+      await this.#emitIntent({
+        kind: "module-changed",
+        payload: { module: info } as unknown as EngineJsonValue,
+      });
+    }
+    return response(request.id, "system.modules.set_enabled", { module: info });
   }
 
   // ---- 訂閱 -------------------------------------------------------------
@@ -1514,9 +1687,9 @@ export class Gateway {
     const sessionId = requiredString(request.payload, "sessionId");
     const text = requiredString(request.payload, "text");
     const deliveryRaw = requiredString(request.payload, "delivery");
-    if (deliveryRaw !== "queue" && deliveryRaw !== "interrupt") {
+    if (deliveryRaw !== "queue" && deliveryRaw !== "steer" && deliveryRaw !== "interrupt") {
       throw new RequestFailure(
-        protocolError("invalid_message", "delivery 只能是 queue 或 interrupt。", {
+        protocolError("invalid_message", "delivery 只能是 queue、steer 或 interrupt。", {
           details: { field: "delivery" },
         }),
       );
@@ -1558,13 +1731,16 @@ export class Gateway {
     const sendRequest = {
       conversationId: sessionId,
       content: [{ type: "text" as const, text }],
-      delivery: "queue" as const,
+      // steer 交給引擎插話；interrupt 已經先取消目前回合，改用 queue 送出。
+      delivery: deliveryRaw === "steer" ? ("steer" as const) : ("queue" as const),
       sender: { kind: "human" as const, clientId: connection.clientInstanceId || connection.id },
       ...(clientMessageId === undefined ? {} : { clientMessageId }),
     };
     const receipt = this.#options.engine.sendMessageWithClientId
       ? await this.#options.engine.sendMessageWithClientId(sendRequest)
       : await this.#options.engine.sendMessage(sendRequest);
+    // 引擎的 steered 表示訊息已進目前回合、下一個模型請求前送達；協定沒有
+    // steered 這個值，記成 started，才不會讓客戶端誤以為訊息排在回合之後。
     const disposition =
       deliveryRaw === "interrupt" && wasRunning
         ? "interrupted_then_started"
@@ -1805,7 +1981,7 @@ export class Gateway {
 
   // ---- HTTP -------------------------------------------------------------
 
-  #handleHttp(request: IncomingMessage, response: ServerResponse): void {
+  async #handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     const sendJson = (status: number, body: unknown): void => {
       const data = JSON.stringify(body);
@@ -1827,17 +2003,8 @@ export class Gateway {
       });
       return;
     }
-    if (!url.pathname.startsWith("/v1/blobs/")) {
-      sendJson(404, {
-        v: PROTOCOL_VERSION,
-        kind: "error",
-        code: "not_found",
-        message: "沒有這個端點。",
-        retryable: false,
-      });
-      return;
-    }
-    if (request.method !== "GET" && request.method !== "HEAD") {
+    const method = request.method ?? "GET";
+    if (method !== "GET" && method !== "HEAD" && method !== "POST") {
       sendJson(400, {
         v: PROTOCOL_VERSION,
         kind: "error",
@@ -1847,17 +2014,94 @@ export class Gateway {
       });
       return;
     }
-    sendJson(404, {
-      v: PROTOCOL_VERSION,
-      kind: "error",
-      code: "not_found",
-      message: "M0 還沒有任何大型內容端點。",
-      retryable: false,
-    });
+    const routeRequest: ModuleHttpRequest = {
+      method,
+      url,
+      headers: headerRecord(request.headers),
+      body: request as unknown as AsyncIterable<Uint8Array>,
+    };
+    let result: ModuleHttpResponse | null;
+    try {
+      result = this.#modules === null ? null : await this.#modules.dispatchHttp(routeRequest);
+    } catch (error) {
+      this.#logger.error("HTTP 路由處理失敗", {
+        path: url.pathname,
+        message: errorMessage(error),
+      });
+      if (!response.headersSent) {
+        sendJson(500, errorBody("internal", "HTTP 路由處理失敗。"));
+      } else {
+        response.destroy();
+      }
+      return;
+    }
+    if (result === null) {
+      sendJson(404, errorBody("not_found", "沒有這個端點。"));
+      return;
+    }
+    try {
+      await writeModuleResponse(response, result, method === "HEAD");
+    } catch (error) {
+      this.#logger.error("HTTP 回應寫入失敗", {
+        path: url.pathname,
+        message: errorMessage(error),
+      });
+      if (!response.headersSent) {
+        sendJson(500, errorBody("internal", "HTTP 回應寫入失敗。"));
+      } else {
+        response.destroy();
+      }
+    }
   }
 }
 
 // ---- 輔助函式 -----------------------------------------------------------
+
+/** 回應模組的 HTTP 結果；body 可以是位元組或串流，不整份進記憶體。 */
+async function writeModuleResponse(
+  response: ServerResponse,
+  result: ModuleHttpResponse,
+  omitBody = false,
+): Promise<void> {
+  response.writeHead(result.status, result.headers ?? {});
+  if (result.body === undefined || omitBody) {
+    response.end();
+    return;
+  }
+  if (result.body instanceof Uint8Array) {
+    response.end(Buffer.from(result.body));
+    return;
+  }
+  for await (const chunk of result.body) {
+    if (!response.write(chunk)) {
+      await once(response, "drain");
+    }
+  }
+  response.end();
+}
+
+function errorBody(code: ErrorCode, message: string): Unknown {
+  return { v: PROTOCOL_VERSION, kind: "error", code, message, retryable: false };
+}
+
+function headerRecord(headers: IncomingHttpHeaders): Record<string, string | undefined> {
+  const record: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    record[key] = Array.isArray(value) ? value.join(", ") : value;
+  }
+  return record;
+}
+
+function isModuleLifecycleError(
+  error: unknown,
+): error is { code: ModuleLifecycleErrorCode; message: string } {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    typeof (error as { code?: unknown }).code === "string" &&
+    typeof (error as { moduleId?: unknown }).moduleId === "string"
+  );
+}
 
 function isHandled(value: unknown): boolean {
   return (

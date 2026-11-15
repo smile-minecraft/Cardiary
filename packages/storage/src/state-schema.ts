@@ -16,8 +16,13 @@ export const ENGINE_APPLICATION_ID = 0x4344454e;
 /** `cache/index.sqlite` 的 application_id（CDIX）。 */
 export const CACHE_APPLICATION_ID = 0x43444958;
 
-/** 快取資料庫的 schema 版本；快取可重建，版本不符就整檔重來。 */
-export const CACHE_SCHEMA_VERSION = 1;
+/**
+ * 快取資料庫的 schema 版本；快取可重建，版本不符就整檔重來。
+ *
+ * v2：卡片索引（`card_index`、`card_tags`、`card_links`、`card_sources`、
+ * `asset_refs`、`asset_meta`、`fts_cards` 與 `card_index_meta`）。
+ */
+export const CACHE_SCHEMA_VERSION = 2;
 
 export interface Migration {
   readonly version: number;
@@ -257,6 +262,140 @@ export const M0_MIGRATIONS: readonly Migration[] = [
   { version: 1, name: "m0-initial", sql: INITIAL_SCHEMA },
 ];
 
+const M1_SCHEMA = `
+CREATE TABLE conversations (
+  conversation_id         TEXT PRIMARY KEY,
+  title                   TEXT,
+  persona                 TEXT NOT NULL DEFAULT 'default',
+  created_at              TEXT NOT NULL,
+  updated_at              TEXT NOT NULL,
+  last_activity_at        TEXT NOT NULL,
+  archived_at             TEXT,
+  purge_at                TEXT,
+  archived_by             TEXT,
+  archive_summary_card_id TEXT,
+  pinned                  INTEGER NOT NULL DEFAULT 0,
+  CHECK (archived_at IS NULL OR purge_at IS NOT NULL)
+) STRICT;
+
+CREATE INDEX conversations_by_archive ON conversations (archived_at) WHERE archived_at IS NOT NULL;
+CREATE INDEX conversations_by_activity ON conversations (last_activity_at);
+
+CREATE TABLE conversation_cards (
+  conversation_id TEXT NOT NULL,
+  card_id         TEXT NOT NULL,
+  first_loaded_at TEXT NOT NULL,
+  last_loaded_at  TEXT NOT NULL,
+  load_count      INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (conversation_id, card_id)
+) STRICT;
+
+CREATE INDEX conversation_cards_by_card ON conversation_cards (card_id);
+
+ALTER TABLE conversation_deletions ADD COLUMN card_ids TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE conversation_deletions ADD COLUMN asset_ids TEXT NOT NULL DEFAULT '[]';
+
+CREATE TABLE conversation_context (
+  conversation_id        TEXT PRIMARY KEY,
+  version                INTEGER NOT NULL DEFAULT 0,
+  used_tokens            INTEGER NOT NULL DEFAULT 0,
+  budget_tokens          INTEGER NOT NULL DEFAULT 0,
+  context_window         INTEGER NOT NULL DEFAULT 0,
+  compaction_threshold   REAL NOT NULL DEFAULT 0.75,
+  reserve_tokens         INTEGER NOT NULL DEFAULT 8192,
+  compaction_in_progress INTEGER NOT NULL DEFAULT 0,
+  last_compacted_at      TEXT,
+  updated_at             TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE context_entries (
+  entry_id            TEXT PRIMARY KEY,
+  conversation_id     TEXT NOT NULL,
+  layer               TEXT NOT NULL CHECK (layer IN (
+                        'bedrock', 'persona', 'core-memory', 'opening-memory',
+                        'short-term-memory', 'other-cards', 'working-context', 'volatile-state')),
+  card_id             TEXT,
+  title               TEXT NOT NULL,
+  token_estimate      INTEGER NOT NULL,
+  state               TEXT NOT NULL CHECK (state IN ('active', 'pending-removal')),
+  position            INTEGER NOT NULL,
+  added_at            TEXT NOT NULL,
+  removed_requested_at TEXT
+) STRICT;
+
+CREATE INDEX context_entries_by_conversation ON context_entries (conversation_id, position);
+CREATE INDEX context_entries_by_card ON context_entries (card_id) WHERE card_id IS NOT NULL;
+
+CREATE TABLE conversation_usage (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id    TEXT NOT NULL,
+  turn_id            TEXT NOT NULL,
+  input_tokens       INTEGER NOT NULL,
+  output_tokens      INTEGER NOT NULL,
+  cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  request_tokens     INTEGER NOT NULL,
+  recorded_at        TEXT NOT NULL,
+  UNIQUE (conversation_id, turn_id)
+) STRICT;
+
+CREATE INDEX conversation_usage_by_conversation ON conversation_usage (conversation_id, recorded_at);
+
+CREATE TABLE import_jobs (
+  id           TEXT PRIMARY KEY,
+  source_kind  TEXT NOT NULL CHECK (source_kind IN (
+                 'generic', 'hermes', 'alma', 'openclaw', 'codex', 'claude-code', 'claude')),
+  source_path  TEXT NOT NULL,
+  status       TEXT NOT NULL CHECK (status IN (
+                 'preview', 'running', 'completed', 'failed', 'cancelled')),
+  range_start  TEXT,
+  range_end    TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  report_json  TEXT
+) STRICT;
+
+CREATE TABLE import_items (
+  job_id       TEXT NOT NULL REFERENCES import_jobs (id) ON DELETE CASCADE,
+  item_key     TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  category     TEXT NOT NULL CHECK (category IN (
+                 'persona', 'user', 'memory', 'rule', 'skill', 'conversation')),
+  card_id      TEXT,
+  status       TEXT NOT NULL CHECK (status IN ('pending', 'written', 'skipped', 'failed')),
+  reason       TEXT,
+  PRIMARY KEY (job_id, item_key)
+) STRICT;
+
+CREATE INDEX import_items_by_hash ON import_items (content_hash);
+CREATE INDEX import_items_by_status ON import_items (status, job_id);
+`;
+
+/** M1 的新表名稱（不含 conversation_deletions 的新欄位）。 */
+export const M1_TABLES = [
+  "conversations",
+  "conversation_cards",
+  "conversation_context",
+  "context_entries",
+  "conversation_usage",
+  "import_jobs",
+  "import_items",
+] as const;
+
+/** `conversation_deletions` 在 v2 增加的欄位。 */
+export const M1_CONVERSATION_DELETION_COLUMNS = ["card_ids", "asset_ids"] as const;
+
+/**
+ * 程式的遷移清單。
+ *
+ * M1 的新表一次建好，之後的工作只寫資料列：`state-schema.ts` 是所有工作
+ * 共用的檔案，只讓一個工作改一次，避免平行衝突。
+ */
+export const M1_MIGRATIONS: readonly Migration[] = [
+  ...M0_MIGRATIONS,
+  { version: 2, name: "m1-cards-context-lifecycle", sql: M1_SCHEMA },
+];
+
 const SCHEMA_MIGRATIONS_DDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version     INTEGER PRIMARY KEY,
@@ -301,7 +440,7 @@ interface AppliedMigrationRow {
  * - 每個版本在單一交易內完成 SQL、`user_version` 與 `schema_migrations`。
  */
 export function migrate(db: Database, options: MigrateOptions): MigrationOutcome {
-  const migrations = options.migrations ?? M0_MIGRATIONS;
+  const migrations = options.migrations ?? M1_MIGRATIONS;
   const now = options.now ?? (() => new Date());
   db.exec(SCHEMA_MIGRATIONS_DDL);
 

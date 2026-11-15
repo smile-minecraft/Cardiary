@@ -23,7 +23,7 @@ import type { RunningHost } from "../src/index.js";
 
 function wrapEngine(engine: FakeEngine, order: string[]): HostEngine {
   return new Proxy(engine, {
-    get(target, property, receiver) {
+    get(target, property) {
       if (property === "open") {
         const open = target.open.bind(target);
         return async () => {
@@ -38,7 +38,9 @@ function wrapEngine(engine: FakeEngine, order: string[]): HostEngine {
           return remove(id, deleteOptions);
         };
       }
-      const value = Reflect.get(target, property, receiver) as unknown;
+      // receiver 傳 target：FakeEngine 的 getter 讀私有欄位，傳 Proxy 會過不了
+      // 私有品牌的檢查（組合根會取 engine.tools）。
+      const value = Reflect.get(target, property, target) as unknown;
       return typeof value === "function" ? value.bind(target) : value;
     },
   }) as unknown as HostEngine;

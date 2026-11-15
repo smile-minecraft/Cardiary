@@ -19,6 +19,7 @@ export type StorageErrorCode =
   | "busy"
   | "invalid-log-field"
   | "invalid-state-transition"
+  | "invalid-cursor"
   | "not-found";
 
 /** 儲存層統一的錯誤型別；`code` 是穩定的機器可讀值。 */

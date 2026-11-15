@@ -32,8 +32,13 @@ export interface CardFrontmatter {
     readonly path: string;
     readonly hash: string;
   };
-  /** 不認得的 frontmatter 欄位；依原本順序保存。 */
-  readonly extra: Readonly<Record<string, unknown>>;
+  /**
+   * 不認得的 frontmatter 欄位；依原本順序保存。
+   *
+   * 值是該欄位的原始 YAML 文字（`key:` 之後到下一個頂層鍵之前），
+   * 服務改寫檔案時原樣接回去，不解析也不重排。
+   */
+  readonly extra: Readonly<Record<string, string>>;
 }
 
 /** 一張卡片的完整內容。 */
@@ -147,3 +152,27 @@ export interface AssetStore {
   /** 沒有其他卡片引用時才刪除。 */
   release(blobId: string): Promise<boolean>;
 }
+
+export {
+  AGENT_CREATABLE_KINDS,
+  CARD_KINDS,
+  SUMMARY_MAX_LENGTH,
+  TAGS_MAX_COUNT,
+  TITLE_MAX_LENGTH,
+  computeRevision,
+  dedupeTags,
+  normalizeRfc3339,
+  parseCardText,
+  serializeCardFile,
+  yamlScalar,
+  type BrokenCardFile,
+  type CardFileLineEnding,
+  type CardFileResult,
+  type FrontmatterLayoutItem,
+  type ParseCardOptions,
+  type ParsedCardFile,
+} from "./frontmatter.js";
+export { isUlid, newCardId, sha256Hex, ULID_PATTERN } from "./ids.js";
+export { extractOutgoingLinks, normalizeLinkText, type OutgoingLink } from "./links.js";
+export { applyPatch, applyUnifiedDiff, CardPatchError, type PatchText } from "./patch.js";
+export { stableStringify } from "./stable-json.js";

@@ -16,6 +16,7 @@
     }
   },
   "dependencies": {
+    "@cardiary/domain": "workspace:*",
     "@cardiary/protocol": "workspace:*"
   }
 }

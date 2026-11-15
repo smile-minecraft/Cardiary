@@ -67,6 +67,12 @@ export interface HostServiceOptions {
   ) => Promise<void>;
   /** 儲存失效時送 `notify.fatal`；由控制面接上。 */
   readonly onFatal?: (reason: "storage_io" | "internal", detail: string) => Promise<void>;
+  /**
+   * 關機前停用模組與釋放模組自己的連線。
+   *
+   * 在引擎與儲存關閉之前呼叫；失敗只記日誌，不阻擋關機。
+   */
+  readonly onShutdown?: () => Promise<void>;
 }
 
 /**
@@ -350,6 +356,7 @@ export class HostService {
   async shutdown(reason: string): Promise<ShutdownResult> {
     return this.#withLifecycle("shutting-down", async () => {
       this.#closed = true;
+      await this.#deactivateModules();
       if (this.#folderState === "mismatch") {
         // 不可信任的 handle：不能把 clean_shutdown 寫進另一個資料夾的狀態庫。
         this.#gateway.stopAccepting();
@@ -419,6 +426,7 @@ export class HostService {
   async abort(reason: string): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    await this.#deactivateModules();
     this.#gateway.stopAccepting();
     await this.#options.spawn.cancelAll(1000);
     try {
@@ -462,6 +470,22 @@ export class HostService {
         await this.#options.onMaintenance?.("idle", operationId);
       }
     });
+  }
+
+  /**
+   * 停用模組：卡片監看要在資料庫關閉之前停下來。
+   *
+   * 模組停用失敗不阻擋關機；錯誤留給日誌，行程還是要關乾淨。
+   */
+  async #deactivateModules(): Promise<void> {
+    if (this.#options.onShutdown === undefined) return;
+    try {
+      await this.#options.onShutdown();
+    } catch (error) {
+      this.#options.logger.warn("關機時停用模組失敗", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /** 目前的 `system.status` 投影；控制面與測試用。 */

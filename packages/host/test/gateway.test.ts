@@ -129,6 +129,100 @@ describe("協定閘道", () => {
     await second.close();
   });
 
+  it("session.send_message 接受 steer 並把 delivery 傳給引擎； idle 時 disposition started", async () => {
+    const host = await boot({ scripts: [[{ kind: "text", text: "好的" }]] });
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    const subscribe = client.request("session.subscribe", { sessionId });
+    await client.waitForReply(subscribe);
+    const spy = vi.spyOn(
+      host.host.engine as unknown as {
+        sendMessageWithClientId(request: { delivery: string }): Promise<unknown>;
+      },
+      "sendMessageWithClientId",
+    );
+    const sendId = client.request("session.send_message", {
+      sessionId,
+      text: "插話",
+      delivery: "steer",
+    });
+    const reply = await client.waitForReply(sendId);
+    expect((reply.payload as { disposition: string }).disposition).toBe("started");
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ delivery: "steer" }));
+    await client.waitForEvent("stream.message_completed");
+    await client.close();
+  });
+
+  it("會話生成中 steer 不中止串流、不排隊在回合後；引擎收到 steered", async () => {
+    const host = await boot({
+      scripts: [
+        [{ kind: "text", text: "abcdefghij", chunkSize: 1, delayMs: 10 }],
+        [{ kind: "text", text: "第二輪" }],
+      ],
+    });
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    const subscribe = client.request("session.subscribe", { sessionId });
+    await client.waitForReply(subscribe);
+    const spy = vi.spyOn(
+      host.host.engine as unknown as {
+        sendMessageWithClientId(request: { delivery: string }): Promise<unknown>;
+      },
+      "sendMessageWithClientId",
+    );
+    const first = client.request("session.send_message", {
+      sessionId,
+      text: "開始",
+      delivery: "queue",
+    });
+    await client.waitForReply(first);
+    await client.waitForEvent("stream.text_delta");
+
+    const steer = client.request("session.send_message", {
+      sessionId,
+      text: "換個方向",
+      delivery: "steer",
+    });
+    const steerReply = await client.waitForReply(steer);
+    const payload = steerReply.payload as {
+      disposition: string;
+      queuedBehindTurnId?: string;
+    };
+    expect(payload.disposition).toBe("started");
+    expect(payload.queuedBehindTurnId).toBeUndefined();
+    expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ delivery: "steer" }));
+
+    const completed = await client.waitFor(
+      (frame) =>
+        frame.type === "stream.message_completed" &&
+        (frame.payload as { entry: { text?: string } }).entry.text === "abcdefghij",
+      5000,
+    );
+    expect(completed.type).toBe("stream.message_completed");
+    const interrupted = client.frames.some(
+      (frame) =>
+        frame.type === "stream.turn_state" &&
+        (frame.payload as { state?: string }).state === "interrupted",
+    );
+    expect(interrupted).toBe(false);
+    await client.close();
+  });
+
+  it("delivery 不是 queue、steer、interrupt 時回 invalid_message", async () => {
+    const host = await boot();
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    const sendId = client.request("session.send_message", {
+      sessionId,
+      text: "嗨",
+      delivery: "later",
+    });
+    const reply = await client.waitForReply(sendId);
+    expect(reply.code).toBe("invalid_message");
+    expect((reply.details as { field: string }).field).toBe("delivery");
+    await client.close();
+  });
+
   it("斷線重連：同一個 epoch 補送；舊 epoch 或缺 epoch 一律 resync 快照", async () => {
     const host = await boot({
       scripts: [[{ kind: "text", text: "回覆" }]],
@@ -459,15 +553,21 @@ describe("協定閘道", () => {
     await client.close();
   });
 
-  it("不是 127.0.0.1 的路徑與端點都不提供狀態變更", async () => {
+  it("HTTP 沒有登記的路由回 not_found；PUT 這類方法仍被拒絕", async () => {
     const host = await boot();
     const response = await fetch(`http://127.0.0.1:${host.host.port}/v1/blobs/x`, {
       method: "POST",
       headers: { authorization: `Bearer ${host.token}` },
     });
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(404);
     const body = (await response.json()) as { code: string };
-    expect(body.code).toBe("unsupported");
+    expect(body.code).toBe("not_found");
+    const put = await fetch(`http://127.0.0.1:${host.host.port}/v1/blobs/x`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${host.token}` },
+    });
+    expect(put.status).toBe(400);
+    expect(((await put.json()) as { code: string }).code).toBe("unsupported");
     const unauthorized = await fetch(`http://127.0.0.1:${host.host.port}/v1/blobs/x`);
     expect(unauthorized.status).toBe(401);
     await host.close();

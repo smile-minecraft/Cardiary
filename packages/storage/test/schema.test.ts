@@ -11,6 +11,9 @@ import {
   ENGINE_APPLICATION_ID,
   M0_MIGRATIONS,
   M0_TABLES,
+  M1_CONVERSATION_DELETION_COLUMNS,
+  M1_MIGRATIONS,
+  M1_TABLES,
   RESERVED_M1_TABLES,
   STATE_APPLICATION_ID,
   StorageError,
@@ -46,29 +49,29 @@ function scratch(): string {
 }
 
 describe("資料庫 header 與表結構", () => {
-  it("Cardiary 狀態庫的 header 與 M0 表齊全", () => {
+  it("Cardiary 狀態庫的 header 與 M0、M1 表齊全", () => {
     const tempRoot = temp();
     const storage = openTestStorage(tempRoot);
     cleanups.push(() => storage.close());
     expect(Number(storage.state.pragma("application_id"))).toBe(STATE_APPLICATION_ID);
     expect(Number(storage.state.pragma("page_size"))).toBe(4096);
     expect(Number(storage.state.pragma("auto_vacuum"))).toBe(2);
-    expect(Number(storage.state.pragma("user_version"))).toBe(1);
+    expect(Number(storage.state.pragma("user_version"))).toBe(2);
     expect(String(storage.state.pragma("journal_mode"))).toBe("wal");
     expect(Number(storage.state.pragma("secure_delete"))).toBe(1);
     expect(Number(storage.state.pragma("foreign_keys"))).toBe(1);
     expect(M0_TABLES).toHaveLength(12);
-    for (const table of M0_TABLES) {
+    for (const table of [...M0_TABLES, ...RESERVED_M1_TABLES, ...M1_TABLES]) {
       expect(storage.state.tableExists(table), table).toBe(true);
     }
-    for (const table of RESERVED_M1_TABLES) {
-      expect(storage.state.tableExists(table), table).toBe(true);
-    }
-    const migration = storage.state.get<{ version: number; checksum: string }>(
+    const migrations = storage.state.all<{ version: number; checksum: string }>(
       "SELECT version, checksum FROM schema_migrations ORDER BY version",
     );
-    expect(migration?.version).toBe(1);
-    expect(migration?.checksum).toBe(sha256(M0_MIGRATIONS[0]?.sql ?? ""));
+    expect(migrations).toHaveLength(2);
+    expect(migrations[0]?.version).toBe(1);
+    expect(migrations[0]?.checksum).toBe(sha256(M0_MIGRATIONS[0]?.sql ?? ""));
+    expect(migrations[1]?.version).toBe(2);
+    expect(migrations[1]?.checksum).toBe(sha256(M1_MIGRATIONS[1]?.sql ?? ""));
   });
 
   it("引擎與快取資料庫的 header 正確，三條連線都開 secure_delete", () => {
@@ -109,7 +112,7 @@ describe("資料庫 header 與表結構", () => {
     const second = openTestStorage(tempRoot);
     cleanups.push(() => second.close());
     expect(second.state.countRows("schema_migrations")).toBe(count);
-    expect(Number(second.state.pragma("user_version"))).toBe(1);
+    expect(Number(second.state.pragma("user_version"))).toBe(2);
   });
 
   it("資料庫檔是符號連結時拒絕開啟，不碰外部檔案", () => {
@@ -153,7 +156,7 @@ describe("遷移", () => {
       appVersion: "test",
       backupDirectory: directory,
     });
-    expect(first.migration.appliedVersions).toEqual([1]);
+    expect(first.migration.appliedVersions).toEqual([1, 2]);
     first.db.close();
 
     const second = openStateDatabase({
@@ -188,12 +191,15 @@ describe("遷移", () => {
   it("遷移內容改了但版本號沒動：checksum 不符就報錯", () => {
     const directory = scratch();
     const filePath = path.join(directory, "state.sqlite");
-    const first = openStateDatabase({
-      filePath,
-      appVersion: "test",
-      backupDirectory: directory,
+    const first = Database.open(filePath, {
+      create: { applicationId: STATE_APPLICATION_ID, pageSize: 4096, autoVacuum: "incremental" },
+      expectedApplicationId: STATE_APPLICATION_ID,
     });
-    first.db.close();
+    try {
+      migrate(first, { migrations: M0_MIGRATIONS, appVersion: "test" });
+    } finally {
+      first.close();
+    }
     const altered = [
       {
         ...(M0_MIGRATIONS[0] as { version: number; name: string; sql: string }),
@@ -212,42 +218,110 @@ describe("遷移", () => {
     }
   });
 
-  it("升級前備份、備份通過 integrity_check、成功後刪除", () => {
+  it("v1 升 v2：七張新表與 conversation_deletions 的新欄位都在，成功後刪除備份", () => {
     const directory = scratch();
     const filePath = path.join(directory, "state.sqlite");
-    const first = openStateDatabase({
+    const v1 = Database.open(filePath, {
+      create: { applicationId: STATE_APPLICATION_ID, pageSize: 4096, autoVacuum: "incremental" },
+      expectedApplicationId: STATE_APPLICATION_ID,
+    });
+    try {
+      migrate(v1, { migrations: M0_MIGRATIONS, appVersion: "test" });
+      expect(Number(v1.pragma("user_version"))).toBe(1);
+      for (const table of M1_TABLES) {
+        expect(v1.tableExists(table), table).toBe(false);
+      }
+      v1.run(
+        "INSERT INTO conversation_deletions (root_id, conversation_ids, client_request_ids, phase, requested_at, updated_at) VALUES ('c1', '[]', '[]', 'rows', 'now', 'now')",
+      );
+    } finally {
+      v1.close();
+    }
+
+    let backupSeen: string | null = null;
+    const upgraded = openStateDatabase({
       filePath,
       appVersion: "test",
       backupDirectory: directory,
+      onBackup: (backupPath) => {
+        backupSeen = backupPath;
+        expect(existsSync(backupPath)).toBe(true);
+        const backup = new DatabaseSync(backupPath);
+        const row = backup.prepare("PRAGMA integrity_check").get() as { integrity_check: string };
+        expect(row.integrity_check).toBe("ok");
+        backup.close();
+      },
     });
-    first.db.close();
-
-    const versionTwo = {
-      version: 2,
-      name: "add-test-table",
-      sql: "CREATE TABLE migration_probe (id TEXT PRIMARY KEY) STRICT;",
-    };
-    const db = Database.open(filePath, { expectedApplicationId: STATE_APPLICATION_ID });
-    let backupSeen: string | null = null;
     try {
-      const outcome = migrate(db, {
-        migrations: [...M0_MIGRATIONS, versionTwo],
-        appVersion: "test",
-        backupDirectory: directory,
-        onBackup: (backupPath) => {
-          backupSeen = backupPath;
-          expect(existsSync(backupPath)).toBe(true);
-          const backup = new DatabaseSync(backupPath);
-          const row = backup.prepare("PRAGMA integrity_check").get() as { integrity_check: string };
-          expect(row.integrity_check).toBe("ok");
-          backup.close();
-        },
-      });
-      expect(outcome.appliedVersions).toEqual([2]);
+      expect(upgraded.migration.fromVersion).toBe(1);
+      expect(upgraded.migration.toVersion).toBe(2);
+      expect(upgraded.migration.appliedVersions).toEqual([2]);
       expect(backupSeen).not.toBeNull();
       expect(existsSync(backupSeen as unknown as string)).toBe(false);
-      expect(db.tableExists("migration_probe")).toBe(true);
-      expect(Number(db.pragma("user_version"))).toBe(2);
+
+      for (const table of M1_TABLES) {
+        expect(upgraded.db.tableExists(table), table).toBe(true);
+      }
+      const columns = upgraded.db
+        .all<{ name: string }>("PRAGMA table_info(conversation_deletions)")
+        .map((column) => column.name);
+      for (const column of M1_CONVERSATION_DELETION_COLUMNS) {
+        expect(columns, column).toContain(column);
+      }
+      // 舊的刪除紀錄在加欄之後仍然讀得到，新欄位是空陣列。
+      expect(
+        upgraded.db.get<{ card_ids: string; asset_ids: string }>(
+          "SELECT card_ids, asset_ids FROM conversation_deletions WHERE root_id = 'c1'",
+        ),
+      ).toEqual({ card_ids: "[]", asset_ids: "[]" });
+      upgraded.db.run(
+        "INSERT INTO conversations (conversation_id, created_at, updated_at, last_activity_at) VALUES ('c1', 'now', 'now', 'now')",
+      );
+      expect(upgraded.db.countRows("conversations")).toBe(1);
+    } finally {
+      upgraded.db.close();
+    }
+  });
+
+  it("遷移失敗保留備份，資料庫停在 v1", () => {
+    const directory = scratch();
+    const filePath = path.join(directory, "state.sqlite");
+    const db = Database.open(filePath, {
+      create: { applicationId: STATE_APPLICATION_ID, pageSize: 4096, autoVacuum: "incremental" },
+      expectedApplicationId: STATE_APPLICATION_ID,
+    });
+    try {
+      migrate(db, { migrations: M0_MIGRATIONS, appVersion: "test" });
+      let backupSeen: string | null = null;
+      expect(() =>
+        migrate(db, {
+          migrations: [
+            ...M0_MIGRATIONS,
+            { version: 2, name: "broken", sql: "CREATE TABLE broken_table (" },
+          ],
+          appVersion: "test",
+          backupDirectory: directory,
+          onBackup: (backupPath) => {
+            backupSeen = backupPath;
+          },
+        }),
+      ).toThrowError(StorageError);
+      expect(backupSeen).not.toBeNull();
+      expect(existsSync(backupSeen as unknown as string)).toBe(true);
+      expect(Number(db.pragma("user_version"))).toBe(1);
+      expect(db.tableExists("broken_table")).toBe(false);
+
+      const backup = new DatabaseSync(backupSeen as unknown as string);
+      try {
+        const integrity = backup.prepare("PRAGMA integrity_check").get() as {
+          integrity_check: string;
+        };
+        expect(integrity.integrity_check).toBe("ok");
+        const version = backup.prepare("PRAGMA user_version").get() as { user_version: number };
+        expect(Number(version.user_version)).toBe(1);
+      } finally {
+        backup.close();
+      }
     } finally {
       db.close();
     }

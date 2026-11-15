@@ -74,12 +74,18 @@ importers:
 
   packages/host:
     dependencies:
+      '@cardiary/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@cardiary/engine-adapter':
         specifier: workspace:*
         version: link:../engine-adapter
       '@cardiary/engine-fake':
         specifier: workspace:*
         version: link:../engine-fake
+      '@cardiary/module-api':
+        specifier: workspace:*
+        version: link:../module-api
       '@cardiary/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -93,6 +99,12 @@ importers:
       '@types/ws':
         specifier: 8.18.1
         version: 8.18.1
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
+      ajv-formats:
+        specifier: 3.0.1
+        version: 3.0.1(ajv@8.20.0)
 
   packages/module-api:
     dependencies:
@@ -114,6 +126,9 @@ importers:
 
   packages/storage:
     dependencies:
+      '@cardiary/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@cardiary/protocol':
         specifier: workspace:*
         version: link:../protocol

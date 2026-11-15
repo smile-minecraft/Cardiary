@@ -9,9 +9,20 @@ import type {
 } from "@cardiary/engine-adapter";
 import { createEngineAdapter } from "@cardiary/engine-adapter";
 import type { JSONObject, JSONValue } from "@cardiary/protocol";
+import type {
+  BackgroundTaskRunner,
+  CardiaryPaths,
+  ModelInvoker,
+  ModuleLogger,
+  ModuleSettingsReader,
+  ProtocolEventIntent,
+  SecretAccess,
+} from "@cardiary/module-api";
+import type { ToolPermissionGate } from "@cardiary/engine-adapter";
+import { FolderLayout } from "@cardiary/storage";
 import { join } from "node:path";
 
-import { BrokerCredentialSource } from "./control/broker.js";
+import { BrokerCredentialSource, type BrokerClient } from "./control/broker.js";
 import { m0PermissionGate } from "./engine/permission.js";
 import type { HostEngine } from "./engine/types.js";
 import { FakeEngine, type FakeModelStep } from "@cardiary/engine-fake";
@@ -20,6 +31,22 @@ import { Gateway } from "./gateway/server.js";
 import { systemClock } from "./ids.js";
 import { SilentLogger } from "./logging.js";
 import { HostService } from "./service.js";
+import {
+  HOST_SERVICE_NAMES,
+  type CardEnvironment,
+  type ModuleRuntimeServices,
+} from "./modules/contract.js";
+import {
+  SettingsModuleEnablementSettings,
+  loadFirstPartyModules,
+  type LoadedModules,
+  type ModuleEnablementSettings,
+} from "./modules/loader.js";
+import { HostServiceRegistryImpl } from "./modules/registry.js";
+import {
+  EphemeralCardEnvironment,
+  persistentCardEnvironment,
+} from "./modules/cards/environment.js";
 import { SpawnRegistry } from "./spawn/wrapper.js";
 import { readFolderIdentity } from "./storage/folder.js";
 import type { StorageBundle } from "./storage/interfaces.js";
@@ -97,6 +124,12 @@ export interface StartHostOptions {
   readonly faultSkipDedupeComplete?: boolean;
   /** 測試故障注入：啟動 N 毫秒後關閉執行期狀態庫，模擬 shutdown 寫入失敗。 */
   readonly faultCloseRuntimeAfterMs?: number;
+  /** 控制面的系統能力代理；省略時不提供 `broker` 服務。 */
+  readonly broker?: BrokerClient;
+  /** 測試與工具用：模組掃描目錄；省略時是 `dist/modules/`（或原始碼的 `modules/`）。 */
+  readonly modulesDirectory?: string;
+  /** 測試用：換掉 `modules.disabled` 的來源；省略時接上狀態庫的設定。 */
+  readonly moduleEnablement?: ModuleEnablementSettings;
 }
 
 export interface RunningHost {
@@ -108,6 +141,10 @@ export interface RunningHost {
   readonly epoch: string;
   /** 共用子行程註冊表；測試與整合驗證「pause 後沒有工具存活」用。 */
   readonly spawn: SpawnRegistry;
+  /** 已載入的第一方模組；`--engine fake` 的原始碼測試通常沒有模組。 */
+  readonly modules: LoadedModules;
+  /** 模組之間共用的服務註冊表。 */
+  readonly hostServices: HostServiceRegistryImpl;
 }
 
 const DEMO_BUNDLE_ID = "demo";
@@ -139,6 +176,35 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   const folder =
     options.storage?.folder ?? persistent?.folder ?? (await readFolderIdentity(options.folderPath));
   const trace = options.trace;
+  const hostServices = new HostServiceRegistryImpl();
+  const paths: CardiaryPaths = {
+    root: folder.path,
+    cards: join(folder.path, "cards"),
+    assets: join(folder.path, "assets"),
+    boards: join(folder.path, "boards"),
+    skills: join(folder.path, "skills"),
+    state: join(folder.path, "state"),
+    modules: join(folder.path, "modules"),
+    cache: join(folder.path, "cache"),
+    tmp: join(folder.path, "tmp"),
+    logs: join(folder.path, "logs"),
+  };
+  // 卡片模組的儲存：產品組裝共用主機已開的連線；記憶體組裝另外開一份。
+  const cardEnvironment: CardEnvironment =
+    persistent !== null
+      ? persistentCardEnvironment(persistent)
+      : new EphemeralCardEnvironment(new FolderLayout(folder.path), {
+          now: () => clock.now(),
+          ...(trace === undefined ? {} : { trace }),
+        });
+  hostServices.provide(HOST_SERVICE_NAMES.cardStorage, cardEnvironment);
+  // 權限閘道在呼叫當下才取：本機工具提供服務之後就生效，不必重啟主機。
+  const permissionGate: ToolPermissionGate = {
+    evaluate(request) {
+      const gate = hostServices.get(HOST_SERVICE_NAMES.toolPermissionGate);
+      return gate === undefined ? m0PermissionGate.evaluate(request) : gate.evaluate(request);
+    },
+  };
   const runtime =
     options.storage?.runtime ??
     persistent?.runtime ??
@@ -187,7 +253,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
       ? new FakeEngine({
           environment,
           approvals,
-          permissionGate: m0PermissionGate,
+          permissionGate,
           credentials,
           logger,
           clock,
@@ -195,7 +261,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
       : createEngineAdapter({
           environment,
           approvals,
-          permissionGate: m0PermissionGate,
+          permissionGate,
           credentials,
           logger,
           clock,
@@ -204,6 +270,12 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
         }));
   if (options.modelSettings !== undefined) {
     await engine.configureModels(options.modelSettings);
+  }
+  hostServices.provide(HOST_SERVICE_NAMES.engine, engine);
+  hostServices.provide(HOST_SERVICE_NAMES.storage, storage);
+  hostServices.provide(HOST_SERVICE_NAMES.paths, paths);
+  if (options.broker !== undefined) {
+    hostServices.provide(HOST_SERVICE_NAMES.broker, options.broker);
   }
   let serviceRef: HostService | null = null;
   const gateway = new Gateway({
@@ -257,6 +329,31 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   for (const script of options.scripts ?? []) {
     if (engine instanceof FakeEngine) engine.enqueueScript(script);
   }
+  const modules = await loadFirstPartyModules({
+    tools: engine.tools,
+    services: moduleRuntimeServices({
+      hostServices,
+      paths,
+      folderPath: folder.path,
+      logger,
+      clock,
+    }),
+    events: {
+      emit: (intent: ProtocolEventIntent): void => {
+        gateway.emitIntent(intent);
+      },
+    },
+    hostServices,
+    settings:
+      options.moduleEnablement ??
+      new SettingsModuleEnablementSettings(() => cardEnvironment.settings),
+    ...(options.modulesDirectory === undefined ? {} : { directory: options.modulesDirectory }),
+    now: () => clock.now(),
+    warn: (message, fields) => {
+      logger.warn(message, fields);
+    },
+  });
+  gateway.setModuleHost(modules);
   const port = await gateway.listen(options.port ?? 0);
   const service = new HostService({
     storage,
@@ -272,6 +369,10 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
       ? {}
       : { onMaintenance: options.maintenanceNotifier }),
     ...(options.fatalNotifier === undefined ? {} : { onFatal: options.fatalNotifier }),
+    onShutdown: async () => {
+      await modules.deactivateAll("shutdown");
+      if (cardEnvironment.ownsConnections) cardEnvironment.close();
+    },
   });
   serviceRef = service;
   gateway.setStorageFailureHandler((detail) => {
@@ -288,7 +389,72 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
     }, options.faultCloseRuntimeAfterMs).unref?.();
   }
   await service.start();
-  return { service, gateway, engine, storage, port, epoch: snapshot.epoch, spawn };
+  return {
+    service,
+    gateway,
+    engine,
+    storage,
+    port,
+    epoch: snapshot.epoch,
+    spawn,
+    modules,
+    hostServices,
+  };
+}
+
+/**
+ * 模組共用的執行期服務。
+ *
+ * `models` 是一個轉呼：呼叫當下才向服務註冊表取真正的 `models`，模型接入
+ * 模組提供之後就生效；沒有提供時丟出明確錯誤，不讓模組以為呼叫成功。
+ * 背景任務、憑證與模組設定在 M1 只有形狀，實際使用時回明確的錯誤或空值。
+ */
+function moduleRuntimeServices(input: {
+  readonly hostServices: HostServiceRegistryImpl;
+  readonly paths: CardiaryPaths;
+  readonly folderPath: string;
+  readonly logger: EngineLogger;
+  readonly clock: Clock;
+}): ModuleRuntimeServices {
+  const models: ModelInvoker = {
+    async invoke(request, options) {
+      const invoker = input.hostServices.get<ModelInvoker>(HOST_SERVICE_NAMES.models);
+      if (invoker === undefined) {
+        throw new Error("沒有模組提供 models 服務；模型接入尚未啟用。");
+      }
+      return invoker.invoke(request, options);
+    },
+  };
+  const backgroundTasks: BackgroundTaskRunner = {
+    async run() {
+      throw new Error("M1 尚未實作背景任務。");
+    },
+  };
+  const settings: ModuleSettingsReader = {
+    get: () => undefined,
+    getLevel: () => "human-only",
+    onChange: () => () => {},
+  };
+  const secrets: SecretAccess = {
+    async withSecret() {
+      throw new Error("M1 沒有提供憑證服務。");
+    },
+  };
+  const logger: ModuleLogger = input.logger;
+  return {
+    models,
+    backgroundTasks,
+    storage: {
+      dataDir: join(input.folderPath, "modules"),
+      cacheDir: join(input.folderPath, "cache"),
+      tempDir: join(input.folderPath, "tmp"),
+    },
+    paths: input.paths,
+    settings,
+    secrets,
+    logger,
+    clock: input.clock,
+  };
 }
 
 /** 示範工具：讓契約測試能走完審批、串流與介面資料，不需要真模型。 */
