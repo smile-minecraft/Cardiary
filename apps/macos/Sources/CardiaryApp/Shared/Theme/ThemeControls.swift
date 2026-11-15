@@ -35,7 +35,7 @@ extension View {
 /// 膠囊按鈕。主要動作用實色紅，其他動作用淺色塊，安靜的動作只有懸停時才出現底色。
 struct ThemeButtonStyle: ButtonStyle {
     enum Kind {
-        /// 實色主色塊，白字。
+        /// 實色主色塊，深墨字。
         case primary
         /// 淺色塊，主色文字。
         case soft
@@ -227,7 +227,7 @@ private struct ThemeSwitchBody: View {
     }
 }
 
-/// 圓角方塊的勾選框：勾選時是紅底白勾。
+/// 圓角方塊的勾選框：勾選時是紅底深墨勾。
 struct ThemeCheckboxStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         ThemeCheckboxBody(configuration: configuration)

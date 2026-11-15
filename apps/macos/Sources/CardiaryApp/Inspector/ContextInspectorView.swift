@@ -143,6 +143,10 @@ struct ContextInspectorView: View {
                     HStack(spacing: 4) {
                         RoundedRectangle(cornerRadius: 3, style: .continuous)
                             .fill(ContextBlockColor.tone(for: layer).color)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                    .strokeBorder(Palette.ink.opacity(0.4), lineWidth: 1)
+                            }
                             .frame(width: 10, height: 10)
                         Text(model.layerTitle(layer))
                             .font(.cardiary(.caption2))
@@ -296,7 +300,7 @@ struct ContextInspectorView: View {
             .overlay {
                 if isSelected {
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(Palette.ink.opacity(0.35))
+                        .strokeBorder(Palette.ink, lineWidth: 2)
                 }
             }
             .help(heatHelp(cell, entry: entry))

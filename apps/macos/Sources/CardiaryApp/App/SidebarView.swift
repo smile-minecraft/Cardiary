@@ -3,7 +3,7 @@ import SwiftUI
 
 /// 左側欄：標誌、新對話、對話清單與其他入口。入口的順序由 `SidebarRegistry` 決定。
 ///
-/// 選中的一列是實色紅塊、白字；懸停是淺色塊。不畫分隔線，章節靠花色標籤分開。
+/// 選中的一列是實色紅塊、深墨字；懸停是淺色塊。不畫分隔線，章節靠花色標籤分開。
 struct SidebarView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var conversations: ConversationListModel

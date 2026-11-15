@@ -288,7 +288,7 @@ struct FreshnessPips: View {
         HStack(spacing: 2) {
             ForEach(0..<count, id: \.self) { index in
                 Capsule(style: .continuous)
-                    .fill(index < lit ? suit.color : Palette.hover)
+                    .fill(index < lit ? suit.ink : Palette.hover)
                     .frame(width: 9, height: 5)
             }
         }
