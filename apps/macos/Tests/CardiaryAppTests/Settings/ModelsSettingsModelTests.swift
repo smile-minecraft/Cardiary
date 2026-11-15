@@ -46,7 +46,7 @@ final class FakeKeychain: KeychainWriting, @unchecked Sendable {
 /// 這裡斷言介面字串，固定用繁體中文，不跟著 CI runner 的系統語言。
 @MainActor
 final class ModelsSettingsModelTests: XCTestCase {
-    private let secret = "sk-test-do-not-leak-9f3a"
+    private let secret = "sk-test-settings-0001"
 
     private func makeModel(keychain: (any KeychainWriting)? = nil) -> ModelsSettingsModel {
         ModelsSettingsModel(keychain: keychain, language: .zhHant)

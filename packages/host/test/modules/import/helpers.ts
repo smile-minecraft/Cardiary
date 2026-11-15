@@ -428,7 +428,7 @@ export async function makeAlmaDatabase(path: string, data: AlmaFixtureData): Pro
 }
 
 /** 假的模型：回固定摘要，並記錄呼叫次數。 */
-export function fakeImportModel(text = "使用者討論了搬家與租約，決定三月再簽約。"): ModelInvoker & {
+export function fakeImportModel(text = "使用者討論了儲藏室整理，決定週末再盤點。"): ModelInvoker & {
   readonly calls: { role: string; prompt: string }[];
 } {
   const calls: { role: string; prompt: string }[] = [];

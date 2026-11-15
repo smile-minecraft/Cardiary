@@ -8,7 +8,7 @@ import {
 } from "../../src/internal/model/redaction.js";
 import { redactingFetch, retryAfterMsFrom } from "../../src/internal/model/provider-response.js";
 
-const SECRET = "sk-test-model-source-0123456789";
+const SECRET = "sk-test-redaction-0001";
 
 describe("憑證清洗", () => {
   it("原文、Bearer、JSON 跳脫與 URL 編碼形式都換成固定文字", () => {

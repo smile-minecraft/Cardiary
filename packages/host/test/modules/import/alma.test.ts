@@ -21,8 +21,8 @@ afterEach(() => {
   for (const fixture of fixtures.splice(0)) fixture.close();
 });
 
-const REAL_CONTENT = "使用者偏好手沖咖啡，器材是 V60。";
-const ARCHIVED_CONTENT = "被封存的舊記憶。";
+const REAL_CONTENT = "使用者喜歡在週末整理書櫃。";
+const ARCHIVED_CONTENT = "被封存的舊筆記。";
 
 interface AlmaFixture {
   readonly f: ImportFixture;
@@ -37,20 +37,20 @@ async function alma(): Promise<AlmaFixture> {
   const databasePath = join(source, "chat_threads.db");
   await makeAlmaDatabase(databasePath, {
     memories: [
-      { id: "memory-1", content: REAL_CONTENT, importance: 4, tags: ["咖啡", "器材"] },
-      { id: "memory-2", content: "三月要搬家。", importance: 2 },
-      { id: "memory-3", content: "不喜歡開會。" },
+      { id: "memory-1", content: REAL_CONTENT, importance: 4, tags: ["整理", "收納"] },
+      { id: "memory-2", content: "範例：下個月要整理儲藏室。", importance: 2 },
+      { id: "memory-3", content: "範例：偏好安靜的環境。" },
       { id: "memory-empty", content: "   " },
     ],
     archived: [{ id: "archived-1", content: ARCHIVED_CONTENT }],
     threads: [
       {
         id: "thread-1",
-        title: "咖啡器材",
+        title: "書櫃整理",
         createdAt: "2026-11-10T09:00:00.000Z",
         updatedAt: "2026-11-10T10:00:00.000Z",
         messages: 4,
-        conclusions: ["使用者要買 V60 濾紙", "預算兩千元"],
+        conclusions: ["使用者要買層板", "預算兩千元"],
       },
       {
         id: "thread-2",
@@ -58,7 +58,7 @@ async function alma(): Promise<AlmaFixture> {
         createdAt: "2026-10-01T09:00:00.000Z",
         updatedAt: "2026-10-01T10:00:00.000Z",
         messages: 2,
-        conclusions: ["十月談過搬家"],
+        conclusions: ["十月談過儲藏室"],
       },
       {
         id: "thread-3",
@@ -104,8 +104,8 @@ describe("Alma 來源", () => {
     expect(memories).toHaveLength(3);
     const first = memories.find((item) => item.body === REAL_CONTENT);
     expect(first?.importance).toBe(4);
-    expect(first?.tags).toEqual(expect.arrayContaining(["alma", "咖啡", "importance-4"]));
-    const withoutImportance = memories.find((item) => item.body === "不喜歡開會。");
+    expect(first?.tags).toEqual(expect.arrayContaining(["alma", "整理", "importance-4"]));
+    const withoutImportance = memories.find((item) => item.body === "範例：偏好安靜的環境。");
     expect(withoutImportance?.importance).toBeUndefined();
 
     expect(preview.skipped).toEqual(
@@ -161,8 +161,8 @@ describe("Alma 來源", () => {
       rangeStart: "2026-11-01T00:00:00.000Z",
       rangeEnd: "2026-11-30T23:59:59.000Z",
     });
-    expect(preview.conversations.map((conversation) => conversation.title)).toEqual(["咖啡器材"]);
-    expect(preview.conversations[0]?.existingSummary).toContain("V60");
+    expect(preview.conversations.map((conversation) => conversation.title)).toEqual(["書櫃整理"]);
+    expect(preview.conversations[0]?.existingSummary).toContain("層板");
     expect(preview.conversations[0]?.existingSummary).not.toContain("不該進卡片");
     expect(preview.skipped).toEqual(
       expect.arrayContaining([
@@ -185,8 +185,8 @@ describe("Alma 來源", () => {
     expect(report.cardsCreated).toBe(1);
     const card = await f.library.get(report.results[0]?.cardId ?? "");
     expect(card?.frontmatter.kind).toBe("summary");
-    expect(card?.frontmatter.title).toBe("對話摘要：咖啡器材");
-    expect(card?.body).toContain("V60");
+    expect(card?.frontmatter.title).toBe("對話摘要：書櫃整理");
+    expect(card?.body).toContain("層板");
     expect(card?.body).not.toContain("不該進卡片");
     expect(card?.frontmatter.importedFrom?.path).toContain("#threads/thread-1");
   });
@@ -204,7 +204,7 @@ describe("Alma 來源", () => {
               title: "匯出的對話",
               createdAt: "2026-11-11T00:00:00.000Z",
               messages: [
-                { role: "user", content: "要買濾紙" },
+                { role: "user", content: "要買層板" },
                 { role: "assistant", content: "好的" },
               ],
             },

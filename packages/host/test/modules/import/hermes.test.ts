@@ -20,9 +20,9 @@ afterEach(() => {
   for (const fixture of fixtures.splice(0)) fixture.close();
 });
 
-const FAKE_TOKEN = "Bearer sk-hermes-fake-token-do-not-leak";
-const FAKE_ENV_SECRET = "sk-hermes-env-secret-do-not-leak";
-const FAKE_AUTH_SECRET = "hermes-auth-secret-do-not-leak";
+const FAKE_TOKEN = "Bearer test-hermes-token-0001";
+const FAKE_ENV_SECRET = "test-hermes-env-secret-0001";
+const FAKE_AUTH_SECRET = "test-hermes-auth-secret-0001";
 
 async function hermesHome(files: Record<string, string | Uint8Array>): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), "cardiary-hermes-"));
@@ -42,8 +42,8 @@ describe("Hermes 來源", () => {
   it("讀取人格、記憶與技能；config.yaml 只取鍵名，機密檔完全沒開", async () => {
     const home = await hermesHome({
       "SOUL.md": "# 我的語氣\n\n講話直接，先說結論。\n",
-      "memories/MEMORY.md": "- 我住在台北\n- 喜歡手沖咖啡\n",
-      "memories/USER.md": "- 使用者的名字是小美\n",
+      "memories/MEMORY.md": "- 我住在範例市\n- 喜歡在週末整理書櫃\n",
+      "memories/USER.md": "- 使用者的名字是張三\n",
       "skills/alpha/SKILL.md":
         "---\nname: alpha\ndescription: 測試技能\n---\n\n# Alpha\n\n做一件事。\n",
       "skills/alpha/assets/template.txt": "附件內容\n",
@@ -171,7 +171,7 @@ describe("Hermes 來源", () => {
     expect(report.conversationEstimate?.modelSummaries).toBe(1);
     const summary = await f.library.get(report.results[0]?.cardId ?? "");
     expect(summary?.frontmatter.kind).toBe("summary");
-    expect(summary?.body).toContain("搬家");
+    expect(summary?.body).toContain("儲藏室");
   });
 
   it("對話預設不匯入，只列在跳過清單", async () => {
@@ -212,16 +212,22 @@ async function makeStateDatabase(path: string): Promise<void> {
     database.exec("INSERT INTO schema_version (version) VALUES (1)");
     database
       .prepare("INSERT INTO sessions (id, title, started_at) VALUES (?, ?, ?)")
-      .run("session-1", "搬家的討論", "2026-11-10T09:00:00.000Z");
+      .run("session-1", "儲藏室整理討論", "2026-11-10T09:00:00.000Z");
     const insert = database.prepare(
       "INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)",
     );
-    insert.run("m1", "session-1", "user", "逐字稿內容：我想在三月搬家", "2026-11-10T09:00:00.000Z");
+    insert.run(
+      "m1",
+      "session-1",
+      "user",
+      "逐字稿內容：我想在週末整理儲藏室",
+      "2026-11-10T09:00:00.000Z",
+    );
     insert.run(
       "m2",
       "session-1",
       "assistant",
-      "逐字稿內容：先確認租約",
+      "逐字稿內容：先確認整理清單",
       "2026-11-10T09:01:00.000Z",
     );
   } finally {

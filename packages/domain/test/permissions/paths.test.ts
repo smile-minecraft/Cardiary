@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -115,11 +115,11 @@ describe("路徑正規化", () => {
     // APFS 預設大小寫不敏感：realpath 保留輸入的寫法，字串比較不折疊。
     const path = resolve("NOTES.md");
     expect(path.resolved).toBe(join(fixture.project, "NOTES.md"));
-    expect(isWithin("/Users/Smile", "/Users/example/x")).toBe(false);
+    expect(isWithin("/Users/Example", "/Users/example/x")).toBe(false);
   });
 
   it("保護目標在大小寫不敏感的卷上以折疊比對", () => {
-    expect(isWithinFolded("/Users/Smile", "/users/smile/x")).toBe(true);
+    expect(isWithinFolded("/Users/Example", "/users/example/x")).toBe(true);
     expect(isSystemPath("/System/Library/x", "case-sensitive")).toBe(true);
     expect(isSystemPath("/SYSTEM/Library/x", "case-sensitive")).toBe(false);
     expect(isSystemPath("/SYSTEM/Library/x", "case-insensitive")).toBe(true);
@@ -171,18 +171,6 @@ describe("路徑正規化", () => {
     expect(isWithin("/f/tmp", "/f/tmp/x")).toBe(true);
     expect(isWithinFolded("/f/tmp", "/f/TMP/x")).toBe(true);
   });
-
-  it.runIf(existsSync("/Volumes/External-Data"))(
-    "掛載點之後的元件決定敏感度：/Volumes/External-Data 是大小寫敏感",
-    () => {
-      // 開機卷（/）與 /Volumes 不敏感，External-Data 是掛載的大小寫敏感 APFS 卷。
-      // 只翻掛載點之後的元件才能測到目標卷；翻 /Volumes 測到的會是開機卷。
-      expect(detectCaseSensitivity("/Volumes/External-Data/MainData")).toBe("case-sensitive");
-      expect(detectCaseSensitivity("/Volumes/External-Data/MainData/Project-Nest/Cardiary")).toBe(
-        "case-sensitive",
-      );
-    },
-  );
 
   it.runIf(volumeIsCaseInsensitive)(
     "大小寫不敏感卷上，STATE/cardiary.sqlite 的寫入是 deny.human-settings",

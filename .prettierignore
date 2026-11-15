@@ -1,3 +1,4 @@
 pnpm-lock.yaml
 dist/
-docs/spec.md
+docs/
+spikes/

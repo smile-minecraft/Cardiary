@@ -119,7 +119,7 @@ describe("環境變數指派不得零審批執行", () => {
   const marker = `${join(fixture.project, "tmp")}/y.sh`;
 
   it.each([
-    // Momus 的實際重現字串：git 的 fsmonitor 設定可以指定任意程式。
+    // 實際重現字串：git 的 fsmonitor 設定可以指定任意程式。
     [
       `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0='sh ${marker}' git status`,
     ],

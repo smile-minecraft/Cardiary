@@ -12,7 +12,7 @@ import {
   MemorySettingsStore,
 } from "./support.js";
 
-const SECRET = "{{SECRET_hd8ejexa}}";
+const SECRET = "sk-test-providers-0001";
 const servers: FakeOpenAI[] = [];
 
 afterEach(async () => {

@@ -17,7 +17,7 @@ import {
 import { silentLogger, waitFor } from "../support.js";
 import { startFakeOpenAI, type FakeOpenAI } from "./fake-openai.js";
 
-const SECRET = "sk-test-model-source-0123456789";
+const SECRET = "sk-test-turn-failure-0001";
 
 const servers: FakeOpenAI[] = [];
 const roots: string[] = [];

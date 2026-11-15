@@ -10,7 +10,7 @@ import type {
 import { classifyModelFailure, createProviderModelSource } from "../../src/index.js";
 import { startFakeOpenAI, type FakeOpenAI } from "./fake-openai.js";
 
-const SECRET = "sk-test-model-source-0123456789";
+const SECRET = "sk-test-provider-source-0001";
 
 const servers: FakeOpenAI[] = [];
 

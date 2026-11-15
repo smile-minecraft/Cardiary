@@ -5,6 +5,18 @@ coverage/
 .DS_Store
 .env
 .env.*
+# 憑證與本機資料：不得進版控
+*.env
+*.sqlite
+*.sqlite-*
+*.db
+*.key
+*.pem
+*.p12
+*.mobileprovision
+auth.json
+credentials*
+
 # Swift / Xcode
 .build/
 DerivedData/

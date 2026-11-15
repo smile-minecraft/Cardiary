@@ -7,13 +7,6 @@ macOS App 的殼：首次啟動選資料夾、啟動並監管內嵌的 Node 主�
 服務在 `ready.clientToken` 回同一把。Token 只在殼與服務的記憶體裡，不進 argv、環境變數、
 日誌或磁碟；服務換行程就換一把，殼收到新的就重連。
 
-設計依據：
-
-- `docs/design/shell-control.md`：殼↔服務的私有控制面（stdin／stdout NDJSON）
-- `docs/design/storage.md` 第 5、6 章：資料夾八態、殼的狀態目錄
-- `docs/design/protocol.md`：客戶端協定，`CardiaryKit` 的實作對象
-- `docs/spikes/macos-shell.md`：技術驗證結論
-
 ## 建置與測試
 
 ```sh
@@ -102,20 +95,20 @@ production 依賴，用 `pnpm deploy` 打包）；`CARDIARY_SERVICE_SCRIPT=...` 
    預期 `responsible` 是 `com.cardiary`（App），`accessing` 是內嵌的 `node`。
 
 在這一條真的按過之前，不能宣稱 TCC 已驗證。目前的自動證據只有「由殼啟動的 node
-子行程，其權限請求的責任行程是 App」這個機制（spike 已驗證）。
+子行程，其權限請求的責任行程是 App」這個機制，而這個機制已在原型中驗證過。
 
 ## 已知缺口（移交給後續工作）
 
 1. **client Token 已接上。** 殼簽發一把，經 `init.clientToken` 交給服務，服務在
    `ready.clientToken` 回同一把（省略時服務自己產生並回報；與控制／代理 Token 重複會
-   直接拒絕）。殼存進記憶體並建立 `CardiaryKit` 連線；細節見 `docs/design/shell-control.md`。
+   直接拒絕）。殼存進記憶體並建立 `CardiaryKit` 連線。
 2. **儲存空間面板的「殼狀態」分類在服務端。** 殼只提供 `broker.shell-state.get`
    的 `{ usedBytes, limitBytes }`；面板屬於儲存與閘道工作。
 3. **內嵌服務的體積。** `packages/host` 的 production 依賴含 Pi Durable 與它帶進來的
-   AWS SDK，打包後約 130 MB（App 總計約 240 MB）。M0 先照實內嵌；之後要 trim（例如
+   AWS SDK，打包後約 130 MB（App 總計約 240 MB）。目前先照實內嵌；之後要 trim（例如
    把用不到的供應商 SDK 拿掉）再談發行。
 4. **GUI 內的對話沒有人工驗證。** 殼的核心層已用真服務跑完含審批的對話，但 App 內的
-   選單操作、TCC 提示與 `tccd` 歸屬仍列手動（`docs/acceptance/chapter-13.md`）。
+   選單操作、TCC 提示與 `tccd` 歸屬仍列手動。
 5. **公證未執行。** 本機用 ad-hoc 簽章；發行要 Developer ID + `--timestamp` +
    `notarytool` + `stapler`。
 6. **工具子行程的 `inherit` 拒絕與 fd 清單屬於服務端。** 殼這邊驗的是「不傳額外 fd」

@@ -26,7 +26,7 @@ import { startFakeOpenAI, type FakeOpenAI } from "./fake-openai.js";
  * 都必須找不到金鑰；對外失敗仍然是乾淨的 `credential_invalid`。
  */
 
-const SECRET = "sk-test-model-source-0123456789";
+const SECRET = "sk-test-secret-redaction-0001";
 const ENCODED = encodeURIComponent(SECRET);
 
 const servers: FakeOpenAI[] = [];

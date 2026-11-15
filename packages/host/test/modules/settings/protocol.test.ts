@@ -13,7 +13,7 @@ import { makeFolder, startTestHost, TestClient, type TestHost } from "../../help
  */
 
 const MODULES_DIRECTORY = fileURLToPath(new URL("../../../dist/modules", import.meta.url));
-const SECRET = "{{SECRET_z9ncut8n}}";
+const SECRET = "fake-key-settings-0002";
 const hosts: TestHost[] = [];
 
 afterEach(async () => {

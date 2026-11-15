@@ -8,11 +8,11 @@ Cardiary is in early development. Nothing is released: there is no download, no 
 
 The foundation is implemented and merged: a host service that runs on its own, an engine adapter around Pi Durable, storage with the data folder rules, a protocol schema with contract tests, and the macOS shell that starts and supervises the service.
 
-M1, conversations and cards, is in progress. Conversation streaming, the card file format and its index, context assembly and compaction, model settings, image and audio import, permission rules with human approval, local file and terminal tools, and the main macOS window are implemented and merged. What is missing is the integration pass: a full day of real use, and the manual acceptance steps that need a person at the keyboard.
+The first usable slice, conversations and cards, is in progress. Conversation streaming, the card file format and its index, context assembly and compaction, model settings, image and audio import, permission rules with human approval, local file and terminal tools, and the main macOS window are implemented and merged. What is missing is the integration pass: a full day of real use, and the manual acceptance steps that need a person at the keyboard.
 
-Expect breaking changes in the card format, the protocol and the folder layout while the milestones land. Do not put data you cannot lose into it yet.
+Expect breaking changes in the card format, the protocol and the folder layout before a stable release. Do not put data you cannot lose into it yet.
 
-The specification and the design notes are written in Traditional Chinese, and so are code comments. Identifiers are English. The app's interface strings exist in English and Traditional Chinese.
+Code comments are written in Traditional Chinese. Identifiers are English. The app's interface strings exist in English and Traditional Chinese.
 
 ## What it is
 
@@ -48,20 +48,18 @@ A few rules shape the code:
 
 ## Repository layout
 
-| Path                      | What is in it                                                       |
-| ------------------------- | ------------------------------------------------------------------- |
-| `packages/protocol`       | Protocol schema, generated types, shared test support               |
-| `packages/domain`         | Card rules, freshness, context assembly, media, permission rules    |
-| `packages/engine-adapter` | The only code that touches Pi Durable                               |
-| `packages/engine-fake`    | In-memory engine used by tests and the demo assembly                |
-| `packages/module-api`     | Module interface and registry                                       |
-| `packages/storage`        | Data folder zones, file registry, SQLite, card files, deletion      |
-| `packages/host`           | Host service: gateway, engine runtime, first-party modules          |
-| `packages/contract-tests` | Black-box protocol tests against a running host                     |
-| `apps/macos`              | SwiftUI app: shell, window, card library, settings, approvals       |
-| `apple/CardiaryKit`       | Shared Swift package: protocol types, client, card model            |
-| `docs`                    | Specification, design notes, acceptance notes, spike write-ups      |
-| `spikes`                  | Throwaway prototypes from technical spikes, not part of the product |
+| Path                      | What is in it                                                    |
+| ------------------------- | ---------------------------------------------------------------- |
+| `packages/protocol`       | Protocol schema, generated types, shared test support            |
+| `packages/domain`         | Card rules, freshness, context assembly, media, permission rules |
+| `packages/engine-adapter` | The only code that touches Pi Durable                            |
+| `packages/engine-fake`    | In-memory engine used by tests and the demo assembly             |
+| `packages/module-api`     | Module interface and registry                                    |
+| `packages/storage`        | Data folder zones, file registry, SQLite, card files, deletion   |
+| `packages/host`           | Host service: gateway, engine runtime, first-party modules       |
+| `packages/contract-tests` | Black-box protocol tests against a running host                  |
+| `apps/macos`              | SwiftUI app: shell, window, card library, settings, approvals    |
+| `apple/CardiaryKit`       | Shared Swift package: protocol types, client, card model         |
 
 ## Requirements
 
@@ -109,7 +107,7 @@ You choose one folder, and everything Cardiary knows lives in it:
 <folder>/
   cards/      card originals (Markdown)
   assets/     images and audio, named by content hash
-  boards/     whiteboard data (M4)
+  boards/     whiteboard data
   skills/     SKILL.md files that describe agent skills
   state/      conversations, settings, freshness, file registry (SQLite)
   modules/    first-party modules and their data
@@ -125,26 +123,6 @@ Every file is an original, a cache entry or a temp file. Originals are what you 
 - **Approvals gate anything that changes your machine.** Permission rules answer allow, deny or ask; a deny is final, and the agent has no way to change its own rules. Files outside the data folder, shell commands and card edits fall under these rules.
 - **The app is not sandboxed.** It runs as a normal Mac app and relies on macOS privacy permissions for protected resources, its own permission rules and the three-zone rule. Distribution is planned as a signed, notarized direct download, not the Mac App Store.
 - **Nothing here has been audited.** Neither the code nor the release process has been through a security review, and the macOS privacy prompts have not been exercised end to end on a signed build.
-
-## Documentation
-
-- [docs/spec.md](docs/spec.md) is the specification: product decisions, the card model, storage rules, the protocol, milestones and acceptance criteria. If code and the specification disagree, the specification wins.
-- [docs/design/README.md](docs/design/README.md) indexes the design notes and links to [docs/design/m1.md](docs/design/m1.md), which covers cards, context, permissions, models, modules and the macOS client.
-- [docs/acceptance/chapter-13.md](docs/acceptance/chapter-13.md) lists which of the storage and deletion acceptance criteria are automated and which still need manual steps.
-
-These documents are in Traditional Chinese. `docs/spikes/` holds the write-ups from technical spikes, including what was verified and what was only assumed.
-
-## Roadmap
-
-- **M1, conversations and cards** (current). Chat, the card library, context and compaction, models, multimodal import, permissions and approvals, the main window.
-- **M2, memory loop.** Hybrid retrieval, dealing cards into context, System One, daily distillation, core memory, schedules and notifications, web client.
-- **M3, document editing.** Patch-based edits with accept or reject per change, version history with limits.
-- **M4, whiteboard.** A canvas of cards, connections, cards pinned to stay fresh, and new cards generated from a selection.
-- **M5, external agents and MCP.** Connect MCP servers, dispatch external coding agents, review mode for System One.
-- **M6, mobile.** An iOS and iPadOS client: chat, notifications and approvals first, then the card library and whiteboard.
-- **M7, open.** A public plugin API, mail, calendar and reminders, multiple personas.
-
-Each milestone is meant to be usable on its own, and the order can change if the earlier ones teach us something.
 
 ## Contributing
 

@@ -30,7 +30,7 @@ import { startFakeOpenAI, type FakeOpenAI } from "./fake-openai.js";
  * 乾淨的 `credential_invalid`。
  */
 
-const SECRET = "sk-midstream-review-secret";
+const SECRET = "sk-test-stream-redaction-0001";
 
 const servers: FakeOpenAI[] = [];
 const roots: string[] = [];

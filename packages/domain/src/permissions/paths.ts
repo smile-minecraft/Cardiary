@@ -46,7 +46,7 @@ const sensitivityByDev = new Map<number, CaseSensitivity>();
  * 由根往下走、以 `dev` 為界找出掛載點，再把掛載點之後的第一個含 ASCII 字母的
  * 元件大小寫反過來再 `stat` 一次：成功且 `dev`＋`ino` 都相同代表卷不分大小寫；
  * `ENOENT` 代表分大小寫。只翻掛載點之後的元件，因為翻更前面的元件（例如
- * `/Volumes/External-Data` 的 `/Volumes`）測到的是開機卷，不是目標卷。整條路徑
+ * `/Volumes/External` 的 `/Volumes`）測到的是開機卷，不是目標卷。整條路徑
  * 都在根卷上時，翻第一個字母就是測根卷。`target` 不存在時會往上找存在的祖先，
  * 整條都不存在或翻不出可用的元件就回 `unknown`。已知的結果以 `dev` 編號快取；
  * `unknown` 不快取，換一條同卷路徑再探測還有機會得到答案。
@@ -130,7 +130,7 @@ function flipFirstAsciiLetter(component: string): string | null {
  * 由根往下逐段 `dev` 找出最深的掛載點：
  * - 沒有任何掛載點（整條在根卷）：翻第一個含 ASCII 字母的字母（原本的做法）。
  * - 有掛載點：只翻掛載點之後的元件；這些元件才在目標卷上。
- * - 目標剛好是掛載點本身（例如 `/Volumes/External-Data`）：沒有「之後」的元件可以
+ * - 目標剛好是掛載點本身（例如 `/Volumes/External`）：沒有「之後」的元件可以
  *   翻，掛載點之前的元件屬於父卷，翻了不代表目標卷的敏感度，回傳 null。
  */
 function flipAsciiCaseOnTargetVolume(current: string): string | null {

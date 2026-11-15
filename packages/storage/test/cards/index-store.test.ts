@@ -22,7 +22,7 @@ afterEach(() => {
 
 const CARD_A = "01JCX8Q3W7Z9K5V2N4M6P8R0T1".toUpperCase();
 const CARD_B = "01JCX8Q3W7Z9K5V2N4M6P8R0T2".toUpperCase();
-const CARD_C = "{{SECRET_8cgh0bmq}}".toUpperCase();
+const CARD_C = "card content sample".toUpperCase();
 
 interface Fixture {
   readonly temp: TempRoot;

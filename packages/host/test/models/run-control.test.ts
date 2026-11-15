@@ -15,7 +15,7 @@ import { startFakeOpenAI, type FakeOpenAI } from "./fake-openai.js";
  */
 
 const HOST_ENTRY = new URL("../../dist/main.js", import.meta.url).pathname;
-const SECRET = "{{SECRET_42wp52do}}";
+const SECRET = "sk-test-run-control-0001";
 
 const children: ChildProcess[] = [];
 const servers: FakeOpenAI[] = [];
