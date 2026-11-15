@@ -34,12 +34,20 @@ describe("憑證清洗", () => {
     expect(redact("about ab-secret-cd and Ab-Secret-Cd")).toBe(`about ${REDACTED} and ${REDACTED}`);
   });
 
+  it("空金鑰不產生任何樣式，文字原樣保留", () => {
+    const redact = secretRedactor("");
+    expect(redact("")).toBe("");
+    expect(redact("plain text 123")).toBe("plain text 123");
+    expect(redact("plain text 123")).not.toContain(REDACTED);
+  });
+
   it("重複跳脫的形式也換掉（引擎持久化前還會再 stringify 一層）", () => {
     const secret = 'sk-proj-"slash\\key"';
     const redact = secretRedactor(secret);
     const esc = (text: string): string => JSON.stringify(text).slice(1, -1);
     // 單層跳脫：訊息裡的 json= 欄位；引擎把錯誤再 stringify 一次後的兩層跳脫。
-    for (const level of [1, 2, 3]) {
+    // 第 4 層是最後一層有承諾的深度（MAX_JSON_ESCAPE_DEPTH），第 5 層不在承諾內。
+    for (const level of [1, 2, 3, 4]) {
       const needle = Array.from({ length: level }, () => "").reduce((text) => esc(text), secret);
       expect(redact(`json=${needle}`)).toBe(`json=${REDACTED}`);
     }
@@ -187,6 +195,20 @@ describe("200 串流的清洗", () => {
     expect(await response.text()).toBe(content);
   });
 
+  it("空金鑰的串流一個字都不改", async () => {
+    const content = "no keys here at all";
+    const input = new ReadableStream<string>({
+      start(controller) {
+        controller.enqueue(content);
+        controller.close();
+      },
+    });
+    const output = await new Response(
+      input.pipeThrough(redactingTransformStream("")).pipeThrough(new TextEncoderStream()),
+    ).text();
+    expect(output).toBe(content);
+  });
+
   it("200 的 JSON body 也清洗", async () => {
     const body = `{"error":{"message":"Incorrect API key provided: ${SECRET}"}}`;
     const guarded = redactingFetch(
@@ -197,6 +219,57 @@ describe("200 串流的清洗", () => {
     const text = await response.text();
     expect(text).not.toContain(SECRET);
     expect(text).toContain("[redacted]");
+  });
+
+  it("200 的非文字 content-type body 也清洗（其實是文字的 octet-stream）", async () => {
+    const body = `{"error":{"message":"Incorrect API key provided: ${SECRET}"}}`;
+    const encoded = bytesOf(body);
+    const guarded = redactingFetch(
+      async () =>
+        new Response(encoded, {
+          status: 200,
+          headers: {
+            "content-type": "application/octet-stream",
+            "content-length": String(encoded.length),
+          },
+        }),
+      SECRET,
+    );
+    const response = await guarded("http://127.0.0.1/v1/chat/completions", { method: "POST" });
+    const text = await response.text();
+    expect(text).not.toContain(SECRET);
+    expect(text).toContain("[redacted]");
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
+    // body 改寫過，長度欄位一定要拿掉。
+    expect(response.headers.get("content-length")).toBeNull();
+  });
+
+  it("200 的非文字 content-type body（無效 UTF-8）也換掉逐位元組相同的金鑰", async () => {
+    const prefix = new Uint8Array([0xff, 0xfe, 0x00, 0x81]);
+    const sse = `data: {"error":{"message":"Incorrect API key provided: ${SECRET}"}}\n\n`;
+    const bytes = new Uint8Array([...prefix, ...bytesOf(sse)]);
+    const guarded = redactingFetch(
+      async () => streamedResponse([bytes], "application/octet-stream"),
+      SECRET,
+    );
+    const response = await guarded("http://127.0.0.1/v1/chat/completions", { method: "POST" });
+    const raw = new Uint8Array(await response.arrayBuffer());
+    // 二進位前綴原樣保留，金鑰的位置換成固定文字。
+    expect([...raw.subarray(0, prefix.length)]).toEqual([...prefix]);
+    const asText = new TextDecoder().decode(raw);
+    expect(asText).not.toContain(SECRET);
+    expect(asText).toContain("[redacted]");
+  });
+
+  it("200 的非文字 content-type body 沒有金鑰時，內容一個位元組都不改", async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff]);
+    const guarded = redactingFetch(
+      async () => streamedResponse([bytes], "application/octet-stream"),
+      SECRET,
+    );
+    const response = await guarded("http://127.0.0.1/v1/chat/completions", { method: "POST" });
+    const raw = new Uint8Array(await response.arrayBuffer());
+    expect([...raw]).toEqual([...bytes]);
   });
 });
 

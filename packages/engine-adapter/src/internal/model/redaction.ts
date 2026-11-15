@@ -44,6 +44,10 @@ export function secretRedactor(secret: string): Redact {
  * 不會命中的比對項。
  */
 function secretNeedles(secret: string): string[] {
+  if (secret.length === 0) {
+    // 空金鑰沒有任何可替換的形式；留著空字串會變成每個位置都命中的規則。
+    return [];
+  }
   const needles = new Set<string>([secret]);
   for (const encoded of [encodeURIComponent(secret), encodeURI(secret), formEncode(secret)]) {
     if (encoded.length > 0) {
@@ -119,6 +123,97 @@ export function redactingTransformStream(secret: string): TransformStream<string
       }
     },
   });
+}
+
+/**
+ * 清洗非文字 body 的位元組。
+ *
+ * 非文字 `content-type` 的成功回應也可能夾帶錯誤原文：供應商或它前面的代理
+ * 換個 `content-type` 就繞過上面的文字串流，pi-ai 卻仍把 body 當串流解析，
+ * 錯誤原文照樣進得了 `engine.sqlite`。所以整段緩衝後先試 UTF-8 解碼：解得開
+ * 就照文字清洗（合法 UTF-8 解碼再編碼是無損的）；解不開（真正的二進位）改
+ * 用位元組比對，只換掉逐位元組相同的位置，其餘 bytes 原樣保留。位元組路徑
+ * 的大小寫折疊只做 ASCII；非 ASCII 的折疊留在文字路徑。
+ */
+export function redactOpaqueBody(
+  bytes: Uint8Array,
+  secret: string,
+): { readonly body: Uint8Array; readonly changed: boolean } {
+  if (secret.length === 0 || bytes.length === 0) {
+    return { body: bytes, changed: false };
+  }
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const redacted = secretRedactor(secret)(text);
+    return redacted === text
+      ? { body: bytes, changed: false }
+      : { body: new TextEncoder().encode(redacted), changed: true };
+  } catch {
+    return redactBytes(bytes, secret);
+  }
+}
+
+const REDACTED_BYTES = new TextEncoder().encode(REDACTED);
+
+/** 位元組層的替換；樣式依長度由長到短，同一個位置先比對最長的樣式。 */
+function redactBytes(
+  bytes: Uint8Array,
+  secret: string,
+): { readonly body: Uint8Array; readonly changed: boolean } {
+  const encoder = new TextEncoder();
+  const needles = secretNeedles(secret).map((needle) => encoder.encode(needle));
+  const parts: Uint8Array[] = [];
+  let cursor = 0;
+  let index = 0;
+  while (index < bytes.length) {
+    const needle = needles.find((candidate) => bytesMatchAt(bytes, index, candidate));
+    if (needle === undefined) {
+      index += 1;
+      continue;
+    }
+    if (index > cursor) {
+      parts.push(bytes.subarray(cursor, index));
+    }
+    parts.push(REDACTED_BYTES);
+    index += needle.length;
+    cursor = index;
+  }
+  if (parts.length === 0) {
+    return { body: bytes, changed: false };
+  }
+  parts.push(bytes.subarray(cursor));
+  return { body: concatBytes(parts), changed: true };
+}
+
+/** 位元組比對：ASCII 字母不分大小寫，其他位元組要完全一致。 */
+function bytesMatchAt(bytes: Uint8Array, offset: number, needle: Uint8Array): boolean {
+  if (offset + needle.length > bytes.length) {
+    return false;
+  }
+  for (let index = 0; index < needle.length; index++) {
+    const left = bytes[offset + index] ?? 0;
+    const right = needle[index] ?? 0;
+    if (left === right || asciiLower(left) === asciiLower(right)) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+function asciiLower(byte: number): number {
+  return byte >= 0x41 && byte <= 0x5a ? byte + 0x20 : byte;
+}
+
+function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
+  const length = parts.reduce((total, part) => total + part.length, 0);
+  const result = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
 }
 
 /**

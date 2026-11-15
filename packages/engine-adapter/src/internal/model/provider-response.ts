@@ -3,6 +3,7 @@ import type { FetchFunction } from "@earendil-works/pi-ai";
 import {
   redactError,
   redactHeaders,
+  redactOpaqueBody,
   redactingTransformStream,
   secretRedactor,
   type Redact,
@@ -59,21 +60,22 @@ export function redactingFetch(
  *
  * `content-type` 是文字形式（缺少 content-type 也視為文字）時，把 body
  * 包上跨 chunk 的替換串流；錯誤事件裡的金鑰會在 pi-ai 讀到之前就被換掉。
- * 非文字的 body 不動，只清洗 headers。換過 body 後 `content-length` 與
- * `content-encoding` 一定要拿掉：內容已經解壓縮並可能改寫過。
+ * 非文字的 body 先整段緩衝再交給 `redactOpaqueBody`：內容其實是文字就照
+ * 文字清洗，真正的二進位只換掉逐位元組相同的地方。換過 body 後
+ * `content-length` 與 `content-encoding` 一定要拿掉：內容已經解壓縮並可能
+ * 改寫過。
  */
-function sanitizeOkResponse(response: Response, redact: Redact, secret: string): Response {
+function sanitizeOkResponse(
+  response: Response,
+  redact: Redact,
+  secret: string,
+): Response | Promise<Response> {
   const textual = isTextualContentType(response.headers.get("content-type"));
-  if (response.body === null || !textual) {
-    const headers = redactHeaders(response.headers, redact);
-    if (headers === null) {
-      return response;
-    }
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    });
+  if (response.body === null) {
+    return withRedactedHeaders(response, redact);
+  }
+  if (!textual) {
+    return sanitizeOpaqueResponse(response, redact, secret);
   }
   const headers = new Headers();
   for (const [name, value] of response.headers) {
@@ -86,6 +88,48 @@ function sanitizeOkResponse(response: Response, redact: Redact, secret: string):
     .pipeThrough(new TextDecoderStream())
     .pipeThrough(redactingTransformStream(secret))
     .pipeThrough(new TextEncoderStream());
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+/** body 不動、只換 headers 的回應；沒有需要換的 header 就保留原物件。 */
+function withRedactedHeaders(response: Response, redact: Redact): Response {
+  const headers = redactHeaders(response.headers, redact);
+  if (headers === null) {
+    return response;
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+/**
+ * 清洗非文字 content-type 的成功回應。
+ *
+ * 這種回應目前不會進 `engine.sqlite`，但供應商換個 `content-type` 就能讓
+ * 錯誤原文繞過上面的文字串流，pi-ai 仍會把它當串流解析。所以這裡不解釋
+ * 為什麼不清，而是真的清：整段緩衝後交給 `redactOpaqueBody`。內容真的被
+ * 改過才拿掉 `content-length` 與 `content-encoding`，沒改就原樣保留。
+ */
+async function sanitizeOpaqueResponse(
+  response: Response,
+  redact: Redact,
+  secret: string,
+): Promise<Response> {
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const { body, changed } = redactOpaqueBody(bytes, secret);
+  const headers = new Headers();
+  for (const [name, value] of response.headers) {
+    if (changed && (name === "content-length" || name === "content-encoding")) {
+      continue;
+    }
+    headers.set(name, redact(value));
+  }
   return new Response(body, {
     status: response.status,
     statusText: response.statusText,
