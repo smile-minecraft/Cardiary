@@ -89,9 +89,9 @@ public struct CardUIScreens {
 /// `makeScreens` 換成它，App/ 的其他檔案不用動。
 @MainActor
 public enum CardUIModule {
-    /// 卡片介面提供的畫面與模型。預設只有佔位畫面。
+    /// 卡片介面提供的畫面與模型。
     public static var makeScreens: @MainActor (AppModel) -> CardUIScreens = { app in
-        .pending(app: app)
+        .live(app: app)
     }
 
     /// 把卡片介面掛上 App。重複呼叫是安全的：同一個位置、分頁與命令都只留一份。
