@@ -1,12 +1,15 @@
 import type { ToolPermissionGate, ToolPermissionVerdict } from "@cardiary/engine-adapter";
 
-/** 審批的預設逾時：5 分鐘。 */
-export const DEFAULT_APPROVAL_TIMEOUT_MS = 300_000;
+import { DEFAULT_APPROVAL_TIMEOUT_MS } from "../permissions/gate.js";
+
+export { DEFAULT_APPROVAL_TIMEOUT_MS };
 
 /**
  * M0 的權限掛點：所有工具都回 `ask-human`。
  *
- * 硬規則與「全部允許」在 M1 實作；掛點與呼叫順序不變，之後只換這個實作。
+ * 保留給示範工具與沒有硬規則閘道的組裝；產品組裝改用
+ * `createToolPermissionGate`（`packages/host/src/permissions/gate.ts`）。
+ * 掛點與呼叫順序不變。
  */
 export const m0PermissionGate: ToolPermissionGate = {
   evaluate(request): Promise<ToolPermissionVerdict> {

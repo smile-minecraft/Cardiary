@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -26,15 +26,18 @@ afterEach(() => {
   }
 });
 
+interface SandboxedService {
+  readonly port: number;
+  readonly token: string;
+  readonly stderr: () => string;
+}
+
 async function runSandboxed(
   folder: string,
   scriptPath: string,
   profilePath: string,
-): Promise<{
-  readonly port: number;
-  readonly token: string;
-  readonly stderr: () => string;
-}> {
+  options: { readonly demo: boolean },
+): Promise<SandboxedService> {
   const here = dirname(fileURLToPath(import.meta.url));
   const entry = resolve(here, "../dist/main.js");
   const child = spawn(
@@ -46,7 +49,7 @@ async function runSandboxed(
       entry,
       "--engine",
       "pi",
-      "--demo",
+      ...(options.demo ? ["--demo"] : []),
       "--initialize-folder",
       "--script",
       scriptPath,
@@ -97,6 +100,146 @@ async function runSandboxed(
   return { port: ready.port, token: ready.token, stderr: () => stderr };
 }
 
+/** 最小協定客戶端；sandbox 測試只需要請求、事件與逾時等待。 */
+async function connectClient(service: SandboxedService) {
+  const ws = new WebSocket(`ws://127.0.0.1:${service.port}/v1/ws`);
+  await new Promise<void>((resolveOpen, reject) => {
+    ws.once("open", () => resolveOpen());
+    ws.once("error", reject);
+  });
+  const frames: Array<Record<string, unknown>> = [];
+  ws.on("message", (data) => {
+    frames.push(JSON.parse(data.toString()) as Record<string, unknown>);
+  });
+  let counter = 0;
+  const send = (type: string, payload: Record<string, unknown>): string => {
+    const id = String(++counter);
+    ws.send(JSON.stringify({ v: 1, kind: "request", id, type, payload }));
+    return id;
+  };
+  const waitFor = async (
+    predicate: (frame: Record<string, unknown>) => boolean,
+    ms = 20_000,
+  ): Promise<Record<string, unknown>> => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      const found = frames.find(predicate);
+      if (found) return found;
+      await new Promise((resolveTick) => setTimeout(resolveTick, 20));
+    }
+    throw new Error(`等待 frame 逾時；已收到 ${frames.length} 則`);
+  };
+  const request = async (
+    type: string,
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> => {
+    const id = send(type, payload);
+    return waitFor((frame) => frame.replyTo === id);
+  };
+  const hello = await request("system.hello", {
+    protocol: { min: 1, max: 1 },
+    client: { name: "sandbox", version: "0", platform: "other", instanceId: "s1" },
+    auth: { token: service.token },
+  });
+  expect(hello.kind).toBe("response");
+  return {
+    frames,
+    request,
+    waitFor,
+    async close() {
+      await new Promise<void>((resolveClose) => {
+        ws.once("close", () => resolveClose());
+        ws.close();
+      });
+    },
+  };
+}
+
+type Client = Awaited<ReturnType<typeof connectClient>>;
+
+async function openSession(client: Client, clientRequestId: string): Promise<string> {
+  const created = await client.request("session.create", { clientRequestId });
+  const sessionId = (created.payload as { session: { id: string } }).session.id;
+  await client.request("session.subscribe", { sessionId });
+  return sessionId;
+}
+
+async function sendMessage(
+  client: Client,
+  sessionId: string,
+  text: string,
+  clientMessageId: string,
+): Promise<void> {
+  await client.request("session.send_message", {
+    sessionId,
+    text,
+    delivery: "queue",
+    clientMessageId,
+  });
+}
+
+/** 核准或拒絕一筆審批；sandbox 測試的審批都是本機工具發出的。 */
+async function decide(
+  client: Client,
+  approvalId: string,
+  optionId: "approve" | "deny" | "always",
+): Promise<Record<string, unknown>> {
+  return client.request("approval.decide", { approvalId, optionId });
+}
+
+/**
+ * 依序核准審批，直到累積 `count` 個工具結果。
+ *
+ * 產品引擎在同一個回合裡連續執行腳本中的工具呼叫，審批會一個接一個出現；
+ * 這裡不假設「一個訊息一個回合」。
+ */
+async function runTools(
+  client: Client,
+  count: number,
+): Promise<readonly Record<string, unknown>[]> {
+  let decided = 0;
+  for (;;) {
+    const approvals = client.frames.filter((frame) => frame.type === "approval.requested");
+    const results = () => client.frames.filter((frame) => frame.type === "stream.tool_result");
+    if (results().length >= count) return results();
+    await client.waitFor(
+      () =>
+        client.frames.filter((frame) => frame.type === "approval.requested").length > decided ||
+        client.frames.filter((frame) => frame.type === "stream.tool_result").length >= count,
+    );
+    const next = client.frames.filter((frame) => frame.type === "approval.requested");
+    if (next.length > decided) {
+      const latest = next[next.length - 1]!;
+      await decide(client, (latest.payload as { approvalId: string }).approvalId, "approve");
+      decided = next.length;
+      continue;
+    }
+    if (approvals.length === 0) {
+      await client.waitFor(
+        () => client.frames.filter((frame) => frame.type === "approval.requested").length > 0,
+      );
+    }
+  }
+}
+
+async function writeProfile(root: string, folder: string): Promise<string> {
+  const profilePath = join(root, "profile.sb");
+  await writeFile(
+    profilePath,
+    [
+      "(version 1)",
+      "(allow default)",
+      "(deny file-write*)",
+      "(allow file-write*",
+      `  (subpath "${folder}")`,
+      '  (subpath "/dev")',
+      ")",
+      "",
+    ].join("\n"),
+  );
+  return profilePath;
+}
+
 describe.skipIf(!darwin || !existsSync("/usr/bin/sandbox-exec"))(
   "sandbox-exec 白名單（資料夾外零寫入）",
   () => {
@@ -108,20 +251,7 @@ describe.skipIf(!darwin || !existsSync("/usr/bin/sandbox-exec"))(
       await mkdir(folder, { recursive: true });
       const scriptPath = join(root, "script.json");
       await writeFile(scriptPath, JSON.stringify([[{ kind: "text", text: "沙盒回覆" }]]));
-      const profilePath = join(root, "profile.sb");
-      await writeFile(
-        profilePath,
-        [
-          "(version 1)",
-          "(allow default)",
-          "(deny file-write*)",
-          "(allow file-write*",
-          `  (subpath "${folder}")`,
-          '  (subpath "/dev")',
-          ")",
-          "",
-        ].join("\n"),
-      );
+      const profilePath = await writeProfile(root, folder);
 
       // 正向對照：profile 必須真的擋住資料夾外的寫入，也要允許資料夾內的寫入。
       // 只 grep stderr 的話，profile 寫壞了也可能看起來「沒有 deny」。
@@ -139,7 +269,7 @@ describe.skipIf(!darwin || !existsSync("/usr/bin/sandbox-exec"))(
       expect(outsideAttempt).toBe("denied");
       expect(existsSync(outside)).toBe(false);
 
-      const service = await runSandboxed(folder, scriptPath, profilePath);
+      const service = await runSandboxed(folder, scriptPath, profilePath, { demo: true });
       expect(service.token.length).toBe(43);
 
       // 反向對照：同一個 profile 允許寫資料夾（服務啟動後才寫，避免影響初始化）。
@@ -156,79 +286,65 @@ describe.skipIf(!darwin || !existsSync("/usr/bin/sandbox-exec"))(
       );
       expect(insideAttempt).toBe("written");
 
-      const ws = new WebSocket(`ws://127.0.0.1:${service.port}/v1/ws`);
-      await new Promise<void>((resolveOpen, reject) => {
-        ws.once("open", () => resolveOpen());
-        ws.once("error", reject);
-      });
-      const frames: Array<Record<string, unknown>> = [];
-      ws.on("message", (data) => {
-        frames.push(JSON.parse(data.toString()) as Record<string, unknown>);
-      });
-      const send = (frame: Record<string, unknown>): void => {
-        ws.send(JSON.stringify(frame));
-      };
-      const waitFor = async (
-        predicate: (frame: Record<string, unknown>) => boolean,
-        ms = 20_000,
-      ): Promise<Record<string, unknown>> => {
-        const deadline = Date.now() + ms;
-        while (Date.now() < deadline) {
-          const found = frames.find(predicate);
-          if (found) return found;
-          await new Promise((resolveTick) => setTimeout(resolveTick, 20));
-        }
-        throw new Error(`等待 frame 逾時；已收到 ${frames.length} 則`);
-      };
-
-      send({
-        v: 1,
-        kind: "request",
-        id: "1",
-        type: "system.hello",
-        payload: {
-          protocol: { min: 1, max: 1 },
-          client: { name: "sandbox", version: "0", platform: "other", instanceId: "s1" },
-          auth: { token: service.token },
-        },
-      });
-      await waitFor((frame) => frame.replyTo === "1");
-      send({
-        v: 1,
-        kind: "request",
-        id: "2",
-        type: "session.create",
-        payload: { clientRequestId: "sandbox-1" },
-      });
-      const created = await waitFor((frame) => frame.replyTo === "2");
-      const sessionId = (created.payload as { session: { id: string } }).session.id;
-      send({
-        v: 1,
-        kind: "request",
-        id: "3",
-        type: "session.subscribe",
-        payload: { sessionId },
-      });
-      await waitFor((frame) => frame.replyTo === "3");
-      send({
-        v: 1,
-        kind: "request",
-        id: "4",
-        type: "session.send_message",
-        payload: { sessionId, text: "沙盒測試", delivery: "queue", clientMessageId: "sb-1" },
-      });
-      await waitFor((frame) => frame.replyTo === "4");
-      const completed = await waitFor(
-        (frame) =>
-          frame.type === "stream.message_completed" &&
-          (frame.payload as { entry: { text: string } }).entry.text === "沙盒回覆",
-      );
-      expect(completed.type).toBe("stream.message_completed");
-      await new Promise<void>((resolveClose) => {
-        ws.once("close", () => resolveClose());
-        ws.close();
-      });
+      const client = await connectClient(service);
+      try {
+        const sessionId = await openSession(client, "sandbox-1");
+        await sendMessage(client, sessionId, "沙盒測試", "sb-1");
+        const completed = await client.waitFor(
+          (frame) =>
+            frame.type === "stream.message_completed" &&
+            (frame.payload as { entry: { text: string } }).entry.text === "沙盒回覆",
+        );
+        expect(completed.type).toBe("stream.message_completed");
+      } finally {
+        await client.close();
+      }
       expect(service.stderr()).not.toContain("deny file-write");
     }, 60_000);
+
+    it("跑過真實的檔案工具後，資料夾外仍然沒有寫入", async () => {
+      const root = realpathSync(await mkdtemp(join(tmpdir(), "cardiary-sandbox-tools-")));
+      const folder = join(root, "Cardiary");
+      await mkdir(folder, { recursive: true });
+      const scriptPath = join(root, "script.json");
+      // `run_command` 自己會在子行程外層套 sandbox-exec；macOS 不支援巢狀沙盒
+      // （第二層會得到 sandbox_apply: Operation not permitted），所以這一輪只量
+      // 服務層級的寫入。指令工具的越界寫入由本機工具自己的沙盒測試涵蓋。
+      await writeFile(
+        scriptPath,
+        JSON.stringify([
+          [
+            {
+              kind: "tool",
+              toolName: "write_file",
+              input: { path: "notes/output.txt", content: "沙盒寫入" },
+            },
+            {
+              kind: "tool",
+              toolName: "write_file",
+              input: { path: "notes/second.txt", content: "第二次" },
+            },
+          ],
+        ]),
+      );
+      const profilePath = await writeProfile(root, folder);
+      await mkdir(join(folder, "notes"), { recursive: true });
+
+      const service = await runSandboxed(folder, scriptPath, profilePath, { demo: false });
+      const client = await connectClient(service);
+      try {
+        const sessionId = await openSession(client, "sandbox-tools");
+        await sendMessage(client, sessionId, "跑工具", "sbt-1");
+        const results = await runTools(client, 2);
+
+        expect((results[0]!.payload as { status: string }).status).toBe("ok");
+        expect((results[1]!.payload as { status: string }).status).toBe("ok");
+        expect(readFileSync(join(folder, "notes/output.txt"), "utf8")).toBe("沙盒寫入");
+        expect(readFileSync(join(folder, "notes/second.txt"), "utf8")).toBe("第二次");
+        expect(service.stderr()).not.toContain("deny file-write");
+      } finally {
+        await client.close();
+      }
+    }, 90_000);
   },
 );
