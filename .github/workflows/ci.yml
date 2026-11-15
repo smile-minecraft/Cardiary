@@ -1,9 +1,10 @@
 name: CI
 
+# main 不在 push 時自動跑 CI，避免每個 PR 合併後再消耗一次 macOS runner。
+# 需要 main 的完整 CI 時手動觸發：gh workflow run CI --ref main
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -24,6 +25,7 @@ jobs:
 
   macos:
     # 殼與 CardiaryKit 只能在 macOS 建置；與 ubuntu 的 check 平行跑。
+    # lint、格式與在 ubuntu 可跑的 vitest 由 ubuntu 的 check 負責；這裡只做 macOS 獨有的 vitest、Swift 測試與 App 組裝。
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -33,9 +35,20 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # 契約測試會啟動建置後的主機服務，所以先跑 TypeScript 那一半。
-      - name: TypeScript 檢查
-        run: pnpm check
+      # Swift 測試與 App 組裝會啟動真的主機服務，需要 packages/host/dist。
+      - name: TypeScript 建置
+        run: pnpm build
+      # SwiftPM 的快取：套件清單或 Package.resolved 變了才換 key。
+      - name: 快取 SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            apple/CardiaryKit/.build
+            apps/macos/.build
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('**/Package.resolved', 'apple/CardiaryKit/Package.swift', 'apps/macos/Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-
       # 本機用 Xcode 27.2 開發；runner 有這個版本就用它，沒有就用預設版本
       # （殼的程式碼已改成不依賴編譯器的名稱解析順序，兩個版本都要能編）。
       - name: 選擇 Xcode 27.2
@@ -45,6 +58,18 @@ jobs:
           xcode-version: "27.2"
       - name: 顯示 Xcode 版本
         run: xcodebuild -version
+      # 這些測試在 ubuntu 會因平台不符而 skip，只在 macOS runner 上真的執行。
+      - name: macOS 專屬測試
+        run: >-
+          pnpm vitest run
+          packages/host/test/sandbox.test.ts
+          packages/host/test/permissions/sandbox.test.ts
+          packages/host/test/modules/local-tools/sandbox.test.ts
+          packages/host/test/modules/local-tools/tools.test.ts
+          packages/host/test/modules/local-tools/integration.test.ts
+      # 契約測試只有這一個測試有 darwin 分支；用名稱篩選，不跑整包契約測試。
+      - name: 控制面的 darwin 檢查
+        run: pnpm vitest run packages/contract-tests/test/contract.test.ts -t "控制面不開 TCP listener"
       - name: CardiaryKit 測試
         working-directory: apple/CardiaryKit
         run: swift test
