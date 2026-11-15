@@ -7,8 +7,9 @@ import CardiaryShellCore
 /// 用檔案式登入鑰匙圈（`kSecClassGenericPassword`，不加
 /// `kSecUseDataProtectionKeychain`）：spike 實測資料保護鑰匙圈需要
 /// provisioning 授權的 entitlement，官網直下載的 App 沒有。服務本身沒有任何
-/// Security framework 呼叫，只能經 `broker.keychain.get` 讀單一帳號。
-final class KeychainStore: KeychainReading, @unchecked Sendable {
+/// Security framework 呼叫，只能經 `broker.keychain.get` 讀單一帳號；
+/// 設定頁的寫入走 `KeychainWriting`，與讀取共用同一個 service。
+final class KeychainStore: KeychainReading, KeychainWriting, @unchecked Sendable {
     private let service: String
 
     init(service: String = "com.cardiary.shell") {

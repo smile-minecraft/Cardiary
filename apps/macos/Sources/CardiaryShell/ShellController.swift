@@ -1,6 +1,11 @@
 import AppKit
+import CardiaryApp
 import CardiaryKit
 import CardiaryShellCore
+
+/// 殼自己的字串（選單列、資料夾錯誤）留在 `CardiaryShellCore`；產品介面的字串在
+/// `CardiaryApp` 的 `.xcstrings`。兩個模組都有 `L10n`，所以在這裡指定殼的那一份。
+private typealias L10n = CardiaryShellCore.L10n
 
 /// 殼的主要協調者：資料夾授權、服務監管、選單列與視窗。
 @MainActor
@@ -45,6 +50,9 @@ final class ShellController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private var infoWindow: InfoWindowController?
+    private var appModel: AppModel?
+    private var mainWindow: MainWindowController?
+    private var versionNeedsUpdate = false
     private var volumeObservers: [NSObjectProtocol] = []
     private var securityScopedURL: URL?
     private var warningShownForPath: String?
@@ -88,13 +96,61 @@ final class ShellController: NSObject {
         scheduleDailyPrune()
         loadAuthorization()
 
+        installAppModel()
+
         if authorization == nil {
             refreshMenu()
-            presentFirstRun()
+            showMainWindow()
         } else {
             refreshFolder(startService: true)
             refreshMenu()
         }
+    }
+
+    /// 建立產品介面的根狀態，並把殼能做的事交給它。
+    private func installAppModel() {
+        // 設定頁的金鑰只在這個行程內寫入鑰匙圈；介面只拿到 `KeychainWriting`。
+        let model = AppModel(
+            bridge: ShellBridge(),
+            setupCompleted: authorization != nil,
+            keychain: keychain
+        )
+        model.bridge.actions = ShellActions(
+            chooseFolder: { [weak self] in self?.chooseFolder() },
+            retry: { [weak self] in self?.refreshFolder(startService: true) },
+            pauseAllApprovals: { [weak self] in self?.pauseAllApprovals() },
+            openMainWindow: { [weak self] in self?.showMainWindow() }
+        )
+        appModel = model
+        syncFolderToApp()
+    }
+
+    private func showMainWindow() {
+        guard let appModel else { return }
+        if mainWindow == nil {
+            mainWindow = MainWindowController(model: appModel)
+        }
+        mainWindow?.show()
+    }
+
+    /// 把殼的資料夾狀態轉成介面看得懂的形狀。
+    private func syncFolderToApp() {
+        let availability: FolderPresentation.Availability
+        switch folder.state {
+        case .ready, .verifying, .migrating:
+            availability = .ready
+        case .unselected:
+            availability = .unselected
+        case .mismatch:
+            availability = .mismatch
+        case .paused, .unavailable, .migrationFailed:
+            availability = .unavailable
+        }
+        appModel?.update(folder: FolderPresentation(
+            availability: availability,
+            displayName: folder.displayName,
+            path: folder.path
+        ))
     }
 
     /// 殼狀態目錄的清理：啟動時做一次，執行期間每天再做一次。
@@ -139,6 +195,7 @@ final class ShellController: NSObject {
 
     /// 解析書籤、確認資料夾與磁碟狀態。不建立任何資料夾。
     private func refreshFolder(startService: Bool) {
+        defer { syncFolderToApp() }
         guard let authorization else {
             setFolder(.unselected)
             return
@@ -220,7 +277,6 @@ final class ShellController: NSObject {
         }
 
         if state == .ready {
-            hideUnavailable()
             if startService {
                 startServiceIfNeeded()
             } else {
@@ -236,6 +292,7 @@ final class ShellController: NSObject {
         reason: String? = nil,
         keepPath: String? = nil
     ) {
+        defer { syncFolderToApp() }
         folder = FolderSnapshot(
             state: state,
             path: keepPath ?? folder.path,
@@ -247,25 +304,6 @@ final class ShellController: NSObject {
         folderBox.snapshot = folder
         supervisor?.folderSnapshot = folder
         refreshMenu()
-    }
-
-    private func presentFirstRun() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.message = L10n.text(.firstRunBody)
-        panel.prompt = L10n.text(.firstRunChooseFolder)
-        NSApp.activate(ignoringOtherApps: true)
-
-        guard panel.runModal() == .OK, let url = panel.url else {
-            // 首次啟動沒有選資料夾：停在「資料不可用」，不建立任何東西。
-            setFolder(.unselected, reason: "first_run_cancelled")
-            presentUnavailable()
-            return
-        }
-        adoptFolder(url)
     }
 
     private func chooseFolder() {
@@ -402,15 +440,17 @@ final class ShellController: NSObject {
             // 服務停了或換了行程：舊的 Token 與連線都失效。
             dropClientConnection()
         }
+        if snapshot.phase == .starting {
+            appModel?.update(connection: .connecting)
+        } else if snapshot.phase != .running, !versionNeedsUpdate {
+            appModel?.update(connection: .waitingForService)
+        }
         if let error = snapshot.lastError, error.hasPrefix("version_mismatch"), !reportedVersionMismatch {
             reportedVersionMismatch = true
+            versionNeedsUpdate = true
             log.write("背景服務版本不符：\(error)")
-            presentInfo(
-                title: L10n.text(.unavailableVersionMismatch),
-                body: L10n.text(.unavailableVersionMismatch),
-                primary: nil,
-                secondary: nil
-            )
+            appModel?.update(connection: .needsUpdate)
+            showMainWindow()
         }
         refreshMenu()
     }
@@ -432,6 +472,10 @@ final class ShellController: NSObject {
         guard let existing = client else { return }
         client = nil
         approvalCount = nil
+        appModel?.detachClient()
+        if !versionNeedsUpdate {
+            appModel?.update(connection: .waitingForService)
+        }
         Task { await existing.stop() }
         refreshMenu()
     }
@@ -463,10 +507,29 @@ final class ShellController: NSObject {
                 )
             }
         }
+        // 選單列只要數量；檢視欄要完整清單。兩者都來自同一份待審批狀態。
         client.handlers.onApprovalCount = { [weak self] count in
             Task { @MainActor in
                 self?.approvalCount = count
                 self?.refreshMenu()
+            }
+        }
+        client.handlers.onApprovals = { [weak self] requests in
+            Task { @MainActor in
+                self?.appModel?.update(approvals: requests)
+            }
+        }
+        client.handlers.onStateChange = { [weak self] state in
+            Task { @MainActor in self?.applyClientState(state) }
+        }
+        // 介面只訂閱它需要的串流；事件由 AppModel 過濾。
+        client.handlers.onSessionEvent = { [weak self] frame in
+            Task { @MainActor in self?.appModel?.handle(sessionEvent: frame) }
+        }
+        client.handlers.onEpochChange = { [weak self] epoch in
+            Task { @MainActor in
+                guard let model = self?.appModel else { return }
+                await model.handleEpochChange(epoch: epoch)
             }
         }
         client.handlers.onDiagnostic = { [weak self] message in
@@ -474,6 +537,22 @@ final class ShellController: NSObject {
         }
         self.client = client
         Task { await client.start() }
+    }
+
+    /// 客戶端狀態轉給介面：連線中、已連線（帶 epoch）或中斷。
+    private func applyClientState(_ state: CardiaryClient.State) {
+        switch state {
+        case .idle, .stopped:
+            if !versionNeedsUpdate { appModel?.update(connection: .waitingForService) }
+        case .connecting:
+            appModel?.update(connection: .connecting)
+        case .connected(let epoch, _):
+            // 完成 system.hello 之後才把服務交給介面；連線前送出的設定請求會被主機拒絕。
+            if let client { appModel?.attach(client: client) }
+            appModel?.update(connection: .connected(epoch: epoch))
+        case .disconnected(let reason):
+            if !versionNeedsUpdate { appModel?.update(connection: .disconnected(reason: reason)) }
+        }
     }
 
     private func stopServiceForUser() {
@@ -704,6 +783,10 @@ final class ShellController: NSObject {
         pauseAll.isEnabled = client != nil
         menu.addItem(pauseAll)
 
+        for item in commandMenuItems() {
+            menu.addItem(item)
+        }
+
         let stop = NSMenuItem(
             title: L10n.text(.menuStopService),
             action: #selector(stopServiceAction),
@@ -714,6 +797,14 @@ final class ShellController: NSObject {
         menu.addItem(stop)
 
         menu.addItem(.separator())
+
+        let openWindow = NSMenuItem(
+            title: AppL10n.text(ShellString.menuOpenMainWindow),
+            action: #selector(openMainWindowAction),
+            keyEquivalent: ""
+        )
+        openWindow.target = self
+        menu.addItem(openWindow)
 
         let choose = NSMenuItem(
             title: L10n.text(.menuChooseFolder),
@@ -767,6 +858,42 @@ final class ShellController: NSObject {
         pauseAllApprovals()
     }
 
+    @objc private func openMainWindowAction() {
+        showMainWindow()
+    }
+
+    /// 介面註冊的選單群組（檢視、卡片、匯入）。其他工作往群組加命令，殼不必改。
+    private func commandMenuItems() -> [NSMenuItem] {
+        guard let appModel else { return [] }
+        return appModel.commands.groups.compactMap { group in
+            guard !group.commands.isEmpty else { return nil }
+            let submenu = NSMenu(title: AppL10n.text(group.titleKey))
+            for command in group.commands {
+                let item = NSMenuItem(
+                    title: AppL10n.text(command.titleKey),
+                    action: #selector(runAppCommand(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = command.id
+                submenu.addItem(item)
+            }
+            let entry = NSMenuItem(title: AppL10n.text(group.titleKey), action: nil, keyEquivalent: "")
+            entry.submenu = submenu
+            return entry
+        }
+    }
+
+    @objc private func runAppCommand(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, let appModel else { return }
+        for group in appModel.commands.groups {
+            if let command = group.commands.first(where: { $0.id == id }) {
+                command.action()
+                return
+            }
+        }
+    }
+
     @objc private func stopServiceAction() {
         stopServiceForUser()
     }
@@ -805,23 +932,9 @@ final class ShellController: NSObject {
 
     // MARK: - 視窗
 
+    /// 資料不可用時顯示主視窗；內容由 `CardiaryApp` 的 AppModel 決定。
     private func presentUnavailable() {
-        if infoWindow == nil {
-            infoWindow = InfoWindowController()
-        }
-        infoWindow?.present(
-            title: L10n.text(.unavailableTitle),
-            body: L10n.text(.unavailableBody),
-            primaryTitle: L10n.text(.unavailableChooseFolder),
-            primaryAction: { [weak self] in self?.chooseFolder() },
-            secondaryTitle: L10n.text(.unavailableRetry),
-            secondaryAction: { [weak self] in self?.refreshFolder(startService: true) }
-        )
-    }
-
-    private func hideUnavailable() {
-        infoWindow?.close()
-        infoWindow = nil
+        showMainWindow()
     }
 
     private func presentInfo(title: String, body: String, primary: String?, secondary: String?) {

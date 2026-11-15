@@ -81,6 +81,18 @@ final class StreamBookkeepingTests: XCTestCase {
         XCTAssertEqual(model.cursor.lastSeq, 4)
     }
 
+    func testCompletionClearsStreamingWhenEngineIdsDiffer() throws {
+        var model = SessionStreamModel(sessionId: "sess_1", epoch: "epoch_a", lastSeq: 3)
+        _ = model.apply(try decodeDelta(delta: "我先確認", messageId: "msg_turn_1"))
+        XCTAssertEqual(model.streaming?.messageId, "msg_turn_1")
+
+        // Pi 轉接層的增量識別碼是 msg_<turnId>，完成訊息用引擎的訊息編號；
+        // 兩者不同時仍要用回合把進行中的文字收掉。
+        _ = model.apply(try decodeCompletedMessage(text: "我先確認。", seq: 4, id: "14"))
+        XCTAssertNil(model.streaming)
+        XCTAssertEqual(model.lastCompletedMessageId, "14")
+    }
+
     func testNonDurableDeltaDoesNotAdvanceCursor() throws {
         var model = SessionStreamModel(sessionId: "sess_1", epoch: "epoch_a", lastSeq: 7)
         _ = model.apply(try decodeDelta(delta: "更多"))
@@ -93,12 +105,41 @@ final class StreamBookkeepingTests: XCTestCase {
         counter.apply(try decodeApprovalRequested(approvalId: "appr_1"))
         counter.apply(try decodeApprovalRequested(approvalId: "appr_2"))
         XCTAssertEqual(counter.count, 2)
+        XCTAssertEqual(counter.requests.map(\.approvalId), ["appr_1", "appr_2"])
+        XCTAssertEqual(counter.requests.first?.title, "需要核准")
+        XCTAssertEqual(counter.requests.first?.scope.target, "bash")
 
         counter.apply(try decodeApprovalDecided(approvalId: "appr_1"))
         XCTAssertEqual(counter.count, 1)
+        XCTAssertEqual(counter.requests.map(\.approvalId), ["appr_2"])
 
         counter.reset()
         XCTAssertEqual(counter.count, 0)
+        XCTAssertTrue(counter.requests.isEmpty)
+    }
+
+    func testApprovalCounterAdoptsSnapshotPerSession() throws {
+        var counter = ApprovalCounter()
+        counter.apply(try decodeApprovalRequested(approvalId: "appr_1"))
+        counter.apply(try decodeApprovalRequested(approvalId: "appr_other_session", sessionId: "sess_2"))
+        counter.apply(try decodeApprovalRequested(approvalId: "appr_2"))
+
+        // 快照是主機現況：同一個會話只留快照帶的那一筆，其他會話不受影響。
+        let snapshotApproval = try JSONDecoder().decode(
+            ApprovalRequest.self,
+            from: JSONSerialization.data(withJSONObject: [
+                "approvalId": "appr_3",
+                "sessionId": "sess_1",
+                "turnId": "turn_2",
+                "title": "寫入檔案",
+                "scope": ["kind": "tool_call", "target": "write_file"],
+                "options": [["id": "approve", "label": "核准", "effect": "approve"]],
+                "requestedAt": "2026-11-14T10:00:02Z",
+            ])
+        )
+        counter.adoptSnapshot(snapshotApproval, sessionId: "sess_1")
+
+        XCTAssertEqual(Set(counter.requests.map(\.approvalId)), ["appr_3", "appr_other_session"])
     }
 
     // MARK: - 測試資料
@@ -149,7 +190,7 @@ final class StreamBookkeepingTests: XCTestCase {
         return try JSONDecoder().decode(SessionSnapshot.self, from: data)
     }
 
-    private func decodeDelta(delta: String) throws -> ServerFrame {
+    private func decodeDelta(delta: String, messageId: String = "msg_1") throws -> ServerFrame {
         let json = JSONFixture.string([
             "v": 1,
             "kind": "event",
@@ -160,14 +201,14 @@ final class StreamBookkeepingTests: XCTestCase {
             "payload": [
                 "sessionId": "sess_1",
                 "turnId": "turn_1",
-                "messageId": "msg_1",
+                "messageId": messageId,
                 "delta": delta,
             ],
         ])
         return try JSONDecoder().decode(ServerFrame.self, from: Data(json.utf8))
     }
 
-    private func decodeCompletedMessage(text: String, seq: Int) throws -> ServerFrame {
+    private func decodeCompletedMessage(text: String, seq: Int, id: String = "msg_1") throws -> ServerFrame {
         let json = JSONFixture.string([
             "v": 1,
             "kind": "event",
@@ -179,7 +220,7 @@ final class StreamBookkeepingTests: XCTestCase {
                 "sessionId": "sess_1",
                 "turnId": "turn_1",
                 "entry": [
-                    "id": "msg_1",
+                    "id": id,
                     "role": "assistant",
                     "turnId": "turn_1",
                     "createdAt": "2026-11-14T10:00:02Z",
@@ -191,17 +232,17 @@ final class StreamBookkeepingTests: XCTestCase {
         return try JSONDecoder().decode(ServerFrame.self, from: Data(json.utf8))
     }
 
-    private func decodeApprovalRequested(approvalId: String) throws -> ServerFrame {
+    private func decodeApprovalRequested(approvalId: String, sessionId: String = "sess_1") throws -> ServerFrame {
         let json = JSONFixture.string([
             "v": 1,
             "kind": "event",
             "type": "approval.requested",
-            "stream": "session:sess_1",
+            "stream": "session:\(sessionId)",
             "seq": 1,
             "emittedAt": "2026-11-14T10:00:00Z",
             "payload": [
                 "approvalId": approvalId,
-                "sessionId": "sess_1",
+                "sessionId": sessionId,
                 "turnId": "turn_1",
                 "title": "需要核准",
                 "scope": ["kind": "tool_call", "target": "bash"],

@@ -140,6 +140,24 @@ public actor CardiaryConnection {
         return response.payload
     }
 
+    /// 取消訂閱單一會話串流。
+    public func unsubscribeSession(
+        sessionId: String,
+        options: RequestOptions = .default
+    ) async throws -> SessionUnsubscribeResponsePayload {
+        let request = SessionUnsubscribeRequest(
+            id: RequestID.next(),
+            payload: SessionUnsubscribeRequestPayload(sessionId: sessionId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .sessionUnsubscribeResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "session.unsubscribe 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
     public func listSessions(
         cursor: String? = nil,
         limit: Int? = nil,
@@ -190,6 +208,160 @@ public actor CardiaryConnection {
         guard case .sessionCreateResponse(let response) = frame else {
             throw CardiaryClientError.invalidFrame(
                 "session.create 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 取得對話的歷史訊息；不帶 `cursor` 時從最新一段開始。
+    public func getHistory(
+        sessionId: String,
+        cursor: String? = nil,
+        limit: Int? = nil,
+        options: RequestOptions = .default
+    ) async throws -> SessionGetHistoryResponsePayload {
+        let request = SessionGetHistoryRequest(
+            id: RequestID.next(),
+            payload: SessionGetHistoryRequestPayload(sessionId: sessionId, cursor: cursor, limit: limit)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .sessionGetHistoryResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "session.get_history 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 中斷一場對話進行中的工作。
+    public func interruptSession(
+        sessionId: String,
+        reason: String? = nil,
+        options: RequestOptions = .default
+    ) async throws -> SessionInterruptResponsePayload {
+        let request = SessionInterruptRequest(
+            id: RequestID.next(),
+            payload: SessionInterruptRequestPayload(sessionId: sessionId, reason: reason)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .sessionInterruptResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "session.interrupt 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func getModels(
+        options: RequestOptions = .default
+    ) async throws -> SystemModelsState {
+        let request = SystemModelsGetRequest(
+            id: RequestID.next(),
+            payload: SystemModelsGetRequestPayload()
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .systemModelsGetResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "system.models.get 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func setModels(
+        providers: [ModelProviderInfo]? = nil,
+        roles: [ModelRoleSelection]? = nil,
+        clientRequestId: String,
+        options: RequestOptions = .default
+    ) async throws -> SystemModelsState {
+        let request = SystemModelsSetRequest(
+            id: RequestID.next(),
+            payload: SystemModelsSetRequestPayload(
+                providers: providers,
+                roles: roles,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .systemModelsSetResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "system.models.set 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func getSettings(
+        options: RequestOptions = .default
+    ) async throws -> SystemSettingsGetResponsePayload {
+        let request = SystemSettingsGetRequest(
+            id: RequestID.next(),
+            payload: SystemSettingsGetRequestPayload()
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .systemSettingsGetResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "system.settings.get 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func setSettings(
+        changes: [SettingChange],
+        clientRequestId: String,
+        options: RequestOptions = .default
+    ) async throws -> SystemSettingsSetResponsePayload {
+        let request = SystemSettingsSetRequest(
+            id: RequestID.next(),
+            payload: SystemSettingsSetRequestPayload(
+                changes: changes,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .systemSettingsSetResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "system.settings.set 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func getModules(
+        options: RequestOptions = .default
+    ) async throws -> SystemModulesGetResponsePayload {
+        let request = SystemModulesGetRequest(
+            id: RequestID.next(),
+            payload: SystemModulesGetRequestPayload()
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .systemModulesGetResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "system.modules.get 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func setModuleEnabled(
+        moduleId: String,
+        enabled: Bool,
+        clientRequestId: String,
+        options: RequestOptions = .default
+    ) async throws -> SystemModulesSetEnabledResponsePayload {
+        let request = SystemModulesSetEnabledRequest(
+            id: RequestID.next(),
+            payload: SystemModulesSetEnabledRequestPayload(
+                moduleId: moduleId,
+                enabled: enabled,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .systemModulesSetEnabledResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "system.modules.set_enabled 收到 \(frame.kindLabel) 而不是回應。"
             )
         }
         return response.payload
@@ -381,6 +553,18 @@ public actor CardiaryConnection {
         case .approvalDecideResponse(let response):
             resume(response.replyTo, with: frame)
         case .approvalPauseAllResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .systemModelsGetResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .systemModelsSetResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .systemSettingsGetResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .systemSettingsSetResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .systemModulesGetResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .systemModulesSetEnabledResponse(let response):
             resume(response.replyTo, with: frame)
         case .moduleResponse(let response):
             resume(response.replyTo, with: frame)

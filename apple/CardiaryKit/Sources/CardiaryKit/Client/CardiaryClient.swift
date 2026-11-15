@@ -74,6 +74,8 @@ public actor CardiaryClient {
     private var systemModel = SystemStatusModel()
     private var sessions: [String: SessionStreamModel] = [:]
     private var approvals = ApprovalCounter()
+    /// 介面明確訂閱的會話。重連時除了進行中的會話，也要重新訂閱這些。
+    private var subscribedSessionIds: Set<String> = []
     private var forceFullSnapshot = false
     private var hasConnectedBefore = false
 
@@ -91,6 +93,9 @@ public actor CardiaryClient {
     public var currentState: State { state }
 
     public var systemStatus: SystemStatus? { systemModel.status }
+
+    /// 目前的待審批清單（依請求時間排序）。介面在重連後用它補回內容。
+    public var pendingApprovals: [ApprovalRequest] { approvals.requests }
 
     public func start() {
         guard runTask == nil else { return }
@@ -111,6 +116,170 @@ public actor CardiaryClient {
     public func pauseAllApprovals(reason: String) async throws {
         guard let connection else { throw CardiaryClientError.connectionClosed }
         _ = try await connection.pauseAllApprovals(reason: reason)
+    }
+
+    // MARK: - 介面使用的請求
+
+    /// 列出會話的一頁；`listAllSessions()` 會自動翻頁。
+    public func listSessions(
+        cursor: String? = nil,
+        limit: Int? = nil
+    ) async throws -> SessionListResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.listSessions(cursor: cursor, limit: limit)
+    }
+
+    /// 翻頁列出全部會話。頁數有上限，避免主機出問題時無限迴圈。
+    public func listAllSessions() async throws -> [SessionSummary] {
+        var summaries: [SessionSummary] = []
+        var cursor: String?
+        var pageCount = 0
+        repeat {
+            let page = try await listSessions(cursor: cursor, limit: 50)
+            summaries.append(contentsOf: page.sessions)
+            cursor = page.nextCursor
+            pageCount += 1
+        } while cursor != nil && pageCount < 20
+        return summaries
+    }
+
+    public func createSession(
+        clientRequestId: String,
+        title: String? = nil
+    ) async throws -> SessionCreateResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.createSession(clientRequestId: clientRequestId, title: title)
+    }
+
+    public func sendMessage(
+        sessionId: String,
+        text: String,
+        delivery: DeliveryMode = .queue,
+        clientMessageId: String? = nil
+    ) async throws -> SessionSendMessageResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.sendMessage(
+            sessionId: sessionId,
+            text: text,
+            delivery: delivery,
+            clientMessageId: clientMessageId
+        )
+    }
+
+    public func interruptSession(
+        sessionId: String,
+        reason: String? = nil
+    ) async throws -> SessionInterruptResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.interruptSession(sessionId: sessionId, reason: reason)
+    }
+
+    /// 取得對話歷史；不帶 `cursor` 時從最新一段開始，往回翻頁帶上次回傳的游標。
+    public func getHistory(
+        sessionId: String,
+        cursor: String? = nil,
+        limit: Int? = nil
+    ) async throws -> SessionGetHistoryResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.getHistory(sessionId: sessionId, cursor: cursor, limit: limit)
+    }
+
+    /// 訂閱一場會話。記錄在內部，重連時會自動重新訂閱（含帶 lastSeq 補送）。
+    /// 回傳的快照（如果有）由呼叫端套用到畫面上。
+    public func subscribeSession(
+        sessionId: String,
+        historyLimit: Int? = nil
+    ) async throws -> SessionSubscribeResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        let existing = sessions[sessionId]
+        let base = existing?.cursor ?? StreamCursor(stream: "session:\(sessionId)")
+        let parameters = base.subscriptionParameters(currentEpoch: systemModel.cursor.epoch ?? "")
+        let response = try await connection.subscribeSession(
+            sessionId: sessionId,
+            lastSeq: parameters.lastSeq,
+            epoch: parameters.epoch,
+            historyLimit: historyLimit
+        )
+        var model = existing ?? SessionStreamModel(sessionId: sessionId)
+        if let snapshot = response.snapshot {
+            model.applySnapshot(snapshot, epoch: response.epoch, seq: response.seq)
+            // 快照帶著主機現在的待審批：重連時不必等補送事件，數量與內容就正確。
+            approvals.adoptSnapshot(snapshot.pendingApproval, sessionId: sessionId)
+            publishApprovals()
+        } else {
+            model.adoptEpochOnly(response.epoch)
+        }
+        sessions[sessionId] = model
+        subscribedSessionIds.insert(sessionId)
+        return response
+    }
+
+    /// 不再訂閱這場會話：通知主機取消訂閱，並從內部記錄移除，重連時不再重訂閱。
+    /// 主機不在連線時略過通知，本地記錄照樣移除。
+    public func unsubscribeSession(sessionId: String) async {
+        subscribedSessionIds.remove(sessionId)
+        sessions.removeValue(forKey: sessionId)
+        if let connection {
+            _ = try? await connection.unsubscribeSession(sessionId: sessionId)
+        }
+    }
+
+    public func decideApproval(
+        approvalId: String,
+        optionId: String,
+        note: String? = nil
+    ) async throws -> ApprovalDecideResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.decideApproval(approvalId: approvalId, optionId: optionId, note: note)
+    }
+
+    public func getModels() async throws -> SystemModelsState {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.getModels()
+    }
+
+    public func setModels(
+        providers: [ModelProviderInfo]? = nil,
+        roles: [ModelRoleSelection]? = nil,
+        clientRequestId: String
+    ) async throws -> SystemModelsState {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.setModels(
+            providers: providers,
+            roles: roles,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func getSettings() async throws -> SystemSettingsGetResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.getSettings()
+    }
+
+    public func setSettings(
+        changes: [SettingChange],
+        clientRequestId: String
+    ) async throws -> SystemSettingsSetResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.setSettings(changes: changes, clientRequestId: clientRequestId)
+    }
+
+    public func getModules() async throws -> SystemModulesGetResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.getModules()
+    }
+
+    public func setModuleEnabled(
+        moduleId: String,
+        enabled: Bool,
+        clientRequestId: String
+    ) async throws -> SystemModulesSetEnabledResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.setModuleEnabled(
+            moduleId: moduleId,
+            enabled: enabled,
+            clientRequestId: clientRequestId
+        )
     }
 
     // MARK: - 連線迴圈
@@ -173,8 +342,10 @@ public actor CardiaryClient {
             systemModel = SystemStatusModel(epoch: handshake.epoch, lastSeq: 0)
             sessions.removeAll()
             approvals.reset()
+            publishApprovals()
             forceFullSnapshot = false
             handlers.onDiagnostic?("事件 epoch 改變（\(handshake.epoch)），重新載入快照。")
+            handlers.onEpochChange?(handshake.epoch)
         }
         hasConnectedBefore = true
         if systemModel.cursor.epoch == nil {
@@ -206,7 +377,7 @@ public actor CardiaryClient {
             systemModel.adoptEpochOnly(subscribe.epoch)
         }
 
-        if configuration.subscribeActiveSessions {
+        if configuration.subscribeActiveSessions || !subscribedSessionIds.isEmpty {
             await subscribeActiveSessions(on: connection, epoch: subscribe.epoch)
         }
 
@@ -222,32 +393,35 @@ public actor CardiaryClient {
     private func subscribeActiveSessions(on connection: CardiaryConnection, epoch: String) async {
         do {
             var summaries: [SessionSummary] = []
-            var cursor: String?
-            var pageCount = 0
-            repeat {
-                let page = try await connection.listSessions(cursor: cursor, limit: 50)
-                summaries.append(contentsOf: page.sessions)
-                cursor = page.nextCursor
-                pageCount += 1
-            } while cursor != nil && pageCount < 20
+            if configuration.subscribeActiveSessions {
+                summaries = try await listAllSessions()
+            } else {
+                // 只列進行中的會話沒有意義；呼叫端只訂閱明確記錄的會話時直接用記錄。
+                summaries = []
+            }
 
-            for summary in summaries where summary.status == .running {
-                let existing = sessions[summary.id]
-                let parameters = (existing?.cursor ?? StreamCursor(stream: "session:\(summary.id)"))
+            var idsToSubscribe = subscribedSessionIds
+            idsToSubscribe.formUnion(summaries.filter { $0.status == .running }.map(\.id))
+
+            for id in idsToSubscribe {
+                let existing = sessions[id]
+                let parameters = (existing?.cursor ?? StreamCursor(stream: "session:\(id)"))
                     .subscriptionParameters(currentEpoch: epoch)
                 let response = try await connection.subscribeSession(
-                    sessionId: summary.id,
+                    sessionId: id,
                     lastSeq: parameters.lastSeq,
                     epoch: parameters.epoch
                 )
-                var model = existing ?? SessionStreamModel(sessionId: summary.id)
+                var model = existing ?? SessionStreamModel(sessionId: id)
                 if let snapshot = response.snapshot {
                     model.applySnapshot(snapshot, epoch: response.epoch, seq: response.seq)
+                    approvals.adoptSnapshot(snapshot.pendingApproval, sessionId: id)
+                    publishApprovals()
                 } else {
                     // 同 epoch 的補送：保留 lastSeq，等事件推進。
                     model.adoptEpochOnly(response.epoch)
                 }
-                sessions[summary.id] = model
+                sessions[id] = model
             }
         } catch {
             // 會話列表失敗不影響系統串流；待審批數量會在下次重連時補上。
@@ -260,6 +434,9 @@ public actor CardiaryClient {
         connectionEpoch: String,
         connection: CardiaryConnection
     ) {
+        // 每一則事件都轉交給介面；view model 自己過濾感興趣的串流。
+        handlers.onSessionEvent?(frame)
+
         switch frame {
         case .systemStatusEvent(let event):
             let advance = systemModel.apply(event)
@@ -281,7 +458,7 @@ public actor CardiaryClient {
 
         default:
             approvals.apply(frame)
-            handlers.onApprovalCount?(approvals.count)
+            publishApprovals()
 
             if let stream = frame.eventStream, let sessionId = Self.sessionId(from: stream),
                 var model = sessions[sessionId]
@@ -294,6 +471,12 @@ public actor CardiaryClient {
                 }
             }
         }
+    }
+
+    /// 待審批數量與內容一起送給介面：選單列用數量，檢視欄用清單。
+    private func publishApprovals() {
+        handlers.onApprovalCount?(approvals.count)
+        handlers.onApprovals?(approvals.requests)
     }
 
     private static func sessionId(from stream: String) -> String? {
@@ -316,7 +499,10 @@ public final class Handlers: @unchecked Sendable {
     private var stateHandler: (@Sendable (CardiaryClient.State) -> Void)?
     private var statusHandler: (@Sendable (SystemStatus) -> Void)?
     private var approvalHandler: (@Sendable (Int) -> Void)?
+    private var approvalsHandler: (@Sendable ([ApprovalRequest]) -> Void)?
     private var diagnosticHandler: (@Sendable (String) -> Void)?
+    private var sessionEventHandler: (@Sendable (ServerFrame) -> Void)?
+    private var epochChangeHandler: (@Sendable (String) -> Void)?
 
     public init() {}
 
@@ -335,8 +521,27 @@ public final class Handlers: @unchecked Sendable {
         set { lock.lock(); approvalHandler = newValue; lock.unlock() }
     }
 
+    /// 待審批的完整清單。檢視欄用它畫內容，數量與內容在同一次呼叫送出。
+    public var onApprovals: (@Sendable ([ApprovalRequest]) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return approvalsHandler }
+        set { lock.lock(); approvalsHandler = newValue; lock.unlock() }
+    }
+
     public var onDiagnostic: (@Sendable (String) -> Void)? {
         get { lock.lock(); defer { lock.unlock() }; return diagnosticHandler }
         set { lock.lock(); diagnosticHandler = newValue; lock.unlock() }
+    }
+
+    /// 每一則伺服器事件（不含回應）都會觸發；介面過濾需要的串流。
+    public var onSessionEvent: (@Sendable (ServerFrame) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return sessionEventHandler }
+        set { lock.lock(); sessionEventHandler = newValue; lock.unlock() }
+    }
+
+    /// 收到與先前不同的 epoch（或串流缺口後被迫重載）時觸發，帶新的 epoch。
+    /// 介面應丟棄本地狀態並從快照重新載入。
+    public var onEpochChange: (@Sendable (String) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return epochChangeHandler }
+        set { lock.lock(); epochChangeHandler = newValue; lock.unlock() }
     }
 }

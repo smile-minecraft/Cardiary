@@ -10,6 +10,8 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "CardiaryShellCore", targets: ["CardiaryShellCore"]),
+        // 產品介面是 library：殼連結它並放進視窗，測試可以只測 view model。
+        .library(name: "CardiaryApp", targets: ["CardiaryApp"]),
         .executable(name: "CardiaryShell", targets: ["CardiaryShell"]),
     ],
     dependencies: [
@@ -25,8 +27,21 @@ let package = Package(
             name: "CardiaryShell",
             dependencies: [
                 "CardiaryShellCore",
+                "CardiaryApp",
                 .product(name: "CardiaryKit", package: "CardiaryKit"),
             ],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // 產品介面：SwiftUI 三欄主視窗、對話、審批與設定頁。
+        // 資源用 `.copy` 原樣放進 bundle：字串表是 `.xcstrings`，由 `L10n` 直接解碼，
+        // 不依賴 Xcode 的字串目錄編譯步驟，`swift test` 也能讀到同一份檔案。
+        .target(
+            name: "CardiaryApp",
+            dependencies: [
+                "CardiaryShellCore",
+                .product(name: "CardiaryKit", package: "CardiaryKit"),
+            ],
+            resources: [.copy("Resources")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         // 測試用的服務替身：實作控制面的服務端，讓殼端測試有真的子行程可監管。
@@ -38,6 +53,15 @@ let package = Package(
         .testTarget(
             name: "CardiaryShellCoreTests",
             dependencies: [
+                "CardiaryShellCore",
+                .product(name: "CardiaryKit", package: "CardiaryKit"),
+            ],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
+            name: "CardiaryAppTests",
+            dependencies: [
+                "CardiaryApp",
                 "CardiaryShellCore",
                 .product(name: "CardiaryKit", package: "CardiaryKit"),
             ],

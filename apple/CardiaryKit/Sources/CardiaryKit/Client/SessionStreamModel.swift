@@ -89,7 +89,7 @@ public struct SessionStreamModel: Equatable, Sendable {
             let advance = cursor.advance(to: event.seq, epoch: epoch)
             guard case .applied = advance else { return advance }
             let entry = event.payload.entry
-            if streaming?.messageId == entry.id {
+            if streaming?.messageId == entry.id || streaming?.turnId == entry.turnId {
                 streaming = nil
             }
             lastCompletedMessageId = entry.id
@@ -102,22 +102,42 @@ public struct SessionStreamModel: Equatable, Sendable {
     }
 }
 
-/// 待審批數量。殼只訂閱有進行中工作的會話，用事件維護計數。
+/// 待審批清單。殼只訂閱有進行中工作的會話，用事件維護；選單列要數量，
+/// 檢視欄要完整內容，所以這裡留著請求本身，不是只記識別碼。
 public struct ApprovalCounter: Equatable, Sendable {
-    private var pending: Set<String> = []
+    private var pending: [String: ApprovalRequest] = [:]
 
     public init() {}
 
     public var count: Int { pending.count }
 
+    /// 依請求時間排序；同一時間用識別碼排，讓畫面順序固定。
+    public var requests: [ApprovalRequest] {
+        pending.values.sorted {
+            ($0.requestedAt, $0.approvalId) < ($1.requestedAt, $1.approvalId)
+        }
+    }
+
     public mutating func apply(_ frame: ServerFrame) {
         switch frame {
         case .approvalRequestedEvent(let event):
-            pending.insert(event.payload.approvalId)
+            pending[event.payload.approvalId] = event.payload
         case .approvalDecidedEvent(let event):
-            pending.remove(event.payload.approvalId)
+            pending.removeValue(forKey: event.payload.approvalId)
         default:
             break
+        }
+    }
+
+    /// 套用會話快照的待審批。快照是主機的現況：這個會話沒有待審批時，
+    /// 就清掉本地留著的那一筆（可能已被其他客戶端決定）。
+    public mutating func adoptSnapshot(_ request: ApprovalRequest?, sessionId: String) {
+        let stale = pending.filter { $0.value.sessionId == sessionId }.map(\.key)
+        for id in stale {
+            pending.removeValue(forKey: id)
+        }
+        if let request {
+            pending[request.approvalId] = request
         }
     }
 
