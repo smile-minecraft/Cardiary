@@ -33,7 +33,16 @@ export interface ToolDiagnostic {
 export type ToolContent =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "json"; readonly value: JsonValue }
-  | { readonly type: "image"; readonly assetId: string; readonly mediaType: string }
+  /**
+   * 圖片內容。`bytes` 由產生它的工具在當下提供（例如翻牌後的縮圖），
+   * 轉接層原樣送給模型；省略時才由主機的媒體服務依 `assetId` 讀取。
+   */
+  | {
+      readonly type: "image";
+      readonly assetId: string;
+      readonly mediaType: string;
+      readonly bytes?: Uint8Array;
+    }
   /** 卡片內容；由主機的卡片管線建立，客戶端用協定卡片事件顯示。 */
   | { readonly type: "card"; readonly card: ToolResultCard };
 

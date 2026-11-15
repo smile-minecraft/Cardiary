@@ -265,6 +265,23 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
           credentials,
           logger,
           clock,
+          // 多模態模組啟用後才提供 blobs；模型請求當下才取，避免模組載入順序耦合。
+          media: {
+            read(assetId) {
+              const blobs = hostServices.get<{
+                info(blobId: string): { readonly mediaType: string } | undefined;
+                read(blobId: string): Uint8Array | undefined;
+              }>(HOST_SERVICE_NAMES.blobs);
+              if (blobs === undefined) {
+                return null;
+              }
+              const info = blobs.info(assetId);
+              const bytes = blobs.read(assetId);
+              return info === undefined || bytes === undefined
+                ? null
+                : { bytes, mediaType: info.mediaType };
+            },
+          },
           ...(options.models === undefined ? {} : { models: options.models }),
           ...(persistent === null ? {} : { purger: new PersistentPurger(persistent.storage) }),
         }));

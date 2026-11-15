@@ -15,6 +15,7 @@ import type {
 import type { EngineEnvironment } from "./environment.js";
 import type { EngineSubscription, SubscribeOptions } from "./events.js";
 import type { ConversationId, IsoInstant, TurnId } from "./ids.js";
+import type { MediaAssetReader } from "./internal/media/types.js";
 import type { ModelSettings, ProviderCredentialSource } from "./model.js";
 import type { ToolPermissionGate } from "./permission.js";
 import type { Clock, EngineLogger, Unsubscribe } from "./runtime.js";
@@ -136,6 +137,13 @@ export interface EngineAdapterOptions {
   readonly eventBufferSize?: number;
   /** 引擎模型的建立方式；省略時只有測試模式可以使用。 */
   readonly models?: EngineModelSource;
+  /**
+   * 媒體區塊的原檔讀取；由主機的多模態服務提供。
+   *
+   * 省略時，圖片與音訊區塊一律退回文字替身。轉接層只把位元組原樣交給
+   * 引擎，不重新編碼或縮放。
+   */
+  readonly media?: MediaAssetReader;
   /**
    * Cardiary 資料庫那一半的刪除接縫；省略時刪除只處理引擎的資料。
    * 正式的主機服務一定要提供。

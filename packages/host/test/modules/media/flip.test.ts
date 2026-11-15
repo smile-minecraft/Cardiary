@@ -1,7 +1,7 @@
 import { rmSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import sharp from "sharp";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createMediaToolBundle } from "../../../src/modules/media/tools.js";
 import { fakeBroker, fakeModels, makeMediaFixture, type MediaFixture } from "./helpers.js";
@@ -64,6 +64,27 @@ async function imageCard(f: MediaFixture): Promise<string> {
   return imported.card.cardId;
 }
 
+/** 翻牌工具與它需要的工具呼叫環境。 */
+function flipTool(f: MediaFixture) {
+  const bundle = createMediaToolBundle({ media: f.media });
+  const tool = bundle.tools[0];
+  if (tool === undefined) throw new Error("找不到 card_flip");
+  const context = {
+    conversationId: "conv",
+    turnId: "turn",
+    callId: "call",
+    toolName: "card_flip",
+    signal: new AbortController().signal,
+    tempDir: join(f.folder, "tmp"),
+    workingDir: f.folder,
+    requestApproval: async () => ({ outcome: "approved" }),
+    spawn: () => {
+      throw new Error("不需要子行程");
+    },
+  };
+  return { tool, context: context as never };
+}
+
 describe("翻牌", () => {
   it("同一張圖片卡翻兩次位元組完全相同；縮圖在 cache/thumbs，刪掉重產仍相同", async () => {
     const f = await fixture({
@@ -102,7 +123,7 @@ describe("翻牌", () => {
     expect(result.text).toContain("## OCR 文字");
   });
 
-  it("音訊預設只回逐字稿；主模型支援且明確要求時才載入原檔", async () => {
+  it("音訊一律回文字替身：needAudio=true 時標引擎原因，沒有讀原檔也不算載入", async () => {
     const f = await fixture({
       recognition: fakeBroker({
         transcribe: { available: true, text: "逐字稿內容" },
@@ -122,19 +143,87 @@ describe("翻牌", () => {
     const bytes = new TextEncoder().encode("audio-original-bytes");
     const blob = await f.store.put({ bytes: chunks(bytes), mediaType: "audio/mp4" });
     const imported = await f.media.import({ blobId: blob.blobId });
+    const read = vi.spyOn(f.store, "read");
     const textOnly = await f.media.flip({
       cardId: imported.card.cardId,
       conversationId: "conv",
     });
     expect(textOnly.loaded).toBe(false);
     expect(textOnly.reason).toBe("audio_not_requested");
-    const loaded = await f.media.flip({
+    expect(textOnly.text).toContain("## 逐字稿");
+    const requested = await f.media.flip({
       cardId: imported.card.cardId,
       conversationId: "conv",
       needAudio: true,
     });
-    expect(loaded.loaded).toBe(true);
-    expect(Buffer.from(loaded.bytes ?? []).equals(Buffer.from(bytes))).toBe(true);
+    expect(requested.loaded).toBe(false);
+    expect(requested.reason).toBe("engine_input_unsupported:audio");
+    expect(requested.bytes).toBeUndefined();
+    expect(requested.text).toContain("## 逐字稿");
+    expect(read).not.toHaveBeenCalled();
+    // 沒有載入原檔就不算一次翻牌載入：`card_loads` 沒有紀錄。
+    const loads = f.storage.state.get<{ readonly n: number }>(
+      "SELECT COUNT(*) AS n FROM card_loads WHERE card_id = ?",
+      imported.card.cardId,
+    );
+    expect(Number(loads?.n ?? -1)).toBe(0);
+  });
+
+  it("模型不支援音訊且 needAudio=true 時，回文字替身並標模型原因", async () => {
+    const f = await fixture({
+      recognition: fakeBroker({
+        transcribe: { available: true, text: "逐字稿內容" },
+      }),
+      models: fakeModels(),
+      modelState: TEXT_ONLY_MODEL,
+      conversationModel: { provider: "local", model: "text" },
+    });
+    const bytes = new TextEncoder().encode("audio-original-bytes");
+    const blob = await f.store.put({ bytes: chunks(bytes), mediaType: "audio/mp4" });
+    const imported = await f.media.import({ blobId: blob.blobId });
+    const result = await f.media.flip({
+      cardId: imported.card.cardId,
+      conversationId: "conv",
+      needAudio: true,
+    });
+    expect(result.loaded).toBe(false);
+    expect(result.reason).toBe("model_input_unsupported:audio");
+    expect(result.text).toContain("## 逐字稿");
+  });
+
+  it("card_flip 工具對音訊回純文字替身，不再宣稱已載入原檔", async () => {
+    const f = await fixture({
+      recognition: fakeBroker({
+        transcribe: { available: true, text: "逐字稿內容" },
+      }),
+      models: fakeModels(),
+      modelState: {
+        providers: [
+          {
+            providerId: "local",
+            models: [{ modelId: "audio", input: ["text", "audio"] as const }],
+          },
+        ],
+        resolved: [{ role: "main", ref: { providerId: "local", modelId: "audio" } }],
+      },
+      conversationModel: { provider: "local", model: "audio" },
+    });
+    const bytes = new TextEncoder().encode("audio-original-bytes");
+    const blob = await f.store.put({ bytes: chunks(bytes), mediaType: "audio/mp4" });
+    const imported = await f.media.import({ blobId: blob.blobId });
+    const { tool, context } = flipTool(f);
+    const outcome = await tool.execute({ cardId: imported.card.cardId, needAudio: true }, context);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.content.every((block) => block.type === "text")).toBe(true);
+    const text = outcome.content
+      .map((block) => (block.type === "text" ? block.text : ""))
+      .join("\n");
+    expect(text).toContain("engine_input_unsupported:audio");
+    expect(text).toContain("## 逐字稿");
+    const metadata = outcome.metadata as { loaded: boolean; reason: string };
+    expect(metadata.loaded).toBe(false);
+    expect(metadata.reason).toBe("engine_input_unsupported:audio");
   });
 
   it("card_flip 工具回圖片內容區塊與固定的位元組摘要", async () => {
@@ -145,23 +234,8 @@ describe("翻牌", () => {
       conversationModel: { provider: "local", model: "vision" },
     });
     const cardId = await imageCard(f);
-    const bundle = createMediaToolBundle({ media: f.media });
-    const tool = bundle.tools[0];
-    if (tool === undefined) throw new Error("找不到 card_flip");
-    const context = {
-      conversationId: "conv",
-      turnId: "turn",
-      callId: "call",
-      toolName: "card_flip",
-      signal: new AbortController().signal,
-      tempDir: join(f.folder, "tmp"),
-      workingDir: f.folder,
-      requestApproval: async () => ({ outcome: "approved" }),
-      spawn: () => {
-        throw new Error("不需要子行程");
-      },
-    };
-    const outcome = await tool.execute({ cardId }, context as never);
+    const { tool, context } = flipTool(f);
+    const outcome = await tool.execute({ cardId }, context);
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     const metadata = outcome.metadata as {
@@ -172,7 +246,7 @@ describe("翻牌", () => {
     expect(metadata.loaded).toBe(true);
     expect(metadata.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(outcome.content.some((block) => block.type === "image")).toBe(true);
-    const again = await tool.execute({ cardId }, context as never);
+    const again = await tool.execute({ cardId }, context);
     expect(again.ok && (again.metadata as { sha256: string }).sha256).toBe(metadata.sha256);
   });
 });

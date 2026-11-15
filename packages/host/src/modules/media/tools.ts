@@ -19,7 +19,8 @@ export interface MediaToolsOptions {
  * 翻牌工具。
  *
  * 預設只回文字替身；呼叫後才把原檔放進下一個模型請求。圖片一定先縮成
- * 固定規格，音訊要呼叫端明確要求且主模型支援時才載入。
+ * 固定規格；音訊一律回文字替身——Pi Durable 1.5.2 沒有音訊內容區塊，
+ * 引擎送不出去，等引擎支援後再接原檔路徑。
  */
 export function createMediaToolBundle(options: MediaToolsOptions): ToolBundleDraft {
   return {
@@ -30,14 +31,16 @@ export function createMediaToolBundle(options: MediaToolsOptions): ToolBundleDra
         name: "card_flip",
         description:
           "翻牌：把圖片或音訊卡片載入下一個模型請求。圖片會縮成固定規格；" +
-          "音訊要 needAudio=true 且主模型支援才會載入。模型不支援時回文字替身與原因。",
+          "音訊一律回文字替身與原因，M1 的引擎沒有音訊內容區塊，送不出原檔。",
         parameters: {
           type: "object",
           properties: {
             cardId: { type: "string", description: "圖片或音訊卡片的識別碼。" },
             needAudio: {
               type: "boolean",
-              description: "音訊卡片：是否要載入原始音訊；預設 false，只回逐字稿。",
+              description:
+                "音訊卡片：是否要聽聲音細節；預設 false。M1 引擎不支援音訊輸入，" +
+                "兩種情況都回文字替身，只有原因不同。",
               default: false,
             },
           },
@@ -83,26 +86,20 @@ export function createMediaToolBundle(options: MediaToolsOptions): ToolBundleDra
             }
             const digest = createHash("sha256").update(bytes).digest("hex");
             const assetId = result.assetId ?? cardId;
-            const isImage = result.mediaType.startsWith("image/");
             return {
               ok: true,
               content: [
                 {
                   type: "text",
-                  text:
-                    `已載入${isImage ? "圖片" : "音訊"}原檔` +
-                    `（${bytes.byteLength} bytes，sha256 ${digest}）。` +
-                    (isImage ? "" : "音訊區塊由引擎在支援時載入。"),
+                  text: `已載入圖片原檔（${bytes.byteLength} bytes，sha256 ${digest}）。`,
                 },
-                ...(isImage
-                  ? [
-                      {
-                        type: "image" as const,
-                        assetId,
-                        mediaType: result.mediaType,
-                      },
-                    ]
-                  : []),
+                {
+                  type: "image" as const,
+                  assetId,
+                  mediaType: result.mediaType,
+                  // 翻牌當下的縮圖位元組；轉接層原樣送給模型，不再重新編碼。
+                  bytes,
+                },
               ],
               metadata: {
                 cardId,

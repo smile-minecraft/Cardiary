@@ -72,6 +72,7 @@ import { CatalogDoc, emptyCatalog } from "./catalog.js";
 import { compactAfterDelete, deleteEngineSubtree, listConversationSubtree } from "./delete.js";
 import { EngineAdapterFailure, engineError } from "./errors.js";
 import { EventBus } from "./event-bus.js";
+import { convertModelContent, convertToolContent } from "./media/content.js";
 import { classifyModelFailure, modelFailureInfo } from "./model/failure.js";
 import { EngineSession, createEngineRegistry } from "./session.js";
 import { ProcessSupervisor } from "./spawn.js";
@@ -94,6 +95,11 @@ const DEFAULT_SUBAGENT_LIMITS: SubagentLimits = {
 };
 
 const DEFAULT_EVENT_BUFFER = 256;
+
+/** 工具結果交給引擎的內容區塊；形狀與 pi-ai 的 ToolResultMessage 一致。 */
+type ToolOutputBlock =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "image"; readonly data: string; readonly mimeType: string };
 
 /** 轉接層的實作；對外只透過 `EngineAdapter` 介面。 */
 export class PiEngineAdapter implements EngineAdapter {
@@ -314,6 +320,25 @@ export class PiEngineAdapter implements EngineAdapter {
     return this.#modelSettings ?? { providers: [], roles: emptyRoles() };
   }
 
+  /**
+   * 對話主模型宣告的輸入能力。
+   *
+   * 以對話建立時固定的模型為準；查不到設定時回空陣列，媒體區塊一律退回
+   * 文字替身，不猜測模型能不能收。
+   */
+  async #modelInputFor(
+    conversationId: ConversationId,
+  ): Promise<readonly ("text" | "image" | "audio")[]> {
+    const meta = (await this.#catalog()).conversations[conversationId];
+    const settings = this.#modelSettings;
+    if (meta === undefined || settings === null) {
+      return [];
+    }
+    const provider = settings.providers.find((entry) => entry.provider === meta.model.provider);
+    const model = provider?.models.find((entry) => entry.id === meta.model.model);
+    return model?.input ?? [];
+  }
+
   // ── 工具組 ─────────────────────────────────────────────────────────────
 
   #createToolRegistry(): ToolRegistry {
@@ -422,14 +447,16 @@ export class PiEngineAdapter implements EngineAdapter {
     readonly context: Context;
     readonly reportProgress?: (progress: ToolProgress) => void;
   }): Promise<{
-    output: { readonly type: "text"; readonly text: string }[];
+    output: ToolOutputBlock[];
     isError?: boolean;
     diagnostics?: readonly { code: string; message?: string }[];
     details?: JsonValue;
   }> {
     const result = await this.#executeTool(input);
     this.#recordToolOutcome(input.callId, result.isError !== true, {
-      text: result.output.map((block) => block.text).join("\n"),
+      text: result.output
+        .map((block) => (block.type === "text" ? block.text : `[image ${block.mimeType}]`))
+        .join("\n"),
       ...(result.details === undefined ? {} : { metadata: result.details }),
     });
     return result;
@@ -460,7 +487,7 @@ export class PiEngineAdapter implements EngineAdapter {
     readonly context: Context;
     readonly reportProgress?: (progress: ToolProgress) => void;
   }): Promise<{
-    output: { readonly type: "text"; readonly text: string }[];
+    output: ToolOutputBlock[];
     isError?: boolean;
     diagnostics?: readonly { code: string; message?: string }[];
     details?: JsonValue;
@@ -624,24 +651,12 @@ export class PiEngineAdapter implements EngineAdapter {
         ...(outcome.metadata === undefined ? {} : { details: outcome.metadata as never }),
       };
     }
-    const content = outcome.content
-      .map((block) => {
-        switch (block.type) {
-          case "text":
-            return block.text;
-          case "json":
-            return JSON.stringify(block.value);
-          case "image":
-            return `[image ${block.assetId}]`;
-          case "card":
-            return JSON.stringify(block.card);
-          default:
-            return "";
-        }
-      })
-      .join("\n");
+    const converted = await convertToolContent(outcome.content, {
+      modelInput: await this.#modelInputFor(input.conversationId),
+      ...(this.#options.media === undefined ? {} : { reader: this.#options.media }),
+    });
     return {
-      output: [{ type: "text" as const, text: content }],
+      output: converted.content,
       isError: false,
       ...(outcome.diagnostics === undefined ? {} : { diagnostics: outcome.diagnostics }),
       ...(outcome.metadata === undefined ? {} : { details: outcome.metadata as never }),
@@ -1221,7 +1236,10 @@ export class PiEngineAdapter implements EngineAdapter {
     if (conversation === undefined) {
       throw engineError("conversation-not-found", `找不到對話 ${request.conversationId}`);
     }
-    const text = contentText(request.content);
+    const converted = await convertModelContent(request.content, {
+      modelInput: await this.#modelInputFor(request.conversationId),
+      ...(this.#options.media === undefined ? {} : { reader: this.#options.media }),
+    });
     const whenBusy =
       request.delivery === "steer"
         ? "steer"
@@ -1233,7 +1251,7 @@ export class PiEngineAdapter implements EngineAdapter {
       submission = await conversation.submit(
         {
           type: "input",
-          content: text,
+          content: converted.content,
           whenBusy,
           ...(request.clientMessageId === undefined ? {} : { requestId: request.clientMessageId }),
         },

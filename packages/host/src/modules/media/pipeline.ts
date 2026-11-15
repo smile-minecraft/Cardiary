@@ -42,7 +42,7 @@ export interface ImportMediaResult {
 export interface FlipInput {
   readonly cardId: string;
   readonly conversationId?: string;
-  /** 音訊只有在呼叫端明確要聽聲音細節時才載入原檔。 */
+  /** 只影響文字替身的原因碼（沒要求、引擎不支援、模型不支援），不會載入原檔。 */
   readonly needAudio?: boolean;
 }
 
@@ -172,10 +172,13 @@ export class MediaService {
   }
 
   /**
-   * 翻牌：載入原檔給模型。
+   * 翻牌：把原檔放進下一個模型請求。
    *
-   * 圖片一律先縮成固定規格；音訊只有主模型支援且呼叫端明確要求時才
-   * 載入。模型不支援或無法確認時回文字替身與原因，不是錯誤。
+   * 圖片一律先縮成固定規格。音訊一律回文字替身：Pi Durable 1.5.2 的
+   * UserMessage／ToolResultMessage 沒有音訊內容區塊，原檔讀了也送不出
+   * 去，所以不讀、不標 `loaded`。等引擎支援 audio 區塊，再開工作接
+   * 「模型支援且 needAudio=true」的路徑。模型不支援或無法確認時同樣回
+   * 文字替身與原因，不是錯誤。
    */
   async flip(input: FlipInput): Promise<FlipResult> {
     const key = input.cardId;
@@ -217,6 +220,28 @@ export class MediaService {
       });
     }
     const supported = await this.#supports(kind, input.conversationId);
+    if (kind === "audio") {
+      if (input.needAudio !== true) {
+        return {
+          loaded: false,
+          reason: "audio_not_requested",
+          mediaType: info.mediaType,
+          assetId: info.blobId,
+          text: card.body,
+        };
+      }
+      // M1：Pi Durable 1.5.2 的 UserMessage／ToolResultMessage 只接受文字
+      // 與圖片，引擎承載不了音訊；就算主模型宣告 audio 輸入，原檔讀了也
+      // 送不出去，所以不讀、一律回文字替身。等引擎支援 audio 內容區塊，
+      // 再開工作把這條路徑接上原檔。
+      return {
+        loaded: false,
+        reason: supported ? "engine_input_unsupported:audio" : "model_input_unsupported:audio",
+        mediaType: info.mediaType,
+        assetId: info.blobId,
+        text: card.body,
+      };
+    }
     if (!supported) {
       return {
         loaded: false,
@@ -226,31 +251,14 @@ export class MediaService {
         text: card.body,
       };
     }
-    if (kind === "audio" && input.needAudio !== true) {
-      return {
-        loaded: false,
-        reason: "audio_not_requested",
-        mediaType: info.mediaType,
-        assetId: info.blobId,
-        text: card.body,
-      };
-    }
-    if (kind === "image") {
-      const thumbnail = await this.#options.store.thumbnail(blobId);
-      this.#recordFlip(card.cardId, input.conversationId);
-      return {
-        loaded: true,
-        mediaType: "image/jpeg",
-        assetId: info.blobId,
-        bytes: thumbnail.bytes,
-      };
-    }
-    const bytes = this.#options.store.read(blobId);
-    if (bytes === undefined) {
-      throw new MediaError("not_found", "找不到卡片指向的原檔。", { blobId });
-    }
+    const thumbnail = await this.#options.store.thumbnail(blobId);
     this.#recordFlip(card.cardId, input.conversationId);
-    return { loaded: true, mediaType: info.mediaType, assetId: info.blobId, bytes };
+    return {
+      loaded: true,
+      mediaType: "image/jpeg",
+      assetId: info.blobId,
+      bytes: thumbnail.bytes,
+    };
   }
 
   /** 主模型的輸入能力；查不到時當成不支援，回文字替身。 */
