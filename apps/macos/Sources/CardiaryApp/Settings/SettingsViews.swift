@@ -62,8 +62,10 @@ struct ModelsSettingsView: View {
                 resolvedSection
                 banners
             }
-            .padding(DesignTokens.spacingL)
+            .padding(.horizontal, DesignTokens.spacingL)
+            .padding(.bottom, DesignTokens.spacingL)
         }
+        .scrollIndicators(.never)
         .task {
             if model.providers.isEmpty {
                 await model.load()
@@ -72,13 +74,13 @@ struct ModelsSettingsView: View {
     }
 
     private var providerSection: some View {
-        SettingsSection(title: .settingsProviders) {
+        SettingsSection(title: .settingsProviders, suit: .heart) {
             if model.isLoading && model.providers.isEmpty {
                 LoadingSettingsView()
             } else if model.providers.isEmpty {
                 Text(AppL10n.text(.settingsProvidersEmpty))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.callout))
+                    .foregroundStyle(Palette.inkSecondary)
             } else {
                 ForEach(model.providers, id: \.providerId) { provider in
                     providerRow(provider)
@@ -92,37 +94,42 @@ struct ModelsSettingsView: View {
     }
 
     private var addProviderSection: some View {
-        SettingsSection(title: .settingsAddProvider) {
+        SettingsSection(title: .settingsAddProvider, suit: .club) {
             AddProviderForm(model: model) { await model.addProvider() }
         }
     }
 
     private var rolesSection: some View {
-        SettingsSection(title: .settingsRoles) {
+        SettingsSection(title: .settingsRoles, suit: .diamond) {
             ForEach(ModelRole.allCases, id: \.self) { role in
-                Picker(AppL10n.text(Self.roleKey(role)), selection: roleBinding(role)) {
-                    ForEach(model.choices(for: role)) { choice in
-                        Text(choice.label).tag(choice)
-                    }
+                ThemeLabeledRow(title: AppL10n.text(Self.roleKey(role))) {
+                    ThemeMenuPicker(
+                        selection: roleBinding(role),
+                        options: model.choices(for: role).map { ($0, $0.label) }
+                    )
                 }
             }
-            Button(AppL10n.text(.settingsRoleSave)) {
-                Task { await model.saveRoles() }
+            HStack {
+                Spacer()
+                Button(AppL10n.text(.settingsRoleSave)) {
+                    Task { await model.saveRoles() }
+                }
+                .buttonStyle(.themePrimary)
+                .disabled(model.isSaving || model.providers.isEmpty)
             }
-            .disabled(model.isSaving || model.providers.isEmpty)
         }
     }
 
     private var resolvedSection: some View {
-        SettingsSection(title: .settingsResolved) {
+        SettingsSection(title: .settingsResolved, suit: .spade) {
             ForEach(ModelRole.allCases, id: \.self) { role in
                 HStack(alignment: .firstTextBaseline, spacing: DesignTokens.spacingS) {
                     Text(AppL10n.text(Self.roleKey(role)))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.cardiary(.caption))
+                        .foregroundStyle(Palette.inkSecondary)
                         .frame(width: 120, alignment: .leading)
                     Text(ModelsSettingsModel.resolvedLabel(model.resolved(for: role)))
-                        .font(.caption)
+                        .font(.cardiary(.caption, weight: .semibold))
                 }
             }
         }
@@ -131,10 +138,10 @@ struct ModelsSettingsView: View {
     @ViewBuilder
     private var banners: some View {
         if let error = model.errorMessage {
-            MessageBanner(text: error, systemImage: "exclamationmark.triangle", tint: .red)
+            MessageBanner(text: error, systemImage: "exclamationmark.triangle", tone: .red)
         }
         if let notice = model.noticeMessage {
-            MessageBanner(text: notice, systemImage: "checkmark.circle", tint: .secondary)
+            MessageBanner(text: notice, systemImage: "checkmark.circle", tone: .sage)
         }
     }
 
@@ -174,10 +181,8 @@ struct ProviderCard: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             HStack(spacing: DesignTokens.spacingS) {
                 Text(provider.displayName)
-                    .font(.callout.weight(.semibold))
-                Text(AppL10n.text(ModelsSettingsView.kindKey(provider.kind)))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.callout, weight: .semibold))
+                ThemeChip(text: AppL10n.text(ModelsSettingsView.kindKey(provider.kind)), tone: .purple)
                 Spacer()
                 Button(AppL10n.text(.settingsCredentialSet)) {
                     model.beginCredentialEntry(for: provider.providerId)
@@ -186,37 +191,38 @@ struct ProviderCard: View {
             }
             if let baseUrl = provider.baseUrl, !baseUrl.isEmpty {
                 Text(baseUrl)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
             }
             Text(AppL10n.count(.settingsProviderModelCount, count: provider.models.count))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.cardiary(.caption))
+                .foregroundStyle(Palette.inkSecondary)
             Text(AppL10n.format(
                 .settingsCredentialAccount,
                 value: model.keychainAccount(for: provider)
             ))
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
+            .font(.cardiary(.caption2))
+            .foregroundStyle(Palette.inkTertiary)
 
             if model.credentialProviderId == provider.providerId {
                 HStack(spacing: DesignTokens.spacingS) {
                     SecureField(AppL10n.text(.settingsCredentialPlaceholder), text: $model.credentialInput)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(ThemeFieldStyle(fill: Palette.surface))
                     Button(AppL10n.text(.settingsCredentialSave)) {
                         Task { await model.storeCredential(for: provider.providerId) }
                     }
+                    .buttonStyle(.themePrimary)
                     .controlSize(.small)
                     Button(AppL10n.text(.genericCancel)) {
                         model.cancelCredentialEntry()
                     }
+                    .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
                     .controlSize(.small)
                 }
             }
         }
-        .padding(DesignTokens.spacingM)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+        .themeBlock(Palette.canvas, radius: DesignTokens.cardRadius)
     }
 }
 
@@ -232,10 +238,16 @@ struct AddProviderForm: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
             TextField(AppL10n.text(.settingsProviderId), text: $model.newProviderId)
             TextField(AppL10n.text(.settingsProviderName), text: $model.newProviderName)
-            Picker(AppL10n.text(.settingsProviderKind), selection: $model.newProviderKind) {
-                Text(AppL10n.text(.settingsProviderKindAPIKey)).tag(ModelProviderKind.apiKey)
-                Text(AppL10n.text(.settingsProviderKindAggregator)).tag(ModelProviderKind.aggregator)
-                Text(AppL10n.text(.settingsProviderKindLocal)).tag(ModelProviderKind.local)
+            ThemeLabeledRow(title: AppL10n.text(.settingsProviderKind)) {
+                ThemeSegmented(
+                    selection: $model.newProviderKind,
+                    options: [
+                        (ModelProviderKind.apiKey, AppL10n.text(.settingsProviderKindAPIKey)),
+                        (ModelProviderKind.aggregator, AppL10n.text(.settingsProviderKindAggregator)),
+                        (ModelProviderKind.local, AppL10n.text(.settingsProviderKindLocal)),
+                    ]
+                )
+                .fixedSize()
             }
             TextField(AppL10n.text(.settingsProviderBaseURL), text: $model.newProviderBaseURL)
             TextField(
@@ -244,10 +256,14 @@ struct AddProviderForm: View {
                 axis: .vertical
             )
             .lineLimit(2...4)
-            Button(AppL10n.text(.settingsProviderAdd)) {
-                Task { await addProvider() }
+            HStack {
+                Spacer()
+                Button(AppL10n.text(.settingsProviderAdd)) {
+                    Task { await addProvider() }
+                }
+                .buttonStyle(.themePrimary)
+                .disabled(!model.canAddProvider)
             }
-            .disabled(!model.canAddProvider)
         }
     }
 }
@@ -264,8 +280,8 @@ struct GeneralSettingsView: View {
                     LoadingSettingsView()
                 } else if model.items.isEmpty {
                     Text(AppL10n.text(.settingsGeneralEmpty))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .font(.cardiary(.callout))
+                        .foregroundStyle(Palette.inkSecondary)
                 } else {
                     ForEach(model.items, id: \.key) { item in
                         itemRow(item)
@@ -273,14 +289,16 @@ struct GeneralSettingsView: View {
                 }
 
                 if let error = model.errorMessage {
-                    MessageBanner(text: error, systemImage: "exclamationmark.triangle", tint: .red)
+                    MessageBanner(text: error, systemImage: "exclamationmark.triangle", tone: .red)
                 }
                 if let notice = model.noticeMessage {
-                    MessageBanner(text: notice, systemImage: "checkmark.circle", tint: .secondary)
+                    MessageBanner(text: notice, systemImage: "checkmark.circle", tone: .sage)
                 }
             }
-            .padding(DesignTokens.spacingL)
+            .padding(.horizontal, DesignTokens.spacingL)
+            .padding(.bottom, DesignTokens.spacingL)
         }
+        .scrollIndicators(.never)
         .task {
             if model.items.isEmpty {
                 await model.load()
@@ -292,21 +310,17 @@ struct GeneralSettingsView: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             HStack(spacing: DesignTokens.spacingS) {
                 Text(model.title(for: item))
-                    .font(.callout.weight(.semibold))
-                Text(AppL10n.text(GeneralSettingsModel.levelKey(item.level)))
-                    .font(.caption2)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(.quaternary.opacity(0.5), in: Capsule())
+                    .font(.cardiary(.callout, weight: .semibold))
+                ThemeChip(text: AppL10n.text(GeneralSettingsModel.levelKey(item.level)), tone: Self.levelTone(item.level))
                 Spacer()
             }
             Text(item.key)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.cardiary(.caption2))
+                .foregroundStyle(Palette.inkTertiary)
             if let description = model.description(for: item) {
                 Text(description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
             }
 
             if model.isBool(item) {
@@ -314,7 +328,7 @@ struct GeneralSettingsView: View {
                     get: { model.boolValue(item) },
                     set: { _ in Task { await model.toggle(item) } }
                 ))
-                .toggleStyle(.switch)
+                .toggleStyle(ThemeSwitchStyle())
                 .labelsHidden()
                 .accessibilityLabel(model.title(for: item))
             } else {
@@ -326,7 +340,6 @@ struct GeneralSettingsView: View {
                             set: { model.drafts[item.key] = $0 }
                         )
                     )
-                    .textFieldStyle(.roundedBorder)
                     Button(AppL10n.text(.settingsSave)) {
                         Task { await model.save(key: item.key) }
                     }
@@ -335,9 +348,16 @@ struct GeneralSettingsView: View {
                 }
             }
         }
-        .padding(DesignTokens.spacingM)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+        .themeBlock(Palette.surface, radius: DesignTokens.cardRadius, padding: DesignTokens.spacingL)
+    }
+
+    private static func levelTone(_ level: SettingLevel) -> Tone {
+        switch level {
+        case .free: return .sage
+        case .approval: return .orange
+        case .humanOnly: return .red
+        }
     }
 }
 
@@ -353,8 +373,8 @@ struct ModulesSettingsView: View {
                     LoadingSettingsView()
                 } else if model.modules.isEmpty {
                     Text(AppL10n.text(.settingsModulesEmpty))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .font(.cardiary(.callout))
+                        .foregroundStyle(Palette.inkSecondary)
                 } else {
                     ForEach(model.modules, id: \.moduleId) { module in
                         moduleRow(module)
@@ -362,14 +382,16 @@ struct ModulesSettingsView: View {
                 }
 
                 if let error = model.errorMessage {
-                    MessageBanner(text: error, systemImage: "exclamationmark.triangle", tint: .red)
+                    MessageBanner(text: error, systemImage: "exclamationmark.triangle", tone: .red)
                 }
                 if let notice = model.noticeMessage {
-                    MessageBanner(text: notice, systemImage: "checkmark.circle", tint: .secondary)
+                    MessageBanner(text: notice, systemImage: "checkmark.circle", tone: .sage)
                 }
             }
-            .padding(DesignTokens.spacingL)
+            .padding(.horizontal, DesignTokens.spacingL)
+            .padding(.bottom, DesignTokens.spacingL)
         }
+        .scrollIndicators(.never)
         .task {
             if model.modules.isEmpty {
                 await model.load()
@@ -381,31 +403,31 @@ struct ModulesSettingsView: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             HStack(spacing: DesignTokens.spacingS) {
                 Text(module.name)
-                    .font(.callout.weight(.semibold))
+                    .font(.cardiary(.callout, weight: .semibold))
                 Text(AppL10n.format(.settingsModuleVersion, value: module.version))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(AppL10n.text(ModulesSettingsModel.stateKey(module.state)))
-                    .font(.caption2)
-                    .foregroundStyle(module.state == .failed ? .red : .secondary)
+                    .font(.cardiary(.caption2))
+                    .foregroundStyle(Palette.inkSecondary)
+                ThemeChip(
+                    text: AppL10n.text(ModulesSettingsModel.stateKey(module.state)),
+                    tone: module.state == .failed ? .red : (module.state == .active ? .sage : .gray)
+                )
                 Spacer()
                 Toggle("", isOn: Binding(
                     get: { module.enabled },
                     set: { value in Task { await model.setEnabled(module, enabled: value) } }
                 ))
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .toggleStyle(ThemeSwitchStyle())
                 .disabled(model.updatingIds.contains(module.moduleId))
             }
             if let failure = module.failure, !failure.isEmpty {
                 Text(AppL10n.format(.settingsModuleFailed, value: failure))
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.redInk)
             }
         }
-        .padding(DesignTokens.spacingM)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+        .themeBlock(Palette.surface, radius: DesignTokens.cardRadius, padding: DesignTokens.spacingL)
     }
 }
 
@@ -415,26 +437,26 @@ struct ModulesSettingsView: View {
 struct LoadingSettingsView: View {
     var body: some View {
         HStack(spacing: DesignTokens.spacingS) {
-            ProgressView()
-                .controlSize(.small)
+            SuitLoader(size: 7)
             Text(AppL10n.text(.settingsLoading))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.cardiary(.caption))
+                .foregroundStyle(Palette.inkSecondary)
         }
     }
 }
 
-/// 設定分頁的一段：標題加內容，內容依序往下排。
+/// 設定分頁的一段：花色標題加內容，整段是一塊面板。
 struct SettingsSection<Content: View>: View {
     let title: AppString
+    var suit: Suit = .heart
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
-            Text(AppL10n.text(title))
-                .font(.headline)
+        VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
+            SuitHeading(title: AppL10n.text(title), suit: suit)
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .themeBlock(Palette.surface, radius: DesignTokens.panelRadius, padding: DesignTokens.spacingL)
     }
 }
