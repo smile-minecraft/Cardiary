@@ -218,6 +218,9 @@ add(
     maxFrameBytes: int("單一 WebSocket 訊息的最大位元組數。", { minimum: 1 }),
     replayWindow: int("每個串流保留的可補送事件數量。", { minimum: 0 }),
     heartbeatSeconds: int("WebSocket ping 的間隔秒數。", { minimum: 1 }),
+    maxBlobBytes: int("HTTP blob 單檔的上傳上限；省略代表沒有提供 blob 端點。", {
+      minimum: 1,
+    }),
   }),
 );
 
@@ -226,6 +229,11 @@ add(
   objectOf("ServerCapabilities", ["modules", "files"], {
     modules: bool("是否接受模組命名空間的請求與事件。"),
     files: bool("是否提供 HTTP 大型檔案端點。"),
+    cards: bool("是否提供卡片類訊息。"),
+    context: bool("是否提供上下文類訊息。"),
+    archive: bool("是否提供會話封存與刪除。"),
+    media: bool("是否提供圖片與音訊的匯入。"),
+    blobs: bool("是否提供 HTTP blob 上傳與下載。"),
   }),
 );
 
@@ -323,6 +331,7 @@ add(
     createdAt: str("建立時間，RFC 3339。", { format: "date-time" }),
     updatedAt: str("最後更新時間，RFC 3339。", { format: "date-time" }),
     messageCount: int("可見訊息數量。", { minimum: 0 }),
+    archive: ref("SessionArchive"),
   }),
 );
 
@@ -360,8 +369,8 @@ add(
 add(
   "DeliveryMode",
   stringEnum(
-    ["queue", "interrupt"],
-    "送出訊息時的行為。queue 在下一個模型請求生效，不中止目前串流；interrupt 先中止目前生成再送出。",
+    ["queue", "steer", "interrupt"],
+    "送出訊息時的行為。queue 在目前回合結束後生效；steer 在下一個模型請求前送達，不中止目前串流；interrupt 先中止目前生成再送出。",
   ),
 );
 
@@ -823,6 +832,764 @@ add(
 );
 
 // ---------------------------------------------------------------------------
+// M1：卡片
+// ---------------------------------------------------------------------------
+
+add(
+  "CardKind",
+  stringEnum(
+    ["note", "image", "audio", "memory", "summary", "persona", "bedrock"],
+    "卡片種類。memory、summary、persona、bedrock 只由系統或匯入建立。",
+  ),
+);
+
+add("CardLifecycle", stringEnum(["live", "cold"], "卡片生命週期；cold 是蒸餾後的冷封存。"));
+add("CardLifecycleFilter", stringEnum(["live", "cold", "all"], "列表與搜尋的生命週期篩選。"));
+
+add(
+  "CardChange",
+  stringEnum(
+    ["created", "updated", "deleted", "refreshed", "reindexed"],
+    "卡片變更的種類。reindexed 表示只有索引或中繼資料變了。",
+  ),
+);
+
+add(
+  "CardAsset",
+  objectOf("CardAsset", ["blobId", "mediaType", "sizeBytes"], {
+    blobId: str("內容雜湊（SHA-256 小寫十六進位），也是 HTTP blob 的識別碼。"),
+    mediaType: str("例如 image/png、audio/mp4。"),
+    sizeBytes: int("原檔位元組數。", { minimum: 0 }),
+  }),
+);
+
+add(
+  "CardLinks",
+  objectOf("CardLinks", ["outgoing", "backlinks"], {
+    outgoing: arrayOf(str("目標卡片或標題。"), "內文 [[ ]] 的目標，依出現順序。"),
+    backlinks: arrayOf(str("來源卡片識別碼。"), "連到這張卡的卡片。"),
+  }),
+);
+
+add(
+  "CardSummary",
+  objectOf(
+    "CardSummary",
+    ["cardId", "kind", "title", "tags", "persona", "createdAt", "freshness", "lifecycle"],
+    {
+      cardId: str("卡片識別碼。"),
+      kind: ref("CardKind"),
+      title: str("標題。"),
+      summary: str("一兩句話的摘要。"),
+      tags: arrayOf(str("標籤。"), "標籤，保留原本順序。"),
+      persona: str("人格分區，預設 default。"),
+      createdAt: str("建立時間，RFC 3339。", { format: "date-time" }),
+      updatedAt: str("最後更新時間，RFC 3339。", { format: "date-time" }),
+      freshness: int("新鮮度 0 到 100；檢視欄與卡片庫用它褪色。", { minimum: 0, maximum: 100 }),
+      lifecycle: ref("CardLifecycle"),
+      supersededBy: str("取代這張卡的新卡；有值時不進預設搜尋與列表。"),
+      asset: ref("CardAsset"),
+      broken: bool("檔案格式不符，索引無法解析；true 時不提供內文。"),
+      brokenReason: str("格式不符的原因，給人看。"),
+    },
+  ),
+);
+
+add(
+  "Card",
+  objectOf(
+    "Card",
+    [
+      "cardId",
+      "kind",
+      "title",
+      "body",
+      "tags",
+      "persona",
+      "createdAt",
+      "freshness",
+      "lifecycle",
+      "links",
+      "revision",
+      "sources",
+    ],
+    {
+      cardId: str("卡片識別碼。"),
+      kind: ref("CardKind"),
+      title: str("標題。"),
+      summary: str("摘要。"),
+      body: str("內文（Markdown）；補丁編輯的對象。"),
+      tags: arrayOf(str("標籤。"), "標籤。"),
+      persona: str("人格分區。"),
+      createdAt: str("建立時間，RFC 3339。", { format: "date-time" }),
+      updatedAt: str("最後更新時間，RFC 3339。", { format: "date-time" }),
+      freshness: int("新鮮度 0 到 100。", { minimum: 0, maximum: 100 }),
+      lifecycle: ref("CardLifecycle"),
+      supersededBy: str("取代這張卡的新卡。"),
+      supersedes: str("被這張卡取代的舊卡。"),
+      sources: arrayOf(str("來源卡片識別碼。"), "血緣：由哪些卡生成。"),
+      asset: ref("CardAsset"),
+      links: ref("CardLinks"),
+      revision: str("正規化內容的 SHA-256；補丁的樂觀鎖。"),
+    },
+  ),
+);
+
+add(
+  "CardListRequestPayload",
+  objectOf("CardListRequestPayload", [], {
+    kinds: arrayOf(ref("CardKind"), "只回這幾種。"),
+    tags: arrayOf(str("標籤。"), "同時包含這些標籤。"),
+    persona: str("人格分區。"),
+    lifecycle: ref("CardLifecycleFilter"),
+    query: str("簡易查詢；等同 card.search 的前綴比對。"),
+    includeSuperseded: bool("是否包含被取代的卡；預設 false。"),
+    cursor: str("上一頁的游標。"),
+    limit: int("最多回傳幾筆。", { minimum: 1, maximum: 200 }),
+  }),
+);
+
+add(
+  "CardListResponsePayload",
+  objectOf("CardListResponsePayload", ["cards"], {
+    cards: arrayOf(ref("CardSummary"), "依建立時間由新到舊。"),
+    nextCursor: str("下一頁游標；沒有更多資料時省略。"),
+  }),
+);
+
+add(
+  "CardGetRequestPayload",
+  objectOf("CardGetRequestPayload", ["cardId"], {
+    cardId: str("要讀取的卡片。"),
+  }),
+);
+
+add(
+  "CardGetResponsePayload",
+  objectOf("CardGetResponsePayload", ["card"], {
+    card: ref("Card"),
+  }),
+);
+
+add(
+  "CardCreateRequestPayload",
+  objectOf("CardCreateRequestPayload", ["kind", "title", "body", "clientRequestId"], {
+    kind: ref("CardKind"),
+    title: str("標題。"),
+    body: str("內文（Markdown）。"),
+    summary: str("摘要。"),
+    tags: arrayOf(str("標籤。"), "標籤。"),
+    persona: str("人格分區。"),
+    sources: arrayOf(str("來源卡片識別碼。"), "血緣。"),
+    supersedes: str("被這張卡取代的舊卡。"),
+    assetBlobId: str("已上傳原檔的 blobId；圖片與音訊卡必填。"),
+    clientRequestId: str("客戶端產生的冪等鍵；同一個鍵重送只會建立一張卡。"),
+  }),
+);
+
+add(
+  "CardCreateResponsePayload",
+  objectOf("CardCreateResponsePayload", ["card"], {
+    card: ref("CardSummary"),
+  }),
+);
+
+add("CardPatchFormat", stringEnum(["unified", "replace"], "補丁格式；代理只能用 unified。"));
+
+add(
+  "CardPatch",
+  objectOf("CardPatch", ["format", "text"], {
+    format: ref("CardPatchFormat"),
+    text: str("統一 diff（unified）或整段內文（replace）。"),
+  }),
+);
+
+add(
+  "CardPatchRequestPayload",
+  objectOf("CardPatchRequestPayload", ["cardId", "baseRevision", "patch"], {
+    cardId: str("要編修的卡片。"),
+    baseRevision: str("客戶端讀到的 revision；與目前檔案不符時回 conflict。"),
+    patch: ref("CardPatch"),
+    clientRequestId: str("冪等鍵；重送不會套用兩次。"),
+  }),
+);
+
+add(
+  "CardPatchResponsePayload",
+  objectOf("CardPatchResponsePayload", ["card"], {
+    card: ref("Card"),
+  }),
+);
+
+add(
+  "CardDeleteRequestPayload",
+  objectOf("CardDeleteRequestPayload", ["cardId", "clientRequestId"], {
+    cardId: str("要刪除的卡片。"),
+    clientRequestId: str("冪等鍵。"),
+  }),
+);
+
+add(
+  "CardDeleteResponsePayload",
+  objectOf("CardDeleteResponsePayload", ["cardId", "deletedAssets"], {
+    cardId: str("已刪除的卡片。"),
+    deletedAssets: int("連帶刪除的原檔數；還有其他卡引用時是 0。", { minimum: 0 }),
+  }),
+);
+
+add(
+  "CardSearchRequestPayload",
+  objectOf("CardSearchRequestPayload", ["query"], {
+    query: str("查詢字串；中文用子字串比對。"),
+    kinds: arrayOf(ref("CardKind"), "只搜這幾種。"),
+    tags: arrayOf(str("標籤。"), "同時包含這些標籤。"),
+    includeSuperseded: bool("是否包含被取代的卡；預設 false。"),
+    limit: int("最多回傳幾筆。", { minimum: 1, maximum: 100 }),
+    cursor: str("上一頁的游標。"),
+  }),
+);
+
+add(
+  "CardSearchHit",
+  objectOf("CardSearchHit", ["card", "score", "snippet"], {
+    card: ref("CardSummary"),
+    score: { type: "number", description: "相關度分數，越大越前面。" },
+    snippet: str("命中片段；不含完整內文。"),
+  }),
+);
+
+add(
+  "CardSearchResponsePayload",
+  objectOf("CardSearchResponsePayload", ["hits"], {
+    hits: arrayOf(ref("CardSearchHit"), "依分數由高到低。"),
+    nextCursor: str("下一頁游標。"),
+  }),
+);
+
+add(
+  "CardRefreshRequestPayload",
+  objectOf("CardRefreshRequestPayload", ["cardId"], {
+    cardId: str("要保鮮的卡片。"),
+  }),
+);
+
+add(
+  "CardRefreshResponsePayload",
+  objectOf("CardRefreshResponsePayload", ["cardId", "freshness"], {
+    cardId: str("卡片識別碼。"),
+    freshness: int("保鮮後的新鮮度，固定 100。", { minimum: 0, maximum: 100 }),
+  }),
+);
+
+add(
+  "CardChangedEventPayload",
+  objectOf("CardChangedEventPayload", ["cardId", "change"], {
+    cardId: str("卡片識別碼。"),
+    change: ref("CardChange"),
+    revision: str("變更後的 revision；刪除時省略。"),
+    freshness: int("變更後的新鮮度；只有保鮮與載入會帶。", { minimum: 0, maximum: 100 }),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// M1：上下文
+// ---------------------------------------------------------------------------
+
+add(
+  "ContextLayer",
+  stringEnum(
+    [
+      "bedrock",
+      "persona",
+      "core-memory",
+      "opening-memory",
+      "short-term-memory",
+      "other-cards",
+      "working-context",
+      "volatile-state",
+    ],
+    "八層的識別碼，順序由前往後。",
+  ),
+);
+
+add("ContextEntryState", stringEnum(["active", "pending-removal"], "項目在上下文中的狀態。"));
+
+add(
+  "ContextEntry",
+  objectOf("ContextEntry", ["entryId", "layer", "title", "tokenEstimate", "state", "position"], {
+    entryId: str("項目識別碼；工作上下文也可以有代表項。"),
+    layer: ref("ContextLayer"),
+    cardId: str("對應的卡片；工作上下文與高速變動層沒有。"),
+    title: str("給人看的標題。"),
+    tokenEstimate: int("token 估算。", { minimum: 0 }),
+    state: ref("ContextEntryState"),
+    position: int("在上下文中的位置，從 0 開始。", { minimum: 0 }),
+  }),
+);
+
+add(
+  "ContextView",
+  objectOf(
+    "ContextView",
+    [
+      "sessionId",
+      "version",
+      "entries",
+      "usedTokens",
+      "budgetTokens",
+      "contextWindow",
+      "compactionThreshold",
+    ],
+    {
+      sessionId: str("會話識別碼。"),
+      version: int("每次變動加 1；客戶端丟棄較小的版本。", { minimum: 0 }),
+      entries: arrayOf(ref("ContextEntry"), "依上下文實際順序。"),
+      usedTokens: int("目前佔用的估算值；等於 entries 的 tokenEstimate 加總。", {
+        minimum: 0,
+      }),
+      budgetTokens: int("可用預算（contextWindow 減去保留給輸出的量）。", { minimum: 0 }),
+      contextWindow: int("目前主模型的上下文上限。", { minimum: 1 }),
+      compactionThreshold: { type: "number", description: "觸發壓縮的比例，預設 0.75。" },
+      lastCompactedAt: str("上次壓縮時間，RFC 3339。", { format: "date-time" }),
+    },
+  ),
+);
+
+add(
+  "ContextGetRequestPayload",
+  objectOf("ContextGetRequestPayload", ["sessionId"], {
+    sessionId: str("會話識別碼。"),
+  }),
+);
+
+add(
+  "ContextGetResponsePayload",
+  objectOf("ContextGetResponsePayload", ["context"], {
+    context: ref("ContextView"),
+  }),
+);
+
+add(
+  "ContextAddCardRequestPayload",
+  objectOf("ContextAddCardRequestPayload", ["sessionId", "cardId"], {
+    sessionId: str("會話識別碼。"),
+    cardId: str("要加入的卡片；只會追加在後段。"),
+  }),
+);
+
+add(
+  "ContextAddCardResponsePayload",
+  objectOf("ContextAddCardResponsePayload", ["context"], {
+    context: ref("ContextView"),
+  }),
+);
+
+add(
+  "ContextRemoveCardRequestPayload",
+  objectOf("ContextRemoveCardRequestPayload", ["sessionId", "cardId"], {
+    sessionId: str("會話識別碼。"),
+    cardId: str("要移除的卡片；標記為 pending-removal，下次壓縮生效。"),
+  }),
+);
+
+add(
+  "ContextRemoveCardResponsePayload",
+  objectOf("ContextRemoveCardResponsePayload", ["context"], {
+    context: ref("ContextView"),
+  }),
+);
+
+add(
+  "ContextCompactRequestPayload",
+  objectOf("ContextCompactRequestPayload", ["sessionId"], {
+    sessionId: str("會話識別碼。"),
+    instructions: str("給摘要模型的額外指示；使用者手動壓縮時可省略。"),
+  }),
+);
+
+add(
+  "ContextCompactResponsePayload",
+  objectOf("ContextCompactResponsePayload", ["sessionId", "scheduled"], {
+    sessionId: str("會話識別碼。"),
+    scheduled: bool("是否已排入壓縮；完成時會送 context.compacted。"),
+  }),
+);
+
+add(
+  "ContextChangedEventPayload",
+  objectOf("ContextChangedEventPayload", ["sessionId", "context"], {
+    sessionId: str("會話識別碼。"),
+    context: ref("ContextView"),
+  }),
+);
+
+add(
+  "ContextCompactedEventPayload",
+  objectOf(
+    "ContextCompactedEventPayload",
+    ["sessionId", "summaryCardId", "beforeTokens", "afterTokens", "compactedAt"],
+    {
+      sessionId: str("會話識別碼。"),
+      summaryCardId: str("壓縮產出的短期記憶卡。"),
+      beforeTokens: int("壓縮前佔用。", { minimum: 0 }),
+      afterTokens: int("壓縮後佔用。", { minimum: 0 }),
+      compactedAt: str("完成時間，RFC 3339。", { format: "date-time" }),
+    },
+  ),
+);
+
+// ---------------------------------------------------------------------------
+// M1：會話封存與刪除
+// ---------------------------------------------------------------------------
+
+add(
+  "SessionArchive",
+  objectOf("SessionArchive", ["archivedAt", "purgeAt"], {
+    archivedAt: str("開始封存倒數的時間，RFC 3339。", { format: "date-time" }),
+    purgeAt: str("倒數結束、預定刪除的時間，RFC 3339。", { format: "date-time" }),
+  }),
+);
+
+add(
+  "SessionArchiveRequestPayload",
+  objectOf("SessionArchiveRequestPayload", ["sessionId"], {
+    sessionId: str("要封存的會話。"),
+    purgeAfterDays: int("倒數天數；省略時用設定值（預設 7）。", { minimum: 1, maximum: 365 }),
+  }),
+);
+
+add(
+  "SessionArchiveResponsePayload",
+  objectOf("SessionArchiveResponsePayload", ["sessionId", "archive"], {
+    sessionId: str("會話識別碼。"),
+    archive: ref("SessionArchive"),
+  }),
+);
+
+add(
+  "SessionUnarchiveRequestPayload",
+  objectOf("SessionUnarchiveRequestPayload", ["sessionId"], {
+    sessionId: str("要取消封存的會話。"),
+  }),
+);
+
+add(
+  "SessionUnarchiveResponsePayload",
+  objectOf("SessionUnarchiveResponsePayload", ["sessionId", "unarchived"], {
+    sessionId: str("會話識別碼。"),
+    unarchived: bool("是否已取消封存。"),
+  }),
+);
+
+add(
+  "SessionDeletionPreviewRequestPayload",
+  objectOf("SessionDeletionPreviewRequestPayload", ["sessionId"], {
+    sessionId: str("要預覽刪除的會話。"),
+  }),
+);
+
+add(
+  "SessionDeletionPreviewResponsePayload",
+  objectOf(
+    "SessionDeletionPreviewResponsePayload",
+    ["sessionId", "subtreeSessionIds", "exclusiveCards", "sharedCards", "assets"],
+    {
+      sessionId: str("會話識別碼。"),
+      subtreeSessionIds: arrayOf(str("會話識別碼。"), "連同支線的整個子樹。"),
+      exclusiveCards: int("會一起刪除的專屬卡片數。", { minimum: 0 }),
+      sharedCards: int("仍被其他會話或白板引用的卡片數；不會刪除。", { minimum: 0 }),
+      assets: int("會一起刪除的原檔數。", { minimum: 0 }),
+    },
+  ),
+);
+
+add(
+  "SessionDeleteRequestPayload",
+  objectOf("SessionDeleteRequestPayload", ["sessionId", "clientRequestId"], {
+    sessionId: str("要刪除的會話；支線一定連同刪除。"),
+    clientRequestId: str("客戶端產生的冪等鍵。"),
+  }),
+);
+
+add(
+  "SessionDeleteResponsePayload",
+  objectOf(
+    "SessionDeleteResponsePayload",
+    ["sessionId", "deletedSessionIds", "deletedCards", "deletedAssets"],
+    {
+      sessionId: str("會話識別碼。"),
+      deletedSessionIds: arrayOf(str("會話識別碼。"), "實際刪除的子樹。"),
+      deletedCards: int("實際刪除的專屬卡片數。", { minimum: 0 }),
+      deletedAssets: int("實際刪除的原檔數。", { minimum: 0 }),
+    },
+  ),
+);
+
+add(
+  "SessionArchivedEventPayload",
+  objectOf("SessionArchivedEventPayload", ["sessionId", "archive"], {
+    sessionId: str("會話識別碼。"),
+    archive: ref("SessionArchive"),
+  }),
+);
+
+add(
+  "SessionUnarchivedEventPayload",
+  objectOf("SessionUnarchivedEventPayload", ["sessionId"], {
+    sessionId: str("會話識別碼。"),
+  }),
+);
+
+add(
+  "SessionDeletedEventPayload",
+  objectOf(
+    "SessionDeletedEventPayload",
+    ["sessionId", "deletedSessionIds", "deletedCards", "deletedAssets"],
+    {
+      sessionId: str("會話識別碼。"),
+      deletedSessionIds: arrayOf(str("會話識別碼。"), "整個子樹。"),
+      deletedCards: int("刪除的專屬卡片數。", { minimum: 0 }),
+      deletedAssets: int("刪除的原檔數。", { minimum: 0 }),
+    },
+  ),
+);
+
+// ---------------------------------------------------------------------------
+// M1：設定、模組與模型
+// ---------------------------------------------------------------------------
+
+add(
+  "SettingLevel",
+  stringEnum(["free", "approval", "human-only"], "設定分級；未標明一律視為 human-only。"),
+);
+
+add(
+  "SettingItem",
+  objectOf("SettingItem", ["key", "value", "level", "updatedAt"], {
+    key: str("設定鍵。"),
+    value: ref("JSONValue"),
+    level: ref("SettingLevel"),
+    title: str("給人看的標題。"),
+    description: str("給人看的說明。"),
+    updatedAt: str("最後更新時間，RFC 3339。", { format: "date-time" }),
+  }),
+);
+
+add("SystemSettingsGetRequestPayload", objectOf("SystemSettingsGetRequestPayload", [], {}));
+
+add(
+  "SystemSettingsGetResponsePayload",
+  objectOf("SystemSettingsGetResponsePayload", ["settings"], {
+    settings: arrayOf(ref("SettingItem"), "所有分級的設定。"),
+  }),
+);
+
+add(
+  "SettingChange",
+  objectOf("SettingChange", ["key", "value"], {
+    key: str("設定鍵。"),
+    value: ref("JSONValue"),
+  }),
+);
+
+add(
+  "SystemSettingsSetRequestPayload",
+  objectOf("SystemSettingsSetRequestPayload", ["changes", "clientRequestId"], {
+    changes: arrayOf(ref("SettingChange"), "要修改的設定；一次可以多筆。", { minItems: 1 }),
+    clientRequestId: str("冪等鍵。"),
+  }),
+);
+
+add(
+  "SystemSettingsSetResponsePayload",
+  objectOf("SystemSettingsSetResponsePayload", ["applied", "requiresApproval"], {
+    applied: arrayOf(ref("SettingItem"), "已套用的設定。"),
+    requiresApproval: bool("是否需要人工核准；M1 由客戶端（人）修改時固定 false。"),
+    approvalId: str("需要核准時的審批識別碼；M1 不使用。"),
+  }),
+);
+
+add(
+  "SystemSettingsChangedEventPayload",
+  objectOf("SystemSettingsChangedEventPayload", ["changes", "changedBy", "changedAt"], {
+    changes: arrayOf(ref("SettingItem"), "變更後的設定。"),
+    changedBy: str("變更者，例如 user:<deviceId>、agent:<conversationId>、system。"),
+    changedAt: str("變更時間，RFC 3339。", { format: "date-time" }),
+  }),
+);
+
+add(
+  "SettingKind",
+  stringEnum(
+    ["string", "number", "integer", "boolean", "enum", "string-list", "path"],
+    "設定值的輸入種類；設定頁據此產生表單。",
+  ),
+);
+
+add(
+  "ModuleSettingDeclaration",
+  objectOf("ModuleSettingDeclaration", ["key", "title", "kind", "level"], {
+    key: str("設定鍵。"),
+    title: str("標題。"),
+    kind: ref("SettingKind"),
+    level: ref("SettingLevel"),
+    description: str("說明。"),
+  }),
+);
+
+add("ModuleState", stringEnum(["loaded", "active", "inactive", "failed"], "模組的執行狀態。"));
+
+add(
+  "ModuleInfo",
+  objectOf(
+    "ModuleInfo",
+    ["moduleId", "name", "version", "enabled", "state", "protocolPrefixes", "settings"],
+    {
+      moduleId: str("模組識別碼。"),
+      name: str("顯示名稱。"),
+      version: str("版本。"),
+      enabled: bool("使用者是否啟用。"),
+      state: ref("ModuleState"),
+      failure: str("載入或啟用失敗的原因。"),
+      protocolPrefixes: arrayOf(str("命名空間前綴。"), "模組登記的協定命名空間。"),
+      settings: arrayOf(ref("ModuleSettingDeclaration"), "設定宣告，不含值。"),
+    },
+  ),
+);
+
+add("SystemModulesGetRequestPayload", objectOf("SystemModulesGetRequestPayload", [], {}));
+
+add(
+  "SystemModulesGetResponsePayload",
+  objectOf("SystemModulesGetResponsePayload", ["modules"], {
+    modules: arrayOf(ref("ModuleInfo"), "依模組識別碼排序。"),
+  }),
+);
+
+add(
+  "SystemModulesSetEnabledRequestPayload",
+  objectOf("SystemModulesSetEnabledRequestPayload", ["moduleId", "enabled", "clientRequestId"], {
+    moduleId: str("模組識別碼。"),
+    enabled: bool("是否啟用。"),
+    clientRequestId: str("冪等鍵。"),
+  }),
+);
+
+add(
+  "SystemModulesSetEnabledResponsePayload",
+  objectOf("SystemModulesSetEnabledResponsePayload", ["module"], {
+    module: ref("ModuleInfo"),
+  }),
+);
+
+add(
+  "SystemModulesChangedEventPayload",
+  objectOf("SystemModulesChangedEventPayload", ["module"], {
+    module: ref("ModuleInfo"),
+  }),
+);
+
+add("ModelProviderKind", stringEnum(["api-key", "aggregator", "local"], "供應商接入方式。"));
+
+add("ModelInputKind", stringEnum(["text", "image", "audio"], "模型接受的輸入種類。"));
+
+add(
+  "ModelInfo",
+  objectOf("ModelInfo", ["modelId", "contextWindow", "input"], {
+    modelId: str("供應商的模型識別碼。"),
+    displayName: str("給人看的名稱。"),
+    contextWindow: int("上下文上限。", { minimum: 1 }),
+    maxOutputTokens: int("輸出上限。", { minimum: 1 }),
+    input: arrayOf(ref("ModelInputKind"), "接受的輸入種類。"),
+  }),
+);
+
+add(
+  "ModelProviderInfo",
+  objectOf("ModelProviderInfo", ["providerId", "kind", "displayName", "models"], {
+    providerId: str("供應商識別碼；由使用者命名，穩定不變。"),
+    kind: ref("ModelProviderKind"),
+    displayName: str("顯示名稱。"),
+    baseUrl: str("OpenAI 相容端點的基底網址；直接供應商可省略。"),
+    credentialRef: str("鑰匙圈的帳號名；不是金鑰本身。"),
+    models: arrayOf(ref("ModelInfo"), "這個供應商提供的模型。"),
+  }),
+);
+
+add("ModelRole", stringEnum(["main", "small", "writing", "system-one"], "四個模型角色。"));
+
+add(
+  "ModelRoleMode",
+  stringEnum(
+    ["model", "unset", "none"],
+    "角色的設定方式：model 指定模型、unset 走退回、none 明確關閉（只有 system-one 可用）。",
+  ),
+);
+
+add(
+  "ModelRef",
+  objectOf("ModelRef", ["providerId", "modelId"], {
+    providerId: str("供應商識別碼。"),
+    modelId: str("模型識別碼。"),
+  }),
+);
+
+add(
+  "ModelRoleSelection",
+  objectOf("ModelRoleSelection", ["role", "mode"], {
+    role: ref("ModelRole"),
+    mode: ref("ModelRoleMode"),
+    ref: ref("ModelRef"),
+  }),
+);
+
+add(
+  "ModelRoleSource",
+  stringEnum(
+    ["configured", "fallback-main", "fallback-small", "none"],
+    "解析結果的來源；fallback 表示走了退回規則。",
+  ),
+);
+
+add(
+  "ResolvedModelRole",
+  objectOf("ResolvedModelRole", ["role", "source"], {
+    role: ref("ModelRole"),
+    source: ref("ModelRoleSource"),
+    ref: ref("ModelRef"),
+  }),
+);
+
+add(
+  "SystemModelsState",
+  objectOf("SystemModelsState", ["providers", "roles", "resolved"], {
+    providers: arrayOf(ref("ModelProviderInfo"), "供應商清單，不含金鑰。"),
+    roles: arrayOf(ref("ModelRoleSelection"), "角色設定。"),
+    resolved: arrayOf(ref("ResolvedModelRole"), "退回規則套用後的實際使用。"),
+  }),
+);
+
+add("SystemModelsGetRequestPayload", objectOf("SystemModelsGetRequestPayload", [], {}));
+
+add(
+  "SystemModelsSetRequestPayload",
+  objectOf("SystemModelsSetRequestPayload", ["clientRequestId"], {
+    providers: arrayOf(ref("ModelProviderInfo"), "要套用的供應商清單；省略代表不改。"),
+    roles: arrayOf(ref("ModelRoleSelection"), "要套用的角色設定；省略代表不改。"),
+    clientRequestId: str("冪等鍵。"),
+  }),
+);
+
+add(
+  "BlobInfo",
+  objectOf("BlobInfo", ["blobId", "mediaType", "sizeBytes"], {
+    blobId: str("內容雜湊（SHA-256 小寫十六進位）。"),
+    mediaType: str("內容類型。"),
+    sizeBytes: int("位元組數。", { minimum: 0 }),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // 訊息外殼
 // ---------------------------------------------------------------------------
 
@@ -1133,6 +1900,258 @@ add("ModuleEvent", {
 });
 
 // ---------------------------------------------------------------------------
+// M1：卡片、上下文、封存與刪除、設定、模組、模型
+// ---------------------------------------------------------------------------
+
+// 卡片
+requestFrame("CardListRequest", "card.list", "CardListRequestPayload", "列出卡片庫。");
+responseFrame("CardListResponse", "card.list", "CardListResponsePayload", "卡片列表。");
+requestFrame("CardGetRequest", "card.get", "CardGetRequestPayload", "讀取一張卡片。");
+responseFrame("CardGetResponse", "card.get", "CardGetResponsePayload", "卡片的完整內容。");
+requestFrame("CardCreateRequest", "card.create", "CardCreateRequestPayload", "建立卡片。");
+responseFrame("CardCreateResponse", "card.create", "CardCreateResponsePayload", "建立的卡片。");
+requestFrame("CardPatchRequest", "card.patch", "CardPatchRequestPayload", "以補丁編修卡片。");
+responseFrame("CardPatchResponse", "card.patch", "CardPatchResponsePayload", "編修後的卡片。");
+requestFrame("CardDeleteRequest", "card.delete", "CardDeleteRequestPayload", "刪除卡片。");
+responseFrame(
+  "CardDeleteResponse",
+  "card.delete",
+  "CardDeleteResponsePayload",
+  "刪除結果與連帶刪除的原檔數。",
+);
+requestFrame("CardSearchRequest", "card.search", "CardSearchRequestPayload", "全文搜尋卡片。");
+responseFrame("CardSearchResponse", "card.search", "CardSearchResponsePayload", "搜尋結果。");
+requestFrame("CardRefreshRequest", "card.refresh", "CardRefreshRequestPayload", "使用者按保鮮。");
+responseFrame(
+  "CardRefreshResponse",
+  "card.refresh",
+  "CardRefreshResponsePayload",
+  "保鮮後的新鮮度。",
+);
+eventFrame(
+  "CardChangedEvent",
+  "card.changed",
+  "CardChangedEventPayload",
+  "卡片建立、更新、刪除、保鮮或重新索引；掛在 system 串流。",
+);
+
+// 上下文
+requestFrame("ContextGetRequest", "context.get", "ContextGetRequestPayload", "取得目前上下文。");
+responseFrame("ContextGetResponse", "context.get", "ContextGetResponsePayload", "上下文視圖。");
+requestFrame(
+  "ContextAddCardRequest",
+  "context.add_card",
+  "ContextAddCardRequestPayload",
+  "把卡片追加到上下文後段。",
+);
+responseFrame(
+  "ContextAddCardResponse",
+  "context.add_card",
+  "ContextAddCardResponsePayload",
+  "加入後的上下文視圖。",
+);
+requestFrame(
+  "ContextRemoveCardRequest",
+  "context.remove_card",
+  "ContextRemoveCardRequestPayload",
+  "標記移除一張卡，下次壓縮生效。",
+);
+responseFrame(
+  "ContextRemoveCardResponse",
+  "context.remove_card",
+  "ContextRemoveCardResponsePayload",
+  "標記後的上下文視圖。",
+);
+requestFrame(
+  "ContextCompactRequest",
+  "context.compact",
+  "ContextCompactRequestPayload",
+  "手動觸發壓縮。",
+);
+responseFrame(
+  "ContextCompactResponse",
+  "context.compact",
+  "ContextCompactResponsePayload",
+  "壓縮已排入。",
+);
+eventFrame(
+  "ContextChangedEvent",
+  "context.changed",
+  "ContextChangedEventPayload",
+  "上下文內容變了；掛在會話串流。",
+);
+eventFrame(
+  "ContextCompactedEvent",
+  "context.compacted",
+  "ContextCompactedEventPayload",
+  "一次壓縮完成；掛在會話串流。",
+);
+
+// 會話封存與刪除
+requestFrame(
+  "SessionArchiveRequest",
+  "session.archive",
+  "SessionArchiveRequestPayload",
+  "開始封存倒數。",
+);
+responseFrame(
+  "SessionArchiveResponse",
+  "session.archive",
+  "SessionArchiveResponsePayload",
+  "封存倒數已開始。",
+);
+requestFrame(
+  "SessionUnarchiveRequest",
+  "session.unarchive",
+  "SessionUnarchiveRequestPayload",
+  "取消封存。",
+);
+responseFrame(
+  "SessionUnarchiveResponse",
+  "session.unarchive",
+  "SessionUnarchiveResponsePayload",
+  "取消封存的結果。",
+);
+requestFrame(
+  "SessionDeletionPreviewRequest",
+  "session.deletion_preview",
+  "SessionDeletionPreviewRequestPayload",
+  "刪除前預覽連帶刪除的會話、卡片與原檔。",
+);
+responseFrame(
+  "SessionDeletionPreviewResponse",
+  "session.deletion_preview",
+  "SessionDeletionPreviewResponsePayload",
+  "預覽結果。",
+);
+requestFrame(
+  "SessionDeleteRequest",
+  "session.delete",
+  "SessionDeleteRequestPayload",
+  "立即刪除會話與專屬卡片。",
+);
+responseFrame(
+  "SessionDeleteResponse",
+  "session.delete",
+  "SessionDeleteResponsePayload",
+  "實際刪除的數量。",
+);
+eventFrame(
+  "SessionArchivedEvent",
+  "session.archived",
+  "SessionArchivedEventPayload",
+  "會話開始封存倒數；system 與會話串流各送一則。",
+);
+eventFrame(
+  "SessionUnarchivedEvent",
+  "session.unarchived",
+  "SessionUnarchivedEventPayload",
+  "會話取消封存。",
+);
+eventFrame(
+  "SessionDeletedEvent",
+  "session.deleted",
+  "SessionDeletedEventPayload",
+  "會話刪除完成；system 串流上的那一則讓列表移除。",
+);
+
+// 設定
+requestFrame(
+  "SystemSettingsGetRequest",
+  "system.settings.get",
+  "SystemSettingsGetRequestPayload",
+  "讀取設定與分級。",
+);
+responseFrame(
+  "SystemSettingsGetResponse",
+  "system.settings.get",
+  "SystemSettingsGetResponsePayload",
+  "設定清單。",
+);
+requestFrame(
+  "SystemSettingsSetRequest",
+  "system.settings.set",
+  "SystemSettingsSetRequestPayload",
+  "修改設定。",
+);
+responseFrame(
+  "SystemSettingsSetResponse",
+  "system.settings.set",
+  "SystemSettingsSetResponsePayload",
+  "已套用的設定。",
+);
+eventFrame(
+  "SystemSettingsChangedEvent",
+  "system.settings.changed",
+  "SystemSettingsChangedEventPayload",
+  "設定變更；掛在 system 串流。",
+);
+
+// 模組
+requestFrame(
+  "SystemModulesGetRequest",
+  "system.modules.get",
+  "SystemModulesGetRequestPayload",
+  "讀取模組清單與狀態。",
+);
+responseFrame(
+  "SystemModulesGetResponse",
+  "system.modules.get",
+  "SystemModulesGetResponsePayload",
+  "模組清單。",
+);
+requestFrame(
+  "SystemModulesSetEnabledRequest",
+  "system.modules.set_enabled",
+  "SystemModulesSetEnabledRequestPayload",
+  "啟用或停用一個模組。",
+);
+responseFrame(
+  "SystemModulesSetEnabledResponse",
+  "system.modules.set_enabled",
+  "SystemModulesSetEnabledResponsePayload",
+  "更新後的模組資訊。",
+);
+eventFrame(
+  "SystemModulesChangedEvent",
+  "system.modules.changed",
+  "SystemModulesChangedEventPayload",
+  "模組狀態改變；掛在 system 串流。",
+);
+
+// 模型
+requestFrame(
+  "SystemModelsGetRequest",
+  "system.models.get",
+  "SystemModelsGetRequestPayload",
+  "讀取供應商、角色與解析結果。",
+);
+responseFrame(
+  "SystemModelsGetResponse",
+  "system.models.get",
+  "SystemModelsState",
+  "目前的模型設定。",
+);
+requestFrame(
+  "SystemModelsSetRequest",
+  "system.models.set",
+  "SystemModelsSetRequestPayload",
+  "設定供應商與角色；只影響新對話。",
+);
+responseFrame(
+  "SystemModelsSetResponse",
+  "system.models.set",
+  "SystemModelsState",
+  "套用後的模型設定。",
+);
+eventFrame(
+  "SystemModelsChangedEvent",
+  "system.models.changed",
+  "SystemModelsState",
+  "模型設定變更；掛在 system 串流。",
+);
+
+// ---------------------------------------------------------------------------
 // 影格聯集
 // ---------------------------------------------------------------------------
 
@@ -1149,6 +2168,27 @@ add("ClientFrame", {
     ref("SessionSubscribeRequest"),
     ref("SessionUnsubscribeRequest"),
     ref("SessionGetHistoryRequest"),
+    ref("SessionArchiveRequest"),
+    ref("SessionUnarchiveRequest"),
+    ref("SessionDeletionPreviewRequest"),
+    ref("SessionDeleteRequest"),
+    ref("CardListRequest"),
+    ref("CardGetRequest"),
+    ref("CardCreateRequest"),
+    ref("CardPatchRequest"),
+    ref("CardDeleteRequest"),
+    ref("CardSearchRequest"),
+    ref("CardRefreshRequest"),
+    ref("ContextGetRequest"),
+    ref("ContextAddCardRequest"),
+    ref("ContextRemoveCardRequest"),
+    ref("ContextCompactRequest"),
+    ref("SystemSettingsGetRequest"),
+    ref("SystemSettingsSetRequest"),
+    ref("SystemModulesGetRequest"),
+    ref("SystemModulesSetEnabledRequest"),
+    ref("SystemModelsGetRequest"),
+    ref("SystemModelsSetRequest"),
     ref("ApprovalDecideRequest"),
     ref("ApprovalPauseAllRequest"),
     ref("ModuleRequest"),
@@ -1169,6 +2209,27 @@ add("ServerFrame", {
     ref("SessionSubscribeResponse"),
     ref("SessionUnsubscribeResponse"),
     ref("SessionGetHistoryResponse"),
+    ref("SessionArchiveResponse"),
+    ref("SessionUnarchiveResponse"),
+    ref("SessionDeletionPreviewResponse"),
+    ref("SessionDeleteResponse"),
+    ref("CardListResponse"),
+    ref("CardGetResponse"),
+    ref("CardCreateResponse"),
+    ref("CardPatchResponse"),
+    ref("CardDeleteResponse"),
+    ref("CardSearchResponse"),
+    ref("CardRefreshResponse"),
+    ref("ContextGetResponse"),
+    ref("ContextAddCardResponse"),
+    ref("ContextRemoveCardResponse"),
+    ref("ContextCompactResponse"),
+    ref("SystemSettingsGetResponse"),
+    ref("SystemSettingsSetResponse"),
+    ref("SystemModulesGetResponse"),
+    ref("SystemModulesSetEnabledResponse"),
+    ref("SystemModelsGetResponse"),
+    ref("SystemModelsSetResponse"),
     ref("StreamTurnStartedEvent"),
     ref("StreamTextDeltaEvent"),
     ref("StreamMessageCompletedEvent"),
@@ -1176,6 +2237,15 @@ add("ServerFrame", {
     ref("StreamToolResultEvent"),
     ref("StreamTurnStateEvent"),
     ref("StreamUiEvent"),
+    ref("CardChangedEvent"),
+    ref("ContextChangedEvent"),
+    ref("ContextCompactedEvent"),
+    ref("SessionArchivedEvent"),
+    ref("SessionUnarchivedEvent"),
+    ref("SessionDeletedEvent"),
+    ref("SystemSettingsChangedEvent"),
+    ref("SystemModulesChangedEvent"),
+    ref("SystemModelsChangedEvent"),
     ref("ApprovalRequestedEvent"),
     ref("ApprovalDecideResponse"),
     ref("ApprovalDecidedEvent"),

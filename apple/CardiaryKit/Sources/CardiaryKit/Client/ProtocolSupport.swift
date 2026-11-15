@@ -83,6 +83,15 @@ extension ServerFrame {
         case .streamUiEvent(let frame): return frame.stream
         case .approvalRequestedEvent(let frame): return frame.stream
         case .approvalDecidedEvent(let frame): return frame.stream
+        case .cardChangedEvent(let frame): return frame.stream
+        case .contextChangedEvent(let frame): return frame.stream
+        case .contextCompactedEvent(let frame): return frame.stream
+        case .sessionArchivedEvent(let frame): return frame.stream
+        case .sessionUnarchivedEvent(let frame): return frame.stream
+        case .sessionDeletedEvent(let frame): return frame.stream
+        case .systemSettingsChangedEvent(let frame): return frame.stream
+        case .systemModulesChangedEvent(let frame): return frame.stream
+        case .systemModelsChangedEvent(let frame): return frame.stream
         case .moduleEvent(let frame): return frame.stream
         default: return nil
         }
@@ -101,6 +110,15 @@ extension ServerFrame {
         case .streamUiEvent(let frame): return frame.seq
         case .approvalRequestedEvent(let frame): return frame.seq
         case .approvalDecidedEvent(let frame): return frame.seq
+        case .cardChangedEvent(let frame): return frame.seq
+        case .contextChangedEvent(let frame): return frame.seq
+        case .contextCompactedEvent(let frame): return frame.seq
+        case .sessionArchivedEvent(let frame): return frame.seq
+        case .sessionUnarchivedEvent(let frame): return frame.seq
+        case .sessionDeletedEvent(let frame): return frame.seq
+        case .systemSettingsChangedEvent(let frame): return frame.seq
+        case .systemModulesChangedEvent(let frame): return frame.seq
+        case .systemModelsChangedEvent(let frame): return frame.seq
         case .moduleEvent(let frame): return frame.seq
         default: return nil
         }
@@ -120,6 +138,27 @@ extension ServerFrame {
         case .sessionSubscribeResponse: return "session.subscribe"
         case .sessionUnsubscribeResponse: return "session.unsubscribe"
         case .sessionGetHistoryResponse: return "session.get_history"
+        case .sessionArchiveResponse: return "session.archive"
+        case .sessionUnarchiveResponse: return "session.unarchive"
+        case .sessionDeletionPreviewResponse: return "session.deletion_preview"
+        case .sessionDeleteResponse: return "session.delete"
+        case .cardListResponse: return "card.list"
+        case .cardGetResponse: return "card.get"
+        case .cardCreateResponse: return "card.create"
+        case .cardPatchResponse: return "card.patch"
+        case .cardDeleteResponse: return "card.delete"
+        case .cardSearchResponse: return "card.search"
+        case .cardRefreshResponse: return "card.refresh"
+        case .contextGetResponse: return "context.get"
+        case .contextAddCardResponse: return "context.add_card"
+        case .contextRemoveCardResponse: return "context.remove_card"
+        case .contextCompactResponse: return "context.compact"
+        case .systemSettingsGetResponse: return "system.settings.get"
+        case .systemSettingsSetResponse: return "system.settings.set"
+        case .systemModulesGetResponse: return "system.modules.get"
+        case .systemModulesSetEnabledResponse: return "system.modules.set_enabled"
+        case .systemModelsGetResponse: return "system.models.get"
+        case .systemModelsSetResponse: return "system.models.set"
         case .streamTurnStartedEvent: return "stream.turn_started"
         case .streamTextDeltaEvent: return "stream.text_delta"
         case .streamMessageCompletedEvent: return "stream.message_completed"
@@ -131,6 +170,15 @@ extension ServerFrame {
         case .approvalDecideResponse: return "approval.decide"
         case .approvalDecidedEvent: return "approval.decided"
         case .approvalPauseAllResponse: return "approval.pause_all"
+        case .cardChangedEvent: return "card.changed"
+        case .contextChangedEvent: return "context.changed"
+        case .contextCompactedEvent: return "context.compacted"
+        case .sessionArchivedEvent: return "session.archived"
+        case .sessionUnarchivedEvent: return "session.unarchived"
+        case .sessionDeletedEvent: return "session.deleted"
+        case .systemSettingsChangedEvent: return "system.settings.changed"
+        case .systemModulesChangedEvent: return "system.modules.changed"
+        case .systemModelsChangedEvent: return "system.models.changed"
         case .errorFrame: return "error"
         case .moduleResponse(let frame): return frame.type
         case .moduleEvent(let frame): return frame.type

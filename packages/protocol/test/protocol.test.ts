@@ -113,8 +113,41 @@ describe("協定 schema 與範例", () => {
     expect(validateClient(missing)).toBe(false);
 
     const badDelivery = structuredClone(examples.sessionSendMessageRequest);
-    badDelivery.payload.delivery = "steer";
+    badDelivery.payload.delivery = "fork";
     expect(validateClient(badDelivery)).toBe(false);
+
+    // M1 新增的 steer 是合法值；插話語義見設計文件第 14.5 節。
+    const steerDelivery = structuredClone(examples.sessionSendMessageRequest);
+    steerDelivery.payload.delivery = "steer";
+    expect(validateClient(steerDelivery)).toBe(true);
+
+    const badKind = structuredClone(examples.cardCreateRequest);
+    badKind.payload.kind = "whiteboard";
+    expect(validateClient(badKind)).toBe(false);
+
+    const patchWithoutBase = structuredClone(examples.cardPatchRequest);
+    delete patchWithoutBase.payload.baseRevision;
+    expect(validateClient(patchWithoutBase)).toBe(false);
+
+    const badPatchFormat = structuredClone(examples.cardPatchRequest);
+    badPatchFormat.payload.patch.format = "binary";
+    expect(validateClient(badPatchFormat)).toBe(false);
+
+    const badLayer = structuredClone(examples.contextGetResponse);
+    badLayer.payload.context.entries[0].layer = "history";
+    expect(validateServer(badLayer)).toBe(false);
+
+    const deleteWithoutKey = structuredClone(examples.sessionDeleteRequest);
+    delete deleteWithoutKey.payload.clientRequestId;
+    expect(validateClient(deleteWithoutKey)).toBe(false);
+
+    const badRoleMode = structuredClone(examples.systemModelsSetRequest);
+    badRoleMode.payload.roles[0].mode = "inherit";
+    expect(validateClient(badRoleMode)).toBe(false);
+
+    const badLevel = structuredClone(examples.systemSettingsGetResponse);
+    badLevel.payload.settings[0].level = "public";
+    expect(validateServer(badLevel)).toBe(false);
 
     const badRole = structuredClone(examples.sessionGetHistoryResponse);
     badRole.payload.entries[0].role = "system";

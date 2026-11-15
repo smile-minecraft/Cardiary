@@ -5,15 +5,22 @@
     "id": "req_hello_1",
     "type": "system.hello",
     "payload": {
-      "auth": { "token": "test-token-not-a-secret" },
-      "protocol": { "min": 1, "max": 1 },
+      "auth": {
+        "token": "test-token-not-a-secret"
+      },
+      "protocol": {
+        "min": 1,
+        "max": 1
+      },
       "client": {
         "name": "Cardiary macOS",
         "version": "0.1.0",
         "platform": "macos",
         "instanceId": "inst_mac_01J8Z3K4Q5R6S7T8V9W0X1Y2Z8"
       },
-      "resume": { "systemSeq": 41 }
+      "resume": {
+        "systemSeq": 41
+      }
     }
   },
   "helloResponse": {
@@ -22,11 +29,25 @@
     "replyTo": "req_hello_1",
     "type": "system.hello",
     "payload": {
-      "protocol": { "version": 1, "min": 1, "max": 1 },
-      "server": { "name": "Cardiary", "version": "0.1.0" },
+      "protocol": {
+        "version": 1,
+        "min": 1,
+        "max": 1
+      },
+      "server": {
+        "name": "Cardiary",
+        "version": "0.1.0"
+      },
       "connectionId": "conn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z9",
-      "limits": { "maxFrameBytes": 1048576, "replayWindow": 512, "heartbeatSeconds": 20 },
-      "capabilities": { "modules": true, "files": true },
+      "limits": {
+        "maxFrameBytes": 1048576,
+        "replayWindow": 512,
+        "heartbeatSeconds": 20
+      },
+      "capabilities": {
+        "modules": true,
+        "files": true
+      },
       "epoch": "01JCX9A2B3C4D5E6F7G8H9J0K1"
     }
   },
@@ -35,7 +56,10 @@
     "kind": "request",
     "id": "req_sys_sub_1",
     "type": "system.subscribe",
-    "payload": { "lastSeq": 41, "epoch": "01JCX9A2B3C4D5E6F7G8H9J0K1" }
+    "payload": {
+      "lastSeq": 41,
+      "epoch": "01JCX9A2B3C4D5E6F7G8H9J0K1"
+    }
   },
   "systemSubscribeResponse": {
     "v": 1,
@@ -48,7 +72,11 @@
       "epoch": "01JCX9A2B3C4D5E6F7G8H9J0K1",
       "resyncRequired": true,
       "snapshot": {
-        "folder": { "state": "ready", "displayName": "Cardiary", "writable": true },
+        "folder": {
+          "state": "ready",
+          "displayName": "Cardiary",
+          "writable": true
+        },
         "service": {
           "state": "running",
           "version": "0.1.0",
@@ -70,7 +98,9 @@
     "kind": "response",
     "replyTo": "req_sys_unsub_1",
     "type": "system.unsubscribe",
-    "payload": { "stream": "system" }
+    "payload": {
+      "stream": "system"
+    }
   },
   "systemStatusEvent": {
     "v": 1,
@@ -80,7 +110,11 @@
     "seq": 43,
     "emittedAt": "2026-11-14T10:05:12Z",
     "payload": {
-      "folder": { "state": "ready", "displayName": "Cardiary", "writable": true },
+      "folder": {
+        "state": "ready",
+        "displayName": "Cardiary",
+        "writable": true
+      },
       "service": {
         "state": "running",
         "version": "0.1.0",
@@ -120,7 +154,9 @@
     "kind": "request",
     "id": "req_list_1",
     "type": "session.list",
-    "payload": { "limit": 20 }
+    "payload": {
+      "limit": 20
+    }
   },
   "sessionListResponse": {
     "v": 1,
@@ -254,11 +290,29 @@
           "toolCallId": "call_01J8Z3K4Q5R6S7T8V9W0X1Y2Z6",
           "title": "執行指令前需要核准",
           "summary": "pnpm check",
-          "scope": { "kind": "tool_call", "target": "bash", "detail": { "cwd": "." } },
+          "scope": {
+            "kind": "tool_call",
+            "target": "bash",
+            "detail": {
+              "cwd": "."
+            }
+          },
           "options": [
-            { "id": "approve", "label": "核准一次", "effect": "approve" },
-            { "id": "approve_always", "label": "此目錄一律允許", "effect": "approve_always" },
-            { "id": "reject", "label": "拒絕", "effect": "reject" }
+            {
+              "id": "approve",
+              "label": "核准一次",
+              "effect": "approve"
+            },
+            {
+              "id": "approve_always",
+              "label": "此目錄一律允許",
+              "effect": "approve_always"
+            },
+            {
+              "id": "reject",
+              "label": "拒絕",
+              "effect": "reject"
+            }
           ],
           "requestedAt": "2026-11-14T10:07:05Z",
           "expiresAt": "2026-11-14T10:12:05Z"
@@ -271,7 +325,9 @@
     "kind": "request",
     "id": "req_unsub_1",
     "type": "session.unsubscribe",
-    "payload": { "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3" }
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3"
+    }
   },
   "sessionUnsubscribeResponse": {
     "v": 1,
@@ -308,8 +364,13 @@
           "createdAt": "2026-11-14T10:07:08Z",
           "toolCallId": "call_01J8Z3K4Q5R6S7T8V9W0X1Y2Z6",
           "name": "bash",
-          "input": { "command": "pnpm check" },
-          "output": { "text": "全部通過", "truncated": false },
+          "input": {
+            "command": "pnpm check"
+          },
+          "output": {
+            "text": "全部通過",
+            "truncated": false
+          },
           "status": "complete",
           "diagnostics": []
         }
@@ -362,7 +423,10 @@
         "text": "我先確認資料夾狀態。",
         "status": "complete"
       },
-      "usage": { "inputTokens": 1200, "outputTokens": 86 }
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 86
+      }
     }
   },
   "streamToolCallEvent": {
@@ -378,7 +442,9 @@
       "toolCallId": "call_01J8Z3K4Q5R6S7T8V9W0X1Y2Z6",
       "name": "bash",
       "title": "檢查專案",
-      "input": { "command": "pnpm check" }
+      "input": {
+        "command": "pnpm check"
+      }
     }
   },
   "streamToolResultEvent": {
@@ -393,8 +459,16 @@
       "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
       "toolCallId": "call_01J8Z3K4Q5R6S7T8V9W0X1Y2Z6",
       "status": "error",
-      "output": { "text": "指令被中斷", "truncated": false },
-      "diagnostics": [{ "code": "interrupted", "message": "主機重啟時工具正在執行" }]
+      "output": {
+        "text": "指令被中斷",
+        "truncated": false
+      },
+      "diagnostics": [
+        {
+          "code": "interrupted",
+          "message": "主機重啟時工具正在執行"
+        }
+      ]
     }
   },
   "streamTurnStateEvent": {
@@ -422,7 +496,10 @@
       "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
       "toolCallId": "call_01J8Z3K4Q5R6S7T8V9W0X1Y2Z6",
       "renderer": "module.cards.grid",
-      "data": { "columns": 3, "cards": [] }
+      "data": {
+        "columns": 3,
+        "cards": []
+      }
     }
   },
   "approvalRequestedEvent": {
@@ -439,11 +516,29 @@
       "toolCallId": "call_01J8Z3K4Q5R6S7T8V9W0X1Y2Z6",
       "title": "執行指令前需要核准",
       "summary": "pnpm check",
-      "scope": { "kind": "tool_call", "target": "bash", "detail": { "cwd": "." } },
+      "scope": {
+        "kind": "tool_call",
+        "target": "bash",
+        "detail": {
+          "cwd": "."
+        }
+      },
       "options": [
-        { "id": "approve", "label": "核准一次", "effect": "approve" },
-        { "id": "approve_always", "label": "此目錄一律允許", "effect": "approve_always" },
-        { "id": "reject", "label": "拒絕", "effect": "reject" }
+        {
+          "id": "approve",
+          "label": "核准一次",
+          "effect": "approve"
+        },
+        {
+          "id": "approve_always",
+          "label": "此目錄一律允許",
+          "effect": "approve_always"
+        },
+        {
+          "id": "reject",
+          "label": "拒絕",
+          "effect": "reject"
+        }
       ],
       "requestedAt": "2026-11-14T10:07:05Z",
       "expiresAt": "2026-11-14T10:12:05Z"
@@ -495,7 +590,9 @@
     "kind": "request",
     "id": "req_pause_1",
     "type": "approval.pause_all",
-    "payload": { "reason": "使用者按下緊急暫停" }
+    "payload": {
+      "reason": "使用者按下緊急暫停"
+    }
   },
   "approvalPauseAllResponse": {
     "v": 1,
@@ -512,14 +609,23 @@
     "kind": "request",
     "id": "req_mod_1",
     "type": "module.cards.search",
-    "payload": { "data": { "query": "協定", "limit": 10 } }
+    "payload": {
+      "data": {
+        "query": "協定",
+        "limit": 10
+      }
+    }
   },
   "moduleResponse": {
     "v": 1,
     "kind": "response",
     "replyTo": "req_mod_1",
     "type": "module.cards.search",
-    "payload": { "data": { "cardIds": ["card_01J8Z3K4Q5R6S7T8V9W0X1Y2ZH"] } }
+    "payload": {
+      "data": {
+        "cardIds": ["card_01J8Z3K4Q5R6S7T8V9W0X1Y2ZH"]
+      }
+    }
   },
   "moduleEvent": {
     "v": 1,
@@ -529,7 +635,10 @@
     "seq": 44,
     "emittedAt": "2026-11-14T10:09:00Z",
     "payload": {
-      "data": { "cardId": "card_01J8Z3K4Q5R6S7T8V9W0X1Y2ZH", "change": "updated" },
+      "data": {
+        "cardId": "card_01J8Z3K4Q5R6S7T8V9W0X1Y2ZH",
+        "change": "updated"
+      },
       "schemaVersion": "1"
     }
   },
@@ -539,7 +648,1148 @@
     "replyTo": "req_hello_1",
     "code": "incompatible_version",
     "message": "客戶端與主機沒有共同的協定版本。",
-    "details": { "clientMin": 2, "clientMax": 2, "serverMin": 1, "serverMax": 1 },
+    "details": {
+      "clientMin": 2,
+      "clientMax": 2,
+      "serverMin": 1,
+      "serverMax": 1
+    },
     "retryable": false
+  },
+  "cardListRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_card_list",
+    "type": "card.list",
+    "payload": {
+      "kinds": ["note"],
+      "query": "協定",
+      "limit": 20
+    }
+  },
+  "cardListResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_card_list",
+    "type": "card.list",
+    "payload": {
+      "cards": [
+        {
+          "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+          "kind": "note",
+          "title": "協定設計討論",
+          "summary": "M1 協定的卡片、上下文與模型訊息。",
+          "tags": ["cardiary", "協定"],
+          "persona": "default",
+          "createdAt": "2026-11-15T02:00:00.000Z",
+          "updatedAt": "2026-11-15T02:05:00.000Z",
+          "freshness": 87,
+          "lifecycle": "live"
+        }
+      ],
+      "nextCursor": "cur_02"
+    }
+  },
+  "cardGetRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_card_get",
+    "type": "card.get",
+    "payload": {
+      "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1"
+    }
+  },
+  "cardGetResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_card_get",
+    "type": "card.get",
+    "payload": {
+      "card": {
+        "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+        "kind": "note",
+        "title": "協定設計討論",
+        "summary": "M1 協定的卡片、上下文與模型訊息。",
+        "body": "## 結論\n\n卡片檔是正本；索引可重建。\n",
+        "tags": ["cardiary", "協定"],
+        "persona": "default",
+        "createdAt": "2026-11-15T02:00:00.000Z",
+        "updatedAt": "2026-11-15T02:05:00.000Z",
+        "freshness": 87,
+        "lifecycle": "live",
+        "sources": ["01JCX8Q3W7Z9K5V2N4M6P8R0T2"],
+        "links": {
+          "outgoing": ["01JCX8Q3W7Z9K5V2N4M6P8R0T2"],
+          "backlinks": []
+        },
+        "revision": "5c1f0a2d3e4b5968778695a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4"
+      }
+    }
+  },
+  "cardCreateRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_card_create",
+    "type": "card.create",
+    "payload": {
+      "kind": "note",
+      "title": "新卡片",
+      "body": "內容\n",
+      "tags": ["待辦"],
+      "clientRequestId": "create_card_01J8Z3K4Q5R6S7T8V9W0X1Y2ZB"
+    }
+  },
+  "cardCreateResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_card_create",
+    "type": "card.create",
+    "payload": {
+      "card": {
+        "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+        "kind": "note",
+        "title": "協定設計討論",
+        "summary": "M1 協定的卡片、上下文與模型訊息。",
+        "tags": ["cardiary", "協定"],
+        "persona": "default",
+        "createdAt": "2026-11-15T02:00:00.000Z",
+        "updatedAt": "2026-11-15T02:05:00.000Z",
+        "freshness": 87,
+        "lifecycle": "live"
+      }
+    }
+  },
+  "cardPatchRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_card_patch",
+    "type": "card.patch",
+    "payload": {
+      "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+      "baseRevision": "5c1f0a2d3e4b5968778695a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4",
+      "patch": {
+        "format": "unified",
+        "text": "@@ -3,3 +3,3 @@\n-舊句子\n+新句子\n"
+      }
+    }
+  },
+  "cardPatchResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_card_patch",
+    "type": "card.patch",
+    "payload": {
+      "card": {
+        "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+        "kind": "note",
+        "title": "協定設計討論",
+        "summary": "M1 協定的卡片、上下文與模型訊息。",
+        "body": "## 結論\n\n卡片檔是正本；索引可重建。\n",
+        "tags": ["cardiary", "協定"],
+        "persona": "default",
+        "createdAt": "2026-11-15T02:00:00.000Z",
+        "updatedAt": "2026-11-15T02:05:00.000Z",
+        "freshness": 87,
+        "lifecycle": "live",
+        "sources": ["01JCX8Q3W7Z9K5V2N4M6P8R0T2"],
+        "links": {
+          "outgoing": ["01JCX8Q3W7Z9K5V2N4M6P8R0T2"],
+          "backlinks": []
+        },
+        "revision": "5c1f0a2d3e4b5968778695a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4"
+      }
+    }
+  },
+  "cardDeleteRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_card_delete",
+    "type": "card.delete",
+    "payload": {
+      "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+      "clientRequestId": "delete_card_01J8Z3K4Q5R6S7T8V9W0X1Y2ZC"
+    }
+  },
+  "cardDeleteResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_card_delete",
+    "type": "card.delete",
+    "payload": {
+      "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+      "deletedAssets": 0
+    }
+  },
+  "cardSearchRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_card_search",
+    "type": "card.search",
+    "payload": {
+      "query": "協定",
+      "limit": 20
+    }
+  },
+  "cardSearchResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_card_search",
+    "type": "card.search",
+    "payload": {
+      "hits": [
+        {
+          "card": {
+            "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+            "kind": "note",
+            "title": "協定設計討論",
+            "summary": "M1 協定的卡片、上下文與模型訊息。",
+            "tags": ["cardiary", "協定"],
+            "persona": "default",
+            "createdAt": "2026-11-15T02:00:00.000Z",
+            "updatedAt": "2026-11-15T02:05:00.000Z",
+            "freshness": 87,
+            "lifecycle": "live"
+          },
+          "score": 3.2,
+          "snippet": "…M1 協定的卡片、上下文…"
+        }
+      ]
+    }
+  },
+  "cardRefreshRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_card_refresh",
+    "type": "card.refresh",
+    "payload": {
+      "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1"
+    }
+  },
+  "cardRefreshResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_card_refresh",
+    "type": "card.refresh",
+    "payload": {
+      "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+      "freshness": 100
+    }
+  },
+  "cardChangedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "card.changed",
+    "stream": "system",
+    "seq": 44,
+    "emittedAt": "2026-11-15T02:20:00.000Z",
+    "payload": {
+      "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+      "change": "updated",
+      "revision": "5c1f0a2d3e4b5968778695a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4",
+      "freshness": 100
+    }
+  },
+  "contextGetRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_context_get",
+    "type": "context.get",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3"
+    }
+  },
+  "contextGetResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_context_get",
+    "type": "context.get",
+    "payload": {
+      "context": {
+        "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+        "version": 7,
+        "entries": [
+          {
+            "entryId": "ctx_bedrock",
+            "layer": "bedrock",
+            "title": "基岩卡",
+            "tokenEstimate": 420,
+            "state": "active",
+            "position": 0
+          },
+          {
+            "entryId": "ctx_persona",
+            "layer": "persona",
+            "title": "人格卡",
+            "tokenEstimate": 980,
+            "state": "active",
+            "position": 1
+          },
+          {
+            "entryId": "ctx_card_1",
+            "layer": "other-cards",
+            "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+            "title": "協定設計討論",
+            "tokenEstimate": 760,
+            "state": "active",
+            "position": 2
+          },
+          {
+            "entryId": "ctx_working",
+            "layer": "working-context",
+            "title": "對話內容",
+            "tokenEstimate": 12400,
+            "state": "active",
+            "position": 3
+          },
+          {
+            "entryId": "ctx_volatile",
+            "layer": "volatile-state",
+            "title": "目前時間",
+            "tokenEstimate": 24,
+            "state": "active",
+            "position": 4
+          }
+        ],
+        "usedTokens": 14584,
+        "budgetTokens": 254000,
+        "contextWindow": 262144,
+        "compactionThreshold": 0.75,
+        "lastCompactedAt": "2026-11-15T02:05:00.000Z"
+      }
+    }
+  },
+  "contextAddCardRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_context_add_card",
+    "type": "context.add_card",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1"
+    }
+  },
+  "contextAddCardResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_context_add_card",
+    "type": "context.add_card",
+    "payload": {
+      "context": {
+        "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+        "version": 7,
+        "entries": [
+          {
+            "entryId": "ctx_bedrock",
+            "layer": "bedrock",
+            "title": "基岩卡",
+            "tokenEstimate": 420,
+            "state": "active",
+            "position": 0
+          },
+          {
+            "entryId": "ctx_persona",
+            "layer": "persona",
+            "title": "人格卡",
+            "tokenEstimate": 980,
+            "state": "active",
+            "position": 1
+          },
+          {
+            "entryId": "ctx_card_1",
+            "layer": "other-cards",
+            "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+            "title": "協定設計討論",
+            "tokenEstimate": 760,
+            "state": "active",
+            "position": 2
+          },
+          {
+            "entryId": "ctx_working",
+            "layer": "working-context",
+            "title": "對話內容",
+            "tokenEstimate": 12400,
+            "state": "active",
+            "position": 3
+          },
+          {
+            "entryId": "ctx_volatile",
+            "layer": "volatile-state",
+            "title": "目前時間",
+            "tokenEstimate": 24,
+            "state": "active",
+            "position": 4
+          }
+        ],
+        "usedTokens": 14584,
+        "budgetTokens": 254000,
+        "contextWindow": 262144,
+        "compactionThreshold": 0.75,
+        "lastCompactedAt": "2026-11-15T02:05:00.000Z"
+      }
+    }
+  },
+  "contextRemoveCardRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_context_remove_card",
+    "type": "context.remove_card",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1"
+    }
+  },
+  "contextRemoveCardResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_context_remove_card",
+    "type": "context.remove_card",
+    "payload": {
+      "context": {
+        "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+        "version": 7,
+        "entries": [
+          {
+            "entryId": "ctx_bedrock",
+            "layer": "bedrock",
+            "title": "基岩卡",
+            "tokenEstimate": 420,
+            "state": "active",
+            "position": 0
+          },
+          {
+            "entryId": "ctx_persona",
+            "layer": "persona",
+            "title": "人格卡",
+            "tokenEstimate": 980,
+            "state": "active",
+            "position": 1
+          },
+          {
+            "entryId": "ctx_card_1",
+            "layer": "other-cards",
+            "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+            "title": "協定設計討論",
+            "tokenEstimate": 760,
+            "state": "active",
+            "position": 2
+          },
+          {
+            "entryId": "ctx_working",
+            "layer": "working-context",
+            "title": "對話內容",
+            "tokenEstimate": 12400,
+            "state": "active",
+            "position": 3
+          },
+          {
+            "entryId": "ctx_volatile",
+            "layer": "volatile-state",
+            "title": "目前時間",
+            "tokenEstimate": 24,
+            "state": "active",
+            "position": 4
+          }
+        ],
+        "usedTokens": 14584,
+        "budgetTokens": 254000,
+        "contextWindow": 262144,
+        "compactionThreshold": 0.75,
+        "lastCompactedAt": "2026-11-15T02:05:00.000Z"
+      }
+    }
+  },
+  "contextCompactRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_context_compact",
+    "type": "context.compact",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3"
+    }
+  },
+  "contextCompactResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_context_compact",
+    "type": "context.compact",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "scheduled": true
+    }
+  },
+  "contextChangedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "context.changed",
+    "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+    "seq": 19,
+    "emittedAt": "2026-11-15T02:20:00.000Z",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "context": {
+        "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+        "version": 7,
+        "entries": [
+          {
+            "entryId": "ctx_bedrock",
+            "layer": "bedrock",
+            "title": "基岩卡",
+            "tokenEstimate": 420,
+            "state": "active",
+            "position": 0
+          },
+          {
+            "entryId": "ctx_persona",
+            "layer": "persona",
+            "title": "人格卡",
+            "tokenEstimate": 980,
+            "state": "active",
+            "position": 1
+          },
+          {
+            "entryId": "ctx_card_1",
+            "layer": "other-cards",
+            "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+            "title": "協定設計討論",
+            "tokenEstimate": 760,
+            "state": "active",
+            "position": 2
+          },
+          {
+            "entryId": "ctx_working",
+            "layer": "working-context",
+            "title": "對話內容",
+            "tokenEstimate": 12400,
+            "state": "active",
+            "position": 3
+          },
+          {
+            "entryId": "ctx_volatile",
+            "layer": "volatile-state",
+            "title": "目前時間",
+            "tokenEstimate": 24,
+            "state": "active",
+            "position": 4
+          }
+        ],
+        "usedTokens": 14584,
+        "budgetTokens": 254000,
+        "contextWindow": 262144,
+        "compactionThreshold": 0.75,
+        "lastCompactedAt": "2026-11-15T02:05:00.000Z"
+      }
+    }
+  },
+  "contextCompactedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "context.compacted",
+    "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+    "seq": 20,
+    "emittedAt": "2026-11-15T02:20:00.000Z",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "summaryCardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T2",
+      "beforeTokens": 120000,
+      "afterTokens": 42000,
+      "compactedAt": "2026-11-15T02:05:00.000Z"
+    }
+  },
+  "sessionArchiveRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_session_archive",
+    "type": "session.archive",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "purgeAfterDays": 7
+    }
+  },
+  "sessionArchiveResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_session_archive",
+    "type": "session.archive",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "archive": {
+        "archivedAt": "2026-11-15T02:10:00.000Z",
+        "purgeAt": "2026-11-22T02:10:00.000Z"
+      }
+    }
+  },
+  "sessionUnarchiveRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_session_unarchive",
+    "type": "session.unarchive",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3"
+    }
+  },
+  "sessionUnarchiveResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_session_unarchive",
+    "type": "session.unarchive",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "unarchived": true
+    }
+  },
+  "sessionDeletionPreviewRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_session_delete_preview",
+    "type": "session.deletion_preview",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3"
+    }
+  },
+  "sessionDeletionPreviewResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_session_delete_preview",
+    "type": "session.deletion_preview",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "subtreeSessionIds": ["sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3"],
+      "exclusiveCards": 3,
+      "sharedCards": 2,
+      "assets": 1
+    }
+  },
+  "sessionDeleteRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_session_delete",
+    "type": "session.delete",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "clientRequestId": "delete_session_01J8Z3K4Q5R6S7T8V9W0X1Y2ZE"
+    }
+  },
+  "sessionDeleteResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_session_delete",
+    "type": "session.delete",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "deletedSessionIds": ["sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3"],
+      "deletedCards": 3,
+      "deletedAssets": 1
+    }
+  },
+  "sessionArchivedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "session.archived",
+    "stream": "system",
+    "seq": 45,
+    "emittedAt": "2026-11-15T02:20:00.000Z",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "archive": {
+        "archivedAt": "2026-11-15T02:10:00.000Z",
+        "purgeAt": "2026-11-22T02:10:00.000Z"
+      }
+    }
+  },
+  "sessionUnarchivedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "session.unarchived",
+    "stream": "system",
+    "seq": 46,
+    "emittedAt": "2026-11-15T02:20:00.000Z",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3"
+    }
+  },
+  "sessionDeletedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "session.deleted",
+    "stream": "system",
+    "seq": 47,
+    "emittedAt": "2026-11-15T02:20:00.000Z",
+    "payload": {
+      "sessionId": "sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+      "deletedSessionIds": ["sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3"],
+      "deletedCards": 3,
+      "deletedAssets": 1
+    }
+  },
+  "systemSettingsGetRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_settings_get",
+    "type": "system.settings.get",
+    "payload": {}
+  },
+  "systemSettingsGetResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_settings_get",
+    "type": "system.settings.get",
+    "payload": {
+      "settings": [
+        {
+          "key": "ui.locale",
+          "value": "zh-Hant",
+          "level": "free",
+          "title": "介面語言",
+          "updatedAt": "2026-11-15T02:00:00.000Z"
+        },
+        {
+          "key": "models.summary.maxOutputTokens",
+          "value": 4096,
+          "level": "free",
+          "title": "摘要輸出上限",
+          "updatedAt": "2026-11-15T02:00:00.000Z"
+        }
+      ]
+    }
+  },
+  "systemSettingsSetRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_settings_set",
+    "type": "system.settings.set",
+    "payload": {
+      "changes": [
+        {
+          "key": "ui.locale",
+          "value": "en"
+        }
+      ],
+      "clientRequestId": "settings_01J8Z3K4Q5R6S7T8V9W0X1Y2ZF"
+    }
+  },
+  "systemSettingsSetResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_settings_set",
+    "type": "system.settings.set",
+    "payload": {
+      "applied": [
+        {
+          "key": "ui.locale",
+          "value": "en",
+          "level": "free",
+          "title": "介面語言",
+          "updatedAt": "2026-11-15T02:05:00.000Z"
+        }
+      ],
+      "requiresApproval": false
+    }
+  },
+  "systemSettingsChangedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "system.settings.changed",
+    "stream": "system",
+    "seq": 48,
+    "emittedAt": "2026-11-15T02:20:00.000Z",
+    "payload": {
+      "changes": [
+        {
+          "key": "ui.locale",
+          "value": "en",
+          "level": "free",
+          "title": "介面語言",
+          "updatedAt": "2026-11-15T02:05:00.000Z"
+        }
+      ],
+      "changedBy": "user:mac_1",
+      "changedAt": "2026-11-15T02:05:00.000Z"
+    }
+  },
+  "systemModulesGetRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_modules_get",
+    "type": "system.modules.get",
+    "payload": {}
+  },
+  "systemModulesGetResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_modules_get",
+    "type": "system.modules.get",
+    "payload": {
+      "modules": [
+        {
+          "moduleId": "cards",
+          "name": "卡片庫",
+          "version": "0.1.0",
+          "enabled": true,
+          "state": "active",
+          "protocolPrefixes": ["card"],
+          "settings": [
+            {
+              "key": "cards.freshness.halfLifeDays",
+              "title": "新鮮度半衰期",
+              "kind": "integer",
+              "level": "free"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "systemModulesSetEnabledRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_modules_set",
+    "type": "system.modules.set_enabled",
+    "payload": {
+      "moduleId": "cards",
+      "enabled": false,
+      "clientRequestId": "modules_01J8Z3K4Q5R6S7T8V9W0X1Y2ZG"
+    }
+  },
+  "systemModulesSetEnabledResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_modules_set",
+    "type": "system.modules.set_enabled",
+    "payload": {
+      "module": {
+        "moduleId": "cards",
+        "name": "卡片庫",
+        "version": "0.1.0",
+        "enabled": false,
+        "state": "inactive",
+        "protocolPrefixes": ["card"],
+        "settings": [
+          {
+            "key": "cards.freshness.halfLifeDays",
+            "title": "新鮮度半衰期",
+            "kind": "integer",
+            "level": "free"
+          }
+        ]
+      }
+    }
+  },
+  "systemModulesChangedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "system.modules.changed",
+    "stream": "system",
+    "seq": 49,
+    "emittedAt": "2026-11-15T02:20:00.000Z",
+    "payload": {
+      "module": {
+        "moduleId": "cards",
+        "name": "卡片庫",
+        "version": "0.1.0",
+        "enabled": false,
+        "state": "inactive",
+        "protocolPrefixes": ["card"],
+        "settings": [
+          {
+            "key": "cards.freshness.halfLifeDays",
+            "title": "新鮮度半衰期",
+            "kind": "integer",
+            "level": "free"
+          }
+        ]
+      }
+    }
+  },
+  "systemModelsGetRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_models_get",
+    "type": "system.models.get",
+    "payload": {}
+  },
+  "systemModelsGetResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_models_get",
+    "type": "system.models.get",
+    "payload": {
+      "providers": [
+        {
+          "providerId": "magpie",
+          "kind": "aggregator",
+          "displayName": "Magpie",
+          "baseUrl": "http://127.0.0.1:3425/v1",
+          "credentialRef": "cardiary/provider/magpie",
+          "models": [
+            {
+              "modelId": "group/free",
+              "displayName": "Free",
+              "contextWindow": 1048576,
+              "maxOutputTokens": 921600,
+              "input": ["text", "image"]
+            }
+          ]
+        }
+      ],
+      "roles": [
+        {
+          "role": "main",
+          "mode": "model",
+          "ref": {
+            "providerId": "magpie",
+            "modelId": "group/free"
+          }
+        },
+        {
+          "role": "small",
+          "mode": "unset"
+        },
+        {
+          "role": "writing",
+          "mode": "unset"
+        },
+        {
+          "role": "system-one",
+          "mode": "none"
+        }
+      ],
+      "resolved": [
+        {
+          "role": "main",
+          "source": "configured",
+          "ref": {
+            "providerId": "magpie",
+            "modelId": "group/free"
+          }
+        },
+        {
+          "role": "small",
+          "source": "fallback-main",
+          "ref": {
+            "providerId": "magpie",
+            "modelId": "group/free"
+          }
+        },
+        {
+          "role": "writing",
+          "source": "fallback-main",
+          "ref": {
+            "providerId": "magpie",
+            "modelId": "group/free"
+          }
+        },
+        {
+          "role": "system-one",
+          "source": "none"
+        }
+      ]
+    }
+  },
+  "systemModelsSetRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_models_set",
+    "type": "system.models.set",
+    "payload": {
+      "providers": [
+        {
+          "providerId": "magpie",
+          "kind": "aggregator",
+          "displayName": "Magpie",
+          "baseUrl": "http://127.0.0.1:3425/v1",
+          "credentialRef": "cardiary/provider/magpie",
+          "models": [
+            {
+              "modelId": "group/free",
+              "displayName": "Free",
+              "contextWindow": 1048576,
+              "maxOutputTokens": 921600,
+              "input": ["text", "image"]
+            }
+          ]
+        }
+      ],
+      "roles": [
+        {
+          "role": "main",
+          "mode": "model",
+          "ref": {
+            "providerId": "magpie",
+            "modelId": "group/free"
+          }
+        },
+        {
+          "role": "small",
+          "mode": "unset"
+        },
+        {
+          "role": "writing",
+          "mode": "unset"
+        },
+        {
+          "role": "system-one",
+          "mode": "none"
+        }
+      ],
+      "clientRequestId": "models_01J8Z3K4Q5R6S7T8V9W0X1Y2ZH"
+    }
+  },
+  "systemModelsSetResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_models_set",
+    "type": "system.models.set",
+    "payload": {
+      "providers": [
+        {
+          "providerId": "magpie",
+          "kind": "aggregator",
+          "displayName": "Magpie",
+          "baseUrl": "http://127.0.0.1:3425/v1",
+          "credentialRef": "cardiary/provider/magpie",
+          "models": [
+            {
+              "modelId": "group/free",
+              "displayName": "Free",
+              "contextWindow": 1048576,
+              "maxOutputTokens": 921600,
+              "input": ["text", "image"]
+            }
+          ]
+        }
+      ],
+      "roles": [
+        {
+          "role": "main",
+          "mode": "model",
+          "ref": {
+            "providerId": "magpie",
+            "modelId": "group/free"
+          }
+        },
+        {
+          "role": "small",
+          "mode": "unset"
+        },
+        {
+          "role": "writing",
+          "mode": "unset"
+        },
+        {
+          "role": "system-one",
+          "mode": "none"
+        }
+      ],
+      "resolved": [
+        {
+          "role": "main",
+          "source": "configured",
+          "ref": {
+            "providerId": "magpie",
+            "modelId": "group/free"
+          }
+        },
+        {
+          "role": "small",
+          "source": "fallback-main",
+          "ref": {
+            "providerId": "magpie",
+            "modelId": "group/free"
+          }
+        },
+        {
+          "role": "writing",
+          "source": "fallback-main",
+          "ref": {
+            "providerId": "magpie",
+            "modelId": "group/free"
+          }
+        },
+        {
+          "role": "system-one",
+          "source": "none"
+        }
+      ]
+    }
+  },
+  "systemModelsChangedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "system.models.changed",
+    "stream": "system",
+    "seq": 50,
+    "emittedAt": "2026-11-15T02:20:00.000Z",
+    "payload": {
+      "providers": [
+        {
+          "providerId": "magpie",
+          "kind": "aggregator",
+          "displayName": "Magpie",
+          "baseUrl": "http://127.0.0.1:3425/v1",
+          "credentialRef": "cardiary/provider/magpie",
+          "models": [
+            {
+              "modelId": "group/free",
+              "displayName": "Free",
+              "contextWindow": 1048576,
+              "maxOutputTokens": 921600,
+              "input": ["text", "image"]
+            }
+          ]
+        }
+      ],
+      "roles": [
+        {
+          "role": "main",
+          "mode": "model",
+          "ref": {
+            "providerId": "magpie",
+            "modelId": "group/free"
+          }
+        },
+        {
+          "role": "small",
+          "mode": "unset"
+        },
+        {
+          "role": "writing",
+          "mode": "unset"
+        },
+        {
+          "role": "system-one",
+          "mode": "none"
+        }
+      ],
+      "resolved": [
+        {
+          "role": "main",
+          "source": "configured",
+          "ref": {
+            "providerId": "magpie",
+            "modelId": "group/free"
+          }
+        },
+        {
+          "role": "small",
+          "source": "fallback-main",
+          "ref": {
+            "providerId": "magpie",
+            "modelId": "group/free"
+          }
+        },
+        {
+          "role": "writing",
+          "source": "fallback-main",
+          "ref": {
+            "providerId": "magpie",
+            "modelId": "group/free"
+          }
+        },
+        {
+          "role": "system-one",
+          "source": "none"
+        }
+      ]
+    }
   }
 }

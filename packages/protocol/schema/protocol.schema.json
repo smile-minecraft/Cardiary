@@ -267,6 +267,11 @@
           "type": "integer",
           "description": "WebSocket ping 的間隔秒數。",
           "minimum": 1
+        },
+        "maxBlobBytes": {
+          "type": "integer",
+          "description": "HTTP blob 單檔的上傳上限；省略代表沒有提供 blob 端點。",
+          "minimum": 1
         }
       }
     },
@@ -283,6 +288,26 @@
         "files": {
           "type": "boolean",
           "description": "是否提供 HTTP 大型檔案端點。"
+        },
+        "cards": {
+          "type": "boolean",
+          "description": "是否提供卡片類訊息。"
+        },
+        "context": {
+          "type": "boolean",
+          "description": "是否提供上下文類訊息。"
+        },
+        "archive": {
+          "type": "boolean",
+          "description": "是否提供會話封存與刪除。"
+        },
+        "media": {
+          "type": "boolean",
+          "description": "是否提供圖片與音訊的匯入。"
+        },
+        "blobs": {
+          "type": "boolean",
+          "description": "是否提供 HTTP blob 上傳與下載。"
         }
       }
     },
@@ -483,6 +508,9 @@
           "type": "integer",
           "description": "可見訊息數量。",
           "minimum": 0
+        },
+        "archive": {
+          "$ref": "#/$defs/SessionArchive"
         }
       }
     },
@@ -552,8 +580,8 @@
     "DeliveryMode": {
       "title": "DeliveryMode",
       "type": "string",
-      "enum": ["queue", "interrupt"],
-      "description": "送出訊息時的行為。queue 在下一個模型請求生效，不中止目前串流；interrupt 先中止目前生成再送出。"
+      "enum": ["queue", "steer", "interrupt"],
+      "description": "送出訊息時的行為。queue 在目前回合結束後生效；steer 在下一個模型請求前送達，不中止目前串流；interrupt 先中止目前生成再送出。"
     },
     "SendMessageDisposition": {
       "title": "SendMessageDisposition",
@@ -1501,6 +1529,1652 @@
         "schemaVersion": {
           "type": "string",
           "description": "模組事件的 payload schema 版本。"
+        }
+      }
+    },
+    "CardKind": {
+      "title": "CardKind",
+      "type": "string",
+      "enum": ["note", "image", "audio", "memory", "summary", "persona", "bedrock"],
+      "description": "卡片種類。memory、summary、persona、bedrock 只由系統或匯入建立。"
+    },
+    "CardLifecycle": {
+      "title": "CardLifecycle",
+      "type": "string",
+      "enum": ["live", "cold"],
+      "description": "卡片生命週期；cold 是蒸餾後的冷封存。"
+    },
+    "CardLifecycleFilter": {
+      "title": "CardLifecycleFilter",
+      "type": "string",
+      "enum": ["live", "cold", "all"],
+      "description": "列表與搜尋的生命週期篩選。"
+    },
+    "CardChange": {
+      "title": "CardChange",
+      "type": "string",
+      "enum": ["created", "updated", "deleted", "refreshed", "reindexed"],
+      "description": "卡片變更的種類。reindexed 表示只有索引或中繼資料變了。"
+    },
+    "CardAsset": {
+      "title": "CardAsset",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blobId", "mediaType", "sizeBytes"],
+      "properties": {
+        "blobId": {
+          "type": "string",
+          "description": "內容雜湊（SHA-256 小寫十六進位），也是 HTTP blob 的識別碼。"
+        },
+        "mediaType": {
+          "type": "string",
+          "description": "例如 image/png、audio/mp4。"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "description": "原檔位元組數。",
+          "minimum": 0
+        }
+      }
+    },
+    "CardLinks": {
+      "title": "CardLinks",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outgoing", "backlinks"],
+      "properties": {
+        "outgoing": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "目標卡片或標題。"
+          },
+          "description": "內文 [[ ]] 的目標，依出現順序。"
+        },
+        "backlinks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "來源卡片識別碼。"
+          },
+          "description": "連到這張卡的卡片。"
+        }
+      }
+    },
+    "CardSummary": {
+      "title": "CardSummary",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cardId",
+        "kind",
+        "title",
+        "tags",
+        "persona",
+        "createdAt",
+        "freshness",
+        "lifecycle"
+      ],
+      "properties": {
+        "cardId": {
+          "type": "string",
+          "description": "卡片識別碼。"
+        },
+        "kind": {
+          "$ref": "#/$defs/CardKind"
+        },
+        "title": {
+          "type": "string",
+          "description": "標題。"
+        },
+        "summary": {
+          "type": "string",
+          "description": "一兩句話的摘要。"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "標籤。"
+          },
+          "description": "標籤，保留原本順序。"
+        },
+        "persona": {
+          "type": "string",
+          "description": "人格分區，預設 default。"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "建立時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "最後更新時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "freshness": {
+          "type": "integer",
+          "description": "新鮮度 0 到 100；檢視欄與卡片庫用它褪色。",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/CardLifecycle"
+        },
+        "supersededBy": {
+          "type": "string",
+          "description": "取代這張卡的新卡；有值時不進預設搜尋與列表。"
+        },
+        "asset": {
+          "$ref": "#/$defs/CardAsset"
+        },
+        "broken": {
+          "type": "boolean",
+          "description": "檔案格式不符，索引無法解析；true 時不提供內文。"
+        },
+        "brokenReason": {
+          "type": "string",
+          "description": "格式不符的原因，給人看。"
+        }
+      }
+    },
+    "Card": {
+      "title": "Card",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cardId",
+        "kind",
+        "title",
+        "body",
+        "tags",
+        "persona",
+        "createdAt",
+        "freshness",
+        "lifecycle",
+        "links",
+        "revision",
+        "sources"
+      ],
+      "properties": {
+        "cardId": {
+          "type": "string",
+          "description": "卡片識別碼。"
+        },
+        "kind": {
+          "$ref": "#/$defs/CardKind"
+        },
+        "title": {
+          "type": "string",
+          "description": "標題。"
+        },
+        "summary": {
+          "type": "string",
+          "description": "摘要。"
+        },
+        "body": {
+          "type": "string",
+          "description": "內文（Markdown）；補丁編輯的對象。"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "標籤。"
+          },
+          "description": "標籤。"
+        },
+        "persona": {
+          "type": "string",
+          "description": "人格分區。"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "建立時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "最後更新時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "freshness": {
+          "type": "integer",
+          "description": "新鮮度 0 到 100。",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/CardLifecycle"
+        },
+        "supersededBy": {
+          "type": "string",
+          "description": "取代這張卡的新卡。"
+        },
+        "supersedes": {
+          "type": "string",
+          "description": "被這張卡取代的舊卡。"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "來源卡片識別碼。"
+          },
+          "description": "血緣：由哪些卡生成。"
+        },
+        "asset": {
+          "$ref": "#/$defs/CardAsset"
+        },
+        "links": {
+          "$ref": "#/$defs/CardLinks"
+        },
+        "revision": {
+          "type": "string",
+          "description": "正規化內容的 SHA-256；補丁的樂觀鎖。"
+        }
+      }
+    },
+    "CardListRequestPayload": {
+      "title": "CardListRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CardKind"
+          },
+          "description": "只回這幾種。"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "標籤。"
+          },
+          "description": "同時包含這些標籤。"
+        },
+        "persona": {
+          "type": "string",
+          "description": "人格分區。"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/CardLifecycleFilter"
+        },
+        "query": {
+          "type": "string",
+          "description": "簡易查詢；等同 card.search 的前綴比對。"
+        },
+        "includeSuperseded": {
+          "type": "boolean",
+          "description": "是否包含被取代的卡；預設 false。"
+        },
+        "cursor": {
+          "type": "string",
+          "description": "上一頁的游標。"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "最多回傳幾筆。",
+          "minimum": 1,
+          "maximum": 200
+        }
+      }
+    },
+    "CardListResponsePayload": {
+      "title": "CardListResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cards"],
+      "properties": {
+        "cards": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CardSummary"
+          },
+          "description": "依建立時間由新到舊。"
+        },
+        "nextCursor": {
+          "type": "string",
+          "description": "下一頁游標；沒有更多資料時省略。"
+        }
+      }
+    },
+    "CardGetRequestPayload": {
+      "title": "CardGetRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cardId"],
+      "properties": {
+        "cardId": {
+          "type": "string",
+          "description": "要讀取的卡片。"
+        }
+      }
+    },
+    "CardGetResponsePayload": {
+      "title": "CardGetResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card"],
+      "properties": {
+        "card": {
+          "$ref": "#/$defs/Card"
+        }
+      }
+    },
+    "CardCreateRequestPayload": {
+      "title": "CardCreateRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "title", "body", "clientRequestId"],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/CardKind"
+        },
+        "title": {
+          "type": "string",
+          "description": "標題。"
+        },
+        "body": {
+          "type": "string",
+          "description": "內文（Markdown）。"
+        },
+        "summary": {
+          "type": "string",
+          "description": "摘要。"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "標籤。"
+          },
+          "description": "標籤。"
+        },
+        "persona": {
+          "type": "string",
+          "description": "人格分區。"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "來源卡片識別碼。"
+          },
+          "description": "血緣。"
+        },
+        "supersedes": {
+          "type": "string",
+          "description": "被這張卡取代的舊卡。"
+        },
+        "assetBlobId": {
+          "type": "string",
+          "description": "已上傳原檔的 blobId；圖片與音訊卡必填。"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "客戶端產生的冪等鍵；同一個鍵重送只會建立一張卡。"
+        }
+      }
+    },
+    "CardCreateResponsePayload": {
+      "title": "CardCreateResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card"],
+      "properties": {
+        "card": {
+          "$ref": "#/$defs/CardSummary"
+        }
+      }
+    },
+    "CardPatchFormat": {
+      "title": "CardPatchFormat",
+      "type": "string",
+      "enum": ["unified", "replace"],
+      "description": "補丁格式；代理只能用 unified。"
+    },
+    "CardPatch": {
+      "title": "CardPatch",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "text"],
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/CardPatchFormat"
+        },
+        "text": {
+          "type": "string",
+          "description": "統一 diff（unified）或整段內文（replace）。"
+        }
+      }
+    },
+    "CardPatchRequestPayload": {
+      "title": "CardPatchRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cardId", "baseRevision", "patch"],
+      "properties": {
+        "cardId": {
+          "type": "string",
+          "description": "要編修的卡片。"
+        },
+        "baseRevision": {
+          "type": "string",
+          "description": "客戶端讀到的 revision；與目前檔案不符時回 conflict。"
+        },
+        "patch": {
+          "$ref": "#/$defs/CardPatch"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵；重送不會套用兩次。"
+        }
+      }
+    },
+    "CardPatchResponsePayload": {
+      "title": "CardPatchResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card"],
+      "properties": {
+        "card": {
+          "$ref": "#/$defs/Card"
+        }
+      }
+    },
+    "CardDeleteRequestPayload": {
+      "title": "CardDeleteRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cardId", "clientRequestId"],
+      "properties": {
+        "cardId": {
+          "type": "string",
+          "description": "要刪除的卡片。"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵。"
+        }
+      }
+    },
+    "CardDeleteResponsePayload": {
+      "title": "CardDeleteResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cardId", "deletedAssets"],
+      "properties": {
+        "cardId": {
+          "type": "string",
+          "description": "已刪除的卡片。"
+        },
+        "deletedAssets": {
+          "type": "integer",
+          "description": "連帶刪除的原檔數；還有其他卡引用時是 0。",
+          "minimum": 0
+        }
+      }
+    },
+    "CardSearchRequestPayload": {
+      "title": "CardSearchRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query"],
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "查詢字串；中文用子字串比對。"
+        },
+        "kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CardKind"
+          },
+          "description": "只搜這幾種。"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "標籤。"
+          },
+          "description": "同時包含這些標籤。"
+        },
+        "includeSuperseded": {
+          "type": "boolean",
+          "description": "是否包含被取代的卡；預設 false。"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "最多回傳幾筆。",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "type": "string",
+          "description": "上一頁的游標。"
+        }
+      }
+    },
+    "CardSearchHit": {
+      "title": "CardSearchHit",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card", "score", "snippet"],
+      "properties": {
+        "card": {
+          "$ref": "#/$defs/CardSummary"
+        },
+        "score": {
+          "type": "number",
+          "description": "相關度分數，越大越前面。"
+        },
+        "snippet": {
+          "type": "string",
+          "description": "命中片段；不含完整內文。"
+        }
+      }
+    },
+    "CardSearchResponsePayload": {
+      "title": "CardSearchResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hits"],
+      "properties": {
+        "hits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CardSearchHit"
+          },
+          "description": "依分數由高到低。"
+        },
+        "nextCursor": {
+          "type": "string",
+          "description": "下一頁游標。"
+        }
+      }
+    },
+    "CardRefreshRequestPayload": {
+      "title": "CardRefreshRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cardId"],
+      "properties": {
+        "cardId": {
+          "type": "string",
+          "description": "要保鮮的卡片。"
+        }
+      }
+    },
+    "CardRefreshResponsePayload": {
+      "title": "CardRefreshResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cardId", "freshness"],
+      "properties": {
+        "cardId": {
+          "type": "string",
+          "description": "卡片識別碼。"
+        },
+        "freshness": {
+          "type": "integer",
+          "description": "保鮮後的新鮮度，固定 100。",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "CardChangedEventPayload": {
+      "title": "CardChangedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cardId", "change"],
+      "properties": {
+        "cardId": {
+          "type": "string",
+          "description": "卡片識別碼。"
+        },
+        "change": {
+          "$ref": "#/$defs/CardChange"
+        },
+        "revision": {
+          "type": "string",
+          "description": "變更後的 revision；刪除時省略。"
+        },
+        "freshness": {
+          "type": "integer",
+          "description": "變更後的新鮮度；只有保鮮與載入會帶。",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "ContextLayer": {
+      "title": "ContextLayer",
+      "type": "string",
+      "enum": [
+        "bedrock",
+        "persona",
+        "core-memory",
+        "opening-memory",
+        "short-term-memory",
+        "other-cards",
+        "working-context",
+        "volatile-state"
+      ],
+      "description": "八層的識別碼，順序由前往後。"
+    },
+    "ContextEntryState": {
+      "title": "ContextEntryState",
+      "type": "string",
+      "enum": ["active", "pending-removal"],
+      "description": "項目在上下文中的狀態。"
+    },
+    "ContextEntry": {
+      "title": "ContextEntry",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entryId", "layer", "title", "tokenEstimate", "state", "position"],
+      "properties": {
+        "entryId": {
+          "type": "string",
+          "description": "項目識別碼；工作上下文也可以有代表項。"
+        },
+        "layer": {
+          "$ref": "#/$defs/ContextLayer"
+        },
+        "cardId": {
+          "type": "string",
+          "description": "對應的卡片；工作上下文與高速變動層沒有。"
+        },
+        "title": {
+          "type": "string",
+          "description": "給人看的標題。"
+        },
+        "tokenEstimate": {
+          "type": "integer",
+          "description": "token 估算。",
+          "minimum": 0
+        },
+        "state": {
+          "$ref": "#/$defs/ContextEntryState"
+        },
+        "position": {
+          "type": "integer",
+          "description": "在上下文中的位置，從 0 開始。",
+          "minimum": 0
+        }
+      }
+    },
+    "ContextView": {
+      "title": "ContextView",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "version",
+        "entries",
+        "usedTokens",
+        "budgetTokens",
+        "contextWindow",
+        "compactionThreshold"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "version": {
+          "type": "integer",
+          "description": "每次變動加 1；客戶端丟棄較小的版本。",
+          "minimum": 0
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextEntry"
+          },
+          "description": "依上下文實際順序。"
+        },
+        "usedTokens": {
+          "type": "integer",
+          "description": "目前佔用的估算值；等於 entries 的 tokenEstimate 加總。",
+          "minimum": 0
+        },
+        "budgetTokens": {
+          "type": "integer",
+          "description": "可用預算（contextWindow 減去保留給輸出的量）。",
+          "minimum": 0
+        },
+        "contextWindow": {
+          "type": "integer",
+          "description": "目前主模型的上下文上限。",
+          "minimum": 1
+        },
+        "compactionThreshold": {
+          "type": "number",
+          "description": "觸發壓縮的比例，預設 0.75。"
+        },
+        "lastCompactedAt": {
+          "type": "string",
+          "description": "上次壓縮時間，RFC 3339。",
+          "format": "date-time"
+        }
+      }
+    },
+    "ContextGetRequestPayload": {
+      "title": "ContextGetRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        }
+      }
+    },
+    "ContextGetResponsePayload": {
+      "title": "ContextGetResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context"],
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/ContextView"
+        }
+      }
+    },
+    "ContextAddCardRequestPayload": {
+      "title": "ContextAddCardRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "cardId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "cardId": {
+          "type": "string",
+          "description": "要加入的卡片；只會追加在後段。"
+        }
+      }
+    },
+    "ContextAddCardResponsePayload": {
+      "title": "ContextAddCardResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context"],
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/ContextView"
+        }
+      }
+    },
+    "ContextRemoveCardRequestPayload": {
+      "title": "ContextRemoveCardRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "cardId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "cardId": {
+          "type": "string",
+          "description": "要移除的卡片；標記為 pending-removal，下次壓縮生效。"
+        }
+      }
+    },
+    "ContextRemoveCardResponsePayload": {
+      "title": "ContextRemoveCardResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context"],
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/ContextView"
+        }
+      }
+    },
+    "ContextCompactRequestPayload": {
+      "title": "ContextCompactRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "instructions": {
+          "type": "string",
+          "description": "給摘要模型的額外指示；使用者手動壓縮時可省略。"
+        }
+      }
+    },
+    "ContextCompactResponsePayload": {
+      "title": "ContextCompactResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "scheduled"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "scheduled": {
+          "type": "boolean",
+          "description": "是否已排入壓縮；完成時會送 context.compacted。"
+        }
+      }
+    },
+    "ContextChangedEventPayload": {
+      "title": "ContextChangedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "context"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "context": {
+          "$ref": "#/$defs/ContextView"
+        }
+      }
+    },
+    "ContextCompactedEventPayload": {
+      "title": "ContextCompactedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "summaryCardId", "beforeTokens", "afterTokens", "compactedAt"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "summaryCardId": {
+          "type": "string",
+          "description": "壓縮產出的短期記憶卡。"
+        },
+        "beforeTokens": {
+          "type": "integer",
+          "description": "壓縮前佔用。",
+          "minimum": 0
+        },
+        "afterTokens": {
+          "type": "integer",
+          "description": "壓縮後佔用。",
+          "minimum": 0
+        },
+        "compactedAt": {
+          "type": "string",
+          "description": "完成時間，RFC 3339。",
+          "format": "date-time"
+        }
+      }
+    },
+    "SessionArchive": {
+      "title": "SessionArchive",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["archivedAt", "purgeAt"],
+      "properties": {
+        "archivedAt": {
+          "type": "string",
+          "description": "開始封存倒數的時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "purgeAt": {
+          "type": "string",
+          "description": "倒數結束、預定刪除的時間，RFC 3339。",
+          "format": "date-time"
+        }
+      }
+    },
+    "SessionArchiveRequestPayload": {
+      "title": "SessionArchiveRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "要封存的會話。"
+        },
+        "purgeAfterDays": {
+          "type": "integer",
+          "description": "倒數天數；省略時用設定值（預設 7）。",
+          "minimum": 1,
+          "maximum": 365
+        }
+      }
+    },
+    "SessionArchiveResponsePayload": {
+      "title": "SessionArchiveResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "archive"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "archive": {
+          "$ref": "#/$defs/SessionArchive"
+        }
+      }
+    },
+    "SessionUnarchiveRequestPayload": {
+      "title": "SessionUnarchiveRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "要取消封存的會話。"
+        }
+      }
+    },
+    "SessionUnarchiveResponsePayload": {
+      "title": "SessionUnarchiveResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "unarchived"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "unarchived": {
+          "type": "boolean",
+          "description": "是否已取消封存。"
+        }
+      }
+    },
+    "SessionDeletionPreviewRequestPayload": {
+      "title": "SessionDeletionPreviewRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "要預覽刪除的會話。"
+        }
+      }
+    },
+    "SessionDeletionPreviewResponsePayload": {
+      "title": "SessionDeletionPreviewResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "subtreeSessionIds", "exclusiveCards", "sharedCards", "assets"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "subtreeSessionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "會話識別碼。"
+          },
+          "description": "連同支線的整個子樹。"
+        },
+        "exclusiveCards": {
+          "type": "integer",
+          "description": "會一起刪除的專屬卡片數。",
+          "minimum": 0
+        },
+        "sharedCards": {
+          "type": "integer",
+          "description": "仍被其他會話或白板引用的卡片數；不會刪除。",
+          "minimum": 0
+        },
+        "assets": {
+          "type": "integer",
+          "description": "會一起刪除的原檔數。",
+          "minimum": 0
+        }
+      }
+    },
+    "SessionDeleteRequestPayload": {
+      "title": "SessionDeleteRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "clientRequestId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "要刪除的會話；支線一定連同刪除。"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "客戶端產生的冪等鍵。"
+        }
+      }
+    },
+    "SessionDeleteResponsePayload": {
+      "title": "SessionDeleteResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "deletedSessionIds", "deletedCards", "deletedAssets"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "deletedSessionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "會話識別碼。"
+          },
+          "description": "實際刪除的子樹。"
+        },
+        "deletedCards": {
+          "type": "integer",
+          "description": "實際刪除的專屬卡片數。",
+          "minimum": 0
+        },
+        "deletedAssets": {
+          "type": "integer",
+          "description": "實際刪除的原檔數。",
+          "minimum": 0
+        }
+      }
+    },
+    "SessionArchivedEventPayload": {
+      "title": "SessionArchivedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "archive"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "archive": {
+          "$ref": "#/$defs/SessionArchive"
+        }
+      }
+    },
+    "SessionUnarchivedEventPayload": {
+      "title": "SessionUnarchivedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        }
+      }
+    },
+    "SessionDeletedEventPayload": {
+      "title": "SessionDeletedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "deletedSessionIds", "deletedCards", "deletedAssets"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "會話識別碼。"
+        },
+        "deletedSessionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "會話識別碼。"
+          },
+          "description": "整個子樹。"
+        },
+        "deletedCards": {
+          "type": "integer",
+          "description": "刪除的專屬卡片數。",
+          "minimum": 0
+        },
+        "deletedAssets": {
+          "type": "integer",
+          "description": "刪除的原檔數。",
+          "minimum": 0
+        }
+      }
+    },
+    "SettingLevel": {
+      "title": "SettingLevel",
+      "type": "string",
+      "enum": ["free", "approval", "human-only"],
+      "description": "設定分級；未標明一律視為 human-only。"
+    },
+    "SettingItem": {
+      "title": "SettingItem",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value", "level", "updatedAt"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "設定鍵。"
+        },
+        "value": {
+          "$ref": "#/$defs/JSONValue"
+        },
+        "level": {
+          "$ref": "#/$defs/SettingLevel"
+        },
+        "title": {
+          "type": "string",
+          "description": "給人看的標題。"
+        },
+        "description": {
+          "type": "string",
+          "description": "給人看的說明。"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "最後更新時間，RFC 3339。",
+          "format": "date-time"
+        }
+      }
+    },
+    "SystemSettingsGetRequestPayload": {
+      "title": "SystemSettingsGetRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {}
+    },
+    "SystemSettingsGetResponsePayload": {
+      "title": "SystemSettingsGetResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["settings"],
+      "properties": {
+        "settings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SettingItem"
+          },
+          "description": "所有分級的設定。"
+        }
+      }
+    },
+    "SettingChange": {
+      "title": "SettingChange",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "設定鍵。"
+        },
+        "value": {
+          "$ref": "#/$defs/JSONValue"
+        }
+      }
+    },
+    "SystemSettingsSetRequestPayload": {
+      "title": "SystemSettingsSetRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changes", "clientRequestId"],
+      "properties": {
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SettingChange"
+          },
+          "description": "要修改的設定；一次可以多筆。",
+          "minItems": 1
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵。"
+        }
+      }
+    },
+    "SystemSettingsSetResponsePayload": {
+      "title": "SystemSettingsSetResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applied", "requiresApproval"],
+      "properties": {
+        "applied": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SettingItem"
+          },
+          "description": "已套用的設定。"
+        },
+        "requiresApproval": {
+          "type": "boolean",
+          "description": "是否需要人工核准；M1 由客戶端（人）修改時固定 false。"
+        },
+        "approvalId": {
+          "type": "string",
+          "description": "需要核准時的審批識別碼；M1 不使用。"
+        }
+      }
+    },
+    "SystemSettingsChangedEventPayload": {
+      "title": "SystemSettingsChangedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changes", "changedBy", "changedAt"],
+      "properties": {
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SettingItem"
+          },
+          "description": "變更後的設定。"
+        },
+        "changedBy": {
+          "type": "string",
+          "description": "變更者，例如 user:<deviceId>、agent:<conversationId>、system。"
+        },
+        "changedAt": {
+          "type": "string",
+          "description": "變更時間，RFC 3339。",
+          "format": "date-time"
+        }
+      }
+    },
+    "SettingKind": {
+      "title": "SettingKind",
+      "type": "string",
+      "enum": ["string", "number", "integer", "boolean", "enum", "string-list", "path"],
+      "description": "設定值的輸入種類；設定頁據此產生表單。"
+    },
+    "ModuleSettingDeclaration": {
+      "title": "ModuleSettingDeclaration",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "title", "kind", "level"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "設定鍵。"
+        },
+        "title": {
+          "type": "string",
+          "description": "標題。"
+        },
+        "kind": {
+          "$ref": "#/$defs/SettingKind"
+        },
+        "level": {
+          "$ref": "#/$defs/SettingLevel"
+        },
+        "description": {
+          "type": "string",
+          "description": "說明。"
+        }
+      }
+    },
+    "ModuleState": {
+      "title": "ModuleState",
+      "type": "string",
+      "enum": ["loaded", "active", "inactive", "failed"],
+      "description": "模組的執行狀態。"
+    },
+    "ModuleInfo": {
+      "title": "ModuleInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "moduleId",
+        "name",
+        "version",
+        "enabled",
+        "state",
+        "protocolPrefixes",
+        "settings"
+      ],
+      "properties": {
+        "moduleId": {
+          "type": "string",
+          "description": "模組識別碼。"
+        },
+        "name": {
+          "type": "string",
+          "description": "顯示名稱。"
+        },
+        "version": {
+          "type": "string",
+          "description": "版本。"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "使用者是否啟用。"
+        },
+        "state": {
+          "$ref": "#/$defs/ModuleState"
+        },
+        "failure": {
+          "type": "string",
+          "description": "載入或啟用失敗的原因。"
+        },
+        "protocolPrefixes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "命名空間前綴。"
+          },
+          "description": "模組登記的協定命名空間。"
+        },
+        "settings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModuleSettingDeclaration"
+          },
+          "description": "設定宣告，不含值。"
+        }
+      }
+    },
+    "SystemModulesGetRequestPayload": {
+      "title": "SystemModulesGetRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {}
+    },
+    "SystemModulesGetResponsePayload": {
+      "title": "SystemModulesGetResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modules"],
+      "properties": {
+        "modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModuleInfo"
+          },
+          "description": "依模組識別碼排序。"
+        }
+      }
+    },
+    "SystemModulesSetEnabledRequestPayload": {
+      "title": "SystemModulesSetEnabledRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["moduleId", "enabled", "clientRequestId"],
+      "properties": {
+        "moduleId": {
+          "type": "string",
+          "description": "模組識別碼。"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "是否啟用。"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵。"
+        }
+      }
+    },
+    "SystemModulesSetEnabledResponsePayload": {
+      "title": "SystemModulesSetEnabledResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module"],
+      "properties": {
+        "module": {
+          "$ref": "#/$defs/ModuleInfo"
+        }
+      }
+    },
+    "SystemModulesChangedEventPayload": {
+      "title": "SystemModulesChangedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module"],
+      "properties": {
+        "module": {
+          "$ref": "#/$defs/ModuleInfo"
+        }
+      }
+    },
+    "ModelProviderKind": {
+      "title": "ModelProviderKind",
+      "type": "string",
+      "enum": ["api-key", "aggregator", "local"],
+      "description": "供應商接入方式。"
+    },
+    "ModelInputKind": {
+      "title": "ModelInputKind",
+      "type": "string",
+      "enum": ["text", "image", "audio"],
+      "description": "模型接受的輸入種類。"
+    },
+    "ModelInfo": {
+      "title": "ModelInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modelId", "contextWindow", "input"],
+      "properties": {
+        "modelId": {
+          "type": "string",
+          "description": "供應商的模型識別碼。"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "給人看的名稱。"
+        },
+        "contextWindow": {
+          "type": "integer",
+          "description": "上下文上限。",
+          "minimum": 1
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "description": "輸出上限。",
+          "minimum": 1
+        },
+        "input": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelInputKind"
+          },
+          "description": "接受的輸入種類。"
+        }
+      }
+    },
+    "ModelProviderInfo": {
+      "title": "ModelProviderInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerId", "kind", "displayName", "models"],
+      "properties": {
+        "providerId": {
+          "type": "string",
+          "description": "供應商識別碼；由使用者命名，穩定不變。"
+        },
+        "kind": {
+          "$ref": "#/$defs/ModelProviderKind"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "顯示名稱。"
+        },
+        "baseUrl": {
+          "type": "string",
+          "description": "OpenAI 相容端點的基底網址；直接供應商可省略。"
+        },
+        "credentialRef": {
+          "type": "string",
+          "description": "鑰匙圈的帳號名；不是金鑰本身。"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelInfo"
+          },
+          "description": "這個供應商提供的模型。"
+        }
+      }
+    },
+    "ModelRole": {
+      "title": "ModelRole",
+      "type": "string",
+      "enum": ["main", "small", "writing", "system-one"],
+      "description": "四個模型角色。"
+    },
+    "ModelRoleMode": {
+      "title": "ModelRoleMode",
+      "type": "string",
+      "enum": ["model", "unset", "none"],
+      "description": "角色的設定方式：model 指定模型、unset 走退回、none 明確關閉（只有 system-one 可用）。"
+    },
+    "ModelRef": {
+      "title": "ModelRef",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerId", "modelId"],
+      "properties": {
+        "providerId": {
+          "type": "string",
+          "description": "供應商識別碼。"
+        },
+        "modelId": {
+          "type": "string",
+          "description": "模型識別碼。"
+        }
+      }
+    },
+    "ModelRoleSelection": {
+      "title": "ModelRoleSelection",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "mode"],
+      "properties": {
+        "role": {
+          "$ref": "#/$defs/ModelRole"
+        },
+        "mode": {
+          "$ref": "#/$defs/ModelRoleMode"
+        },
+        "ref": {
+          "$ref": "#/$defs/ModelRef"
+        }
+      }
+    },
+    "ModelRoleSource": {
+      "title": "ModelRoleSource",
+      "type": "string",
+      "enum": ["configured", "fallback-main", "fallback-small", "none"],
+      "description": "解析結果的來源；fallback 表示走了退回規則。"
+    },
+    "ResolvedModelRole": {
+      "title": "ResolvedModelRole",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "source"],
+      "properties": {
+        "role": {
+          "$ref": "#/$defs/ModelRole"
+        },
+        "source": {
+          "$ref": "#/$defs/ModelRoleSource"
+        },
+        "ref": {
+          "$ref": "#/$defs/ModelRef"
+        }
+      }
+    },
+    "SystemModelsState": {
+      "title": "SystemModelsState",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providers", "roles", "resolved"],
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelProviderInfo"
+          },
+          "description": "供應商清單，不含金鑰。"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelRoleSelection"
+          },
+          "description": "角色設定。"
+        },
+        "resolved": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ResolvedModelRole"
+          },
+          "description": "退回規則套用後的實際使用。"
+        }
+      }
+    },
+    "SystemModelsGetRequestPayload": {
+      "title": "SystemModelsGetRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {}
+    },
+    "SystemModelsSetRequestPayload": {
+      "title": "SystemModelsSetRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clientRequestId"],
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelProviderInfo"
+          },
+          "description": "要套用的供應商清單；省略代表不改。"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelRoleSelection"
+          },
+          "description": "要套用的角色設定；省略代表不改。"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵。"
+        }
+      }
+    },
+    "BlobInfo": {
+      "title": "BlobInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blobId", "mediaType", "sizeBytes"],
+      "properties": {
+        "blobId": {
+          "type": "string",
+          "description": "內容雜湊（SHA-256 小寫十六進位）。"
+        },
+        "mediaType": {
+          "type": "string",
+          "description": "內容類型。"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "description": "位元組數。",
+          "minimum": 0
         }
       }
     },
@@ -2548,6 +4222,1371 @@
       "description": "模組貢獻的事件。未安裝對應模組的客戶端可以忽略。",
       "x-catch-all": true
     },
+    "CardListRequest": {
+      "title": "CardListRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "card.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardListRequestPayload"
+        }
+      },
+      "description": "列出卡片庫。"
+    },
+    "CardListResponse": {
+      "title": "CardListResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "card.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardListResponsePayload"
+        }
+      },
+      "description": "卡片列表。"
+    },
+    "CardGetRequest": {
+      "title": "CardGetRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "card.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardGetRequestPayload"
+        }
+      },
+      "description": "讀取一張卡片。"
+    },
+    "CardGetResponse": {
+      "title": "CardGetResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "card.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardGetResponsePayload"
+        }
+      },
+      "description": "卡片的完整內容。"
+    },
+    "CardCreateRequest": {
+      "title": "CardCreateRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "card.create"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardCreateRequestPayload"
+        }
+      },
+      "description": "建立卡片。"
+    },
+    "CardCreateResponse": {
+      "title": "CardCreateResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "card.create"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardCreateResponsePayload"
+        }
+      },
+      "description": "建立的卡片。"
+    },
+    "CardPatchRequest": {
+      "title": "CardPatchRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "card.patch"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardPatchRequestPayload"
+        }
+      },
+      "description": "以補丁編修卡片。"
+    },
+    "CardPatchResponse": {
+      "title": "CardPatchResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "card.patch"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardPatchResponsePayload"
+        }
+      },
+      "description": "編修後的卡片。"
+    },
+    "CardDeleteRequest": {
+      "title": "CardDeleteRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "card.delete"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardDeleteRequestPayload"
+        }
+      },
+      "description": "刪除卡片。"
+    },
+    "CardDeleteResponse": {
+      "title": "CardDeleteResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "card.delete"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardDeleteResponsePayload"
+        }
+      },
+      "description": "刪除結果與連帶刪除的原檔數。"
+    },
+    "CardSearchRequest": {
+      "title": "CardSearchRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "card.search"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardSearchRequestPayload"
+        }
+      },
+      "description": "全文搜尋卡片。"
+    },
+    "CardSearchResponse": {
+      "title": "CardSearchResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "card.search"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardSearchResponsePayload"
+        }
+      },
+      "description": "搜尋結果。"
+    },
+    "CardRefreshRequest": {
+      "title": "CardRefreshRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "card.refresh"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardRefreshRequestPayload"
+        }
+      },
+      "description": "使用者按保鮮。"
+    },
+    "CardRefreshResponse": {
+      "title": "CardRefreshResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "card.refresh"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardRefreshResponsePayload"
+        }
+      },
+      "description": "保鮮後的新鮮度。"
+    },
+    "CardChangedEvent": {
+      "title": "CardChangedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "card.changed"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardChangedEventPayload"
+        }
+      },
+      "description": "卡片建立、更新、刪除、保鮮或重新索引；掛在 system 串流。"
+    },
+    "ContextGetRequest": {
+      "title": "ContextGetRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "context.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/ContextGetRequestPayload"
+        }
+      },
+      "description": "取得目前上下文。"
+    },
+    "ContextGetResponse": {
+      "title": "ContextGetResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "context.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/ContextGetResponsePayload"
+        }
+      },
+      "description": "上下文視圖。"
+    },
+    "ContextAddCardRequest": {
+      "title": "ContextAddCardRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "context.add_card"
+        },
+        "payload": {
+          "$ref": "#/$defs/ContextAddCardRequestPayload"
+        }
+      },
+      "description": "把卡片追加到上下文後段。"
+    },
+    "ContextAddCardResponse": {
+      "title": "ContextAddCardResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "context.add_card"
+        },
+        "payload": {
+          "$ref": "#/$defs/ContextAddCardResponsePayload"
+        }
+      },
+      "description": "加入後的上下文視圖。"
+    },
+    "ContextRemoveCardRequest": {
+      "title": "ContextRemoveCardRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "context.remove_card"
+        },
+        "payload": {
+          "$ref": "#/$defs/ContextRemoveCardRequestPayload"
+        }
+      },
+      "description": "標記移除一張卡，下次壓縮生效。"
+    },
+    "ContextRemoveCardResponse": {
+      "title": "ContextRemoveCardResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "context.remove_card"
+        },
+        "payload": {
+          "$ref": "#/$defs/ContextRemoveCardResponsePayload"
+        }
+      },
+      "description": "標記後的上下文視圖。"
+    },
+    "ContextCompactRequest": {
+      "title": "ContextCompactRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "context.compact"
+        },
+        "payload": {
+          "$ref": "#/$defs/ContextCompactRequestPayload"
+        }
+      },
+      "description": "手動觸發壓縮。"
+    },
+    "ContextCompactResponse": {
+      "title": "ContextCompactResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "context.compact"
+        },
+        "payload": {
+          "$ref": "#/$defs/ContextCompactResponsePayload"
+        }
+      },
+      "description": "壓縮已排入。"
+    },
+    "ContextChangedEvent": {
+      "title": "ContextChangedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "context.changed"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/ContextChangedEventPayload"
+        }
+      },
+      "description": "上下文內容變了；掛在會話串流。"
+    },
+    "ContextCompactedEvent": {
+      "title": "ContextCompactedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "context.compacted"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/ContextCompactedEventPayload"
+        }
+      },
+      "description": "一次壓縮完成；掛在會話串流。"
+    },
+    "SessionArchiveRequest": {
+      "title": "SessionArchiveRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "session.archive"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionArchiveRequestPayload"
+        }
+      },
+      "description": "開始封存倒數。"
+    },
+    "SessionArchiveResponse": {
+      "title": "SessionArchiveResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "session.archive"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionArchiveResponsePayload"
+        }
+      },
+      "description": "封存倒數已開始。"
+    },
+    "SessionUnarchiveRequest": {
+      "title": "SessionUnarchiveRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "session.unarchive"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionUnarchiveRequestPayload"
+        }
+      },
+      "description": "取消封存。"
+    },
+    "SessionUnarchiveResponse": {
+      "title": "SessionUnarchiveResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "session.unarchive"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionUnarchiveResponsePayload"
+        }
+      },
+      "description": "取消封存的結果。"
+    },
+    "SessionDeletionPreviewRequest": {
+      "title": "SessionDeletionPreviewRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "session.deletion_preview"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionDeletionPreviewRequestPayload"
+        }
+      },
+      "description": "刪除前預覽連帶刪除的會話、卡片與原檔。"
+    },
+    "SessionDeletionPreviewResponse": {
+      "title": "SessionDeletionPreviewResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "session.deletion_preview"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionDeletionPreviewResponsePayload"
+        }
+      },
+      "description": "預覽結果。"
+    },
+    "SessionDeleteRequest": {
+      "title": "SessionDeleteRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "session.delete"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionDeleteRequestPayload"
+        }
+      },
+      "description": "立即刪除會話與專屬卡片。"
+    },
+    "SessionDeleteResponse": {
+      "title": "SessionDeleteResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "session.delete"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionDeleteResponsePayload"
+        }
+      },
+      "description": "實際刪除的數量。"
+    },
+    "SessionArchivedEvent": {
+      "title": "SessionArchivedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "session.archived"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionArchivedEventPayload"
+        }
+      },
+      "description": "會話開始封存倒數；system 與會話串流各送一則。"
+    },
+    "SessionUnarchivedEvent": {
+      "title": "SessionUnarchivedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "session.unarchived"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionUnarchivedEventPayload"
+        }
+      },
+      "description": "會話取消封存。"
+    },
+    "SessionDeletedEvent": {
+      "title": "SessionDeletedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "session.deleted"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionDeletedEventPayload"
+        }
+      },
+      "description": "會話刪除完成；system 串流上的那一則讓列表移除。"
+    },
+    "SystemSettingsGetRequest": {
+      "title": "SystemSettingsGetRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.settings.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemSettingsGetRequestPayload"
+        }
+      },
+      "description": "讀取設定與分級。"
+    },
+    "SystemSettingsGetResponse": {
+      "title": "SystemSettingsGetResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.settings.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemSettingsGetResponsePayload"
+        }
+      },
+      "description": "設定清單。"
+    },
+    "SystemSettingsSetRequest": {
+      "title": "SystemSettingsSetRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.settings.set"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemSettingsSetRequestPayload"
+        }
+      },
+      "description": "修改設定。"
+    },
+    "SystemSettingsSetResponse": {
+      "title": "SystemSettingsSetResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.settings.set"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemSettingsSetResponsePayload"
+        }
+      },
+      "description": "已套用的設定。"
+    },
+    "SystemSettingsChangedEvent": {
+      "title": "SystemSettingsChangedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "system.settings.changed"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemSettingsChangedEventPayload"
+        }
+      },
+      "description": "設定變更；掛在 system 串流。"
+    },
+    "SystemModulesGetRequest": {
+      "title": "SystemModulesGetRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.modules.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemModulesGetRequestPayload"
+        }
+      },
+      "description": "讀取模組清單與狀態。"
+    },
+    "SystemModulesGetResponse": {
+      "title": "SystemModulesGetResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.modules.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemModulesGetResponsePayload"
+        }
+      },
+      "description": "模組清單。"
+    },
+    "SystemModulesSetEnabledRequest": {
+      "title": "SystemModulesSetEnabledRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.modules.set_enabled"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemModulesSetEnabledRequestPayload"
+        }
+      },
+      "description": "啟用或停用一個模組。"
+    },
+    "SystemModulesSetEnabledResponse": {
+      "title": "SystemModulesSetEnabledResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.modules.set_enabled"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemModulesSetEnabledResponsePayload"
+        }
+      },
+      "description": "更新後的模組資訊。"
+    },
+    "SystemModulesChangedEvent": {
+      "title": "SystemModulesChangedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "system.modules.changed"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemModulesChangedEventPayload"
+        }
+      },
+      "description": "模組狀態改變；掛在 system 串流。"
+    },
+    "SystemModelsGetRequest": {
+      "title": "SystemModelsGetRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.models.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemModelsGetRequestPayload"
+        }
+      },
+      "description": "讀取供應商、角色與解析結果。"
+    },
+    "SystemModelsGetResponse": {
+      "title": "SystemModelsGetResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.models.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemModelsState"
+        }
+      },
+      "description": "目前的模型設定。"
+    },
+    "SystemModelsSetRequest": {
+      "title": "SystemModelsSetRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.models.set"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemModelsSetRequestPayload"
+        }
+      },
+      "description": "設定供應商與角色；只影響新對話。"
+    },
+    "SystemModelsSetResponse": {
+      "title": "SystemModelsSetResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.models.set"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemModelsState"
+        }
+      },
+      "description": "套用後的模型設定。"
+    },
+    "SystemModelsChangedEvent": {
+      "title": "SystemModelsChangedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "system.models.changed"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemModelsState"
+        }
+      },
+      "description": "模型設定變更；掛在 system 串流。"
+    },
     "ClientFrame": {
       "title": "ClientFrame",
       "description": "客戶端送給主機的所有訊息。",
@@ -2581,6 +5620,69 @@
         },
         {
           "$ref": "#/$defs/SessionGetHistoryRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionArchiveRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionUnarchiveRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionDeletionPreviewRequest"
+        },
+        {
+          "$ref": "#/$defs/SessionDeleteRequest"
+        },
+        {
+          "$ref": "#/$defs/CardListRequest"
+        },
+        {
+          "$ref": "#/$defs/CardGetRequest"
+        },
+        {
+          "$ref": "#/$defs/CardCreateRequest"
+        },
+        {
+          "$ref": "#/$defs/CardPatchRequest"
+        },
+        {
+          "$ref": "#/$defs/CardDeleteRequest"
+        },
+        {
+          "$ref": "#/$defs/CardSearchRequest"
+        },
+        {
+          "$ref": "#/$defs/CardRefreshRequest"
+        },
+        {
+          "$ref": "#/$defs/ContextGetRequest"
+        },
+        {
+          "$ref": "#/$defs/ContextAddCardRequest"
+        },
+        {
+          "$ref": "#/$defs/ContextRemoveCardRequest"
+        },
+        {
+          "$ref": "#/$defs/ContextCompactRequest"
+        },
+        {
+          "$ref": "#/$defs/SystemSettingsGetRequest"
+        },
+        {
+          "$ref": "#/$defs/SystemSettingsSetRequest"
+        },
+        {
+          "$ref": "#/$defs/SystemModulesGetRequest"
+        },
+        {
+          "$ref": "#/$defs/SystemModulesSetEnabledRequest"
+        },
+        {
+          "$ref": "#/$defs/SystemModelsGetRequest"
+        },
+        {
+          "$ref": "#/$defs/SystemModelsSetRequest"
         },
         {
           "$ref": "#/$defs/ApprovalDecideRequest"
@@ -2631,6 +5733,69 @@
           "$ref": "#/$defs/SessionGetHistoryResponse"
         },
         {
+          "$ref": "#/$defs/SessionArchiveResponse"
+        },
+        {
+          "$ref": "#/$defs/SessionUnarchiveResponse"
+        },
+        {
+          "$ref": "#/$defs/SessionDeletionPreviewResponse"
+        },
+        {
+          "$ref": "#/$defs/SessionDeleteResponse"
+        },
+        {
+          "$ref": "#/$defs/CardListResponse"
+        },
+        {
+          "$ref": "#/$defs/CardGetResponse"
+        },
+        {
+          "$ref": "#/$defs/CardCreateResponse"
+        },
+        {
+          "$ref": "#/$defs/CardPatchResponse"
+        },
+        {
+          "$ref": "#/$defs/CardDeleteResponse"
+        },
+        {
+          "$ref": "#/$defs/CardSearchResponse"
+        },
+        {
+          "$ref": "#/$defs/CardRefreshResponse"
+        },
+        {
+          "$ref": "#/$defs/ContextGetResponse"
+        },
+        {
+          "$ref": "#/$defs/ContextAddCardResponse"
+        },
+        {
+          "$ref": "#/$defs/ContextRemoveCardResponse"
+        },
+        {
+          "$ref": "#/$defs/ContextCompactResponse"
+        },
+        {
+          "$ref": "#/$defs/SystemSettingsGetResponse"
+        },
+        {
+          "$ref": "#/$defs/SystemSettingsSetResponse"
+        },
+        {
+          "$ref": "#/$defs/SystemModulesGetResponse"
+        },
+        {
+          "$ref": "#/$defs/SystemModulesSetEnabledResponse"
+        },
+        {
+          "$ref": "#/$defs/SystemModelsGetResponse"
+        },
+        {
+          "$ref": "#/$defs/SystemModelsSetResponse"
+        },
+        {
           "$ref": "#/$defs/StreamTurnStartedEvent"
         },
         {
@@ -2650,6 +5815,33 @@
         },
         {
           "$ref": "#/$defs/StreamUiEvent"
+        },
+        {
+          "$ref": "#/$defs/CardChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/ContextChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/ContextCompactedEvent"
+        },
+        {
+          "$ref": "#/$defs/SessionArchivedEvent"
+        },
+        {
+          "$ref": "#/$defs/SessionUnarchivedEvent"
+        },
+        {
+          "$ref": "#/$defs/SessionDeletedEvent"
+        },
+        {
+          "$ref": "#/$defs/SystemSettingsChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/SystemModulesChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/SystemModelsChangedEvent"
         },
         {
           "$ref": "#/$defs/ApprovalRequestedEvent"

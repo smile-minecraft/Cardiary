@@ -22,6 +22,27 @@ export type ClientFrame =
   | SessionSubscribeRequest
   | SessionUnsubscribeRequest
   | SessionGetHistoryRequest
+  | SessionArchiveRequest
+  | SessionUnarchiveRequest
+  | SessionDeletionPreviewRequest
+  | SessionDeleteRequest
+  | CardListRequest
+  | CardGetRequest
+  | CardCreateRequest
+  | CardPatchRequest
+  | CardDeleteRequest
+  | CardSearchRequest
+  | CardRefreshRequest
+  | ContextGetRequest
+  | ContextAddCardRequest
+  | ContextRemoveCardRequest
+  | ContextCompactRequest
+  | SystemSettingsGetRequest
+  | SystemSettingsSetRequest
+  | SystemModulesGetRequest
+  | SystemModulesSetEnabledRequest
+  | SystemModelsGetRequest
+  | SystemModelsSetRequest
   | ApprovalDecideRequest
   | ApprovalPauseAllRequest
   | ModuleRequest;
@@ -30,9 +51,21 @@ export type ClientFrame =
  */
 export type ClientPlatform = "macos" | "ios" | "ipados" | "web" | "other";
 /**
- * 送出訊息時的行為。queue 在下一個模型請求生效，不中止目前串流；interrupt 先中止目前生成再送出。
+ * 送出訊息時的行為。queue 在目前回合結束後生效；steer 在下一個模型請求前送達，不中止目前串流；interrupt 先中止目前生成再送出。
  */
-export type DeliveryMode = "queue" | "interrupt";
+export type DeliveryMode = "queue" | "steer" | "interrupt";
+/**
+ * 卡片種類。memory、summary、persona、bedrock 只由系統或匯入建立。
+ */
+export type CardKind = "note" | "image" | "audio" | "memory" | "summary" | "persona" | "bedrock";
+/**
+ * 列表與搜尋的生命週期篩選。
+ */
+export type CardLifecycleFilter = "live" | "cold" | "all";
+/**
+ * 補丁格式；代理只能用 unified。
+ */
+export type CardPatchFormat = "unified" | "replace";
 /**
  * 任意 JSON 值。只用於工具輸出、模組資料與錯誤細節，協定欄位不使用。
  */
@@ -45,6 +78,22 @@ export type JSONValue =
   | {
       [k: string]: JSONValue;
     };
+/**
+ * 供應商接入方式。
+ */
+export type ModelProviderKind = "api-key" | "aggregator" | "local";
+/**
+ * 模型接受的輸入種類。
+ */
+export type ModelInputKind = "text" | "image" | "audio";
+/**
+ * 四個模型角色。
+ */
+export type ModelRole = "main" | "small" | "writing" | "system-one";
+/**
+ * 角色的設定方式：model 指定模型、unset 走退回、none 明確關閉（只有 system-one 可用）。
+ */
+export type ModelRoleMode = "model" | "unset" | "none";
 /**
  * 主機送給客戶端的所有訊息。
  */
@@ -60,6 +109,27 @@ export type ServerFrame =
   | SessionSubscribeResponse
   | SessionUnsubscribeResponse
   | SessionGetHistoryResponse
+  | SessionArchiveResponse
+  | SessionUnarchiveResponse
+  | SessionDeletionPreviewResponse
+  | SessionDeleteResponse
+  | CardListResponse
+  | CardGetResponse
+  | CardCreateResponse
+  | CardPatchResponse
+  | CardDeleteResponse
+  | CardSearchResponse
+  | CardRefreshResponse
+  | ContextGetResponse
+  | ContextAddCardResponse
+  | ContextRemoveCardResponse
+  | ContextCompactResponse
+  | SystemSettingsGetResponse
+  | SystemSettingsSetResponse
+  | SystemModulesGetResponse
+  | SystemModulesSetEnabledResponse
+  | SystemModelsGetResponse
+  | SystemModelsSetResponse
   | StreamTurnStartedEvent
   | StreamTextDeltaEvent
   | StreamMessageCompletedEvent
@@ -67,6 +137,15 @@ export type ServerFrame =
   | StreamToolResultEvent
   | StreamTurnStateEvent
   | StreamUiEvent
+  | CardChangedEvent
+  | ContextChangedEvent
+  | ContextCompactedEvent
+  | SessionArchivedEvent
+  | SessionUnarchivedEvent
+  | SessionDeletedEvent
+  | SystemSettingsChangedEvent
+  | SystemModulesChangedEvent
+  | SystemModelsChangedEvent
   | ApprovalRequestedEvent
   | ApprovalDecideResponse
   | ApprovalDecidedEvent
@@ -112,9 +191,50 @@ export type ApprovalScopeKind = "tool_call" | "settings_change" | "schedule";
  */
 export type ApprovalEffect = "approve" | "reject" | "approve_always";
 /**
+ * 卡片生命週期；cold 是蒸餾後的冷封存。
+ */
+export type CardLifecycle = "live" | "cold";
+/**
+ * 八層的識別碼，順序由前往後。
+ */
+export type ContextLayer =
+  | "bedrock"
+  | "persona"
+  | "core-memory"
+  | "opening-memory"
+  | "short-term-memory"
+  | "other-cards"
+  | "working-context"
+  | "volatile-state";
+/**
+ * 項目在上下文中的狀態。
+ */
+export type ContextEntryState = "active" | "pending-removal";
+/**
+ * 設定分級；未標明一律視為 human-only。
+ */
+export type SettingLevel = "free" | "approval" | "human-only";
+/**
+ * 模組的執行狀態。
+ */
+export type ModuleState = "loaded" | "active" | "inactive" | "failed";
+/**
+ * 設定值的輸入種類；設定頁據此產生表單。
+ */
+export type SettingKind =
+  "string" | "number" | "integer" | "boolean" | "enum" | "string-list" | "path";
+/**
+ * 解析結果的來源；fallback 表示走了退回規則。
+ */
+export type ModelRoleSource = "configured" | "fallback-main" | "fallback-small" | "none";
+/**
  * 工具結果狀態。
  */
 export type ToolResultStatus = "ok" | "error";
+/**
+ * 卡片變更的種類。reindexed 表示只有索引或中繼資料變了。
+ */
+export type CardChange = "created" | "updated" | "deleted" | "refreshed" | "reindexed";
 /**
  * 做出決定的來源。
  */
@@ -416,6 +536,605 @@ export interface SessionGetHistoryRequestPayload {
   limit?: number;
 }
 /**
+ * 開始封存倒數。
+ */
+export interface SessionArchiveRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "session.archive";
+  payload: SessionArchiveRequestPayload;
+}
+export interface SessionArchiveRequestPayload {
+  /**
+   * 要封存的會話。
+   */
+  sessionId: string;
+  /**
+   * 倒數天數；省略時用設定值（預設 7）。
+   */
+  purgeAfterDays?: number;
+}
+/**
+ * 取消封存。
+ */
+export interface SessionUnarchiveRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "session.unarchive";
+  payload: SessionUnarchiveRequestPayload;
+}
+export interface SessionUnarchiveRequestPayload {
+  /**
+   * 要取消封存的會話。
+   */
+  sessionId: string;
+}
+/**
+ * 刪除前預覽連帶刪除的會話、卡片與原檔。
+ */
+export interface SessionDeletionPreviewRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "session.deletion_preview";
+  payload: SessionDeletionPreviewRequestPayload;
+}
+export interface SessionDeletionPreviewRequestPayload {
+  /**
+   * 要預覽刪除的會話。
+   */
+  sessionId: string;
+}
+/**
+ * 立即刪除會話與專屬卡片。
+ */
+export interface SessionDeleteRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "session.delete";
+  payload: SessionDeleteRequestPayload;
+}
+export interface SessionDeleteRequestPayload {
+  /**
+   * 要刪除的會話；支線一定連同刪除。
+   */
+  sessionId: string;
+  /**
+   * 客戶端產生的冪等鍵。
+   */
+  clientRequestId: string;
+}
+/**
+ * 列出卡片庫。
+ */
+export interface CardListRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "card.list";
+  payload: CardListRequestPayload;
+}
+export interface CardListRequestPayload {
+  /**
+   * 只回這幾種。
+   */
+  kinds?: CardKind[];
+  /**
+   * 同時包含這些標籤。
+   *
+   * Items: 標籤。
+   */
+  tags?: string[];
+  /**
+   * 人格分區。
+   */
+  persona?: string;
+  lifecycle?: CardLifecycleFilter;
+  /**
+   * 簡易查詢；等同 card.search 的前綴比對。
+   */
+  query?: string;
+  /**
+   * 是否包含被取代的卡；預設 false。
+   */
+  includeSuperseded?: boolean;
+  /**
+   * 上一頁的游標。
+   */
+  cursor?: string;
+  /**
+   * 最多回傳幾筆。
+   */
+  limit?: number;
+}
+/**
+ * 讀取一張卡片。
+ */
+export interface CardGetRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "card.get";
+  payload: CardGetRequestPayload;
+}
+export interface CardGetRequestPayload {
+  /**
+   * 要讀取的卡片。
+   */
+  cardId: string;
+}
+/**
+ * 建立卡片。
+ */
+export interface CardCreateRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "card.create";
+  payload: CardCreateRequestPayload;
+}
+export interface CardCreateRequestPayload {
+  kind: CardKind;
+  /**
+   * 標題。
+   */
+  title: string;
+  /**
+   * 內文（Markdown）。
+   */
+  body: string;
+  /**
+   * 摘要。
+   */
+  summary?: string;
+  /**
+   * 標籤。
+   *
+   * Items: 標籤。
+   */
+  tags?: string[];
+  /**
+   * 人格分區。
+   */
+  persona?: string;
+  /**
+   * 血緣。
+   *
+   * Items: 來源卡片識別碼。
+   */
+  sources?: string[];
+  /**
+   * 被這張卡取代的舊卡。
+   */
+  supersedes?: string;
+  /**
+   * 已上傳原檔的 blobId；圖片與音訊卡必填。
+   */
+  assetBlobId?: string;
+  /**
+   * 客戶端產生的冪等鍵；同一個鍵重送只會建立一張卡。
+   */
+  clientRequestId: string;
+}
+/**
+ * 以補丁編修卡片。
+ */
+export interface CardPatchRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "card.patch";
+  payload: CardPatchRequestPayload;
+}
+export interface CardPatchRequestPayload {
+  /**
+   * 要編修的卡片。
+   */
+  cardId: string;
+  /**
+   * 客戶端讀到的 revision；與目前檔案不符時回 conflict。
+   */
+  baseRevision: string;
+  patch: CardPatch;
+  /**
+   * 冪等鍵；重送不會套用兩次。
+   */
+  clientRequestId?: string;
+}
+export interface CardPatch {
+  format: CardPatchFormat;
+  /**
+   * 統一 diff（unified）或整段內文（replace）。
+   */
+  text: string;
+}
+/**
+ * 刪除卡片。
+ */
+export interface CardDeleteRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "card.delete";
+  payload: CardDeleteRequestPayload;
+}
+export interface CardDeleteRequestPayload {
+  /**
+   * 要刪除的卡片。
+   */
+  cardId: string;
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId: string;
+}
+/**
+ * 全文搜尋卡片。
+ */
+export interface CardSearchRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "card.search";
+  payload: CardSearchRequestPayload;
+}
+export interface CardSearchRequestPayload {
+  /**
+   * 查詢字串；中文用子字串比對。
+   */
+  query: string;
+  /**
+   * 只搜這幾種。
+   */
+  kinds?: CardKind[];
+  /**
+   * 同時包含這些標籤。
+   *
+   * Items: 標籤。
+   */
+  tags?: string[];
+  /**
+   * 是否包含被取代的卡；預設 false。
+   */
+  includeSuperseded?: boolean;
+  /**
+   * 最多回傳幾筆。
+   */
+  limit?: number;
+  /**
+   * 上一頁的游標。
+   */
+  cursor?: string;
+}
+/**
+ * 使用者按保鮮。
+ */
+export interface CardRefreshRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "card.refresh";
+  payload: CardRefreshRequestPayload;
+}
+export interface CardRefreshRequestPayload {
+  /**
+   * 要保鮮的卡片。
+   */
+  cardId: string;
+}
+/**
+ * 取得目前上下文。
+ */
+export interface ContextGetRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "context.get";
+  payload: ContextGetRequestPayload;
+}
+export interface ContextGetRequestPayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+}
+/**
+ * 把卡片追加到上下文後段。
+ */
+export interface ContextAddCardRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "context.add_card";
+  payload: ContextAddCardRequestPayload;
+}
+export interface ContextAddCardRequestPayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+  /**
+   * 要加入的卡片；只會追加在後段。
+   */
+  cardId: string;
+}
+/**
+ * 標記移除一張卡，下次壓縮生效。
+ */
+export interface ContextRemoveCardRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "context.remove_card";
+  payload: ContextRemoveCardRequestPayload;
+}
+export interface ContextRemoveCardRequestPayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+  /**
+   * 要移除的卡片；標記為 pending-removal，下次壓縮生效。
+   */
+  cardId: string;
+}
+/**
+ * 手動觸發壓縮。
+ */
+export interface ContextCompactRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "context.compact";
+  payload: ContextCompactRequestPayload;
+}
+export interface ContextCompactRequestPayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+  /**
+   * 給摘要模型的額外指示；使用者手動壓縮時可省略。
+   */
+  instructions?: string;
+}
+/**
+ * 讀取設定與分級。
+ */
+export interface SystemSettingsGetRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "system.settings.get";
+  payload: SystemSettingsGetRequestPayload;
+}
+export interface SystemSettingsGetRequestPayload {}
+/**
+ * 修改設定。
+ */
+export interface SystemSettingsSetRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "system.settings.set";
+  payload: SystemSettingsSetRequestPayload;
+}
+export interface SystemSettingsSetRequestPayload {
+  /**
+   * 要修改的設定；一次可以多筆。
+   *
+   * @minItems 1
+   */
+  changes: [SettingChange, ...SettingChange[]];
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId: string;
+}
+export interface SettingChange {
+  /**
+   * 設定鍵。
+   */
+  key: string;
+  value: JSONValue;
+}
+/**
+ * 讀取模組清單與狀態。
+ */
+export interface SystemModulesGetRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "system.modules.get";
+  payload: SystemModulesGetRequestPayload;
+}
+export interface SystemModulesGetRequestPayload {}
+/**
+ * 啟用或停用一個模組。
+ */
+export interface SystemModulesSetEnabledRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "system.modules.set_enabled";
+  payload: SystemModulesSetEnabledRequestPayload;
+}
+export interface SystemModulesSetEnabledRequestPayload {
+  /**
+   * 模組識別碼。
+   */
+  moduleId: string;
+  /**
+   * 是否啟用。
+   */
+  enabled: boolean;
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId: string;
+}
+/**
+ * 讀取供應商、角色與解析結果。
+ */
+export interface SystemModelsGetRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "system.models.get";
+  payload: SystemModelsGetRequestPayload;
+}
+export interface SystemModelsGetRequestPayload {}
+/**
+ * 設定供應商與角色；只影響新對話。
+ */
+export interface SystemModelsSetRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "system.models.set";
+  payload: SystemModelsSetRequestPayload;
+}
+export interface SystemModelsSetRequestPayload {
+  /**
+   * 要套用的供應商清單；省略代表不改。
+   */
+  providers?: ModelProviderInfo[];
+  /**
+   * 要套用的角色設定；省略代表不改。
+   */
+  roles?: ModelRoleSelection[];
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId: string;
+}
+export interface ModelProviderInfo {
+  /**
+   * 供應商識別碼；由使用者命名，穩定不變。
+   */
+  providerId: string;
+  kind: ModelProviderKind;
+  /**
+   * 顯示名稱。
+   */
+  displayName: string;
+  /**
+   * OpenAI 相容端點的基底網址；直接供應商可省略。
+   */
+  baseUrl?: string;
+  /**
+   * 鑰匙圈的帳號名；不是金鑰本身。
+   */
+  credentialRef?: string;
+  /**
+   * 這個供應商提供的模型。
+   */
+  models: ModelInfo[];
+}
+export interface ModelInfo {
+  /**
+   * 供應商的模型識別碼。
+   */
+  modelId: string;
+  /**
+   * 給人看的名稱。
+   */
+  displayName?: string;
+  /**
+   * 上下文上限。
+   */
+  contextWindow: number;
+  /**
+   * 輸出上限。
+   */
+  maxOutputTokens?: number;
+  /**
+   * 接受的輸入種類。
+   */
+  input: ModelInputKind[];
+}
+export interface ModelRoleSelection {
+  role: ModelRole;
+  mode: ModelRoleMode;
+  ref?: ModelRef;
+}
+export interface ModelRef {
+  /**
+   * 供應商識別碼。
+   */
+  providerId: string;
+  /**
+   * 模型識別碼。
+   */
+  modelId: string;
+}
+/**
  * 核准或拒絕一筆審批。
  */
 export interface ApprovalDecideRequest {
@@ -553,6 +1272,10 @@ export interface ServerLimits {
    * WebSocket ping 的間隔秒數。
    */
   heartbeatSeconds: number;
+  /**
+   * HTTP blob 單檔的上傳上限；省略代表沒有提供 blob 端點。
+   */
+  maxBlobBytes?: number;
 }
 export interface ServerCapabilities {
   /**
@@ -563,6 +1286,26 @@ export interface ServerCapabilities {
    * 是否提供 HTTP 大型檔案端點。
    */
   files: boolean;
+  /**
+   * 是否提供卡片類訊息。
+   */
+  cards?: boolean;
+  /**
+   * 是否提供上下文類訊息。
+   */
+  context?: boolean;
+  /**
+   * 是否提供會話封存與刪除。
+   */
+  archive?: boolean;
+  /**
+   * 是否提供圖片與音訊的匯入。
+   */
+  media?: boolean;
+  /**
+   * 是否提供 HTTP blob 上傳與下載。
+   */
+  blobs?: boolean;
 }
 /**
  * 系統狀態串流的訂閱結果。
@@ -708,6 +1451,17 @@ export interface SessionSummary {
    * 可見訊息數量。
    */
   messageCount: number;
+  archive?: SessionArchive;
+}
+export interface SessionArchive {
+  /**
+   * 開始封存倒數的時間，RFC 3339。
+   */
+  archivedAt: string;
+  /**
+   * 倒數結束、預定刪除的時間，RFC 3339。
+   */
+  purgeAt: string;
 }
 /**
  * 會話列表。
@@ -1082,6 +1836,735 @@ export interface SessionGetHistoryResponsePayload {
   nextCursor?: string;
 }
 /**
+ * 封存倒數已開始。
+ */
+export interface SessionArchiveResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "session.archive";
+  payload: SessionArchiveResponsePayload;
+}
+export interface SessionArchiveResponsePayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+  archive: SessionArchive;
+}
+/**
+ * 取消封存的結果。
+ */
+export interface SessionUnarchiveResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "session.unarchive";
+  payload: SessionUnarchiveResponsePayload;
+}
+export interface SessionUnarchiveResponsePayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+  /**
+   * 是否已取消封存。
+   */
+  unarchived: boolean;
+}
+/**
+ * 預覽結果。
+ */
+export interface SessionDeletionPreviewResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "session.deletion_preview";
+  payload: SessionDeletionPreviewResponsePayload;
+}
+export interface SessionDeletionPreviewResponsePayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+  /**
+   * 連同支線的整個子樹。
+   *
+   * Items: 會話識別碼。
+   */
+  subtreeSessionIds: string[];
+  /**
+   * 會一起刪除的專屬卡片數。
+   */
+  exclusiveCards: number;
+  /**
+   * 仍被其他會話或白板引用的卡片數；不會刪除。
+   */
+  sharedCards: number;
+  /**
+   * 會一起刪除的原檔數。
+   */
+  assets: number;
+}
+/**
+ * 實際刪除的數量。
+ */
+export interface SessionDeleteResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "session.delete";
+  payload: SessionDeleteResponsePayload;
+}
+export interface SessionDeleteResponsePayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+  /**
+   * 實際刪除的子樹。
+   *
+   * Items: 會話識別碼。
+   */
+  deletedSessionIds: string[];
+  /**
+   * 實際刪除的專屬卡片數。
+   */
+  deletedCards: number;
+  /**
+   * 實際刪除的原檔數。
+   */
+  deletedAssets: number;
+}
+/**
+ * 卡片列表。
+ */
+export interface CardListResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "card.list";
+  payload: CardListResponsePayload;
+}
+export interface CardListResponsePayload {
+  /**
+   * 依建立時間由新到舊。
+   */
+  cards: CardSummary[];
+  /**
+   * 下一頁游標；沒有更多資料時省略。
+   */
+  nextCursor?: string;
+}
+export interface CardSummary {
+  /**
+   * 卡片識別碼。
+   */
+  cardId: string;
+  kind: CardKind;
+  /**
+   * 標題。
+   */
+  title: string;
+  /**
+   * 一兩句話的摘要。
+   */
+  summary?: string;
+  /**
+   * 標籤，保留原本順序。
+   *
+   * Items: 標籤。
+   */
+  tags: string[];
+  /**
+   * 人格分區，預設 default。
+   */
+  persona: string;
+  /**
+   * 建立時間，RFC 3339。
+   */
+  createdAt: string;
+  /**
+   * 最後更新時間，RFC 3339。
+   */
+  updatedAt?: string;
+  /**
+   * 新鮮度 0 到 100；檢視欄與卡片庫用它褪色。
+   */
+  freshness: number;
+  lifecycle: CardLifecycle;
+  /**
+   * 取代這張卡的新卡；有值時不進預設搜尋與列表。
+   */
+  supersededBy?: string;
+  asset?: CardAsset;
+  /**
+   * 檔案格式不符，索引無法解析；true 時不提供內文。
+   */
+  broken?: boolean;
+  /**
+   * 格式不符的原因，給人看。
+   */
+  brokenReason?: string;
+}
+export interface CardAsset {
+  /**
+   * 內容雜湊（SHA-256 小寫十六進位），也是 HTTP blob 的識別碼。
+   */
+  blobId: string;
+  /**
+   * 例如 image/png、audio/mp4。
+   */
+  mediaType: string;
+  /**
+   * 原檔位元組數。
+   */
+  sizeBytes: number;
+}
+/**
+ * 卡片的完整內容。
+ */
+export interface CardGetResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "card.get";
+  payload: CardGetResponsePayload;
+}
+export interface CardGetResponsePayload {
+  card: Card;
+}
+export interface Card {
+  /**
+   * 卡片識別碼。
+   */
+  cardId: string;
+  kind: CardKind;
+  /**
+   * 標題。
+   */
+  title: string;
+  /**
+   * 摘要。
+   */
+  summary?: string;
+  /**
+   * 內文（Markdown）；補丁編輯的對象。
+   */
+  body: string;
+  /**
+   * 標籤。
+   *
+   * Items: 標籤。
+   */
+  tags: string[];
+  /**
+   * 人格分區。
+   */
+  persona: string;
+  /**
+   * 建立時間，RFC 3339。
+   */
+  createdAt: string;
+  /**
+   * 最後更新時間，RFC 3339。
+   */
+  updatedAt?: string;
+  /**
+   * 新鮮度 0 到 100。
+   */
+  freshness: number;
+  lifecycle: CardLifecycle;
+  /**
+   * 取代這張卡的新卡。
+   */
+  supersededBy?: string;
+  /**
+   * 被這張卡取代的舊卡。
+   */
+  supersedes?: string;
+  /**
+   * 血緣：由哪些卡生成。
+   *
+   * Items: 來源卡片識別碼。
+   */
+  sources: string[];
+  asset?: CardAsset;
+  links: CardLinks;
+  /**
+   * 正規化內容的 SHA-256；補丁的樂觀鎖。
+   */
+  revision: string;
+}
+export interface CardLinks {
+  /**
+   * 內文 [[ ]] 的目標，依出現順序。
+   *
+   * Items: 目標卡片或標題。
+   */
+  outgoing: string[];
+  /**
+   * 連到這張卡的卡片。
+   *
+   * Items: 來源卡片識別碼。
+   */
+  backlinks: string[];
+}
+/**
+ * 建立的卡片。
+ */
+export interface CardCreateResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "card.create";
+  payload: CardCreateResponsePayload;
+}
+export interface CardCreateResponsePayload {
+  card: CardSummary;
+}
+/**
+ * 編修後的卡片。
+ */
+export interface CardPatchResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "card.patch";
+  payload: CardPatchResponsePayload;
+}
+export interface CardPatchResponsePayload {
+  card: Card;
+}
+/**
+ * 刪除結果與連帶刪除的原檔數。
+ */
+export interface CardDeleteResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "card.delete";
+  payload: CardDeleteResponsePayload;
+}
+export interface CardDeleteResponsePayload {
+  /**
+   * 已刪除的卡片。
+   */
+  cardId: string;
+  /**
+   * 連帶刪除的原檔數；還有其他卡引用時是 0。
+   */
+  deletedAssets: number;
+}
+/**
+ * 搜尋結果。
+ */
+export interface CardSearchResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "card.search";
+  payload: CardSearchResponsePayload;
+}
+export interface CardSearchResponsePayload {
+  /**
+   * 依分數由高到低。
+   */
+  hits: CardSearchHit[];
+  /**
+   * 下一頁游標。
+   */
+  nextCursor?: string;
+}
+export interface CardSearchHit {
+  card: CardSummary;
+  /**
+   * 相關度分數，越大越前面。
+   */
+  score: number;
+  /**
+   * 命中片段；不含完整內文。
+   */
+  snippet: string;
+}
+/**
+ * 保鮮後的新鮮度。
+ */
+export interface CardRefreshResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "card.refresh";
+  payload: CardRefreshResponsePayload;
+}
+export interface CardRefreshResponsePayload {
+  /**
+   * 卡片識別碼。
+   */
+  cardId: string;
+  /**
+   * 保鮮後的新鮮度，固定 100。
+   */
+  freshness: number;
+}
+/**
+ * 上下文視圖。
+ */
+export interface ContextGetResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "context.get";
+  payload: ContextGetResponsePayload;
+}
+export interface ContextGetResponsePayload {
+  context: ContextView;
+}
+export interface ContextView {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+  /**
+   * 每次變動加 1；客戶端丟棄較小的版本。
+   */
+  version: number;
+  /**
+   * 依上下文實際順序。
+   */
+  entries: ContextEntry[];
+  /**
+   * 目前佔用的估算值；等於 entries 的 tokenEstimate 加總。
+   */
+  usedTokens: number;
+  /**
+   * 可用預算（contextWindow 減去保留給輸出的量）。
+   */
+  budgetTokens: number;
+  /**
+   * 目前主模型的上下文上限。
+   */
+  contextWindow: number;
+  /**
+   * 觸發壓縮的比例，預設 0.75。
+   */
+  compactionThreshold: number;
+  /**
+   * 上次壓縮時間，RFC 3339。
+   */
+  lastCompactedAt?: string;
+}
+export interface ContextEntry {
+  /**
+   * 項目識別碼；工作上下文也可以有代表項。
+   */
+  entryId: string;
+  layer: ContextLayer;
+  /**
+   * 對應的卡片；工作上下文與高速變動層沒有。
+   */
+  cardId?: string;
+  /**
+   * 給人看的標題。
+   */
+  title: string;
+  /**
+   * token 估算。
+   */
+  tokenEstimate: number;
+  state: ContextEntryState;
+  /**
+   * 在上下文中的位置，從 0 開始。
+   */
+  position: number;
+}
+/**
+ * 加入後的上下文視圖。
+ */
+export interface ContextAddCardResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "context.add_card";
+  payload: ContextAddCardResponsePayload;
+}
+export interface ContextAddCardResponsePayload {
+  context: ContextView;
+}
+/**
+ * 標記後的上下文視圖。
+ */
+export interface ContextRemoveCardResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "context.remove_card";
+  payload: ContextRemoveCardResponsePayload;
+}
+export interface ContextRemoveCardResponsePayload {
+  context: ContextView;
+}
+/**
+ * 壓縮已排入。
+ */
+export interface ContextCompactResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "context.compact";
+  payload: ContextCompactResponsePayload;
+}
+export interface ContextCompactResponsePayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+  /**
+   * 是否已排入壓縮；完成時會送 context.compacted。
+   */
+  scheduled: boolean;
+}
+/**
+ * 設定清單。
+ */
+export interface SystemSettingsGetResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "system.settings.get";
+  payload: SystemSettingsGetResponsePayload;
+}
+export interface SystemSettingsGetResponsePayload {
+  /**
+   * 所有分級的設定。
+   */
+  settings: SettingItem[];
+}
+export interface SettingItem {
+  /**
+   * 設定鍵。
+   */
+  key: string;
+  value: JSONValue;
+  level: SettingLevel;
+  /**
+   * 給人看的標題。
+   */
+  title?: string;
+  /**
+   * 給人看的說明。
+   */
+  description?: string;
+  /**
+   * 最後更新時間，RFC 3339。
+   */
+  updatedAt: string;
+}
+/**
+ * 已套用的設定。
+ */
+export interface SystemSettingsSetResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "system.settings.set";
+  payload: SystemSettingsSetResponsePayload;
+}
+export interface SystemSettingsSetResponsePayload {
+  /**
+   * 已套用的設定。
+   */
+  applied: SettingItem[];
+  /**
+   * 是否需要人工核准；M1 由客戶端（人）修改時固定 false。
+   */
+  requiresApproval: boolean;
+  /**
+   * 需要核准時的審批識別碼；M1 不使用。
+   */
+  approvalId?: string;
+}
+/**
+ * 模組清單。
+ */
+export interface SystemModulesGetResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "system.modules.get";
+  payload: SystemModulesGetResponsePayload;
+}
+export interface SystemModulesGetResponsePayload {
+  /**
+   * 依模組識別碼排序。
+   */
+  modules: ModuleInfo[];
+}
+export interface ModuleInfo {
+  /**
+   * 模組識別碼。
+   */
+  moduleId: string;
+  /**
+   * 顯示名稱。
+   */
+  name: string;
+  /**
+   * 版本。
+   */
+  version: string;
+  /**
+   * 使用者是否啟用。
+   */
+  enabled: boolean;
+  state: ModuleState;
+  /**
+   * 載入或啟用失敗的原因。
+   */
+  failure?: string;
+  /**
+   * 模組登記的協定命名空間。
+   *
+   * Items: 命名空間前綴。
+   */
+  protocolPrefixes: string[];
+  /**
+   * 設定宣告，不含值。
+   */
+  settings: ModuleSettingDeclaration[];
+}
+export interface ModuleSettingDeclaration {
+  /**
+   * 設定鍵。
+   */
+  key: string;
+  /**
+   * 標題。
+   */
+  title: string;
+  kind: SettingKind;
+  level: SettingLevel;
+  /**
+   * 說明。
+   */
+  description?: string;
+}
+/**
+ * 更新後的模組資訊。
+ */
+export interface SystemModulesSetEnabledResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "system.modules.set_enabled";
+  payload: SystemModulesSetEnabledResponsePayload;
+}
+export interface SystemModulesSetEnabledResponsePayload {
+  module: ModuleInfo;
+}
+/**
+ * 目前的模型設定。
+ */
+export interface SystemModelsGetResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "system.models.get";
+  payload: SystemModelsState;
+}
+export interface SystemModelsState {
+  /**
+   * 供應商清單，不含金鑰。
+   */
+  providers: ModelProviderInfo[];
+  /**
+   * 角色設定。
+   */
+  roles: ModelRoleSelection[];
+  /**
+   * 退回規則套用後的實際使用。
+   */
+  resolved: ResolvedModelRole[];
+}
+export interface ResolvedModelRole {
+  role: ModelRole;
+  source: ModelRoleSource;
+  ref?: ModelRef;
+}
+/**
+ * 套用後的模型設定。
+ */
+export interface SystemModelsSetResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "system.models.set";
+  payload: SystemModelsState;
+}
+/**
  * 一個回應回合開始。
  */
 export interface StreamTurnStartedEvent {
@@ -1347,6 +2830,289 @@ export interface StreamUiEventPayload {
    */
   renderer: string;
   data: JSONValue;
+}
+/**
+ * 卡片建立、更新、刪除、保鮮或重新索引；掛在 system 串流。
+ */
+export interface CardChangedEvent {
+  v: 1;
+  kind: "event";
+  type: "card.changed";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: CardChangedEventPayload;
+}
+export interface CardChangedEventPayload {
+  /**
+   * 卡片識別碼。
+   */
+  cardId: string;
+  change: CardChange;
+  /**
+   * 變更後的 revision；刪除時省略。
+   */
+  revision?: string;
+  /**
+   * 變更後的新鮮度；只有保鮮與載入會帶。
+   */
+  freshness?: number;
+}
+/**
+ * 上下文內容變了；掛在會話串流。
+ */
+export interface ContextChangedEvent {
+  v: 1;
+  kind: "event";
+  type: "context.changed";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: ContextChangedEventPayload;
+}
+export interface ContextChangedEventPayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+  context: ContextView;
+}
+/**
+ * 一次壓縮完成；掛在會話串流。
+ */
+export interface ContextCompactedEvent {
+  v: 1;
+  kind: "event";
+  type: "context.compacted";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: ContextCompactedEventPayload;
+}
+export interface ContextCompactedEventPayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+  /**
+   * 壓縮產出的短期記憶卡。
+   */
+  summaryCardId: string;
+  /**
+   * 壓縮前佔用。
+   */
+  beforeTokens: number;
+  /**
+   * 壓縮後佔用。
+   */
+  afterTokens: number;
+  /**
+   * 完成時間，RFC 3339。
+   */
+  compactedAt: string;
+}
+/**
+ * 會話開始封存倒數；system 與會話串流各送一則。
+ */
+export interface SessionArchivedEvent {
+  v: 1;
+  kind: "event";
+  type: "session.archived";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: SessionArchivedEventPayload;
+}
+export interface SessionArchivedEventPayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+  archive: SessionArchive;
+}
+/**
+ * 會話取消封存。
+ */
+export interface SessionUnarchivedEvent {
+  v: 1;
+  kind: "event";
+  type: "session.unarchived";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: SessionUnarchivedEventPayload;
+}
+export interface SessionUnarchivedEventPayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+}
+/**
+ * 會話刪除完成；system 串流上的那一則讓列表移除。
+ */
+export interface SessionDeletedEvent {
+  v: 1;
+  kind: "event";
+  type: "session.deleted";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: SessionDeletedEventPayload;
+}
+export interface SessionDeletedEventPayload {
+  /**
+   * 會話識別碼。
+   */
+  sessionId: string;
+  /**
+   * 整個子樹。
+   *
+   * Items: 會話識別碼。
+   */
+  deletedSessionIds: string[];
+  /**
+   * 刪除的專屬卡片數。
+   */
+  deletedCards: number;
+  /**
+   * 刪除的原檔數。
+   */
+  deletedAssets: number;
+}
+/**
+ * 設定變更；掛在 system 串流。
+ */
+export interface SystemSettingsChangedEvent {
+  v: 1;
+  kind: "event";
+  type: "system.settings.changed";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: SystemSettingsChangedEventPayload;
+}
+export interface SystemSettingsChangedEventPayload {
+  /**
+   * 變更後的設定。
+   */
+  changes: SettingItem[];
+  /**
+   * 變更者，例如 user:<deviceId>、agent:<conversationId>、system。
+   */
+  changedBy: string;
+  /**
+   * 變更時間，RFC 3339。
+   */
+  changedAt: string;
+}
+/**
+ * 模組狀態改變；掛在 system 串流。
+ */
+export interface SystemModulesChangedEvent {
+  v: 1;
+  kind: "event";
+  type: "system.modules.changed";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: SystemModulesChangedEventPayload;
+}
+export interface SystemModulesChangedEventPayload {
+  module: ModuleInfo;
+}
+/**
+ * 模型設定變更；掛在 system 串流。
+ */
+export interface SystemModelsChangedEvent {
+  v: 1;
+  kind: "event";
+  type: "system.models.changed";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: SystemModelsState;
 }
 /**
  * 需要使用者決定時送出審批請求。

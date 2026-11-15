@@ -17,6 +17,13 @@ export interface ModelInvocationRequest {
   readonly prompt: string;
   readonly attachments?: readonly ContentBlock[];
   readonly conversationId?: ConversationId;
+  /**
+   * 這次呼叫的輸出上限。
+   *
+   * 摘要需要比一般回覆更大的額度（實測 1,024 會失敗、4,096 才完成）；
+   * 省略時用模型或角色的預設值。
+   */
+  readonly maxOutputTokens?: number;
 }
 
 /** 背景模型呼叫的結果。 */
@@ -115,6 +122,21 @@ export interface CardiaryPaths {
   readonly logs: string;
 }
 
+/**
+ * 模組之間的服務註冊表。
+ *
+ * 第一方模組與主機同一個行程；服務是行程內的參考，不序列化、不跨行程。
+ * 提供者在啟用時 `provide`，消費者在請求當下才 `get`／`require`，不要
+ * 假設對方已經就緒。名稱由主機定義（`engine`、`cards`、`models` 等），
+ * `module-api` 只定形狀。
+ */
+export interface HostServiceRegistry {
+  provide<T>(name: string, value: T): void;
+  get<T>(name: string): T | undefined;
+  /** 取不到時丟錯；呼叫端要把它轉成 `unsupported` 或明確的診斷。 */
+  require<T>(name: string): T;
+}
+
 /** 主機提供給模組的服務。 */
 export interface ModuleServices {
   readonly models: ModelInvoker;
@@ -126,4 +148,6 @@ export interface ModuleServices {
   readonly secrets: SecretAccess;
   readonly logger: ModuleLogger;
   readonly clock: Clock;
+  /** 模組之間共用的服務；M1 新增。 */
+  readonly host: HostServiceRegistry;
 }
