@@ -5,6 +5,7 @@ import type {
   ApprovalRequest as EngineApprovalRequest,
   Clock,
   EngineErrorCode,
+  EngineErrorInfo,
   JsonValue as EngineJsonValue,
   ConversationSummary,
   EngineEvent,
@@ -35,6 +36,8 @@ import type {
   ToolOutput,
   ToolTranscriptEntry,
   TranscriptEntry,
+  TurnError,
+  TurnErrorDetails,
   TurnPhase,
   TurnState,
   UserTranscriptEntry,
@@ -120,7 +123,7 @@ interface TurnView {
   phase: TurnPhase;
   readonly startedAt: string;
   endedAt?: string;
-  error?: { readonly code: string; readonly message: string; readonly retryable: boolean };
+  error?: TurnError;
 }
 
 interface ToolCallView {
@@ -1240,13 +1243,7 @@ export class Gateway {
         state.activeTurnId = null;
         const view = state.turns.get(event.turnId);
         const startedAt = view?.startedAt ?? event.at;
-        const error = event.failure
-          ? {
-              code: event.failure.code,
-              message: event.failure.message,
-              retryable: false,
-            }
-          : undefined;
+        const error = event.failure ? turnErrorOf(event.failure) : undefined;
         state.turns.set(event.turnId, {
           turnId: event.turnId,
           phase: status === "complete" ? "completed" : status,
@@ -1259,7 +1256,7 @@ export class Gateway {
           state: status === "complete" ? "completed" : status,
           startedAt,
           endedAt: event.at,
-          ...(error ? { error } : {}),
+          ...(error ? { error: error as unknown as JSONValue } : {}),
         });
         return;
       }
@@ -2401,6 +2398,51 @@ function toolOutput(outcome: {
     ...(texts.length > 0 ? { text: texts.join("\n") } : {}),
     ...(data === undefined ? {} : { data }),
     ...(truncated ? { truncated: true } : {}),
+  };
+}
+
+/**
+ * 引擎的回合失敗轉成協定的 TurnError。
+ *
+ * 模型錯誤帶 `details.reason` 與 `retryable`（轉接層分類）；額度用盡對應
+ * `rate_limited`，其餘供應商問題對應 `unavailable`。`retryAfterMs` 只在
+ * 供應商真的給了等待時間時帶上。
+ */
+function turnErrorOf(failure: EngineErrorInfo): TurnError {
+  const mapped = protocolErrorFromEngine(failure.code, failure.message);
+  const details = failureDetailsOf(failure.details);
+  const reason = details.reason;
+  const code = reason === "quota_exceeded" ? "rate_limited" : mapped.code;
+  const retryable = typeof details.retryable === "boolean" ? details.retryable : mapped.retryable;
+  const turnDetails: TurnErrorDetails = {
+    ...(reason === undefined ? {} : { reason }),
+    ...(details.retryAfterMs === undefined ? {} : { retryAfterMs: details.retryAfterMs }),
+  };
+  return {
+    code,
+    message: failure.message,
+    retryable,
+    ...(Object.keys(turnDetails).length === 0 ? {} : { details: turnDetails }),
+  };
+}
+
+function failureDetailsOf(value: EngineJsonValue | undefined): {
+  readonly reason?: string;
+  readonly retryable?: boolean;
+  readonly retryAfterMs?: number;
+} {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {};
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    ...(typeof record.reason === "string" ? { reason: record.reason } : {}),
+    ...(typeof record.retryable === "boolean" ? { retryable: record.retryable } : {}),
+    ...(typeof record.retryAfterMs === "number" &&
+    Number.isInteger(record.retryAfterMs) &&
+    record.retryAfterMs >= 0
+      ? { retryAfterMs: record.retryAfterMs }
+      : {}),
   };
 }
 

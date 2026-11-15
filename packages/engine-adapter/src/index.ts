@@ -13,6 +13,26 @@ export type * from "./subagent.js";
 export type * from "./tools.js";
 
 export { createEngineAdapter } from "./internal/factory.js";
+export {
+  createProviderModelSource,
+  defaultBaseUrl,
+  isCredentialSafeBaseUrl,
+  isLoopbackHost,
+} from "./internal/model/provider-source.js";
+export {
+  createModelCompletion,
+  type ModelCompletion,
+  type ModelCompletionOptions,
+  type ModelCompletionRequest,
+  type ModelCompletionResult,
+  type ModelCompletionStopReason,
+} from "./internal/model/completion.js";
+export {
+  classifyModelFailure,
+  modelFailureInfo,
+  type ModelFailure,
+  type ModelFailureReason,
+} from "./internal/model/failure.js";
 /**
  * 工具子行程的共用監督器。
  *

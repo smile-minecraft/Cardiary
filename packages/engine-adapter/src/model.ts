@@ -44,6 +44,14 @@ export interface ModelProviderConfig {
   readonly label?: string;
   readonly baseUrl?: string;
   readonly credentialRef: CredentialRef;
+  /**
+   * 這個供應商是否一定要有憑證。
+   *
+   * 本機 OpenAI 相容端點常常不驗金鑰，省略時視為一定要有：讀不到憑證
+   * 就不送出請求，回報 `model-unavailable`。設成 `false` 時讀不到憑證
+   * 仍照常送出，讓端點自己決定要不要拒絕。
+   */
+  readonly credentialRequired?: boolean;
   readonly models: readonly ModelDescriptor[];
 }
 

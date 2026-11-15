@@ -11,14 +11,15 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { startHost, type RunningHost } from "../../../src/index.js";
 import { HOST_SERVICE_NAMES, type CardEnvironment } from "../../../src/modules/contract.js";
+import { MemoryModuleEnablementSettings } from "../../../src/modules/loader.js";
 import type { SessionLifecycleService } from "../../../src/sessions/service.js";
 
 /**
  * 封存倒數結束的整合測試：真的 Pi 組裝、真的事件與卡片檔，模型用替身。
  *
- * 生命週期模組的 `models` 服務是延後取值：呼叫當下才向服務註冊表要。
- * 所以這裡不必改產品行為，只要在有沒有提供 `models` 之間切換，就能驗
- * 「摘要成功才刪」與「沒有模型時延後刪除、不刪半套」。
+ * 模型用替身。模型接入的第一方 settings 模組也提供 `models` 服務；這個
+ * harness 停用它，讓測試自己 provide（或不 provide）`models`，驗「有提供」
+ * 與「沒有模型時延後刪除、不刪半套」。
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -56,6 +57,8 @@ async function makeHarness(): Promise<Harness> {
     initializeFolder: true,
     modulesDirectory: MODULES_DIRECTORY,
     clock: { now: () => clock.now },
+    // 模型接入模組預設也提供 `models`；此 harness 停用它，由測試自己提供替身或完全不提供。
+    moduleEnablement: new MemoryModuleEnablementSettings(["settings"]),
   });
   running.push(host);
   const cards = host.hostServices.require<CardService>(HOST_SERVICE_NAMES.cards);

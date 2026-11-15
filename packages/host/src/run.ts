@@ -2,13 +2,16 @@ import { PassThrough, type Readable } from "node:stream";
 import { isAbsolute, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type { JSONObject } from "@cardiary/protocol";
-import { createScriptedModels, scriptedModelSettings } from "@cardiary/engine-adapter";
+import {
+  createProviderModelSource,
+  createScriptedModels,
+  scriptedModelSettings,
+} from "@cardiary/engine-adapter";
 import type {
   EngineModelSource,
   ModelSettings,
   ProviderCredentialSource,
 } from "@cardiary/engine-adapter";
-import type { CredentialRef, ProviderCredential } from "@cardiary/engine-adapter";
 
 import { startHost, UnavailableCredentials, type RunningHost } from "./bootstrap.js";
 import type { FolderInfo } from "./control/broker.js";
@@ -167,30 +170,11 @@ async function loadScripts(
 }
 
 /**
- * 控制面的金鑰來源：通道建立前一律回報不可用，建立後改問殼。
- *
- * 轉接層只會在真的要呼叫模型時取值，所以這裡可以晚一步接到 broker。
- */
-class LazyBrokerCredentials implements ProviderCredentialSource {
-  #source: ProviderCredentialSource | null = null;
-
-  use(source: ProviderCredentialSource): void {
-    this.#source = source;
-  }
-
-  async resolve(ref: CredentialRef): Promise<ProviderCredential> {
-    if (this.#source === null) {
-      throw Object.assign(new Error("控制面尚未建立，沒有金鑰來源"), {
-        code: "model-unavailable",
-      });
-    }
-    return this.#source.resolve(ref);
-  }
-}
-
-/**
- * 依 `--engine` 決定組裝；Pi Durable 需要模型來源，測試用腳本化的模型
- * 把 `--script` 的每一步轉成一則固定回應。
+ * 服務入口的兩種模式：
+ * - 控制模式（無 `--folder`）：stdin 第一行 `init`，stdout 第一行 `ready`，
+ *   之後同一對 pipe 走 NDJSON。
+ * - 獨立模式（`--folder`）：沒有控制面、沒有 stdin 租約，只提供客戶端協定；
+ *   `ready` 寫在 stdout 供啟動者取得埠與 client Token。
  */
 function assemblyFor(
   args: ParsedArgs,
@@ -206,7 +190,12 @@ function assemblyFor(
     return { assembly: "fake", credentials };
   }
   if (scripts.length === 0) {
-    return { assembly: "pi", credentials };
+    // 正式組裝：供應商模型由主機的設定決定，金鑰在每個請求當下才向殼取。
+    return {
+      assembly: "pi",
+      credentials,
+      models: createProviderModelSource({ credentials }),
+    };
   }
   // 腳本若指定了分段與間隔，換成對應的串流速度；這樣同一份契約測試
   // 在 Pi 組裝下也看得到逐步的文字增量。
@@ -468,8 +457,32 @@ async function runControl(
   const scripts = await loadScripts(args.script);
   // 殼沒帶就自己產生一把；帶了就用殼那一把（重複在 parseInit 就被拒絕了）。
   const clientToken = init.clientToken ?? generateToken();
-  let channelRef: ControlChannel | null = null;
-  const credentials = new LazyBrokerCredentials();
+  // 控制通道先建立：金鑰與系統能力都經同一個通道問殼。通道在 ready 之後
+  // 才 start／handshake，之前不會送出任何請求。
+  let hostRef: RunningHost | null = null;
+  const channel = new ControlChannel({
+    input: remainder,
+    writer: sink,
+    token: init.token,
+    brokerToken: init.brokerToken,
+    logger,
+    ...(init.limits?.maxFrameBytes === undefined
+      ? {}
+      : { maxFrameBytes: init.limits.maxFrameBytes }),
+    onStorageFailure: async (detail) => {
+      await hostRef?.service.failStorage(detail);
+    },
+    onClose: (reason) => {
+      if (reason === "stdin_end" || reason === "write_failed") {
+        void hostRef?.service.abort(`control_${reason}`).then(async () => {
+          await sink.flush();
+          process.exit(0);
+        });
+      }
+    },
+  });
+  const broker = new BrokerClient(channel);
+  const credentials = new BrokerCredentialSource(broker);
   const assembly = assemblyFor(args, scripts, credentials);
   let host: RunningHost;
   try {
@@ -481,6 +494,8 @@ async function runControl(
       scripts,
       initializeFolder: args.initializeFolder,
       ...assembly,
+      credentials,
+      broker,
       ...(args.port === undefined ? {} : { port: args.port }),
       ...(args.faultCloseEventLogMs === undefined
         ? {}
@@ -490,12 +505,12 @@ async function runControl(
         : { faultCloseRuntimeAfterMs: args.faultCloseRuntimeMs }),
       ...(args.faultSkipDedupeComplete ? { faultSkipDedupeComplete: true } : {}),
       maintenanceNotifier: async (lifecycle, operationId) => {
-        await channelRef
-          ?.notify("notify.maintenance", { lifecycle, operationId })
+        await channel
+          .notify("notify.maintenance", { lifecycle, operationId })
           .catch(() => undefined);
       },
       fatalNotifier: async (reason, detail) => {
-        await channelRef?.notify("notify.fatal", { reason, detail }).catch(() => undefined);
+        await channel.notify("notify.fatal", { reason, detail }).catch(() => undefined);
         // 留一點時間讓 notify.fatal、control.pause 的回應與客戶端 1011 送出去。
         setTimeout(() => process.exit(70), 150).unref?.();
       },
@@ -504,30 +519,8 @@ async function runControl(
     stderr.write(`服務啟動失敗：${messageOf(error)}\n`);
     return 2;
   }
+  hostRef = host;
 
-  const channel = new ControlChannel({
-    input: remainder,
-    writer: sink,
-    token: init.token,
-    brokerToken: init.brokerToken,
-    logger,
-    ...(init.limits?.maxFrameBytes === undefined
-      ? {}
-      : { maxFrameBytes: init.limits.maxFrameBytes }),
-    onStorageFailure: async (detail) => {
-      await host.service.failStorage(detail);
-    },
-    onClose: (reason) => {
-      if (reason === "stdin_end" || reason === "write_failed") {
-        void host.service.abort(`control_${reason}`).then(async () => {
-          await sink.flush();
-          process.exit(0);
-        });
-      }
-    },
-  });
-  channelRef = channel;
-  credentials.use(new BrokerCredentialSource(new BrokerClient(channel)));
   channel.onRequest("control.health", async () => toJson(host.service.health()));
   channel.onRequest("control.pause", async (payload) => {
     const reason = typeof payload.reason === "string" ? payload.reason : "user";

@@ -5,6 +5,7 @@ import { LiveDoc, defineDocFamily, defineExtension, defineTool } from "@earendil
 import type {
   Conversation,
   EntryRecord,
+  SettledSubmissionRecord,
   Submission,
   SubmissionRecord,
   Tx,
@@ -40,6 +41,7 @@ import type {
   EngineStatus,
 } from "../engine.js";
 import type { EngineSubscription, SubscribeOptions } from "../events.js";
+import type { EngineErrorInfo } from "../errors.js";
 import type { ConversationId, ToolBundleId, ToolCallId, ToolName, TurnId } from "../ids.js";
 import type { JsonValue } from "../json.js";
 import type { ModelSettings } from "../model.js";
@@ -70,6 +72,7 @@ import { CatalogDoc, emptyCatalog } from "./catalog.js";
 import { compactAfterDelete, deleteEngineSubtree, listConversationSubtree } from "./delete.js";
 import { EngineAdapterFailure, engineError } from "./errors.js";
 import { EventBus } from "./event-bus.js";
+import { classifyModelFailure, modelFailureInfo } from "./model/failure.js";
 import { EngineSession, createEngineRegistry } from "./session.js";
 import { ProcessSupervisor } from "./spawn.js";
 
@@ -1388,10 +1391,13 @@ export class PiEngineAdapter implements EngineAdapter {
   ): Promise<void> {
     let lastSeen = firstEntry;
     let lastText = "";
+    let lastModelError: string | null = null;
     let settled: CompletedTurnStatus | null = null;
+    let settlement: SettledSubmissionRecord | null = null;
     const settledPromise = submission
       .wait(BACKGROUND_CONTEXT)
       .then((record) => {
+        settlement = record;
         settled =
           record.status === "done"
             ? "completed"
@@ -1438,6 +1444,11 @@ export class PiEngineAdapter implements EngineAdapter {
               lastText,
               assistantTextOfEntry(entry),
             );
+            const modelMessage = entry.model?.[0] as
+              { stopReason?: string; errorMessage?: string } | undefined;
+            if (modelMessage?.stopReason === "error") {
+              lastModelError = modelMessage.errorMessage ?? null;
+            }
             this.#publishToolStarted(conversationId, turnId, entry);
           }
           if (entry.kind.startsWith("pi.tool")) {
@@ -1479,6 +1490,7 @@ export class PiEngineAdapter implements EngineAdapter {
     const finalStatus = (
       interrupted ? "interrupted" : (settled ?? "completed")
     ) as CompletedTurnStatus;
+    const failure = finalStatus === "failed" ? modelFailureFor(settlement, lastModelError) : null;
     await this.#finishTurn(conversationId, turnId, finalStatus);
     this.#bus.publish({
       kind: "turn.completed",
@@ -1486,7 +1498,7 @@ export class PiEngineAdapter implements EngineAdapter {
       conversationId,
       turnId,
       status: finalStatus,
-      failure: null,
+      failure,
     });
   }
 
@@ -2237,6 +2249,35 @@ function errorMessage(error: unknown): string {
   return error instanceof EngineAdapterFailure || error instanceof Error
     ? error.message
     : String(error);
+}
+
+/**
+ * 回合失敗的原因。
+ *
+ * 引擎把模型錯誤結算成 `unanswered`：`reason` 是 `model_error` 或
+ * `no_model`，`detail` 是供應商原文。只有這兩種會變成帶原因的回合錯誤；
+ * 其他結算（例如背景任務沒有內容可答）維持沒有錯誤物件。
+ */
+function modelFailureFor(
+  settlement: SettledSubmissionRecord | null,
+  lastModelError: string | null,
+): EngineErrorInfo | null {
+  if (settlement === null || settlement.status !== "unanswered") {
+    return null;
+  }
+  const detail =
+    typeof settlement.detail === "string"
+      ? settlement.detail
+      : settlement.detail === undefined
+        ? (lastModelError ?? "")
+        : JSON.stringify(settlement.detail);
+  if (settlement.reason === "model_error") {
+    return modelFailureInfo(classifyModelFailure(detail || lastModelError));
+  }
+  if (settlement.reason === "no_model") {
+    return modelFailureInfo(classifyModelFailure("model_not_configured"));
+  }
+  return null;
 }
 
 function submissionRecordToStatus(record: SubmissionRecord): {
