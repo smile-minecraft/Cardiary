@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 
+import {
+  HOST_SERVICE_NAMES,
+  type AlwaysAllowDecisionOutcome,
+  type AlwaysAllowService,
+} from "../src/modules/contract.js";
+import type { FakeModelStep } from "@cardiary/engine-fake";
 import { TestClient, startTestHost, waitUntil, type TestHost } from "./helpers.js";
 
 const hosts: TestHost[] = [];
@@ -1026,6 +1032,389 @@ describe("審查修正的回歸測試", () => {
       list.payload as { sessions: Array<{ id: string; messageCount: number }> }
     ).sessions.find((session) => session.id === sessionId);
     expect(summary?.messageCount).toBe(2);
+    await client.close();
+  });
+});
+
+describe("一律允許", () => {
+  interface AlwaysAllowServiceCalls {
+    readonly policyChecks: string[];
+    readonly decisions: { requestId: string; effect: string; clientId: string }[];
+    readonly granted: string[];
+    alwaysAllowed: boolean;
+  }
+
+  function provideAlwaysAllowService(host: TestHost): AlwaysAllowServiceCalls {
+    const calls: AlwaysAllowServiceCalls = {
+      policyChecks: [],
+      decisions: [],
+      granted: [],
+      alwaysAllowed: true,
+    };
+    const service: AlwaysAllowService = {
+      async canAlwaysAllow(requestId) {
+        calls.policyChecks.push(requestId);
+        return calls.alwaysAllowed;
+      },
+      async decide(input) {
+        calls.decisions.push({
+          requestId: input.requestId,
+          effect: input.effect,
+          clientId: input.decidedBy.clientId,
+        });
+        const result = await host.host.engine.approvals.decide({
+          requestId: input.requestId,
+          verdict: "approve",
+          decidedBy: input.decidedBy,
+          ...(input.note === undefined ? {} : { note: input.note }),
+        });
+        if (result.outcome === "accepted") {
+          calls.granted.push(input.requestId);
+          return { outcome: "accepted", decision: result.decision };
+        }
+        if (result.outcome === "already-decided") {
+          return { outcome: "already-decided", decision: result.decision };
+        }
+        if (result.outcome === "not-found") return { outcome: "not-found" };
+        if (result.outcome === "expired") return { outcome: "expired" };
+        return { outcome: "withdrawn" };
+      },
+    };
+    host.host.hostServices.provide(HOST_SERVICE_NAMES.permissionDecision, service);
+    return calls;
+  }
+
+  function approvalOptions(frame: {
+    payload?: Record<string, unknown>;
+  }): { id: string; label: string; effect: string }[] {
+    return (frame.payload as { options: { id: string; label: string; effect: string }[] }).options;
+  }
+
+  function toolScript(): readonly (readonly FakeModelStep[])[] {
+    return [
+      [
+        { kind: "tool", toolName: "demo.echo", input: { text: "內容" } },
+        { kind: "text", text: "完成" },
+      ],
+    ];
+  }
+
+  async function requestToolApproval(
+    client: TestClient,
+  ): Promise<{ sessionId: string; approvalId: string }> {
+    const sessionId = await createSession(client);
+    await subscribeSession(client, sessionId);
+    client.request("session.send_message", {
+      sessionId,
+      text: "用工具",
+      delivery: "queue",
+    });
+    const requested = await client.waitForEvent("approval.requested");
+    return {
+      sessionId,
+      approvalId: (requested.payload as { approvalId: string }).approvalId,
+    };
+  }
+
+  it("沒有權限服務時不提供一律允許；送 always 回明確的 unsupported", async () => {
+    const host = await boot({ scripts: toolScript() });
+    const client = await helloClient(host);
+    const { approvalId } = await requestToolApproval(client);
+    const requested = client.frames.find((frame) => frame.type === "approval.requested");
+    expect(approvalOptions(requested!).map((option) => option.id)).toEqual(["approve", "deny"]);
+
+    const decide = client.request("approval.decide", { approvalId, optionId: "always" });
+    const reply = await client.waitForReply(decide);
+    expect(reply.code).toBe("unsupported");
+    expect((reply.details as { reason: string }).reason).toBe("always_unavailable");
+
+    // 審批還在；改用核准一次照常進行。
+    const approve = client.request("approval.decide", { approvalId, optionId: "approve" });
+    const approved = await client.waitForReply(approve);
+    expect((approved.payload as { persisted: boolean }).persisted).toBe(true);
+    const result = await client.waitForEvent("stream.tool_result");
+    expect((result.payload as { status: string }).status).toBe("ok");
+    await client.close();
+  });
+
+  it("政策不允許時不提供一律允許；送 always 回 unsupported，服務決定不被呼叫", async () => {
+    const host = await boot({ scripts: toolScript() });
+    const service = provideAlwaysAllowService(host);
+    service.alwaysAllowed = false;
+    const client = await helloClient(host);
+    const { approvalId } = await requestToolApproval(client);
+    const requested = client.frames.find((frame) => frame.type === "approval.requested");
+    expect(approvalOptions(requested!).map((option) => option.id)).toEqual(["approve", "deny"]);
+
+    const decide = client.request("approval.decide", { approvalId, optionId: "always" });
+    const reply = await client.waitForReply(decide);
+    expect(reply.code).toBe("unsupported");
+    expect((reply.details as { reason: string }).reason).toBe("always_not_allowed");
+    expect(service.decisions).toEqual([]);
+    expect(service.granted).toEqual([]);
+
+    const approve = client.request("approval.decide", { approvalId, optionId: "approve" });
+    expect((await client.waitForReply(approve)).code).toBeUndefined();
+    await client.close();
+  });
+
+  it("政策允許時提供一律允許；always 經服務決定，回應與事件都是 approve_always", async () => {
+    const host = await boot({ scripts: toolScript() });
+    const service = provideAlwaysAllowService(host);
+    const client = await helloClient(host);
+    const { approvalId } = await requestToolApproval(client);
+    const requested = client.frames.find((frame) => frame.type === "approval.requested");
+    expect(approvalOptions(requested!)).toEqual([
+      { id: "approve", label: "核准", effect: "approve" },
+      { id: "always", label: "一律允許", effect: "approve_always" },
+      { id: "deny", label: "拒絕", effect: "reject" },
+    ]);
+
+    // 第二個客戶端的快照也帶有一律允許。
+    const sessionId = (requested!.payload as { sessionId: string }).sessionId;
+    const second = await helloClient(host);
+    const snapshotId = second.request("session.subscribe", { sessionId });
+    const secondSnapshot = await second.waitForReply(snapshotId);
+    expect(
+      (
+        secondSnapshot.payload as { snapshot?: { pendingApproval?: { options: { id: string }[] } } }
+      ).snapshot?.pendingApproval?.options.map((option) => option.id),
+    ).toEqual(["approve", "always", "deny"]);
+
+    const decided = client.waitForEvent("approval.decided");
+    const decide = client.request("approval.decide", { approvalId, optionId: "always" });
+    const reply = await client.waitForReply(decide);
+    expect((reply.payload as { effect: string }).effect).toBe("approve_always");
+    expect((reply.payload as { persisted: boolean }).persisted).toBe(true);
+    expect(service.policyChecks).toContain(approvalId);
+    expect(service.decisions).toEqual([
+      { requestId: approvalId, effect: "approve_always", clientId: "test-1" },
+    ]);
+    expect(service.granted).toEqual([approvalId]);
+    const decidedEvent = await decided;
+    expect((decidedEvent.payload as { effect: string }).effect).toBe("approve_always");
+
+    const result = await client.waitForEvent("stream.tool_result");
+    expect((result.payload as { status: string }).status).toBe("ok");
+    await client.close();
+    await second.close();
+  });
+
+  /**
+   * 回傳固定結果的假服務；用來逐一驗閘道對每種結果的映射。
+   * 記錄 decide 的呼叫次數與是否被要求寫白名單，不只驗回應。
+   */
+  function provideCannedAlwaysAllowService(
+    host: TestHost,
+    decideOutcome: (requestId: string) => AlwaysAllowDecisionOutcome,
+  ): { calls: { decide: number }; granted: string[] } {
+    const calls = { decide: 0 };
+    const granted: string[] = [];
+    const service: AlwaysAllowService = {
+      async canAlwaysAllow() {
+        return true;
+      },
+      async decide(input) {
+        calls.decide += 1;
+        const outcome = decideOutcome(input.requestId);
+        if (outcome.outcome === "accepted") granted.push(input.requestId);
+        return outcome;
+      },
+    };
+    host.host.hostServices.provide(HOST_SERVICE_NAMES.permissionDecision, service);
+    return { calls, granted };
+  }
+
+  function acceptedOutcome(requestId: string): AlwaysAllowDecisionOutcome {
+    return {
+      outcome: "accepted",
+      decision: {
+        requestId,
+        verdict: "approve",
+        decidedAt: new Date().toISOString(),
+        decidedBy: { kind: "human", clientId: "test-1" },
+      },
+    };
+  }
+
+  it("approve 之後再送 always：不呼叫權限服務，回 conflict，不寫白名單", async () => {
+    const host = await boot({ scripts: toolScript() });
+    const service = provideAlwaysAllowService(host);
+    const client = await helloClient(host);
+    const { approvalId } = await requestToolApproval(client);
+
+    const approve = client.request("approval.decide", { approvalId, optionId: "approve" });
+    expect((await client.waitForReply(approve)).code).toBeUndefined();
+
+    const decide = client.request("approval.decide", { approvalId, optionId: "always" });
+    const reply = await client.waitForReply(decide);
+    expect(reply.code).toBe("conflict");
+    const details = reply.details as {
+      decision: { verdict: string; effect: string };
+    };
+    expect(details.decision.verdict).toBe("approve");
+    expect(details.decision.effect).toBe("approve");
+    expect(service.decisions).toEqual([]);
+    expect(service.granted).toEqual([]);
+    await client.close();
+  });
+
+  it("一律允許之後再送 always：第二次不呼叫 decide，回 conflict", async () => {
+    const host = await boot({ scripts: toolScript() });
+    const service = provideAlwaysAllowService(host);
+    const client = await helloClient(host);
+    const { approvalId } = await requestToolApproval(client);
+
+    const first = client.request("approval.decide", { approvalId, optionId: "always" });
+    expect((await client.waitForReply(first)).code).toBeUndefined();
+    expect(service.decisions).toHaveLength(1);
+    expect(service.granted).toEqual([approvalId]);
+
+    const second = client.request("approval.decide", { approvalId, optionId: "always" });
+    const reply = await client.waitForReply(second);
+    expect(reply.code).toBe("conflict");
+    const details = reply.details as { decision: { verdict: string } };
+    expect(details.decision.verdict).toBe("approve");
+    expect(service.decisions).toHaveLength(1);
+    expect(service.granted).toEqual([approvalId]);
+    await client.close();
+  });
+
+  it("審批已撤回再送 always：不呼叫 decide，回 conflict withdrawn，不寫白名單", async () => {
+    const host = await boot({ scripts: toolScript() });
+    const service = provideAlwaysAllowService(host);
+    const client = await helloClient(host);
+    const { approvalId } = await requestToolApproval(client);
+    await host.host.engine.approvals.withdraw(approvalId, "測試撤回");
+
+    const decide = client.request("approval.decide", { approvalId, optionId: "always" });
+    const reply = await client.waitForReply(decide);
+    expect(reply.code).toBe("conflict");
+    expect((reply.details as { reason: string }).reason).toBe("withdrawn");
+    expect(service.decisions).toEqual([]);
+    expect(service.granted).toEqual([]);
+    await client.close();
+  });
+
+  it("權限服務回 expired：閘道回 conflict approval_expired，不寫白名單", async () => {
+    const host = await boot({ scripts: toolScript() });
+    const canned = provideCannedAlwaysAllowService(host, () => ({ outcome: "expired" }));
+    const client = await helloClient(host);
+    const { approvalId } = await requestToolApproval(client);
+
+    const decide = client.request("approval.decide", { approvalId, optionId: "always" });
+    const reply = await client.waitForReply(decide);
+    expect(reply.code).toBe("conflict");
+    expect((reply.details as { reason: string }).reason).toBe("approval_expired");
+    expect(canned.calls.decide).toBe(1);
+    expect(canned.granted).toEqual([]);
+    await client.close();
+  });
+
+  it("權限服務回 withdrawn：閘道回 conflict withdrawn，不寫白名單", async () => {
+    const host = await boot({ scripts: toolScript() });
+    const canned = provideCannedAlwaysAllowService(host, () => ({ outcome: "withdrawn" }));
+    const client = await helloClient(host);
+    const { approvalId } = await requestToolApproval(client);
+
+    const decide = client.request("approval.decide", { approvalId, optionId: "always" });
+    const reply = await client.waitForReply(decide);
+    expect(reply.code).toBe("conflict");
+    expect((reply.details as { reason: string }).reason).toBe("withdrawn");
+    expect(canned.calls.decide).toBe(1);
+    expect(canned.granted).toEqual([]);
+    await client.close();
+  });
+
+  it("權限服務回 not-found：閘道回 not_found，不寫白名單", async () => {
+    const host = await boot({ scripts: toolScript() });
+    const canned = provideCannedAlwaysAllowService(host, () => ({ outcome: "not-found" }));
+    const client = await helloClient(host);
+    const { approvalId } = await requestToolApproval(client);
+
+    const decide = client.request("approval.decide", { approvalId, optionId: "always" });
+    const reply = await client.waitForReply(decide);
+    expect(reply.code).toBe("not_found");
+    expect(canned.calls.decide).toBe(1);
+    expect(canned.granted).toEqual([]);
+    await client.close();
+  });
+
+  it("權限服務回 cannot-always-allow：閘道回 unsupported always_not_allowed，帶 policy，不寫白名單", async () => {
+    const host = await boot({ scripts: toolScript() });
+    const canned = provideCannedAlwaysAllowService(host, () => ({
+      outcome: "cannot-always-allow",
+      reason: "tool_policy_terminal",
+    }));
+    const client = await helloClient(host);
+    const { approvalId } = await requestToolApproval(client);
+
+    const decide = client.request("approval.decide", { approvalId, optionId: "always" });
+    const reply = await client.waitForReply(decide);
+    expect(reply.code).toBe("unsupported");
+    const details = reply.details as { reason: string; policy: string };
+    expect(details.reason).toBe("always_not_allowed");
+    expect(details.policy).toBe("tool_policy_terminal");
+    expect(canned.calls.decide).toBe(1);
+    expect(canned.granted).toEqual([]);
+    await client.close();
+  });
+
+  it("權限服務回 already-decided：閘道回 conflict，不寫白名單", async () => {
+    const host = await boot({ scripts: toolScript() });
+    const canned = provideCannedAlwaysAllowService(host, (requestId) => ({
+      outcome: "already-decided",
+      decision: {
+        requestId,
+        verdict: "approve",
+        decidedAt: new Date().toISOString(),
+        decidedBy: { kind: "human", clientId: "test-1" },
+      },
+    }));
+    const client = await helloClient(host);
+    const { approvalId } = await requestToolApproval(client);
+
+    const decide = client.request("approval.decide", { approvalId, optionId: "always" });
+    const reply = await client.waitForReply(decide);
+    expect(reply.code).toBe("conflict");
+    const details = reply.details as { decision: { verdict: string } };
+    expect(details.decision.verdict).toBe("approve");
+    expect(canned.calls.decide).toBe(1);
+    expect(canned.granted).toEqual([]);
+    await client.close();
+  });
+
+  it("權限服務回 accepted：閘道回 approve_always 且 persisted，白名單只寫一次", async () => {
+    const host = await boot({ scripts: toolScript() });
+    const canned = provideCannedAlwaysAllowService(host, acceptedOutcome);
+    const client = await helloClient(host);
+    const { approvalId } = await requestToolApproval(client);
+
+    const decide = client.request("approval.decide", { approvalId, optionId: "always" });
+    const reply = await client.waitForReply(decide);
+    expect((reply.payload as { effect: string }).effect).toBe("approve_always");
+    expect((reply.payload as { persisted: boolean }).persisted).toBe(true);
+    expect(canned.calls.decide).toBe(1);
+    expect(canned.granted).toEqual([approvalId]);
+    await client.close();
+  });
+
+  it("政策查詢丟錯時不提供一律允許，審批沒有整體失敗", async () => {
+    const host = await boot({ scripts: toolScript() });
+    host.host.hostServices.provide(HOST_SERVICE_NAMES.permissionDecision, {
+      async canAlwaysAllow(): Promise<boolean> {
+        throw new Error("政策服務壞了");
+      },
+      async decide(): Promise<never> {
+        throw new Error("不該被呼叫");
+      },
+    });
+    const client = await helloClient(host);
+    const { approvalId } = await requestToolApproval(client);
+    const requested = client.frames.find((frame) => frame.type === "approval.requested");
+    expect(approvalOptions(requested!).map((option) => option.id)).toEqual(["approve", "deny"]);
+    const approve = client.request("approval.decide", { approvalId, optionId: "approve" });
+    expect((await client.waitForReply(approve)).code).toBeUndefined();
     await client.close();
   });
 });

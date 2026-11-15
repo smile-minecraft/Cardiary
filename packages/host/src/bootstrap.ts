@@ -301,6 +301,8 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
     },
     ...(options.limits === undefined ? {} : { limits: options.limits }),
     cancelToolProcesses: (deadlineMs) => spawn.cancelAll(deadlineMs),
+    // 「一律允許」由權限模組提供；模組可能在閘道建立後才啟用，所以用取值函式。
+    permissionDecision: () => hostServices.get(HOST_SERVICE_NAMES.permissionDecision),
     ...(options.faultSkipDedupeComplete === true ? { faultSkipDedupeComplete: true } : {}),
     ...(options.demo === true
       ? { toolBundles: () => [{ bundleId: DEMO_BUNDLE_ID, generation: DEMO_GENERATION }] }

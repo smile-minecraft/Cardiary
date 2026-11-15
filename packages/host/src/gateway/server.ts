@@ -9,6 +9,7 @@ import type {
   ConversationSummary,
   EngineEvent,
   EngineLogger,
+  ToolBundlePin,
 } from "@cardiary/engine-adapter";
 import type {
   ModuleHttpRequest,
@@ -18,6 +19,7 @@ import type {
   ProtocolRequestContext,
 } from "@cardiary/module-api";
 import type {
+  ApprovalOption,
   ApprovalRequestedEvent,
   ApprovalRequest as ProtocolApprovalRequest,
   AssistantTranscriptEntry,
@@ -49,7 +51,7 @@ import {
   type ProtocolErrorInfo,
 } from "../errors.js";
 import type { ModuleHostBridge } from "../modules/contract.js";
-import { ProtocolHandlerError } from "../modules/contract.js";
+import { ProtocolHandlerError, type AlwaysAllowService } from "../modules/contract.js";
 import { lifecycleErrorCode } from "../modules/registry.js";
 import type { DedupeRecord, StorageBundle } from "../storage/interfaces.js";
 import { constantTimeEqual, isValidToken } from "../tokens.js";
@@ -78,11 +80,20 @@ export interface GatewayOptions {
   readonly status: () => HostStatusInput;
   readonly clock?: Clock;
   readonly limits?: Partial<GatewayLimits>;
-  /** 新對話釘選的工具組版本。 */
-  readonly toolBundles?: () => readonly {
-    readonly bundleId: string;
-    readonly generation: number;
-  }[];
+  /**
+   * 建立對話時額外釘選的工具組（示範工具）。
+   *
+   * 模組註冊的工具組由模組主機提供；這裡只放不屬於任何模組的工具，
+   * 例如 `--demo` 的示範工具。同一個 `bundleId` 以模組的版本為準。
+   */
+  readonly toolBundles?: () => readonly ToolBundlePin[];
+  /**
+   * 「一律允許」的權限服務（`permission.decision`）。
+   *
+   * 由本機工具模組在啟用時提供，所以用取值函式，建立對話或審批當下才取；
+   * 沒有提供時審批不顯示 `approve_always`，送了會回明確的 `unsupported`。
+   */
+  readonly permissionDecision?: () => AlwaysAllowService | undefined;
   /** 固定前綴；由主機組好，轉接層不拆解。 */
   readonly systemContext?: () => string;
   readonly moduleHandlers?: ReadonlyMap<string, ModuleHandler>;
@@ -176,6 +187,8 @@ export class Gateway {
   readonly #requestCache = new Map<string, Map<string, ServerFrame | Unknown>>();
   readonly #messageCounts = new Map<string, number>();
   readonly #pendingDecided = new Map<string, { promise: Promise<void>; resolve: () => void }>();
+  /** 以「一律允許」核准的審批；`approval.decided` 要帶 `approve_always`。 */
+  readonly #alwaysDecided = new Set<string>();
   #storageFailureHandler: ((detail: string) => void) | null = null;
   #storageFailed = false;
   #faultSkipComplete: boolean;
@@ -1149,7 +1162,7 @@ export class Gateway {
         return;
       }
       case "approval.requested": {
-        const projection = this.#approvalProjection(event.request);
+        const projection = await this.#approvalProjection(event.request);
         state.pendingApprovalId = projection.approvalId;
         const approvalTurnId = event.request.draft.turnId ?? "";
         const approvalView = state.turns.get(approvalTurnId);
@@ -1179,6 +1192,7 @@ export class Gateway {
         // 等 approval.decide 的回應送出後才送 approval.decided（沿用協定順序），
         // 但事件處理是同一個佇列，所以 decided 一定排在工具結果與 turn.completed 之前。
         if (gate) await gate.promise;
+        const always = this.#alwaysDecided.delete(resolution.request.id);
         const sessionId = resolution.request.draft.conversationId ?? state.sessionId;
         if (this.#isPendingApproval(state, resolution.request.id)) {
           state.pendingApprovalId = null;
@@ -1189,7 +1203,8 @@ export class Gateway {
           // 消失），不送 approval.decided，避免把逾時或撤回誤報成「拒絕」。
           return;
         }
-        const effect = resolution.outcome === "approved" ? "approve" : "reject";
+        const effect =
+          resolution.outcome === "approved" ? (always ? "approve_always" : "approve") : "reject";
         const decidedByClient = resolution.decision?.decidedBy.clientId;
         await this.#appendEvent(state, stream, "approval.decided", {
           approvalId: resolution.request.id,
@@ -1380,9 +1395,15 @@ export class Gateway {
     });
   }
 
-  #approvalProjection(request: EngineApprovalRequest): ProtocolApprovalRequest {
+  async #approvalProjection(request: EngineApprovalRequest): Promise<ProtocolApprovalRequest> {
     const details = request.draft.action.details;
     const summary = details?.map((detail) => `${detail.label}：${detail.value}`).join("；");
+    const approve: ApprovalOption = { id: "approve", label: "核准", effect: "approve" };
+    const deny: ApprovalOption = { id: "deny", label: "拒絕", effect: "reject" };
+    const always: ApprovalOption = { id: "always", label: "一律允許", effect: "approve_always" };
+    const options: [ApprovalOption, ...ApprovalOption[]] = (await this.#canAlwaysAllow(request.id))
+      ? [approve, always, deny]
+      : [approve, deny];
     return {
       approvalId: request.id,
       sessionId: request.draft.conversationId ?? "",
@@ -1397,13 +1418,30 @@ export class Gateway {
           ? {}
           : { detail: toProtocolJson(request.draft.action.toolInput) }),
       },
-      options: [
-        { id: "approve", label: "核准", effect: "approve" },
-        { id: "deny", label: "拒絕", effect: "reject" },
-      ],
+      options,
       requestedAt: request.requestedAt,
       ...(request.expiresAt === null ? {} : { expiresAt: request.expiresAt }),
     };
+  }
+
+  /**
+   * 這筆審批是否提供「一律允許」。
+   *
+   * 政策由權限模組決定（有沒有可放行的工具、動作種類與範圍）。服務還沒
+   * 提供、或查詢失敗時一律不提供，不讓審批投影失敗；使用者仍可核准一次。
+   */
+  async #canAlwaysAllow(approvalId: string): Promise<boolean> {
+    const service = this.#options.permissionDecision?.();
+    if (service === undefined) return false;
+    try {
+      return await service.canAlwaysAllow(approvalId);
+    } catch (error) {
+      this.#logger.warn("查詢一律允許政策失敗，這次不提供", {
+        approvalId,
+        message: errorMessage(error),
+      });
+      return false;
+    }
   }
 
   // ---- 快照 -------------------------------------------------------------
@@ -1432,7 +1470,7 @@ export class Gateway {
       session: this.#sessionSummary(summary, state),
       entries,
       ...(activeTurn ? { activeTurn } : {}),
-      ...(oldest ? { pendingApproval: this.#approvalProjection(oldest) } : {}),
+      ...(oldest ? { pendingApproval: await this.#approvalProjection(oldest) } : {}),
       ...(streaming ? { streaming } : {}),
     };
   }
@@ -1559,7 +1597,7 @@ export class Gateway {
       purpose: "conversation",
       model,
       systemContext: this.#options.systemContext?.() ?? "你是 Cardiary 的助理。",
-      toolBundles: this.#options.toolBundles?.() ?? [],
+      toolBundles: this.#pinnedToolBundles(),
       permissionMode: "hard-rules",
     });
     return {
@@ -1570,6 +1608,20 @@ export class Gateway {
       updatedAt: summary.updatedAt,
       messageCount: this.#messageCounts.get(summary.id) ?? 0,
     };
+  }
+
+  /**
+   * 新對話釘選的工具組：啟用中的模組提供的版本，加上示範工具。
+   *
+   * 模組主機在載入完成後才接到閘道，所以每次建立對話都重新取，不快取。
+   * 停用的模組不在 `activeToolBundles` 裡，它的工具不會進新對話。
+   */
+  #pinnedToolBundles(): readonly ToolBundlePin[] {
+    const pins: ToolBundlePin[] = [...(this.#modules?.activeToolBundles() ?? [])];
+    for (const extra of this.#options.toolBundles?.() ?? []) {
+      if (!pins.some((pin) => pin.bundleId === extra.bundleId)) pins.push(extra);
+    }
+    return pins;
   }
 
   async #recoverCreateSession(
@@ -1842,7 +1894,7 @@ export class Gateway {
     const approvalId = requiredString(request.payload, "approvalId");
     const optionId = requiredString(request.payload, "optionId");
     const note = optionalString(request.payload, "note");
-    if (optionId !== "approve" && optionId !== "deny") {
+    if (optionId !== "approve" && optionId !== "deny" && optionId !== "always") {
       throw new RequestFailure(
         protocolError("invalid_message", "不支援的審批選項。", { details: { field: "optionId" } }),
       );
@@ -1851,13 +1903,22 @@ export class Gateway {
     if (!existing) {
       throw new RequestFailure(protocolError("not_found", "找不到這筆審批。"));
     }
+    if (optionId === "always") {
+      return this.#decideAlways(connection, request, approvalId, note, existing);
+    }
     const releaseDecision = this.#beginDecisionGate(approvalId);
-    const result = await this.#options.engine.approvals.decide({
-      requestId: approvalId,
-      verdict: optionId === "approve" ? "approve" : "deny",
-      decidedBy: { kind: "human", clientId: connection.clientInstanceId || connection.id },
-      ...(note === undefined ? {} : { note }),
-    });
+    let result;
+    try {
+      result = await this.#options.engine.approvals.decide({
+        requestId: approvalId,
+        verdict: optionId === "approve" ? "approve" : "deny",
+        decidedBy: { kind: "human", clientId: connection.clientInstanceId || connection.id },
+        ...(note === undefined ? {} : { note }),
+      });
+    } catch (error) {
+      releaseDecision();
+      throw error;
+    }
     if (result.outcome === "not-found") {
       releaseDecision();
       throw new RequestFailure(protocolError("not_found", "找不到這筆審批。"));
@@ -1903,6 +1964,130 @@ export class Gateway {
     await connection.send(response(request.id, "approval.decide", payload));
     releaseDecision();
     return { __handled: true };
+  }
+
+  /**
+   * 「一律允許」：經 `permission.decision` 服務寫入決定與白名單。
+   *
+   * 閘道不匯入權限模組的實作；服務不存在或政策不允許時回 `unsupported`，
+   * 不會默默當成一次核准。
+   *
+   * 審批不是 `pending` 時直接回 `conflict`，不呼叫權限服務、不寫白名單；
+   * 回應失敗就不該留下耐久授權。白名單由服務在決定成功之後寫入，
+   * 閘道只在提供者回 `accepted` 時把 `persisted` 標成 `true`。
+   */
+  async #decideAlways(
+    connection: ClientConnection,
+    request: ParsedRequest,
+    approvalId: string,
+    note: string | undefined,
+    existing: EngineApprovalRequest,
+  ): Promise<Unknown> {
+    if (existing.status !== "pending") {
+      if (existing.status === "expired") {
+        throw new RequestFailure(
+          protocolError("conflict", "這筆審批已經逾時。", {
+            details: { reason: "approval_expired" },
+          }),
+        );
+      }
+      if (existing.status === "withdrawn") {
+        throw new RequestFailure(
+          protocolError("conflict", "這筆審批已經撤回。", { details: { reason: "withdrawn" } }),
+        );
+      }
+      // approved／denied：已有決定。引擎不一定把 decision 掛在審批物件上
+      // （假引擎就沒有），這時用狀態推出 verdict，decidedAt 省略。
+      const verdict =
+        existing.decision?.verdict ?? (existing.status === "approved" ? "approve" : "deny");
+      throw this.#alreadyDecidedConflict(verdict, existing.decision?.decidedAt);
+    }
+    const service = this.#options.permissionDecision?.();
+    if (service === undefined) {
+      throw new RequestFailure(
+        protocolError("unsupported", "目前沒有提供「一律允許」的權限服務。", {
+          details: { reason: "always_unavailable" },
+        }),
+      );
+    }
+    if (!(await this.#canAlwaysAllow(approvalId))) {
+      throw new RequestFailure(
+        protocolError("unsupported", "這個工具的政策不允許一律允許。", {
+          details: { reason: "always_not_allowed" },
+        }),
+      );
+    }
+    const releaseDecision = this.#beginDecisionGate(approvalId);
+    let result;
+    try {
+      result = await service.decide({
+        requestId: approvalId,
+        effect: "approve_always",
+        decidedBy: { kind: "human", clientId: connection.clientInstanceId || connection.id },
+        ...(note === undefined ? {} : { note }),
+      });
+    } catch (error) {
+      releaseDecision();
+      throw error;
+    }
+    if (result.outcome === "accepted" || result.outcome === "already-decided") {
+      if (result.outcome === "already-decided") {
+        releaseDecision();
+        throw this.#alreadyDecidedConflict(result.decision.verdict, result.decision.decidedAt);
+      }
+      this.#alwaysDecided.add(approvalId);
+      const payload = {
+        approvalId,
+        effect: "approve_always",
+        decidedAt: result.decision.decidedAt,
+        persisted: true,
+      };
+      await connection.send(response(request.id, "approval.decide", payload));
+      releaseDecision();
+      return { __handled: true };
+    }
+    releaseDecision();
+    if (result.outcome === "not-found") {
+      throw new RequestFailure(protocolError("not_found", "找不到這筆審批。"));
+    }
+    if (result.outcome === "expired") {
+      throw new RequestFailure(
+        protocolError("conflict", "這筆審批已經逾時。", {
+          details: { reason: "approval_expired" },
+        }),
+      );
+    }
+    if (result.outcome === "withdrawn") {
+      throw new RequestFailure(
+        protocolError("conflict", "這筆審批已經撤回。", { details: { reason: "withdrawn" } }),
+      );
+    }
+    if (result.outcome === "cannot-always-allow") {
+      throw new RequestFailure(
+        protocolError("unsupported", "這個工具的政策不允許一律允許。", {
+          details: { reason: "always_not_allowed", policy: result.reason },
+        }),
+      );
+    }
+    throw new RequestFailure(protocolError("internal", "權限服務回了未知的結果。"));
+  }
+
+  /** 「一律允許」遇到已有決定的審批時共用的衝突回應；`decidedAt` 未知時省略。 */
+  #alreadyDecidedConflict(
+    verdict: "approve" | "deny",
+    decidedAt: string | undefined,
+  ): RequestFailure {
+    return new RequestFailure(
+      protocolError("conflict", "這筆審批已經有決定了。", {
+        details: {
+          decision: {
+            verdict,
+            ...(decidedAt === undefined ? {} : { decidedAt }),
+            effect: verdict === "approve" ? "approve" : "reject",
+          },
+        },
+      }),
+    );
   }
 
   async #pauseAll(request: ParsedRequest): Promise<Unknown> {

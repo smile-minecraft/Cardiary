@@ -271,6 +271,67 @@ describe("模組生命週期", () => {
     expect(tools.retired).toEqual(["cards.tools@1"]);
   });
 
+  it("啟用中的模組提供工具組版本；停用後清空，重新啟用配發新 generation", async () => {
+    const { registry } = makeRegistry();
+    await registry.load({
+      manifest: manifestOf("cards"),
+      activate(context) {
+        context.registerToolBundle({ bundleId: "cards.tools", label: "卡片工具", tools: [] });
+        context.registerToolBundle({ bundleId: "cards.tips", label: "卡片提示", tools: [] });
+      },
+    });
+    await registry.load({
+      manifest: manifestOf("local-tools"),
+      activate(context) {
+        context.registerToolBundle({ bundleId: "local-tools", label: "本機工具", tools: [] });
+      },
+    });
+    await registry.activate("cards");
+    await registry.activate("local-tools");
+    expect(registry.activeToolBundles()).toEqual([
+      { bundleId: "cards.tools", generation: 1 },
+      { bundleId: "cards.tips", generation: 1 },
+      { bundleId: "local-tools", generation: 2 },
+    ]);
+
+    await registry.deactivate("cards", { reason: "user" });
+    expect(registry.activeToolBundles()).toEqual([{ bundleId: "local-tools", generation: 2 }]);
+
+    await registry.activate("cards");
+    expect(registry.activeToolBundles()).toEqual([
+      { bundleId: "cards.tools", generation: 3 },
+      { bundleId: "cards.tips", generation: 3 },
+      { bundleId: "local-tools", generation: 2 },
+    ]);
+  });
+
+  it("載入失敗、停用與尚未啟用的模組不提供工具組", async () => {
+    const { registry } = makeRegistry();
+    const healthy: HostModule = {
+      manifest: manifestOf("healthy"),
+      activate(context) {
+        context.registerToolBundle({ bundleId: "healthy.tools", label: "好", tools: [] });
+      },
+    };
+    const broken: HostModule = {
+      manifest: manifestOf("broken"),
+      activate(context) {
+        context.registerToolBundle({
+          bundleId: "broken.tools",
+          label: "壞",
+          tools: [],
+        });
+        throw new Error("壞掉了");
+      },
+    };
+    await registry.load(broken);
+    await registry.load(healthy, { inactive: true });
+    await registry.activate("broken");
+    expect(registry.activeToolBundles()).toEqual([]);
+    await registry.activate("healthy");
+    expect(registry.activeToolBundles()).toEqual([{ bundleId: "healthy.tools", generation: 2 }]);
+  });
+
   it("重新啟用配發新的 generation；服務提供在停用後撤銷", async () => {
     const { registry } = makeRegistry();
     const module: HostModule = {

@@ -2,7 +2,8 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { EngineLogger } from "@cardiary/engine-adapter";
+import type { EngineLogger, ToolBundlePin } from "@cardiary/engine-adapter";
+import type { FakeModelStep } from "@cardiary/engine-fake";
 import type { ModuleServices } from "@cardiary/module-api";
 import type { ModuleInfo } from "@cardiary/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -89,6 +90,10 @@ class StubModules implements ModuleHostBridge {
 
   listModules(): readonly ModuleInfo[] {
     return this.infos;
+  }
+
+  activeToolBundles(): readonly ToolBundlePin[] {
+    return [];
   }
 
   async setModuleEnabled(moduleId: string, enabled: boolean): Promise<ModuleInfo> {
@@ -419,6 +424,134 @@ describe("模組主機與閘道", () => {
     expect((await client.waitForReply(list)).payload).toEqual({ from: "a" });
     const unknown = client.request("nothing.here", {});
     expect((await client.waitForReply(unknown)).code).toBe("unsupported");
+    await client.close();
+  });
+});
+
+async function writeToolModule(root: string, id: string, bundleId: string): Promise<void> {
+  await writeModule(
+    root,
+    id,
+    `context.registerToolBundle({
+      bundleId: ${JSON.stringify(bundleId)},
+      label: "假工具",
+      tools: [
+        {
+          name: "fake.echo",
+          description: "回傳輸入的文字",
+          parameters: { type: "object" },
+          replay: "safe",
+          async execute(input) {
+            const text =
+              typeof input === "object" && input !== null && "text" in input
+                ? String(input.text ?? "")
+                : "";
+            return { ok: true, content: [{ type: "text", text: "模組回：" + text }] };
+          },
+        },
+      ],
+    });`,
+  );
+}
+
+/** 啟動一個載入了假工具模組的主機；回傳主機與模組主機。 */
+async function bootWithToolModule(
+  scripts: readonly (readonly FakeModelStep[])[],
+): Promise<LoadedHarness> {
+  const root = await mkdtemp(join(tmpdir(), "cardiary-gateway-pin-"));
+  await writeToolModule(root, "fake", "fake.tools");
+  const host = await boot({ demo: false, scripts });
+  const modules = await loadFirstPartyModules({
+    tools: host.host.engine.tools,
+    services: moduleServices,
+    events: { emit: (intent) => host.host.gateway.emitIntent(intent) },
+    directory: root,
+  });
+  host.host.gateway.setModuleHost(modules);
+  return { host, modules };
+}
+
+async function subscribeSession(client: TestClient, sessionId: string): Promise<void> {
+  const id = client.request("session.subscribe", { sessionId });
+  await client.waitForReply(id);
+}
+
+describe("工具組釘選", () => {
+  it("啟用中的模組工具組進新對話；停用後不進，工具回 tool-unavailable", async () => {
+    const { host, modules } = await bootWithToolModule([
+      [
+        { kind: "tool", toolName: "fake.echo", input: { text: "你好" } },
+        { kind: "text", text: "完成" },
+      ],
+      [
+        { kind: "tool", toolName: "fake.echo", input: { text: "再見" } },
+        { kind: "text", text: "完成" },
+      ],
+    ]);
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    const conversation = await host.host.engine.getConversation(sessionId);
+    expect(conversation?.toolBundles).toEqual([{ bundleId: "fake.tools", generation: 1 }]);
+
+    await subscribeSession(client, sessionId);
+    client.request("session.send_message", {
+      sessionId,
+      text: "用工具",
+      delivery: "queue",
+    });
+    const requested = await client.waitForEvent("approval.requested");
+    const approvalId = (requested.payload as { approvalId: string }).approvalId;
+    client.request("approval.decide", { approvalId, optionId: "approve" });
+    const result = await client.waitForEvent("stream.tool_result");
+    const payload = result.payload as {
+      sessionId: string;
+      status: string;
+      output: { text?: string };
+      diagnostics: { readonly code: string }[];
+    };
+    expect(payload.sessionId).toBe(sessionId);
+    expect(payload.status).toBe("ok");
+    expect(payload.output.text).toBe("模組回：你好");
+
+    // 停用後：新對話不帶工具組，呼叫直接回 tool-unavailable，不會重問審批。
+    await modules.setModuleEnabled("fake", false);
+    const second = await helloClient(host);
+    const disabledSession = await createSession(second);
+    const disabledConversation = await host.host.engine.getConversation(disabledSession);
+    expect(disabledConversation?.toolBundles).toEqual([]);
+    await subscribeSession(second, disabledSession);
+    second.request("session.send_message", {
+      sessionId: disabledSession,
+      text: "用工具",
+      delivery: "queue",
+    });
+    const unavailable = await second.waitForEvent("stream.tool_result");
+    const unavailablePayload = unavailable.payload as {
+      sessionId: string;
+      status: string;
+      diagnostics: { readonly code: string }[];
+    };
+    expect(unavailablePayload.sessionId).toBe(disabledSession);
+    expect(unavailablePayload.status).toBe("error");
+    expect(unavailablePayload.diagnostics.map((entry) => entry.code)).toContain("tool_unavailable");
+    expect(second.frames.some((frame) => frame.type === "approval.requested")).toBe(false);
+    await second.close();
+    await client.close();
+  });
+
+  it("重新啟用配發新的 generation，新對話釘選新版", async () => {
+    const { host, modules } = await bootWithToolModule([
+      [
+        { kind: "tool", toolName: "fake.echo", input: { text: "一" } },
+        { kind: "text", text: "完成" },
+      ],
+    ]);
+    await modules.setModuleEnabled("fake", false);
+    await modules.setModuleEnabled("fake", true);
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    const conversation = await host.host.engine.getConversation(sessionId);
+    expect(conversation?.toolBundles).toEqual([{ bundleId: "fake.tools", generation: 2 }]);
     await client.close();
   });
 });

@@ -18,7 +18,7 @@ import type {
   ProtocolRequestHandler,
   RegistrationHandle,
 } from "@cardiary/module-api";
-import type { JsonValue, ToolRegistry } from "@cardiary/engine-adapter";
+import type { JsonValue, ToolBundlePin, ToolRegistry } from "@cardiary/engine-adapter";
 import { ModuleLifecycleFailure } from "@cardiary/module-api";
 import type { ErrorCode, JSONObject, ModuleInfo } from "@cardiary/protocol";
 
@@ -424,6 +424,8 @@ interface ModuleEntry {
   failure: { message: string; at: string } | null;
   handles: Registration[];
   services: ScopedHostServices | null;
+  /** 這次啟用註冊的工具組版本；停用或啟用失敗時清空。 */
+  bundles: ToolBundlePin[];
   activationOrder: number;
 }
 
@@ -491,6 +493,7 @@ export class HostModuleRegistry implements ModuleHost {
       failure: null,
       handles: [],
       services: null,
+      bundles: [],
       activationOrder: 0,
     };
     this.#entries.set(manifest.id, entry);
@@ -520,8 +523,9 @@ export class HostModuleRegistry implements ModuleHost {
     };
     const handles: Registration[] = [];
     const pending: Promise<void>[] = [];
+    const bundles: ToolBundlePin[] = [];
     const services = new ScopedHostServices(this.#hostServices, moduleId);
-    const context = this.#activationContext(identity, services, handles, pending);
+    const context = this.#activationContext(identity, services, handles, pending, bundles);
     try {
       await entry.module.activate(context);
       await Promise.all(pending);
@@ -533,6 +537,7 @@ export class HostModuleRegistry implements ModuleHost {
       entry.identity = identity;
       entry.handles = [];
       entry.services = null;
+      entry.bundles = [];
       this.#options.warn?.("模組啟用失敗", { moduleId, message: messageOf(error) });
       return recordOf(entry);
     }
@@ -541,6 +546,7 @@ export class HostModuleRegistry implements ModuleHost {
     entry.failure = null;
     entry.handles = handles;
     entry.services = services;
+    entry.bundles = bundles;
     entry.activationOrder = this.#activationCounter;
     return recordOf(entry);
   }
@@ -578,6 +584,7 @@ export class HostModuleRegistry implements ModuleHost {
       entry.handles = [];
       entry.services?.withdraw();
       entry.services = null;
+      entry.bundles = [];
       entry.state = "inactive";
     }
     return recordOf(entry);
@@ -622,6 +629,19 @@ export class HostModuleRegistry implements ModuleHost {
       .filter((entry) => entry.state === "active")
       .sort((left, right) => right.activationOrder - left.activationOrder)
       .map((entry) => entry.identity.id);
+  }
+
+  /**
+   * 啟用中的模組提供的工具組版本；建立對話時釘選。
+   *
+   * 依模組識別碼排序，讓同一組模組的釘選結果固定。停用、載入失敗與尚未
+   * 啟用的模組都不在清單裡。
+   */
+  activeToolBundles(): readonly ToolBundlePin[] {
+    return [...this.#entries.values()]
+      .filter((entry) => entry.state === "active")
+      .sort((left, right) => left.identity.id.localeCompare(right.identity.id))
+      .flatMap((entry) => entry.bundles);
   }
 
   /** 關機時停用所有模組；重複呼叫是安全的。 */
@@ -669,6 +689,7 @@ export class HostModuleRegistry implements ModuleHost {
     scoped: ScopedHostServices,
     handles: Registration[],
     pending: Promise<void>[],
+    bundles: ToolBundlePin[],
   ): ModuleActivationContext {
     let counter = 0;
     const handle = (suffix: string, dispose: () => void | Promise<void>): Registration => {
@@ -702,6 +723,7 @@ export class HostModuleRegistry implements ModuleHost {
       identity,
       services,
       registerToolBundle: (draft) => {
+        bundles.push({ bundleId: draft.bundleId, generation: identity.generation });
         pending.push(this.#options.tools.register({ ...draft, generation: identity.generation }));
         return handle("tools", () =>
           this.#options.tools.retire(draft.bundleId, identity.generation),

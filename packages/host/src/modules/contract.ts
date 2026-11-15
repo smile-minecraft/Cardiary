@@ -1,5 +1,11 @@
 import type { AssetStore, CardIndex, CardService } from "@cardiary/domain";
-import type { JsonValue, ToolPermissionGate } from "@cardiary/engine-adapter";
+import type {
+  ApprovalDecision,
+  HumanActor,
+  JsonValue,
+  ToolBundlePin,
+  ToolPermissionGate,
+} from "@cardiary/engine-adapter";
 import type {
   CardiaryPaths,
   ModelInvoker,
@@ -44,10 +50,67 @@ export const HOST_SERVICE_NAMES = {
   cardStorage: "cardStorage",
   /** 工具權限閘道；由本機工具（Phase 2）提供，引擎的回呼在呼叫當下才取。 */
   toolPermissionGate: "toolPermissionGate",
+  /** 「一律允許」的決定入口；由權限模組提供，閘道在審批當下才取。 */
+  permissionDecision: "permission.decision",
 } as const;
 
 /** 服務名稱的聯集；`modules.md` 第 5 節那張表。 */
 export type HostServiceName = (typeof HOST_SERVICE_NAMES)[keyof typeof HOST_SERVICE_NAMES];
+
+/**
+ * 「一律允許」的決定結果；只保留閘道需要判別的部分。
+ *
+ * 提供者可以帶回更多欄位（例如寫入的白名單），多出來的欄位不影響這裡的型別。
+ */
+export type AlwaysAllowDecisionOutcome =
+  | { readonly outcome: "accepted" | "already-decided"; readonly decision: ApprovalDecision }
+  | { readonly outcome: "expired" | "withdrawn" }
+  | { readonly outcome: "not-found" }
+  | { readonly outcome: "cannot-always-allow"; readonly reason: string };
+
+export interface AlwaysAllowDecisionInput {
+  readonly requestId: string;
+  readonly effect: "approve_always";
+  readonly decidedBy: HumanActor;
+  readonly note?: string;
+}
+
+/**
+ * 「一律允許」的窄介面；服務名稱 `permission.decision`。
+ *
+ * 由權限模組（本機檔案與終端機）提供，閘道只依賴這兩個方法，不匯入模組實作：
+ * `canAlwaysAllow` 依工具政策判斷這筆審批能不能放行到白名單，`decide` 寫入
+ * 使用者的決定，成功後由提供者寫入白名單。M1 的提供者是
+ * `PermissionDecisionService`，形狀就是這兩個方法，兩者結構對齊：
+ * 同一個 `requestId`、同一組判別式結果，`decide` 只在引擎把決定落地後
+ * 才回 `accepted`。
+ *
+ * 決定結果的語意：
+ *
+ * - `accepted` 代表審批已由提供者落地（引擎已決策），閘道才回
+ *   `persisted: true`；`persisted` 只信任提供者的 `accepted`，
+ *   不為其他結果標成 `true`。
+ * - `already-decided` 代表引擎裡已經有決定，提供者不得寫入白名單；
+ *   閘道回 `conflict`，呼叫端要靠 `decision` 裡的先前 verdict 判斷。
+ * - `expired`／`withdrawn`／`not-found` 由閘道分別映射成 `conflict`
+ *   （逾時／撤回）與 `not_found`；這三種都不寫白名單。
+ * - `cannot-always-allow` 代表政策不允許，閘道回 `unsupported`，
+ *   `reason` 原樣帶給呼叫端；同樣不寫白名單。
+ *
+ * 閘道在呼叫 `decide` 前會先確認審批仍是 `pending`；`already-decided`
+ * 是防線而不是常態路徑，提供者仍不可倚賴閘道代為把關。
+ */
+export interface AlwaysAllowService {
+  /** 這筆審批是否提供「一律允許」；政策不允許時回 `false`，不是丟錯。 */
+  canAlwaysAllow(requestId: string): Promise<boolean>;
+  /**
+   * 寫入「一律允許」的決定。
+   *
+   * 只有在引擎把決定落地、且提供者寫好白名單之後，才回 `accepted`；
+   * 審批已有決定時回 `already-decided`，這時不得寫入白名單。
+   */
+  decide(input: AlwaysAllowDecisionInput): Promise<AlwaysAllowDecisionOutcome>;
+}
 
 /**
  * 主機已知服務的型別。
@@ -67,6 +130,7 @@ export interface HostServiceTypeMap {
   assets: AssetStore;
   cardStorage: CardEnvironment;
   toolPermissionGate: ToolPermissionGate;
+  "permission.decision": AlwaysAllowService;
 }
 
 /**
@@ -142,6 +206,13 @@ export type ModuleRuntimeServices = Omit<ModuleServices, "protocol" | "host">;
 export interface ModuleHostBridge {
   /** `system.modules.get` 的資料；依模組識別碼排序。 */
   listModules(): readonly ModuleInfo[];
+  /**
+   * 啟用中的模組提供的工具組版本；建立對話時釘選。
+   *
+   * 停用與啟用失敗的模組不在清單裡。重新啟用配發新的 generation，
+   * 已建立的對話保留原本釘選的版本。
+   */
+  activeToolBundles(): readonly ToolBundlePin[];
   /**
    * `system.modules.set_enabled`。
    *

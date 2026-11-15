@@ -239,6 +239,9 @@ export async function loadFirstPartyModules(options: LoadModulesOptions): Promis
       ]);
       return [...ids].sort().map(infoOf);
     },
+    activeToolBundles() {
+      return registry.activeToolBundles();
+    },
     async setModuleEnabled(moduleId: string, enabled: boolean): Promise<ModuleInfo> {
       const known =
         failures.has(moduleId) || registry.list().some((record) => record.identity.id === moduleId);

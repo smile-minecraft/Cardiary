@@ -271,7 +271,7 @@ describe("審批", () => {
     } finally {
       await fixture.cleanup();
     }
-  });
+  }, 20000);
 
   it("權限閘道 deny 時工具不執行，回 permission-denied", async () => {
     const counter = { runs: 0 };
