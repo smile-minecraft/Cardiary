@@ -94,7 +94,7 @@ struct ToolCallRow: View {
                             .frame(width: 26, height: 26)
                         Image(systemName: symbol)
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(tone.color)
+                            .foregroundStyle(tone.ink)
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(tool.title ?? tool.name)

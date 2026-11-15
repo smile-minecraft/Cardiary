@@ -41,7 +41,7 @@ struct BrandHeader: View {
             CardFanMark(size: markSize)
             Text(AppL10n.text(.appTitle))
                 .font(.cardiary(size: titleSize, weight: .bold))
-                .foregroundStyle(Palette.red)
+                .foregroundStyle(Palette.redInk)
         }
         .accessibilityElement(children: .combine)
     }

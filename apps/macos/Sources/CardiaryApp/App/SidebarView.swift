@@ -81,12 +81,13 @@ struct SidebarView: View {
         model.sidebar.all.filter { $0.id != AppRegistry.conversationsSlotId }
     }
 
-    /// 各入口的顏色。卡片庫是方塊橘，白板是梅花粉，封存與設定是黑桃灰。
+    /// 各入口的顏色。卡片庫是方塊橘（記憶），白板是梅花粉（一般），
+    /// 通知與文件同用輔助色紫；其餘是黑桃灰。紅心只留給基岩與人格。
     static func tone(forSlot id: String) -> Tone {
         switch id {
         case AppRegistry.cardsSlotId: return .orange
         case "whiteboard": return .pink
-        case "notifications": return .red
+        case "notifications": return .purple
         case "documents": return .purple
         default: return .gray
         }
@@ -111,7 +112,8 @@ struct SidebarView: View {
     }
 }
 
-/// 章節標籤：花色加標題，放在淺色膠囊裡。
+/// 章節標籤：花色加標題，放在淺色膠囊裡。花色對照 `Suit` 的語意表：
+/// 「對話」是黑桃（摘要與對話），「工具與卡片」是方塊（記憶）。
 private struct SidebarSectionLabel: View {
     let title: String
     let suit: Suit
@@ -120,7 +122,7 @@ private struct SidebarSectionLabel: View {
         HStack(spacing: 6) {
             Image(systemName: suit.symbol)
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(suit.color)
+                .foregroundStyle(suit.ink)
             Text(title)
                 .font(.cardiary(.caption, weight: .semibold))
                 .foregroundStyle(Palette.inkSecondary)
@@ -148,7 +150,7 @@ private struct SidebarRow: View {
             HStack(spacing: 10) {
                 Image(systemName: systemImage)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isSelected ? Palette.onAccent : tone.color)
+                    .foregroundStyle(isSelected ? Palette.onAccent : tone.ink)
                     .frame(width: 20)
                 Text(title)
                     .font(.cardiary(.callout, weight: isSelected ? .semibold : .medium))
@@ -156,7 +158,7 @@ private struct SidebarRow: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, DesignTokens.rowPadding)
             .padding(.vertical, 7)
             .background(background, in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
@@ -180,7 +182,7 @@ private struct SidebarFooter: View {
     var body: some View {
         HStack(spacing: DesignTokens.spacingS) {
             Circle()
-                .fill(isConnected ? Palette.sage : Palette.orange)
+                .fill(isConnected ? Palette.sageInk : Palette.orangeInk)
                 .frame(width: 8, height: 8)
             Text(bridge.folder.displayName ?? AppL10n.text(.appTitle))
                 .font(.cardiary(.caption, weight: .medium))

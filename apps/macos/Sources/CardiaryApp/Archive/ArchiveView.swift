@@ -122,12 +122,12 @@ private struct ArchiveRowView: View {
     var body: some View {
         HStack(alignment: .center, spacing: DesignTokens.spacingM) {
             ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: DesignTokens.tileRadius, style: .continuous)
                     .fill(Palette.graySoft)
                     .frame(width: 38, height: 38)
                 Image(systemName: "archivebox.fill")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Palette.gray)
+                    .foregroundStyle(Palette.grayInk)
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -199,7 +199,7 @@ private struct DeleteConfirmationView: View {
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Palette.onAccent)
                     .frame(width: 34, height: 34)
-                    .background(Palette.red, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .background(Palette.red, in: RoundedRectangle(cornerRadius: DesignTokens.tileRadius, style: .continuous))
                 Text(CardL10n.text(.archiveDeleteConfirmTitle))
                     .font(.cardiary(.title3, weight: .bold))
             }
@@ -240,7 +240,7 @@ private struct DeleteConfirmationView: View {
             }
         }
         .padding(DesignTokens.spacingXL)
-        .frame(width: 440)
+        .frame(width: DesignTokens.deleteConfirmationWidth)
         .background(Palette.canvas)
         .cardiaryTheme()
     }
@@ -249,7 +249,7 @@ private struct DeleteConfirmationView: View {
         HStack(spacing: DesignTokens.spacingS) {
             Image(systemName: suit.symbol)
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(suit.color)
+                .foregroundStyle(suit.ink)
             Text(text)
                 .font(.cardiary(.callout, monospacedDigits: true))
         }

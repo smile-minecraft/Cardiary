@@ -36,7 +36,7 @@ struct CardLibraryView: View {
                     .overlay {
                         Label(CardL10n.text(.cardsDropHint), systemImage: "square.and.arrow.down.fill")
                             .font(.cardiary(.headline))
-                            .foregroundStyle(Palette.orange)
+                            .foregroundStyle(Palette.orangeInk)
                     }
                     .padding(DesignTokens.spacingM)
                     .allowsHitTesting(false)
@@ -211,14 +211,13 @@ struct CardLibraryView: View {
                     let appearance = model.appearance(for: item)
                     let suit = CardFreshnessFill.suit(kind: item.kind, lifecycle: item.lifecycle)
                     let isSelected = model.selectedCardId == item.id
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    RoundedRectangle(cornerRadius: DesignTokens.smallRadius, style: .continuous)
                         .fill(CardFreshnessFill.overview(for: appearance, suit: suit))
                         .frame(height: 18)
                         .overlay {
                             if isSelected {
-                                Circle()
-                                    .fill(Palette.onAccent)
-                                    .frame(width: 6, height: 6)
+                                RoundedRectangle(cornerRadius: DesignTokens.smallRadius, style: .continuous)
+                                    .strokeBorder(Palette.ink, lineWidth: 1.5)
                             }
                         }
                         .scaleEffect(isSelected ? 1.15 : 1)
@@ -297,16 +296,16 @@ struct FreshnessPips: View {
     }
 }
 
-/// 花色圖塊：卡片的花色，深淺跟著新鮮度。
+/// 花色圖塊：卡片的花色。實色色塊配深墨字，任何新鮮度都看得清楚；
+/// 新鮮度改用 `FreshnessPips` 與數值表示，不放在底色濃淡上。
 private struct SuitTile: View {
     let suit: Suit
-    let appearance: CardFreshnessAppearance
     var size: CGFloat = 34
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: size * 0.32, style: .continuous)
-                .fill(CardFreshnessFill.block(for: appearance, suit: suit))
+                .fill(suit.color)
             Image(systemName: suit.symbol)
                 .font(.system(size: size * 0.42, weight: .bold))
                 .foregroundStyle(Palette.onAccent)
@@ -331,7 +330,7 @@ private struct CardRowView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            SuitTile(suit: suit, appearance: appearance)
+            SuitTile(suit: suit)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: DesignTokens.spacingXS) {
@@ -344,12 +343,12 @@ private struct CardRowView: View {
                     if item.lifecycle == .cold {
                         Image(systemName: "snowflake")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(Palette.gray)
+                            .foregroundStyle(Palette.grayInk)
                     }
                     Spacer(minLength: 0)
                     Text(CardL10n.text(item.kind.cardStringKey))
                         .font(.cardiary(.caption2, weight: .semibold))
-                        .foregroundStyle(suit == .spade ? Palette.inkSecondary : suit.color)
+                        .foregroundStyle(suit.ink)
                 }
                 if let snippet = item.snippet, !snippet.isEmpty {
                     Text(snippet)
@@ -366,7 +365,7 @@ private struct CardRowView: View {
                     FreshnessPips(appearance: appearance, suit: suit)
                     Text(CardL10n.format(.cardsDetailFreshness, value: "\(appearance.value)"))
                         .font(.cardiary(.caption2, monospacedDigits: true))
-                        .foregroundStyle(appearance.needsAttention ? Palette.orange : Palette.inkSecondary)
+                        .foregroundStyle(appearance.needsAttention ? Palette.orangeInk : Palette.inkSecondary)
                         .fixedSize()
                         .help(attentionText ?? "")
                     if appearance.needsAttention {
@@ -383,7 +382,7 @@ private struct CardRowView: View {
                 }
             }
         }
-        .padding(10)
+        .padding(DesignTokens.rowPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(rowBackground, in: RoundedRectangle(cornerRadius: DesignTokens.cardRadius, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius, style: .continuous))
@@ -456,7 +455,7 @@ private struct CardDetailView: View {
     private var faceBlock: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             HStack(spacing: DesignTokens.spacingS) {
-                SuitTile(suit: suit, appearance: appearance, size: 30)
+                SuitTile(suit: suit, size: 30)
                 ThemeChip(text: CardL10n.text(card.kind.cardStringKey), tone: suit.tone, filled: true)
                 Spacer()
                 if !model.isEditing {
@@ -471,7 +470,7 @@ private struct CardDetailView: View {
             HStack(spacing: DesignTokens.spacingS) {
                 Text(CardL10n.format(.cardsDetailFreshness, value: "\(appearance.value)"))
                     .font(.cardiary(.callout, weight: .semibold, monospacedDigits: true))
-                    .foregroundStyle(appearance.needsAttention ? Palette.orange : Palette.ink)
+                    .foregroundStyle(appearance.needsAttention ? Palette.orangeInk : Palette.ink)
                 FreshnessPips(appearance: appearance, suit: suit)
                 if appearance.needsAttention {
                     Button(CardL10n.text(.cardsDetailRefresh)) {
@@ -483,7 +482,7 @@ private struct CardDetailView: View {
                 Spacer(minLength: 0)
                 Image(systemName: suit.symbol)
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(suit.color)
+                    .foregroundStyle(suit.ink)
                     .accessibilityHidden(true)
             }
             if !card.tags.isEmpty {
@@ -590,7 +589,7 @@ private struct FlowTags: View {
             ForEach(tags, id: \.self) { tag in
                 Text("# " + tag)
                     .font(.cardiary(.caption, weight: .semibold))
-                    .foregroundStyle(tone == .gray ? Palette.inkSecondary : tone.color)
+                    .foregroundStyle(tone.ink)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 3)
                     .background(Palette.surface.opacity(0.8), in: Capsule(style: .continuous))

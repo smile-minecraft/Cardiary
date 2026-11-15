@@ -23,12 +23,12 @@ struct ConversationView: View {
     private var header: some View {
         HStack(spacing: DesignTokens.spacingM) {
             ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: DesignTokens.tileRadius, style: .continuous)
                     .fill(Palette.graySoft)
                     .frame(width: 34, height: 34)
                 Image(systemName: Suit.spade.symbol)
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(Palette.gray)
+                    .foregroundStyle(Palette.grayInk)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(conversation.title.isEmpty ? AppL10n.text(.conversationUntitled) : conversation.title)
@@ -36,7 +36,7 @@ struct ConversationView: View {
                     .lineLimit(1)
                 HStack(spacing: 5) {
                     Circle()
-                        .fill(statusTone.color)
+                        .fill(statusTone.ink)
                         .frame(width: 6, height: 6)
                     Text(statusText)
                         .font(.cardiary(.caption))
@@ -168,7 +168,7 @@ struct PendingApprovalRow: View {
             VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
                 Text(AppL10n.text(.inspectorApprovalsTitle))
                     .font(.cardiary(.caption, weight: .semibold))
-                    .foregroundStyle(Palette.orange)
+                    .foregroundStyle(Palette.orangeInk)
                 Text(approval.title)
                     .font(.cardiary(.callout, weight: .semibold))
                 if let summary = approval.summary {

@@ -89,7 +89,7 @@ public struct ImportView: View {
                     HStack(alignment: .top, spacing: DesignTokens.spacingM) {
                         Image(systemName: isChosen ? "checkmark" : Suit.diamond.symbol)
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(isChosen ? Palette.onAccent : Palette.orange)
+                            .foregroundStyle(isChosen ? Palette.onAccent : Palette.orangeInk)
                             .frame(width: 24, height: 24)
                             .background(isChosen ? Palette.red : Palette.orangeSoft, in: Circle())
                         VStack(alignment: .leading, spacing: 2) {
@@ -101,7 +101,7 @@ public struct ImportView: View {
                             if let unverified = source.unverified {
                                 Text(ImportL10n.format(.importSourceUnverified, value: unverified))
                                     .font(.cardiary(.caption))
-                                    .foregroundStyle(Palette.orange)
+                                    .foregroundStyle(Palette.orangeInk)
                             }
                         }
                         Spacer(minLength: 0)
@@ -211,7 +211,7 @@ public struct ImportView: View {
                 if model.requiresRange {
                     Text(ImportL10n.text(.importRangeRequired))
                         .font(.cardiary(.callout))
-                        .foregroundStyle(Palette.orange)
+                        .foregroundStyle(Palette.orangeInk)
                 }
             }
         }
@@ -463,7 +463,7 @@ public struct ImportView: View {
             }
             if result.failed > 0 {
                 Text(ImportL10n.format(.importFailed, value: "\(result.failed)"))
-                    .foregroundStyle(Palette.red)
+                    .foregroundStyle(Palette.redInk)
             }
         }
         .font(.cardiary(.callout))

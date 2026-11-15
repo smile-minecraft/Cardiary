@@ -49,7 +49,7 @@ struct ComposerView: View {
                             Image(systemName: "stop.fill")
                                 .font(.system(size: 11, weight: .bold))
                         }
-                        .buttonStyle(ThemeIconButtonStyle(fill: Palette.redSoft, foreground: Palette.red, diameter: 32))
+                        .buttonStyle(ThemeIconButtonStyle(fill: Palette.redSoft, foreground: Palette.redInk, diameter: 32))
                         .help(AppL10n.text(.conversationInterrupt))
                     }
 

@@ -423,7 +423,7 @@ struct ModulesSettingsView: View {
             if let failure = module.failure, !failure.isEmpty {
                 Text(AppL10n.format(.settingsModuleFailed, value: failure))
                     .font(.cardiary(.caption))
-                    .foregroundStyle(Palette.red)
+                    .foregroundStyle(Palette.redInk)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

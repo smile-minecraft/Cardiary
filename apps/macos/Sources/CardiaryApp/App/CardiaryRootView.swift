@@ -83,7 +83,7 @@ private struct StatusCard<Content: View>: View {
                     .frame(width: 76, height: 76)
                 Image(systemName: systemImage)
                     .font(.system(size: 32, weight: .semibold))
-                    .foregroundStyle(suit.color)
+                    .foregroundStyle(suit.ink)
             }
             content
             SuitDivider()
@@ -106,7 +106,7 @@ struct ConnectionBanner: View {
         if let text {
             HStack(spacing: DesignTokens.spacingS) {
                 Image(systemName: "bolt.horizontal.circle.fill")
-                    .foregroundStyle(Palette.orange)
+                    .foregroundStyle(Palette.orangeInk)
                 Text(text)
                     .font(.cardiary(.callout))
                 Spacer()

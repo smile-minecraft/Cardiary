@@ -5,13 +5,14 @@ import SwiftUI
 ///
 /// 色相來自花色（卡片種類），深淺來自新鮮度：越新鮮越濃，快歸零時接近底色。
 /// 冷封存的卡一律用黑桃灰。
+/// `block` 只給不承載文字的裝飾色塊（圖例）用；承載文字的格子走 `ContextBlockColor.fill`，兩檔之一，不用濃淡。
 enum CardFreshnessFill {
     /// 新鮮度對應的不透明度。100、50、0 三個值必須看得出差別。
     static func strength(for appearance: CardFreshnessAppearance) -> Double {
         0.22 + 0.78 * appearance.opacity
     }
 
-    /// 列表與詳細內容的花色圖塊。
+    /// 檢視欄圖例用的花色圖塊。不承載文字；列表的花色圖塊見 `SuitTile`。
     static func block(for appearance: CardFreshnessAppearance, suit: Suit) -> Color {
         suit.color.opacity(strength(for: appearance))
     }
@@ -27,43 +28,46 @@ enum CardFreshnessFill {
     }
 }
 
-/// 檢視欄區塊的顏色。
+/// 檢視欄區塊的顏色。花色語意表在 `Suit` 上方；這裡照表對照，不另立一套。
 ///
-/// 靜態層（基岩、人格）是固定的紅心色，對話內容是固定的黑桃灰，兩者都不褪色；
-/// 卡片層依層別用方塊橘、紫、梅花粉，深淺代表新鮮度。
+/// 靜態層（基岩、人格）是固定的紅心實色；對話工作區是固定的黑桃軟色塊；
+/// 記憶與一般卡依新鮮度分兩檔：新鮮用實色配深墨字，快歸零用軟色塊配主文字。
+/// 兩檔以外不使用濃淡：中間的濃度壓不住 4.5:1 的字。
 enum ContextBlockColor {
     struct Fill {
         let color: Color
-        /// 底色夠深時，格子裡的文字改用白色。
-        let prefersLightText: Bool
+        /// 格子裡文字用的顏色。實色底用深墨字 `onAccent`；軟色塊或淺底用 `ink`。
+        let text: Color
     }
 
     static func tone(for layer: ContextLayer) -> Tone {
         switch layer {
         case .bedrock, .persona: return .red
-        case .coreMemory, .openingMemory: return .orange
-        case .shortTermMemory: return .purple
+        case .coreMemory, .openingMemory, .shortTermMemory: return .orange
         case .otherCards: return .pink
         case .workingContext, .volatileState: return .gray
         }
     }
 
-    /// 圖例用的代表層：每個顏色一個。
-    static let legendLayers: [ContextLayer] = [.bedrock, .coreMemory, .shortTermMemory, .otherCards, .workingContext]
+    /// 圖例用的代表層：每個花色一個。
+    static let legendLayers: [ContextLayer] = [.bedrock, .coreMemory, .otherCards, .workingContext]
 
     static func fill(for entry: ContextEntry, appearance: CardFreshnessAppearance?) -> Fill {
         let tone = tone(for: entry.layer)
         if entry.state == .pendingRemoval {
-            return Fill(color: tone.color.opacity(0.22), prefersLightText: false)
+            // 即將移除：軟色塊加虛線框，主文字。
+            return Fill(color: tone.soft, text: Palette.ink)
         }
         switch entry.layer {
         case .bedrock, .persona:
-            return Fill(color: tone.color, prefersLightText: true)
+            return Fill(color: tone.color, text: Palette.onAccent)
         case .workingContext, .volatileState:
-            return Fill(color: tone.color.opacity(0.45), prefersLightText: false)
+            return Fill(color: tone.soft, text: Palette.ink)
         default:
-            let strength = appearance.map(CardFreshnessFill.strength(for:)) ?? 0.6
-            return Fill(color: tone.color.opacity(strength), prefersLightText: strength > 0.65)
+            let isFresh = (appearance?.opacity ?? 0.6) >= 0.5
+            return isFresh
+                ? Fill(color: tone.color, text: Palette.onAccent)
+                : Fill(color: tone.soft, text: Palette.ink)
         }
     }
 

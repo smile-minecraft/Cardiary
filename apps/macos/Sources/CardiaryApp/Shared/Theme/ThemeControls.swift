@@ -96,15 +96,15 @@ private struct ThemeButtonBody: View {
         .cardiary(isCompact ? .caption : .callout, weight: .semibold)
     }
 
-    private var horizontalPadding: CGFloat { isCompact ? 11 : 16 }
-    private var verticalPadding: CGFloat { isCompact ? 4.5 : 7.5 }
+    private var horizontalPadding: CGFloat { isCompact ? DesignTokens.buttonPaddingHCompact : DesignTokens.buttonPaddingH }
+    private var verticalPadding: CGFloat { isCompact ? DesignTokens.buttonPaddingVCompact : DesignTokens.buttonPaddingV }
 
     private var foreground: Color {
         switch kind {
         case .primary: return Palette.onAccent
-        case .soft, .link: return tone == .gray ? Palette.ink : tone.color
+        case .soft, .link: return tone.ink
         case .quiet, .surface: return Palette.ink
-        case .danger: return Palette.red
+        case .danger: return Palette.redInk
         }
     }
 
@@ -180,8 +180,8 @@ struct ThemeFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
             .textFieldStyle(.plain)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.horizontal, DesignTokens.spacingM)
+            .padding(.vertical, DesignTokens.fieldPaddingV)
             .background(fill, in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
     }
 }
@@ -218,7 +218,7 @@ private struct ThemeSwitchBody: View {
                 .frame(width: 38, height: 22)
                 .overlay(alignment: configuration.isOn ? .trailing : .leading) {
                     Circle()
-                        .fill(Palette.onAccent)
+                        .fill(configuration.isOn ? Palette.onAccent : Palette.ink)
                         .padding(3)
                 }
                 .animation(.spring(response: 0.25, dampingFraction: 0.8), value: configuration.isOn)
@@ -245,7 +245,7 @@ private struct ThemeCheckboxBody: View {
             configuration.isOn.toggle()
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: DesignTokens.spacingS) {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                RoundedRectangle(cornerRadius: DesignTokens.smallRadius, style: .continuous)
                     .fill(configuration.isOn ? Palette.red : Palette.hover)
                     .frame(width: 16, height: 16)
                     .overlay {
@@ -284,8 +284,8 @@ struct ThemeSegmented<Value: Hashable>: View {
                         .font(.cardiary(.caption, weight: .semibold))
                         .lineLimit(1)
                         .foregroundStyle(isSelected ? Palette.onAccent : Palette.inkSecondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
+                        .padding(.horizontal, DesignTokens.spacingM)
+                        .padding(.vertical, DesignTokens.segmentedPaddingV)
                         .frame(maxWidth: .infinity)
                         .background(
                             isSelected ? Palette.red : Color.clear,
@@ -331,8 +331,8 @@ struct ThemeMenuPicker<Value: Hashable>: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.visible)
         .fixedSize()
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
+        .padding(.horizontal, DesignTokens.spacingM)
+        .padding(.vertical, DesignTokens.segmentedPaddingV)
         .background(fill, in: Capsule(style: .continuous))
     }
 
@@ -423,7 +423,7 @@ struct ThemeChip: View {
                 .lineLimit(1)
         }
         .font(.cardiary(.caption2, weight: .semibold))
-        .foregroundStyle(filled ? Palette.onAccent : (tone == .gray ? Palette.inkSecondary : tone.color))
+        .foregroundStyle(filled ? Palette.onAccent : tone.ink)
         .padding(.horizontal, 8)
         .padding(.vertical, 2.5)
         .background(filled ? tone.color : tone.soft, in: Capsule(style: .continuous))
@@ -440,7 +440,7 @@ struct SuitHeading: View {
         HStack(spacing: DesignTokens.spacingS) {
             Image(systemName: suit.symbol)
                 .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(suit.color)
+                .foregroundStyle(suit.ink)
             Text(title)
                 .font(font)
                 .foregroundStyle(Palette.ink)
@@ -478,7 +478,7 @@ struct ThemeEmptyState: View {
                     .frame(width: 54, height: 54)
                 Image(systemName: systemImage ?? suit.symbol)
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(suit.color)
+                    .foregroundStyle(suit.ink)
             }
             Text(text)
                 .font(.cardiary(.callout))
@@ -499,7 +499,7 @@ struct ThemePageTitle: View {
     var body: some View {
         HStack(spacing: DesignTokens.spacingM) {
             ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: DesignTokens.tileRadius, style: .continuous)
                     .fill(suit.color)
                     .frame(width: 34, height: 34)
                 Image(systemName: suit.symbol)

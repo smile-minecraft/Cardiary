@@ -10,7 +10,7 @@ struct MessageBanner: View {
         HStack(alignment: .firstTextBaseline, spacing: DesignTokens.spacingS) {
             Image(systemName: systemImage)
                 .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(tone.color)
+                .foregroundStyle(tone.ink)
             Text(text)
                 .font(.cardiary(.caption))
                 .foregroundStyle(Palette.ink)

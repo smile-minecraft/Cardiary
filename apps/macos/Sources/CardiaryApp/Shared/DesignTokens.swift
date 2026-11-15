@@ -29,6 +29,24 @@ public enum DesignTokens {
     public static let cardRadius: CGFloat = 18
     /// 大面板與對話框。
     public static let panelRadius: CGFloat = 24
+    /// 小色塊（勾選框、總覽格）。
+    public static let smallRadius: CGFloat = 5
+    /// 圖示磚（頁首、審批、刪除確認）。
+    public static let tileRadius: CGFloat = 11
+    /// 按鈕的水平內距：一般與窄版（.small / .mini）。
+    public static let buttonPaddingH: CGFloat = 16
+    public static let buttonPaddingHCompact: CGFloat = 11
+    /// 按鈕的垂直內距：一般與窄版（.small / .mini）。
+    public static let buttonPaddingV: CGFloat = 7.5
+    public static let buttonPaddingVCompact: CGFloat = 4.5
+    /// 輸入框垂直內距。
+    public static let fieldPaddingV: CGFloat = 7
+    /// 分段控制與選單的垂直內距。
+    public static let segmentedPaddingV: CGFloat = 5
+    /// 列表與總覽格的列內距。
+    public static let rowPadding: CGFloat = 10
+    /// 刪除確認對話框的寬度。
+    public static let deleteConfirmationWidth: CGFloat = 440
 
     // 對話
     public static let transcriptMaxWidth: CGFloat = 720

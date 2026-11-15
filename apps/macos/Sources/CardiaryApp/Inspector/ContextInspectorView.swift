@@ -63,7 +63,7 @@ struct ContextInspectorView: View {
                     .overlay {
                         Label(CardL10n.text(.inspectorDropping), systemImage: "arrow.down.to.line")
                             .font(.cardiary(.callout, weight: .semibold))
-                            .foregroundStyle(Palette.orange)
+                            .foregroundStyle(Palette.orangeInk)
                     }
                     .allowsHitTesting(false)
             }
@@ -99,7 +99,7 @@ struct ContextInspectorView: View {
                 Image(systemName: "arrow.down.right.and.arrow.up.left")
                     .font(.system(size: 11, weight: .bold))
             }
-            .buttonStyle(ThemeIconButtonStyle(fill: Palette.purpleSoft, foreground: Palette.purple, diameter: 30))
+            .buttonStyle(ThemeIconButtonStyle(fill: Palette.purpleSoft, foreground: Palette.purpleInk, diameter: 30))
             .help(CardL10n.text(.inspectorCompact))
             .accessibilityLabel(CardL10n.text(.inspectorCompact))
             .disabled(model.isCompacting)
@@ -201,7 +201,7 @@ struct ContextInspectorView: View {
             .overlay {
                 if let entry, entry.state == .pendingRemoval {
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(Palette.orange, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                        .strokeBorder(Palette.orangeInk, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                 }
             }
             .overlay(alignment: .topLeading) {
@@ -210,14 +210,14 @@ struct ContextInspectorView: View {
                         .font(.cardiary(size: 10, weight: .semibold))
                         .lineLimit(2)
                         .padding(4)
-                        .foregroundStyle(fill.prefersLightText ? Palette.onAccent : Palette.ink)
+                        .foregroundStyle(fill.text)
                 }
             }
             .overlay(alignment: .bottomTrailing) {
                 if isSelected {
                     Image(systemName: "suit.heart.fill")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Palette.onAccent)
+                        .foregroundStyle(Palette.surface)
                         .padding(4)
                         .background(Palette.ink.opacity(0.75), in: Circle())
                         .padding(3)
@@ -250,7 +250,7 @@ struct ContextInspectorView: View {
         if case .entry(let entry) = item.content {
             return ContextBlockColor.fill(for: entry, appearance: model.appearance(for: entry))
         }
-        return ContextBlockColor.Fill(color: Palette.pink.opacity(0.35), prefersLightText: false)
+        return ContextBlockColor.Fill(color: Palette.pinkSoft, text: Palette.ink)
     }
 
     // MARK: - 比例熱力格
@@ -284,13 +284,13 @@ struct ContextInspectorView: View {
                 if let ordinal = cell.ordinal {
                     Text("\(ordinal)")
                         .font(.cardiary(size: 7.5, weight: .bold))
-                        .foregroundStyle(fill.prefersLightText ? Palette.onAccent : Palette.ink)
+                        .foregroundStyle(fill.text)
                 }
             }
             .overlay {
                 if entry?.state == .pendingRemoval {
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .strokeBorder(Palette.orange, lineWidth: 1)
+                        .strokeBorder(Palette.orangeInk, lineWidth: 1)
                 }
             }
             .overlay {
@@ -314,7 +314,7 @@ struct ContextInspectorView: View {
 
     private func heatFill(_ cell: ContextHeatGridLayout.Cell) -> ContextBlockColor.Fill {
         guard let entry = heatEntry(cell) else {
-            return ContextBlockColor.Fill(color: ContextBlockColor.empty, prefersLightText: false)
+            return ContextBlockColor.Fill(color: ContextBlockColor.empty, text: Palette.ink)
         }
         return ContextBlockColor.fill(for: entry, appearance: model.appearance(for: entry))
     }
@@ -350,7 +350,7 @@ struct ContextInspectorView: View {
                 if entry.state == .pendingRemoval {
                     Label(CardL10n.text(.inspectorPendingRemoval), systemImage: "clock.arrow.circlepath")
                         .font(.cardiary(.caption, weight: .semibold))
-                        .foregroundStyle(Palette.orange)
+                        .foregroundStyle(Palette.orangeInk)
                 } else if entry.cardId != nil {
                     Button(CardL10n.text(.inspectorRemove)) {
                         Task { await model.removeSelected() }

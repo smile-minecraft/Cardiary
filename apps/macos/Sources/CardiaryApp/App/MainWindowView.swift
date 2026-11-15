@@ -48,7 +48,7 @@ struct MainWindowView: View {
                         systemImage: "sidebar.trailing"
                     )
                     .labelStyle(.iconOnly)
-                    .foregroundStyle(model.isInspectorVisible ? Palette.red : Palette.inkSecondary)
+                    .foregroundStyle(model.isInspectorVisible ? Palette.redInk : Palette.inkSecondary)
                 }
                 .buttonStyle(ThemeIconButtonStyle(diameter: 30))
                 .help(AppL10n.text(model.isInspectorVisible ? .inspectorHide : .inspectorShow))

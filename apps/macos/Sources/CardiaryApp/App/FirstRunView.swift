@@ -194,7 +194,7 @@ private struct FirstRunStepper: View {
                     .frame(width: 24, height: 24)
                 Image(systemName: isDone ? "checkmark" : suit.symbol)
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(isActive || isDone ? Palette.onAccent : suit.color)
+                    .foregroundStyle(isActive || isDone ? Palette.onAccent : suit.ink)
             }
             Text(title)
                 .font(.cardiary(.caption, weight: isActive ? .bold : .medium))

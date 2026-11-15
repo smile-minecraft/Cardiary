@@ -60,7 +60,7 @@ struct ApprovalPanelView: View {
         HStack(spacing: DesignTokens.spacingS) {
             Image(systemName: systemImage)
                 .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(Palette.sage)
+                .foregroundStyle(Palette.sageInk)
                 .frame(width: 22, height: 22)
                 .background(Palette.sageSoft, in: Circle())
             Text(text)
