@@ -125,10 +125,14 @@ struct ConversationView: View {
             .controlSize(.small)
             .frame(maxWidth: .infinity)
         } else if !conversation.items.isEmpty {
-            SuitDivider()
-                .frame(width: 140)
-                .help(AppL10n.text(.conversationNoMoreHistory))
-                .frame(maxWidth: .infinity)
+            HStack(spacing: DesignTokens.spacingS) {
+                Rectangle().fill(Palette.inkSecondary).frame(width: 24, height: 1)
+                Text(AppL10n.text(.conversationNoMoreHistory))
+                    .font(.cardiary(.caption2))
+                    .foregroundStyle(Palette.inkSecondary)
+                Rectangle().fill(Palette.inkSecondary).frame(width: 24, height: 1)
+            }
+            .frame(maxWidth: .infinity)
         }
     }
 

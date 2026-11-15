@@ -16,8 +16,6 @@ extension View {
             .buttonStyle(ThemeButtonStyle(kind: .soft))
             .textFieldStyle(ThemeFieldStyle())
             .toggleStyle(ThemeCheckboxStyle())
-            // 色塊本身就是狀態，不加系統的藍色焦點框。
-            .focusEffectDisabled()
     }
 
     /// 浮在底色上的扁平色塊。

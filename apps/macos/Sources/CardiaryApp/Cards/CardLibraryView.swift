@@ -15,7 +15,7 @@ struct CardLibraryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             header
-            HStack(alignment: .top, spacing: DesignTokens.spacingM) {
+            HSplitView {
                 libraryPane
                     .frame(minWidth: 240, idealWidth: DesignTokens.cardListWidth, maxWidth: 380)
                 detailPane
@@ -277,11 +277,11 @@ struct CardLibraryView: View {
     }
 }
 
-/// 新鮮度的七格膠囊：亮起的格數對應新鮮度。
+/// 新鮮度的五格膠囊：亮起的格數對應新鮮度（工作目標以五顆點數表示新鮮度）。
 struct FreshnessPips: View {
     let appearance: CardFreshnessAppearance
     let suit: Suit
-    var count = 7
+    var count = 5
 
     var body: some View {
         let lit = Int((appearance.fraction * Double(count)).rounded(.up))

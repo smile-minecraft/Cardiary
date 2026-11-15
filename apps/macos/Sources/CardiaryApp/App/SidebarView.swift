@@ -31,9 +31,8 @@ struct SidebarView: View {
             .padding(.horizontal, DesignTokens.spacingM)
             .padding(.bottom, DesignTokens.spacingM)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 3) {
-                    SidebarSectionLabel(title: AppL10n.text(.sidebarSectionSession), suit: .spade)
+            List(selection: sidebarSelection) {
+                Section {
                     if conversations.sessions.isEmpty {
                         Text(AppL10n.text(.conversationListEmpty))
                             .font(.cardiary(.caption))
@@ -42,39 +41,57 @@ struct SidebarView: View {
                             .padding(.vertical, DesignTokens.spacingXS)
                     } else {
                         ForEach(conversations.sessions) { session in
-                            SidebarRow(
+                            SidebarRowLabel(
                                 title: session.title.isEmpty ? AppL10n.text(.conversationUntitled) : session.title,
                                 systemImage: symbol(for: session.status),
                                 tone: tone(for: session.status),
                                 isSelected: model.selection == .conversation(session.id)
-                            ) {
-                                Task { await model.selectConversation(session.id) }
-                            }
+                            )
+                            .tag(AppSelection.conversation(session.id))
                         }
                     }
+                } header: {
+                    SidebarSectionLabel(title: AppL10n.text(.sidebarSectionSession), suit: .spade)
+                }
 
-                    SidebarSectionLabel(title: AppL10n.text(.sidebarSectionTools), suit: .diamond)
-                        .padding(.top, DesignTokens.spacingM)
+                Section {
                     ForEach(otherSlots) { slot in
-                        SidebarRow(
+                        SidebarRowLabel(
                             title: AppL10n.text(slot.titleKey),
                             systemImage: slot.systemImage,
                             tone: Self.tone(forSlot: slot.id),
                             isSelected: model.selection == .slot(slot.id)
-                        ) {
-                            model.selectSlot(slot.id)
-                        }
+                        )
+                        .tag(AppSelection.slot(slot.id))
                     }
+                } header: {
+                    SidebarSectionLabel(title: AppL10n.text(.sidebarSectionTools), suit: .diamond)
+                        .padding(.top, DesignTokens.spacingM)
                 }
-                .padding(.horizontal, DesignTokens.spacingM)
-                .padding(.bottom, DesignTokens.spacingL)
             }
+            .listStyle(.plain)
             .scrollIndicators(.never)
 
             SidebarFooter(bridge: model.bridge)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Palette.sidebar)
+    }
+
+    private var sidebarSelection: Binding<AppSelection?> {
+        Binding(
+            get: { model.selection == .none ? nil : model.selection },
+            set: { selection in
+                switch selection {
+                case let .conversation(id):
+                    Task { await model.selectConversation(id) }
+                case let .slot(id):
+                    model.selectSlot(id)
+                case .some(.none), nil:
+                    break
+                }
+            }
+        )
     }
 
     private var otherSlots: [SidebarSlot] {
@@ -136,34 +153,33 @@ private struct SidebarSectionLabel: View {
 }
 
 /// 左側欄的一列。
-private struct SidebarRow: View {
+private struct SidebarRowLabel: View {
     let title: String
     let systemImage: String
     let tone: Tone
     let isSelected: Bool
-    let action: () -> Void
 
     @State private var isHovered = false
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isSelected ? Palette.onAccent : tone.ink)
-                    .frame(width: 20)
-                Text(title)
-                    .font(.cardiary(.callout, weight: isSelected ? .semibold : .medium))
-                    .foregroundStyle(isSelected ? Palette.onAccent : Palette.ink)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, DesignTokens.rowPadding)
-            .padding(.vertical, 7)
-            .background(background, in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isSelected ? Palette.onAccent : tone.ink)
+                .frame(width: 20)
+            Text(title)
+                .font(.cardiary(.callout, weight: isSelected ? .semibold : .medium))
+                .foregroundStyle(isSelected ? Palette.onAccent : Palette.ink)
+                .lineLimit(1)
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, DesignTokens.rowPadding)
+        .padding(.vertical, 7)
+        .background(background, in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
