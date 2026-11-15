@@ -7,6 +7,14 @@ enum AppRegistry {
     static let conversationsSlotId = "conversations"
     /// 設定頁的位置。
     static let settingsSlotId = "settings"
+    /// 卡片庫與封存區的位置；內容由卡片介面提供。
+    static let cardsSlotId = "cards"
+    static let archiveSlotId = "archive"
+    /// 檢視欄的上下文面板；卡片介面提供實作。
+    static let contextInspectorId = "context"
+    /// 選單群組：卡片與匯入。
+    static let cardCommandsGroupId = "cards"
+    static let importCommandsGroupId = "import"
 
     @MainActor
     static func installBuiltins(_ app: AppModel) {
@@ -15,15 +23,15 @@ enum AppRegistry {
             titleKey: .sidebarSectionSession,
             systemImage: "bubble.left.and.bubble.right"
         ))
-        // 卡片庫與封存區：這裡只保留位置，內容由卡片介面工作掛上。
+        // 卡片庫與封存區：位置在這裡保留，內容由 `CardUIModule.install` 掛上。
         app.sidebar.register(SidebarSlot(
-            id: "cards",
+            id: cardsSlotId,
             titleKey: .destinationCards,
             systemImage: "square.grid.2x2",
             placeholderKey: .placeholderCards
         ))
         app.sidebar.register(SidebarSlot(
-            id: "archive",
+            id: archiveSlotId,
             titleKey: .destinationArchive,
             systemImage: "archivebox",
             placeholderKey: .placeholderArchive
@@ -53,7 +61,7 @@ enum AppRegistry {
         // 檢視欄：審批面板是真的實作；上下文面板由卡片介面提供。
         app.inspector.register(ApprovalInspectorPanel(model: app.approvals))
         app.inspector.register(PlaceholderInspectorPanel(
-            id: "context",
+            id: contextInspectorId,
             titleKey: .inspectorTitle,
             messageKey: .placeholderInspector
         ))
@@ -73,7 +81,17 @@ enum AppRegistry {
                 }
             ]
         ))
-        app.commands.register(CommandGroup(id: "cards", titleKey: .commandGroupCards))
-        app.commands.register(CommandGroup(id: "import", titleKey: .commandGroupImport))
+        app.commands.register(CommandGroup(
+            id: cardCommandsGroupId,
+            titleKey: .commandGroupCards
+        ))
+        app.commands.register(CommandGroup(
+            id: importCommandsGroupId,
+            titleKey: .commandGroupImport
+        ))
+
+        // 卡片庫、封存區、檢視欄、卡片設定與匯入：一次掛上。
+        CardUIModule.install(app)
+        ImportUIModule.install(app)
     }
 }

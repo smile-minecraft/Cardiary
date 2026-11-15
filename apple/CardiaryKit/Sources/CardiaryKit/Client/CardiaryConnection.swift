@@ -417,6 +417,381 @@ public actor CardiaryConnection {
         return response.payload
     }
 
+    // MARK: - 卡片
+
+    /// 列出一頁卡片；篩選條件沒帶的欄位不會出現在請求裡。
+    public func listCards(
+        kinds: [CardKind]? = nil,
+        tags: [String]? = nil,
+        persona: String? = nil,
+        lifecycle: CardLifecycleFilter? = nil,
+        query: String? = nil,
+        includeSuperseded: Bool? = nil,
+        cursor: String? = nil,
+        limit: Int? = nil,
+        options: RequestOptions = .default
+    ) async throws -> CardListResponsePayload {
+        let request = CardListRequest(
+            id: RequestID.next(),
+            payload: CardListRequestPayload(
+                kinds: kinds,
+                tags: tags,
+                persona: persona,
+                lifecycle: lifecycle,
+                query: query,
+                includeSuperseded: includeSuperseded,
+                cursor: cursor,
+                limit: limit
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .cardListResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "card.list 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func getCard(
+        cardId: String,
+        options: RequestOptions = .default
+    ) async throws -> CardGetResponsePayload {
+        let request = CardGetRequest(
+            id: RequestID.next(),
+            payload: CardGetRequestPayload(cardId: cardId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .cardGetResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "card.get 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 建立一張卡片；`clientRequestId` 讓重送不會建立第二張。
+    public func createCard(
+        kind: CardKind,
+        title: String,
+        body: String,
+        summary: String? = nil,
+        tags: [String]? = nil,
+        persona: String? = nil,
+        sources: [String]? = nil,
+        supersedes: String? = nil,
+        assetBlobId: String? = nil,
+        clientRequestId: String,
+        options: RequestOptions = .default
+    ) async throws -> CardCreateResponsePayload {
+        let request = CardCreateRequest(
+            id: RequestID.next(),
+            payload: CardCreateRequestPayload(
+                kind: kind,
+                title: title,
+                body: body,
+                summary: summary,
+                tags: tags,
+                persona: persona,
+                sources: sources,
+                supersedes: supersedes,
+                assetBlobId: assetBlobId,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .cardCreateResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "card.create 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 以 `baseRevision` 做樂觀鎖套用補丁；revision 不符時主機回 `conflict`。
+    public func patchCard(
+        cardId: String,
+        baseRevision: String,
+        patch: CardPatch,
+        clientRequestId: String? = nil,
+        options: RequestOptions = .default
+    ) async throws -> CardPatchResponsePayload {
+        let request = CardPatchRequest(
+            id: RequestID.next(),
+            payload: CardPatchRequestPayload(
+                cardId: cardId,
+                baseRevision: baseRevision,
+                patch: patch,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .cardPatchResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "card.patch 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func deleteCard(
+        cardId: String,
+        clientRequestId: String,
+        options: RequestOptions = .default
+    ) async throws -> CardDeleteResponsePayload {
+        let request = CardDeleteRequest(
+            id: RequestID.next(),
+            payload: CardDeleteRequestPayload(
+                cardId: cardId,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .cardDeleteResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "card.delete 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func searchCards(
+        query: String,
+        kinds: [CardKind]? = nil,
+        tags: [String]? = nil,
+        includeSuperseded: Bool? = nil,
+        limit: Int? = nil,
+        cursor: String? = nil,
+        options: RequestOptions = .default
+    ) async throws -> CardSearchResponsePayload {
+        let request = CardSearchRequest(
+            id: RequestID.next(),
+            payload: CardSearchRequestPayload(
+                query: query,
+                kinds: kinds,
+                tags: tags,
+                includeSuperseded: includeSuperseded,
+                limit: limit,
+                cursor: cursor
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .cardSearchResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "card.search 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 卡片被實際使用時保鮮；新數值由主機計算。
+    public func refreshCard(
+        cardId: String,
+        options: RequestOptions = .default
+    ) async throws -> CardRefreshResponsePayload {
+        let request = CardRefreshRequest(
+            id: RequestID.next(),
+            payload: CardRefreshRequestPayload(cardId: cardId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .cardRefreshResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "card.refresh 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    // MARK: - 上下文
+
+    public func getContext(
+        sessionId: String,
+        options: RequestOptions = .default
+    ) async throws -> ContextGetResponsePayload {
+        let request = ContextGetRequest(
+            id: RequestID.next(),
+            payload: ContextGetRequestPayload(sessionId: sessionId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .contextGetResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "context.get 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 把卡片加入對話的上下文後段。
+    public func addCardToContext(
+        sessionId: String,
+        cardId: String,
+        options: RequestOptions = .default
+    ) async throws -> ContextAddCardResponsePayload {
+        let request = ContextAddCardRequest(
+            id: RequestID.next(),
+            payload: ContextAddCardRequestPayload(sessionId: sessionId, cardId: cardId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .contextAddCardResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "context.add_card 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 移除卡片只是標記，下一次壓縮才真的拿掉。
+    public func removeCardFromContext(
+        sessionId: String,
+        cardId: String,
+        options: RequestOptions = .default
+    ) async throws -> ContextRemoveCardResponsePayload {
+        let request = ContextRemoveCardRequest(
+            id: RequestID.next(),
+            payload: ContextRemoveCardRequestPayload(sessionId: sessionId, cardId: cardId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .contextRemoveCardResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "context.remove_card 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 要求主機壓縮上下文；回應只代表排入，完成要看 `context.compacted` 事件。
+    public func compactContext(
+        sessionId: String,
+        instructions: String? = nil,
+        options: RequestOptions = .default
+    ) async throws -> ContextCompactResponsePayload {
+        let request = ContextCompactRequest(
+            id: RequestID.next(),
+            payload: ContextCompactRequestPayload(
+                sessionId: sessionId,
+                instructions: instructions
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .contextCompactResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "context.compact 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    // MARK: - 封存與刪除
+
+    public func archiveSession(
+        sessionId: String,
+        purgeAfterDays: Int? = nil,
+        options: RequestOptions = .default
+    ) async throws -> SessionArchiveResponsePayload {
+        let request = SessionArchiveRequest(
+            id: RequestID.next(),
+            payload: SessionArchiveRequestPayload(
+                sessionId: sessionId,
+                purgeAfterDays: purgeAfterDays
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .sessionArchiveResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "session.archive 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func unarchiveSession(
+        sessionId: String,
+        options: RequestOptions = .default
+    ) async throws -> SessionUnarchiveResponsePayload {
+        let request = SessionUnarchiveRequest(
+            id: RequestID.next(),
+            payload: SessionUnarchiveRequestPayload(sessionId: sessionId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .sessionUnarchiveResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "session.unarchive 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 刪除前的預估：會帶走哪些對話、多少張專屬與共享卡片、多少個原檔。
+    public func previewSessionDeletion(
+        sessionId: String,
+        options: RequestOptions = .default
+    ) async throws -> SessionDeletionPreviewResponsePayload {
+        let request = SessionDeletionPreviewRequest(
+            id: RequestID.next(),
+            payload: SessionDeletionPreviewRequestPayload(sessionId: sessionId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .sessionDeletionPreviewResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "session.deletion_preview 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func deleteSession(
+        sessionId: String,
+        clientRequestId: String,
+        options: RequestOptions = .default
+    ) async throws -> SessionDeleteResponsePayload {
+        let request = SessionDeleteRequest(
+            id: RequestID.next(),
+            payload: SessionDeleteRequestPayload(
+                sessionId: sessionId,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .sessionDeleteResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "session.delete 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    // MARK: - 媒體
+
+    /// 以已上傳的 blob 匯入圖片或音訊；主機同步完成後才回應。
+    public func importMedia(
+        blobId: String,
+        locale: String? = nil,
+        ocrLocales: [String]? = nil,
+        title: String? = nil,
+        tags: [String]? = nil,
+        persona: String? = nil,
+        options: RequestOptions = .default
+    ) async throws -> MediaImportResponsePayload {
+        let request = MediaImportRequest(
+            id: RequestID.next(),
+            payload: MediaImportRequestPayload(
+                blobId: blobId,
+                locale: locale,
+                ocrLocales: ocrLocales,
+                title: title,
+                tags: tags,
+                persona: persona
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .mediaImportResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "media.import 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
     public func close() async {
         guard !closed else { return }
         closed = true
@@ -549,6 +924,38 @@ public actor CardiaryConnection {
         case .sessionUnsubscribeResponse(let response):
             resume(response.replyTo, with: frame)
         case .sessionGetHistoryResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .sessionArchiveResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .sessionUnarchiveResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .sessionDeletionPreviewResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .sessionDeleteResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .cardListResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .cardGetResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .cardCreateResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .cardPatchResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .cardDeleteResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .cardSearchResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .cardRefreshResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .mediaImportResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .contextGetResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .contextAddCardResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .contextRemoveCardResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .contextCompactResponse(let response):
             resume(response.replyTo, with: frame)
         case .approvalDecideResponse(let response):
             resume(response.replyTo, with: frame)

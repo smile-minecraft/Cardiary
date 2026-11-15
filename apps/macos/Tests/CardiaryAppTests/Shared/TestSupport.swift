@@ -5,7 +5,8 @@ import Foundation
 
 /// 測試用的服務替身：所有請求都回預先設定的資料，並記下呼叫順序。
 actor FakeCardiaryService:
-    ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService
+    ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService,
+    CardService, ContextService, SessionManagementService, MediaImportService
 {
     enum Failure: Error, Equatable {
         case send
@@ -25,6 +26,8 @@ actor FakeCardiaryService:
     private let failure: Failure?
     private var settingsItems: [SettingItem]
     private var modulesList: [ModuleInfo]
+    private var cards: [Card]
+    private var context: ContextView
 
     private(set) var historyCursors: [String?] = []
     private(set) var listCalls = 0
@@ -37,6 +40,19 @@ actor FakeCardiaryService:
     private(set) var pauseAllCalls = 0
     private(set) var settingChanges: [[SettingChange]] = []
     private(set) var moduleChanges: [(moduleId: String, enabled: Bool)] = []
+    private(set) var cardListCalls: [(cursor: String?, limit: Int?)] = []
+    private(set) var cardSearches: [String] = []
+    private(set) var cardPatches: [(cardId: String, baseRevision: String, patch: CardPatch)] = []
+    private(set) var cardDeletes: [String] = []
+    private(set) var cardRefreshes: [String] = []
+    private(set) var contextAdds: [(sessionId: String, cardId: String)] = []
+    private(set) var contextRemoves: [(sessionId: String, cardId: String)] = []
+    private(set) var contextCompactions: [(sessionId: String, instructions: String?)] = []
+    private(set) var archivedSessions: [(sessionId: String, purgeAfterDays: Int?)] = []
+    private(set) var unarchivedSessions: [String] = []
+    private(set) var deletionPreviews: [String] = []
+    private(set) var deletedSessions: [String] = []
+    private(set) var importedBlobIds: [String] = []
 
     init(
         sessions: [SessionSummary] = [],
@@ -48,6 +64,8 @@ actor FakeCardiaryService:
         modelsState: SystemModelsState = SystemModelsState(providers: [], roles: [], resolved: []),
         settings: [SettingItem] = [],
         modules: [ModuleInfo] = [],
+        cards: [Card] = [],
+        context: ContextView? = nil,
         failure: Failure? = nil
     ) {
         self.fallbackSessions = sessions
@@ -59,6 +77,8 @@ actor FakeCardiaryService:
         self.modelsState = modelsState
         self.settingsItems = settings
         self.modulesList = modules
+        self.cards = cards
+        self.context = context ?? Fixtures.contextView()
         self.failure = failure
     }
 
@@ -225,6 +245,248 @@ actor FakeCardiaryService:
         if failure == .pause { throw Failure.pause }
     }
 
+    // MARK: - CardService
+
+    func listCards(
+        kinds: [CardKind]?,
+        tags: [String]?,
+        persona: String?,
+        lifecycle: CardLifecycleFilter?,
+        query: String?,
+        includeSuperseded: Bool?,
+        cursor: String?,
+        limit: Int?
+    ) async throws -> CardListResponsePayload {
+        cardListCalls.append((cursor, limit))
+        let summaries = cards
+            .filter { lifecycle == nil || lifecycle == .all || $0.lifecycle == (lifecycle == .cold ? .cold : .live) }
+            .filter { kinds?.contains($0.kind) ?? true }
+            .map { cardSummary(of: $0) }
+        return CardListResponsePayload(cards: summaries, nextCursor: nil)
+    }
+
+    func getCard(cardId: String) async throws -> CardGetResponsePayload {
+        guard let card = cards.first(where: { $0.cardId == cardId }) else {
+            throw Failure.models
+        }
+        return CardGetResponsePayload(card: card)
+    }
+
+    func createCard(
+        kind: CardKind,
+        title: String,
+        body: String,
+        summary: String?,
+        tags: [String]?,
+        persona: String?,
+        sources: [String]?,
+        supersedes: String?,
+        assetBlobId: String?,
+        clientRequestId: String
+    ) async throws -> CardCreateResponsePayload {
+        if let existing = cards.first(where: { $0.title == title && $0.body == body }) {
+            return CardCreateResponsePayload(card: cardSummary(of: existing))
+        }
+        let card = Card(
+            cardId: "card-\(cards.count + 1)",
+            kind: kind,
+            title: title,
+            summary: summary,
+            body: body,
+            tags: tags ?? [],
+            persona: persona ?? "default",
+            createdAt: "2026-01-01T00:00:00Z",
+            freshness: 100,
+            lifecycle: .live,
+            sources: sources ?? [],
+            links: CardLinks(outgoing: [], backlinks: []),
+            revision: "rev-1"
+        )
+        cards.append(card)
+        return CardCreateResponsePayload(card: cardSummary(of: card))
+    }
+
+    func patchCard(
+        cardId: String,
+        baseRevision: String,
+        patch: CardPatch,
+        clientRequestId: String?
+    ) async throws -> CardPatchResponsePayload {
+        cardPatches.append((cardId, baseRevision, patch))
+        guard let index = cards.firstIndex(where: { $0.cardId == cardId }) else {
+            throw Failure.models
+        }
+        let current = cards[index]
+        let updated = Card(
+            cardId: current.cardId,
+            kind: current.kind,
+            title: current.title,
+            summary: current.summary,
+            body: patch.text,
+            tags: current.tags,
+            persona: current.persona,
+            createdAt: current.createdAt,
+            updatedAt: "2026-01-01T00:00:09Z",
+            freshness: current.freshness,
+            lifecycle: current.lifecycle,
+            supersedes: current.supersedes,
+            sources: current.sources,
+            asset: current.asset,
+            links: current.links,
+            revision: "rev-2"
+        )
+        cards[index] = updated
+        return CardPatchResponsePayload(card: updated)
+    }
+
+    func deleteCard(cardId: String, clientRequestId: String) async throws -> CardDeleteResponsePayload {
+        cardDeletes.append(cardId)
+        cards.removeAll { $0.cardId == cardId }
+        return CardDeleteResponsePayload(cardId: cardId, deletedAssets: 0)
+    }
+
+    func searchCards(
+        query: String,
+        kinds: [CardKind]?,
+        tags: [String]?,
+        includeSuperseded: Bool?,
+        limit: Int?,
+        cursor: String?
+    ) async throws -> CardSearchResponsePayload {
+        cardSearches.append(query)
+        let hits = cards
+            .filter { $0.title.contains(query) || $0.body.contains(query) }
+            .filter { kinds?.contains($0.kind) ?? true }
+            .map { CardSearchHit(card: cardSummary(of: $0), score: 1, snippet: "…\(query)…") }
+        return CardSearchResponsePayload(hits: hits, nextCursor: nil)
+    }
+
+    func refreshCard(cardId: String) async throws -> CardRefreshResponsePayload {
+        cardRefreshes.append(cardId)
+        return CardRefreshResponsePayload(cardId: cardId, freshness: 100)
+    }
+
+    // MARK: - ContextService
+
+    func getContext(sessionId: String) async throws -> ContextGetResponsePayload {
+        ContextGetResponsePayload(context: context)
+    }
+
+    func addCardToContext(
+        sessionId: String,
+        cardId: String
+    ) async throws -> ContextAddCardResponsePayload {
+        contextAdds.append((sessionId, cardId))
+        return ContextAddCardResponsePayload(context: context)
+    }
+
+    func removeCardFromContext(
+        sessionId: String,
+        cardId: String
+    ) async throws -> ContextRemoveCardResponsePayload {
+        contextRemoves.append((sessionId, cardId))
+        return ContextRemoveCardResponsePayload(context: context)
+    }
+
+    func compactContext(
+        sessionId: String,
+        instructions: String?
+    ) async throws -> ContextCompactResponsePayload {
+        contextCompactions.append((sessionId, instructions))
+        return ContextCompactResponsePayload(sessionId: sessionId, scheduled: true)
+    }
+
+    // MARK: - SessionManagementService
+
+    func archiveSession(
+        sessionId: String,
+        purgeAfterDays: Int?
+    ) async throws -> SessionArchiveResponsePayload {
+        archivedSessions.append((sessionId, purgeAfterDays))
+        return SessionArchiveResponsePayload(
+            sessionId: sessionId,
+            archive: SessionArchive(
+                archivedAt: "2026-01-01T00:00:00Z",
+                purgeAt: "2026-01-31T00:00:00Z"
+            )
+        )
+    }
+
+    func unarchiveSession(sessionId: String) async throws -> SessionUnarchiveResponsePayload {
+        unarchivedSessions.append(sessionId)
+        return SessionUnarchiveResponsePayload(sessionId: sessionId, unarchived: true)
+    }
+
+    func previewSessionDeletion(
+        sessionId: String
+    ) async throws -> SessionDeletionPreviewResponsePayload {
+        deletionPreviews.append(sessionId)
+        return SessionDeletionPreviewResponsePayload(
+            sessionId: sessionId,
+            subtreeSessionIds: [sessionId],
+            exclusiveCards: 2,
+            sharedCards: 1,
+            assets: 1
+        )
+    }
+
+    func deleteSession(
+        sessionId: String,
+        clientRequestId: String
+    ) async throws -> SessionDeleteResponsePayload {
+        deletedSessions.append(sessionId)
+        return SessionDeleteResponsePayload(
+            sessionId: sessionId,
+            deletedSessionIds: [sessionId],
+            deletedCards: 2,
+            deletedAssets: 1
+        )
+    }
+
+    // MARK: - MediaImportService
+
+    func importMedia(
+        blobId: String,
+        locale: String?,
+        ocrLocales: [String]?,
+        title: String?,
+        tags: [String]?,
+        persona: String?
+    ) async throws -> MediaImportResponsePayload {
+        importedBlobIds.append(blobId)
+        return MediaImportResponsePayload(
+            cardId: "card-image",
+            kind: .image,
+            textStandIn: MediaTextStandIn(
+                sources: MediaTextStandInSources(
+                    ocr: .local,
+                    description: .smallModel,
+                    transcript: .none,
+                    summary: .none
+                ),
+                missingParts: []
+            ),
+            deduped: false
+        )
+    }
+
+    private func cardSummary(of card: Card) -> CardSummary {
+        CardSummary(
+            cardId: card.cardId,
+            kind: card.kind,
+            title: card.title,
+            summary: card.summary,
+            tags: card.tags,
+            persona: card.persona,
+            createdAt: card.createdAt,
+            updatedAt: card.updatedAt,
+            freshness: card.freshness,
+            lifecycle: card.lifecycle,
+            supersededBy: card.supersededBy,
+            asset: card.asset
+        )
+    }
+
     // MARK: - ModelSettingsService
 
     func getModels() async throws -> SystemModelsState {
@@ -256,10 +518,119 @@ actor FakeCardiaryService:
     }
 }
 
+/// 測試用的媒體服務：記下上傳與匯入的呼叫，回固定資料。
+actor FakeMediaService: MediaService {
+    private(set) var uploads: [(fileURL: URL?, mediaType: String, bytes: Int)] = []
+    private(set) var importedBlobIds: [String] = []
+    private let blobId: String
+
+    init(blobId: String = String(repeating: "a", count: 64)) {
+        self.blobId = blobId
+    }
+
+    func upload(fileURL: URL, mediaType: String) async throws -> BlobInfo {
+        let size = (try? Data(contentsOf: fileURL).count) ?? 0
+        uploads.append((fileURL, mediaType, size))
+        return BlobInfo(blobId: blobId, mediaType: mediaType, sizeBytes: size)
+    }
+
+    func upload(data: Data, mediaType: String) async throws -> BlobInfo {
+        uploads.append((nil, mediaType, data.count))
+        return BlobInfo(blobId: blobId, mediaType: mediaType, sizeBytes: data.count)
+    }
+
+    func download(blobId: String, variant: BlobClient.Variant?) async throws -> Data {
+        Data()
+    }
+
+    func importMedia(
+        blobId: String,
+        locale: String?,
+        ocrLocales: [String]?,
+        title: String?,
+        tags: [String]?,
+        persona: String?
+    ) async throws -> MediaImportResponsePayload {
+        importedBlobIds.append(blobId)
+        return MediaImportResponsePayload(
+            cardId: "card-image",
+            kind: .image,
+            textStandIn: MediaTextStandIn(
+                sources: MediaTextStandInSources(
+                    ocr: .local,
+                    description: .smallModel,
+                    transcript: .none,
+                    summary: .none
+                ),
+                missingParts: []
+            ),
+            deduped: false
+        )
+    }
+}
+
 /// 測試資料。全部用固定值，讓斷言看得出差異。
 enum Fixtures {
-    static func summary(
+    static func card(
         _ id: String,
+        title: String? = nil,
+        kind: CardKind = .note,
+        body: String = "內文",
+        tags: [String] = [],
+        freshness: Int = 100,
+        lifecycle: CardLifecycle = .live,
+        revision: String = "rev-1"
+    ) -> Card {
+        Card(
+            cardId: id,
+            kind: kind,
+            title: title ?? "卡片 \(id)",
+            body: body,
+            tags: tags,
+            persona: "default",
+            createdAt: "2026-01-01T00:00:00Z",
+            freshness: freshness,
+            lifecycle: lifecycle,
+            sources: ["s1"],
+            links: CardLinks(outgoing: [], backlinks: []),
+            revision: revision
+        )
+    }
+
+    static func contextView(
+        sessionId: String = "s1",
+        entries: [ContextEntry]? = nil
+    ) -> ContextView {
+        ContextView(
+            sessionId: sessionId,
+            version: 1,
+            entries: entries ?? [
+                ContextEntry(
+                    entryId: "entry-1",
+                    layer: .persona,
+                    cardId: "card-persona",
+                    title: "人格卡",
+                    tokenEstimate: 120,
+                    state: .active,
+                    position: 0
+                ),
+                ContextEntry(
+                    entryId: "entry-2",
+                    layer: .workingContext,
+                    title: "逐字稿",
+                    tokenEstimate: 400,
+                    state: .active,
+                    position: 1
+                ),
+            ],
+            usedTokens: 520,
+            budgetTokens: 1000,
+            contextWindow: 200_000,
+            compactionThreshold: 0.75
+        )
+    }
+
+    static func summary(        _ id: String,
         title: String? = nil,
         status: SessionStatus = .idle,
         messageCount: Int = 0,

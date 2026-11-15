@@ -43,6 +43,8 @@ final class ShellController: NSObject {
     private let folderBox = FolderSnapshotBox()
     private var supervisor: ServiceSupervisor?
     private var client: CardiaryClient?
+    /// 原檔上傳與媒體匯入；端點與 Token 跟著客戶端連線一起換。
+    private var mediaService: (any MediaService)?
     private var brokerService: BrokerService?
     private var approvalCount: Int?
     private var serviceSnapshot = ServiceStatusSnapshot()
@@ -471,6 +473,7 @@ final class ShellController: NSObject {
     private func dropClientConnection() {
         guard let existing = client else { return }
         client = nil
+        mediaService = nil
         approvalCount = nil
         appModel?.detachClient()
         if !versionNeedsUpdate {
@@ -491,6 +494,7 @@ final class ShellController: NSObject {
         }
         loggedMissingClientToken = false
         guard let endpoint = URL(string: "ws://127.0.0.1:\(port)/v1/ws") else { return }
+        guard let blobBaseURL = URL(string: "http://127.0.0.1:\(port)") else { return }
 
         let info = ClientInfoFactory.make()
         let configuration = CardiaryClient.Configuration(
@@ -500,6 +504,16 @@ final class ShellController: NSObject {
             subscribeActiveSessions: true
         )
         let client = CardiaryClient(configuration: configuration)
+        // 原檔上傳與協定走同一個服務埠；Token 只在記憶體，交給 App 的只有服務介面。
+        mediaService = CardiaryMediaService(
+            blobs: BlobClient(
+                configuration: BlobClient.Configuration(
+                    baseURL: blobBaseURL,
+                    clientToken: token
+                )
+            ),
+            importer: client
+        )
         client.handlers.onSystemStatus = { [weak self] status in
             Task { @MainActor in
                 self?.log.write(
@@ -548,7 +562,9 @@ final class ShellController: NSObject {
             appModel?.update(connection: .connecting)
         case .connected(let epoch, _):
             // 完成 system.hello 之後才把服務交給介面；連線前送出的設定請求會被主機拒絕。
-            if let client { appModel?.attach(client: client) }
+            if let client {
+                appModel?.attach(client: client, media: mediaService)
+            }
             appModel?.update(connection: .connected(epoch: epoch))
         case .disconnected(let reason):
             if !versionNeedsUpdate { appModel?.update(connection: .disconnected(reason: reason)) }

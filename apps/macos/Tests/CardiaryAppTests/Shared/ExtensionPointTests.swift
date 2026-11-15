@@ -21,6 +21,9 @@ final class ExtensionPointTests: XCTestCase {
 
     func testInstallContentKeepsPositionAndOrder() {
         let model = AppModel(setupCompleted: true)
+        // 掛載點預設就給了佔位畫面，卡片介面之後只換內容、不換位置。
+        XCTAssertNotNil(model.sidebar.slot("cards")?.content)
+        XCTAssertNotNil(model.sidebar.slot("archive")?.content)
 
         let installed = model.sidebar.installContent(for: "cards") {
             AnyView(Text("cards"))
@@ -32,7 +35,7 @@ final class ExtensionPointTests: XCTestCase {
             "掛上內容不應改變其他入口的順序"
         )
         XCTAssertNotNil(model.sidebar.slot("cards")?.content)
-        XCTAssertNil(model.sidebar.slot("archive")?.content)
+        XCTAssertNotNil(model.sidebar.slot("archive")?.content)
 
         XCTAssertFalse(model.sidebar.installContent(for: "unknown") { AnyView(Text("x")) })
     }

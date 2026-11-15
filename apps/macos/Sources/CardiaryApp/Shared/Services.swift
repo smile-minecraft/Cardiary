@@ -56,8 +56,176 @@ public protocol ApprovalService: Sendable {
     func pauseAllApprovals(reason: String) async throws
 }
 
+/// 卡片庫的讀取與編輯；篩選條件沒帶的欄位不會出現在請求裡。
+public protocol CardService: Sendable {
+    func listCards(
+        kinds: [CardKind]?,
+        tags: [String]?,
+        persona: String?,
+        lifecycle: CardLifecycleFilter?,
+        query: String?,
+        includeSuperseded: Bool?,
+        cursor: String?,
+        limit: Int?
+    ) async throws -> CardListResponsePayload
+    func getCard(cardId: String) async throws -> CardGetResponsePayload
+    func createCard(
+        kind: CardKind,
+        title: String,
+        body: String,
+        summary: String?,
+        tags: [String]?,
+        persona: String?,
+        sources: [String]?,
+        supersedes: String?,
+        assetBlobId: String?,
+        clientRequestId: String
+    ) async throws -> CardCreateResponsePayload
+    func patchCard(
+        cardId: String,
+        baseRevision: String,
+        patch: CardPatch,
+        clientRequestId: String?
+    ) async throws -> CardPatchResponsePayload
+    func deleteCard(cardId: String, clientRequestId: String) async throws -> CardDeleteResponsePayload
+    func searchCards(
+        query: String,
+        kinds: [CardKind]?,
+        tags: [String]?,
+        includeSuperseded: Bool?,
+        limit: Int?,
+        cursor: String?
+    ) async throws -> CardSearchResponsePayload
+    func refreshCard(cardId: String) async throws -> CardRefreshResponsePayload
+}
+
+/// 檢視欄的上下文：讀取、加入與移除卡片、要求壓縮。
+public protocol ContextService: Sendable {
+    func getContext(sessionId: String) async throws -> ContextGetResponsePayload
+    func addCardToContext(sessionId: String, cardId: String) async throws -> ContextAddCardResponsePayload
+    func removeCardFromContext(
+        sessionId: String,
+        cardId: String
+    ) async throws -> ContextRemoveCardResponsePayload
+    func compactContext(
+        sessionId: String,
+        instructions: String?
+    ) async throws -> ContextCompactResponsePayload
+}
+
+/// 封存區與刪除確認。
+public protocol SessionManagementService: Sendable {
+    func archiveSession(
+        sessionId: String,
+        purgeAfterDays: Int?
+    ) async throws -> SessionArchiveResponsePayload
+    func unarchiveSession(sessionId: String) async throws -> SessionUnarchiveResponsePayload
+    func previewSessionDeletion(
+        sessionId: String
+    ) async throws -> SessionDeletionPreviewResponsePayload
+    func deleteSession(
+        sessionId: String,
+        clientRequestId: String
+    ) async throws -> SessionDeleteResponsePayload
+}
+
+/// 媒體匯入的協定部分：以已上傳的 blobId 建卡。
+public protocol MediaImportService: Sendable {
+    func importMedia(
+        blobId: String,
+        locale: String?,
+        ocrLocales: [String]?,
+        title: String?,
+        tags: [String]?,
+        persona: String?
+    ) async throws -> MediaImportResponsePayload
+}
+
+/// 圖片與音訊匯入：先上傳原檔，再以 blobId 走協定建卡。
+public protocol MediaService: Sendable {
+    func upload(fileURL: URL, mediaType: String) async throws -> BlobInfo
+    func upload(data: Data, mediaType: String) async throws -> BlobInfo
+    /// 下載原檔；帶 `variant` 時取得主機產生的縮圖。卡片畫面只在可見範圍載入。
+    func download(blobId: String, variant: BlobClient.Variant?) async throws -> Data
+    func importMedia(
+        blobId: String,
+        locale: String?,
+        ocrLocales: [String]?,
+        title: String?,
+        tags: [String]?,
+        persona: String?
+    ) async throws -> MediaImportResponsePayload
+}
+
+extension MediaService {
+    /// 一步完成匯入：上傳原檔後用回傳的 `blobId` 建卡。
+    public func importFile(
+        fileURL: URL,
+        mediaType: String,
+        locale: String? = nil,
+        ocrLocales: [String]? = nil,
+        title: String? = nil,
+        tags: [String]? = nil,
+        persona: String? = nil
+    ) async throws -> MediaImportResponsePayload {
+        let blob = try await upload(fileURL: fileURL, mediaType: mediaType)
+        return try await importMedia(
+            blobId: blob.blobId,
+            locale: locale,
+            ocrLocales: ocrLocales,
+            title: title,
+            tags: tags,
+            persona: persona
+        )
+    }
+}
+
+/// 殼組好的媒體服務：原檔走 HTTP，建卡走協定。
+public struct CardiaryMediaService: MediaService {
+    private let blobs: BlobClient
+    private let importer: any MediaImportService
+
+    public init(blobs: BlobClient, importer: any MediaImportService) {
+        self.blobs = blobs
+        self.importer = importer
+    }
+
+    public func upload(fileURL: URL, mediaType: String) async throws -> BlobInfo {
+        try await blobs.upload(fileURL: fileURL, mediaType: mediaType)
+    }
+
+    public func upload(data: Data, mediaType: String) async throws -> BlobInfo {
+        try await blobs.upload(data: data, mediaType: mediaType)
+    }
+
+    public func download(blobId: String, variant: BlobClient.Variant?) async throws -> Data {
+        try await blobs.download(blobId: blobId, variant: variant)
+    }
+
+    public func importMedia(
+        blobId: String,
+        locale: String?,
+        ocrLocales: [String]?,
+        title: String?,
+        tags: [String]?,
+        persona: String?
+    ) async throws -> MediaImportResponsePayload {
+        try await importer.importMedia(
+            blobId: blobId,
+            locale: locale,
+            ocrLocales: ocrLocales,
+            title: title,
+            tags: tags,
+            persona: persona
+        )
+    }
+}
+
 public typealias CardiaryService =
     ConversationService & ModelSettingsService & SettingsService & ModulesService & ApprovalService
+    & CardService & ContextService & SessionManagementService & MediaImportService
 
 extension CardiaryClient:
-    ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService {}
+    ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService,
+    CardService, ContextService, SessionManagementService, MediaImportService
+{}

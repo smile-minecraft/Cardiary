@@ -194,6 +194,10 @@ public struct CommandGroup: Identifiable {
     mutating func append(_ command: AppCommand) {
         commands.append(command)
     }
+
+    mutating func replaceCommand(at position: Int, with command: AppCommand) {
+        commands[position] = command
+    }
 }
 
 @MainActor
@@ -216,6 +220,18 @@ public final class CommandRegistry {
     public func append(_ command: AppCommand, to groupId: String) -> Bool {
         guard let existing = index[groupId] else { return false }
         groups[existing].append(command)
+        return true
+    }
+
+    /// 同一個 id 的命令換成新的，沒有的才附加；重複掛載不會出現兩份。
+    @discardableResult
+    public func upsert(_ command: AppCommand, in groupId: String) -> Bool {
+        guard let existing = index[groupId] else { return false }
+        if let position = groups[existing].commands.firstIndex(where: { $0.id == command.id }) {
+            groups[existing].replaceCommand(at: position, with: command)
+        } else {
+            groups[existing].append(command)
+        }
         return true
     }
 

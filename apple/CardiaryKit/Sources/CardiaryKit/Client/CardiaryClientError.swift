@@ -13,6 +13,8 @@ public enum CardiaryClientError: Error, Equatable, Sendable {
     case server(ErrorFrame)
     /// frame 不是合法的 UTF-8 JSON 物件，或缺少必要欄位。
     case invalidFrame(String)
+    /// 端點不是可用的 http(s) 網址，或無法組合出請求路徑。
+    case invalidEndpoint(String)
     /// 回應的 `replyTo` 對不上任何在途請求。
     case unexpectedReply(String)
     /// 主機要求重新載入快照，但客戶端沒有可用的快照處理方式。
@@ -35,6 +37,8 @@ extension CardiaryClientError: LocalizedError {
             return frame.message
         case .invalidFrame(let detail):
             return "收到不合法的協定訊息：\(detail)"
+        case .invalidEndpoint(let detail):
+            return "原檔端點無法使用：\(detail)"
         case .unexpectedReply(let id):
             return "收到對不上請求的回應：\(id)"
         case .resyncRequired(let stream):

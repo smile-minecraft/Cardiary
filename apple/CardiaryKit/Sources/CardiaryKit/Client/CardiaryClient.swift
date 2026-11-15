@@ -282,6 +282,198 @@ public actor CardiaryClient {
         )
     }
 
+    // MARK: - 卡片、上下文與封存
+
+    /// 列出一頁卡片；翻頁帶上一次的 `cursor`。
+    public func listCards(
+        kinds: [CardKind]? = nil,
+        tags: [String]? = nil,
+        persona: String? = nil,
+        lifecycle: CardLifecycleFilter? = nil,
+        query: String? = nil,
+        includeSuperseded: Bool? = nil,
+        cursor: String? = nil,
+        limit: Int? = nil
+    ) async throws -> CardListResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.listCards(
+            kinds: kinds,
+            tags: tags,
+            persona: persona,
+            lifecycle: lifecycle,
+            query: query,
+            includeSuperseded: includeSuperseded,
+            cursor: cursor,
+            limit: limit
+        )
+    }
+
+    public func getCard(cardId: String) async throws -> CardGetResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.getCard(cardId: cardId)
+    }
+
+    public func createCard(
+        kind: CardKind,
+        title: String,
+        body: String,
+        summary: String? = nil,
+        tags: [String]? = nil,
+        persona: String? = nil,
+        sources: [String]? = nil,
+        supersedes: String? = nil,
+        assetBlobId: String? = nil,
+        clientRequestId: String
+    ) async throws -> CardCreateResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.createCard(
+            kind: kind,
+            title: title,
+            body: body,
+            summary: summary,
+            tags: tags,
+            persona: persona,
+            sources: sources,
+            supersedes: supersedes,
+            assetBlobId: assetBlobId,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func patchCard(
+        cardId: String,
+        baseRevision: String,
+        patch: CardPatch,
+        clientRequestId: String? = nil
+    ) async throws -> CardPatchResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.patchCard(
+            cardId: cardId,
+            baseRevision: baseRevision,
+            patch: patch,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func deleteCard(
+        cardId: String,
+        clientRequestId: String
+    ) async throws -> CardDeleteResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.deleteCard(cardId: cardId, clientRequestId: clientRequestId)
+    }
+
+    public func searchCards(
+        query: String,
+        kinds: [CardKind]? = nil,
+        tags: [String]? = nil,
+        includeSuperseded: Bool? = nil,
+        limit: Int? = nil,
+        cursor: String? = nil
+    ) async throws -> CardSearchResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.searchCards(
+            query: query,
+            kinds: kinds,
+            tags: tags,
+            includeSuperseded: includeSuperseded,
+            limit: limit,
+            cursor: cursor
+        )
+    }
+
+    public func refreshCard(cardId: String) async throws -> CardRefreshResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.refreshCard(cardId: cardId)
+    }
+
+    public func getContext(sessionId: String) async throws -> ContextGetResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.getContext(sessionId: sessionId)
+    }
+
+    public func addCardToContext(
+        sessionId: String,
+        cardId: String
+    ) async throws -> ContextAddCardResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.addCardToContext(sessionId: sessionId, cardId: cardId)
+    }
+
+    public func removeCardFromContext(
+        sessionId: String,
+        cardId: String
+    ) async throws -> ContextRemoveCardResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.removeCardFromContext(sessionId: sessionId, cardId: cardId)
+    }
+
+    public func compactContext(
+        sessionId: String,
+        instructions: String? = nil
+    ) async throws -> ContextCompactResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.compactContext(
+            sessionId: sessionId,
+            instructions: instructions
+        )
+    }
+
+    public func archiveSession(
+        sessionId: String,
+        purgeAfterDays: Int? = nil
+    ) async throws -> SessionArchiveResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.archiveSession(
+            sessionId: sessionId,
+            purgeAfterDays: purgeAfterDays
+        )
+    }
+
+    public func unarchiveSession(
+        sessionId: String
+    ) async throws -> SessionUnarchiveResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.unarchiveSession(sessionId: sessionId)
+    }
+
+    public func previewSessionDeletion(
+        sessionId: String
+    ) async throws -> SessionDeletionPreviewResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.previewSessionDeletion(sessionId: sessionId)
+    }
+
+    public func deleteSession(
+        sessionId: String,
+        clientRequestId: String
+    ) async throws -> SessionDeleteResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.deleteSession(
+            sessionId: sessionId,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func importMedia(
+        blobId: String,
+        locale: String? = nil,
+        ocrLocales: [String]? = nil,
+        title: String? = nil,
+        tags: [String]? = nil,
+        persona: String? = nil
+    ) async throws -> MediaImportResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.importMedia(
+            blobId: blobId,
+            locale: locale,
+            ocrLocales: ocrLocales,
+            title: title,
+            tags: tags,
+            persona: persona
+        )
+    }
+
     // MARK: - 連線迴圈
 
     private func runLoop() async {

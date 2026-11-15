@@ -34,7 +34,12 @@ public final class AppModel: ObservableObject {
         didSet { AppL10n.language = language }
     }
 
-    private var service: (any CardiaryService)?
+    /// 目前的服務連線；畫面與模型都從這裡取得請求方法。
+    public private(set) var service: (any CardiaryService)?
+    /// 原檔上傳與媒體匯入；殼提供端點與 Token，App 不自己拼。
+    public private(set) var media: (any MediaService)?
+    /// 卡片與封存的模型；由 `CardUIModule` 掛上，AppModel 只轉發生命週期。
+    public private(set) var contentModels: [any AppContentModel] = []
 
     /// - Parameter setupCompleted: 殼在啟動時是否已經有資料夾授權紀錄。有的話是回訪，
     ///   直接進主畫面，不再走首次設定。
@@ -83,8 +88,16 @@ public final class AppModel: ObservableObject {
     }
 
     /// 新的客戶端連線（第一次連上、重連、服務換行程後都走這裡）。
-    public func attach(client: CardiaryClient) {
+    ///
+    /// `media` 由殼一起給：原檔的 HTTP 端點與 client Token 只有殼知道。
+    public func attach(client: CardiaryClient, media: (any MediaService)?) {
+        self.media = media
         Task { await attach(service: client) }
+    }
+
+    /// 只換原檔服務（測試或殼更正端點時）；不影響協定連線。
+    public func attach(media: (any MediaService)?) {
+        self.media = media
     }
 
     public func attach(service: any CardiaryService) async {
@@ -94,6 +107,9 @@ public final class AppModel: ObservableObject {
         firstRun.attach(service: service)
         approvals.attach(service: service)
         settingsModel.attach(service: service)
+        for model in contentModels {
+            model.attach(service: service)
+        }
         await reloadAfterAttach()
         // 首次設定停在「選模型」時，連線一好就把供應商與模型載進來。
         if firstRun.step == .model, firstRun.providers.isEmpty {
@@ -103,6 +119,10 @@ public final class AppModel: ObservableObject {
 
     public func detachClient() {
         service = nil
+        media = nil
+        for model in contentModels {
+            model.detach()
+        }
         conversation.markDisconnected()
         settingsModel.detach()
         firstRun.detach()
@@ -110,7 +130,11 @@ public final class AppModel: ObservableObject {
     }
 
     /// epoch 換代：舊 epoch 的事件與狀態一律丟棄，重新列出對話並載入目前對話。
+    /// 卡片與封存的模型收到同一個通知，自己從主機重新載入。
     public func handleEpochChange(epoch: String) async {
+        for model in contentModels {
+            await model.handleEpochChange(epoch: epoch)
+        }
         guard let service else { return }
         await conversations.reload()
         if case .conversation(let id) = selection {
@@ -119,9 +143,12 @@ public final class AppModel: ObservableObject {
         reconcileSelection()
     }
 
-    /// 殼轉來的會話事件。只有目前開啟的對話會套用。
+    /// 殼轉來的會話事件。對話只套用目前開啟的那一場；卡片與封存的模型自己過濾。
     public func handle(sessionEvent frame: ServerFrame) {
         conversation.apply(frame: frame)
+        for model in contentModels {
+            model.handle(event: frame)
+        }
     }
 
     // MARK: - 介面動作
@@ -176,6 +203,42 @@ public final class AppModel: ObservableObject {
 
     public func selectSettings() {
         selection = .slot(AppRegistry.settingsSlotId)
+    }
+
+    // MARK: - 掛載點
+
+    /// 把卡片介面的模型、畫面、檢視欄、設定分頁與選單掛上。
+    ///
+    /// 由 `CardUIModule.install` 呼叫。重複呼叫時同一個位置、面板、分頁與命令都只留
+    /// 一份，測試換一組畫面或重新組合都不會疊出兩份。
+    public func installCardUI(_ screens: CardUIScreens) {
+        if !contentModels.isEmpty {
+            for model in contentModels {
+                model.detach()
+            }
+        }
+        contentModels = screens.models
+        if let service {
+            for model in contentModels {
+                model.attach(service: service)
+            }
+        }
+        sidebar.installContent(for: AppRegistry.cardsSlotId) { screens.cardLibrary() }
+        sidebar.installContent(for: AppRegistry.archiveSlotId) { screens.archive() }
+        inspector.register(screens.contextInspector())
+        if let makeTab = screens.freshnessSettings {
+            settings.register(makeTab())
+        }
+        for command in screens.cardCommands {
+            commands.upsert(command, in: AppRegistry.cardCommandsGroupId)
+        }
+    }
+
+    /// 把匯入介面的命令掛上；由 `ImportUIModule.install` 呼叫。
+    public func installImportUI(_ entry: ImportUIEntry) {
+        for command in entry.commands {
+            commands.upsert(command, in: AppRegistry.importCommandsGroupId)
+        }
     }
 
     // MARK: - 內部
