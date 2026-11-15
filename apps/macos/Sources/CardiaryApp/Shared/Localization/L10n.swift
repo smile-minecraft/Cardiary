@@ -43,6 +43,7 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case appTitle
     case sidebarSectionSession
     case sidebarSectionLibrary
+    case sidebarSectionTools
     case sidebarSectionArchive
     case sidebarSectionComingSoon
     case destinationConversations

@@ -56,6 +56,28 @@ final class ContextLayoutTests: XCTestCase {
         XCTAssertEqual(items[1].tokens, 300)
     }
 
+    func testTreemapWrapsIntoRowsInNarrowColumn() {
+        // 檢視欄很窄、每層只有一張卡時，也要排成多列，而不是一排細長條。
+        let layers: [ContextLayer] = [
+            .bedrock, .persona, .coreMemory, .shortTermMemory, .otherCards, .otherCards, .workingContext,
+        ]
+        let tokens = [900, 500, 700, 600, 450, 300, 1200]
+        let entries = layers.indices.map {
+            entry("e\($0)", tokens: tokens[$0], layer: layers[$0], position: $0)
+        }
+        let size = ContextLayoutSize(width: 280, height: 240)
+        let items = ContextTreemap.layout(entries: entries, in: size, minimumShare: 0)
+        XCTAssertEqual(items.map(\.entryIds), entries.map { [$0.entryId] }, "版面順序等於上下文順序")
+        XCTAssertGreaterThan(Set(items.map(\.rect.y)).count, 1, "要換列")
+        let totalArea = size.width * size.height
+        let totalTokens = Double(tokens.reduce(0, +))
+        for (item, token) in zip(items, tokens) {
+            XCTAssertEqual(item.rect.area / totalArea, Double(token) / totalTokens, accuracy: 1e-9)
+            let aspect = max(item.rect.width / item.rect.height, item.rect.height / item.rect.width)
+            XCTAssertLessThan(aspect, 5, "不能是細長條：\(item.entryIds)")
+        }
+    }
+
     func testTreemapMergesSmallCardsIntoSingleAggregate() {
         let entries = [
             entry("big-1", tokens: 500, position: 0),

@@ -14,30 +14,42 @@ struct ConversationView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             transcript
-            Divider()
             ComposerView(model: model, conversation: conversation)
         }
+        .background(Palette.canvas)
     }
 
     private var header: some View {
-        HStack(spacing: DesignTokens.spacingS) {
+        HStack(spacing: DesignTokens.spacingM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Palette.graySoft)
+                    .frame(width: 34, height: 34)
+                Image(systemName: Suit.spade.symbol)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Palette.gray)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(conversation.title.isEmpty ? AppL10n.text(.conversationUntitled) : conversation.title)
-                    .font(.headline)
-                Text(statusText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.title3, weight: .bold))
+                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(statusTone.color)
+                        .frame(width: 6, height: 6)
+                    Text(statusText)
+                        .font(.cardiary(.caption))
+                        .foregroundStyle(Palette.inkSecondary)
+                }
             }
             Spacer()
             if conversation.isLoadingInitial {
-                ProgressView()
-                    .controlSize(.small)
+                SuitLoader()
             }
         }
-        .padding(.horizontal, DesignTokens.spacingM)
-        .padding(.vertical, DesignTokens.spacingS)
+        .padding(.horizontal, DesignTokens.spacingL)
+        .padding(.vertical, DesignTokens.spacingM)
     }
 
     private var statusText: String {
@@ -51,10 +63,18 @@ struct ConversationView: View {
         }
     }
 
+    private var statusTone: Tone {
+        switch conversation.activeTurn?.state {
+        case .some(.waitingApproval): return .orange
+        case .some(.queued), .some(.running): return .red
+        default: return .sage
+        }
+    }
+
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: DesignTokens.spacingM) {
+                LazyVStack(alignment: .leading, spacing: DesignTokens.spacingL) {
                     historyControls
 
                     ForEach(conversation.items) { item in
@@ -75,7 +95,8 @@ struct ConversationView: View {
                         .id(Self.bottomAnchor)
                 }
                 .frame(maxWidth: DesignTokens.transcriptMaxWidth, alignment: .leading)
-                .padding(DesignTokens.spacingM)
+                .padding(.horizontal, DesignTokens.spacingL)
+                .padding(.vertical, DesignTokens.spacingS)
                 .frame(maxWidth: .infinity)
             }
             .onChange(of: conversation.items.count) { _, _ in
@@ -95,18 +116,18 @@ struct ConversationView: View {
             } label: {
                 HStack(spacing: DesignTokens.spacingXS) {
                     if conversation.isLoadingOlder {
-                        ProgressView()
-                            .controlSize(.small)
+                        SuitLoader(size: 7)
                     }
                     Text(AppL10n.text(conversation.isLoadingOlder ? .conversationLoadingOlder : .conversationLoadOlder))
                 }
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
+            .controlSize(.small)
             .frame(maxWidth: .infinity)
         } else if !conversation.items.isEmpty {
-            Text(AppL10n.text(.conversationNoMoreHistory))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            SuitDivider()
+                .frame(width: 140)
+                .help(AppL10n.text(.conversationNoMoreHistory))
                 .frame(maxWidth: .infinity)
         }
     }
@@ -119,20 +140,12 @@ struct StreamingRow: View {
     let text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
-            Text(AppL10n.text(.messageRoleAssistant))
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(text)
-                .textSelection(.enabled)
-                .padding(DesignTokens.spacingM)
-                .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: DesignTokens.messageBubbleRadius))
-            HStack(spacing: DesignTokens.spacingXS) {
-                ProgressView()
-                    .controlSize(.small)
+        AssistantBubble(text: text) {
+            HStack(spacing: DesignTokens.spacingS) {
+                SuitLoader(size: 7)
                 Text(AppL10n.text(.conversationStreaming))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
             }
         }
     }
@@ -143,20 +156,29 @@ struct PendingApprovalRow: View {
     let approval: ApprovalRequest
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
-            Label(AppL10n.text(.inspectorApprovalsTitle), systemImage: "hand.raised")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.orange)
-            Text(approval.title)
-                .font(.callout)
-            if let summary = approval.summary {
-                Text(summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: DesignTokens.spacingM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Palette.orange)
+                    .frame(width: 30, height: 30)
+                Image(systemName: "hand.raised.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Palette.onAccent)
+            }
+            VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
+                Text(AppL10n.text(.inspectorApprovalsTitle))
+                    .font(.cardiary(.caption, weight: .semibold))
+                    .foregroundStyle(Palette.orange)
+                Text(approval.title)
+                    .font(.cardiary(.callout, weight: .semibold))
+                if let summary = approval.summary {
+                    Text(summary)
+                        .font(.cardiary(.caption))
+                        .foregroundStyle(Palette.inkSecondary)
+                }
             }
         }
-        .padding(DesignTokens.spacingM)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+        .themeBlock(Palette.orangeSoft)
     }
 }

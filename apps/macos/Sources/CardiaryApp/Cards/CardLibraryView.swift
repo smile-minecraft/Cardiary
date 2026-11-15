@@ -13,28 +13,33 @@ struct CardLibraryView: View {
     @State private var isDropTargeted = false
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             header
-            Divider()
-            HSplitView {
+            HStack(alignment: .top, spacing: DesignTokens.spacingM) {
                 libraryPane
-                    .frame(minWidth: 260)
+                    .frame(minWidth: 240, idealWidth: DesignTokens.cardListWidth, maxWidth: 380)
                 detailPane
-                    .frame(minWidth: 300)
+                    .frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Palette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.panelRadius, style: .continuous))
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .padding(DesignTokens.spacingL)
+        .background(Palette.canvas)
         .dropDestination(for: URL.self) { urls, _ in
             Task { await model.importDropped(urls: urls) }
             return true
         } isTargeted: { isDropTargeted = $0 }
-        .overlay(alignment: .top) {
+        .overlay {
             if isDropTargeted {
-                Label(CardL10n.text(.cardsDropHint), systemImage: "square.and.arrow.down")
-                    .font(.callout)
-                    .padding(DesignTokens.spacingS)
-                    .background(.regularMaterial, in: Capsule())
-                    .padding(.top, DesignTokens.spacingS)
+                RoundedRectangle(cornerRadius: DesignTokens.panelRadius, style: .continuous)
+                    .fill(Palette.orangeSoft.opacity(0.85))
+                    .overlay {
+                        Label(CardL10n.text(.cardsDropHint), systemImage: "square.and.arrow.down.fill")
+                            .font(.cardiary(.headline))
+                            .foregroundStyle(Palette.orange)
+                    }
+                    .padding(DesignTokens.spacingM)
+                    .allowsHitTesting(false)
             }
         }
         .task {
@@ -56,87 +61,85 @@ struct CardLibraryView: View {
     }
 
     private var header: some View {
-        HStack(spacing: DesignTokens.spacingM) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(CardL10n.text(.cardsTitle))
-                    .font(.title3.bold())
-                Text(CardL10n.count(.cardsCount, count: model.items.count))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
+            HStack(spacing: DesignTokens.spacingM) {
+                ThemePageTitle(
+                    title: CardL10n.text(.cardsTitle),
+                    subtitle: CardL10n.count(.cardsCount, count: model.items.count),
+                    suit: .diamond
+                )
+                Spacer()
+                if model.isImporting {
+                    SuitLoader()
+                }
+                Button {
+                    isNewCardPresented = true
+                } label: {
+                    Label(CardL10n.text(.cardsNew), systemImage: "plus")
+                }
+                .buttonStyle(.themePrimary)
+                .disabled(!model.isServiceAvailable)
             }
 
-            Picker("", selection: Binding(
-                get: { model.mode },
-                set: { model.setMode($0) }
-            )) {
-                Text(CardL10n.text(.cardsModeList)).tag(CardLibraryMode.list)
-                Text(CardL10n.text(.cardsModeOverview)).tag(CardLibraryMode.overview)
+            HStack(spacing: DesignTokens.spacingS) {
+                ThemeSegmented(
+                    selection: Binding(
+                        get: { model.mode },
+                        set: { model.setMode($0) }
+                    ),
+                    options: [
+                        (CardLibraryMode.list, CardL10n.text(.cardsModeList)),
+                        (CardLibraryMode.overview, CardL10n.text(.cardsModeOverview)),
+                    ]
+                )
+                .fixedSize()
+                searchField
+                tagPicker
+                Spacer(minLength: 0)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 150)
-
-            searchField
-            tagPicker
-            Spacer()
-
-            if model.isImporting {
-                ProgressView()
-                    .controlSize(.small)
-            }
-            Button {
-                isNewCardPresented = true
-            } label: {
-                Label(CardL10n.text(.cardsNew), systemImage: "plus")
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(!model.isServiceAvailable)
         }
-        .padding(.horizontal, DesignTokens.spacingL)
-        .padding(.vertical, DesignTokens.spacingM)
     }
 
     private var searchField: some View {
         HStack(spacing: DesignTokens.spacingXS) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(Palette.inkSecondary)
             TextField(CardL10n.text(.cardsSearchPlaceholder), text: $model.query)
                 .textFieldStyle(.plain)
+                .font(.cardiary(.callout))
                 .onSubmit { Task { await model.loadFirstPage() } }
             if !model.query.isEmpty {
                 Button {
                     model.query = ""
                     Task { await model.loadFirstPage() }
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ThemeIconButtonStyle(diameter: 18))
                 .help(CardL10n.text(.cardsSearchClear))
             }
         }
-        .padding(.horizontal, DesignTokens.spacingS)
-        .padding(.vertical, 5)
-        .background(.quaternary.opacity(0.35), in: Capsule())
-        .frame(maxWidth: 240)
+        .padding(.horizontal, DesignTokens.spacingM)
+        .padding(.vertical, 6)
+        .background(Palette.sunken, in: Capsule(style: .continuous))
+        .frame(maxWidth: 260)
     }
 
     private var tagPicker: some View {
-        Picker(CardL10n.text(.cardsTagLabel), selection: Binding(
-            get: { model.tagFilter },
-            set: { value in
-                model.tagFilter = value
-                Task { await model.loadFirstPage() }
-            }
-        )) {
-            Text(CardL10n.text(.cardsTagAll)).tag(String?.none)
-            ForEach(model.tags, id: \.self) { tag in
-                Text(tag).tag(String?.some(tag))
-            }
-        }
-        .labelsHidden()
-        .frame(width: 140)
+        ThemeMenuPicker(
+            selection: Binding(
+                get: { model.tagFilter },
+                set: { value in
+                    model.tagFilter = value
+                    Task { await model.loadFirstPage() }
+                }
+            ),
+            options: [(String?.none, CardL10n.text(.cardsTagAll))]
+                + model.tags.map { (String?.some($0), "# " + $0) }
+        )
+        .help(CardL10n.text(.cardsTagLabel))
     }
 
     // MARK: - 左側：列表或總覽
@@ -146,13 +149,19 @@ struct CardLibraryView: View {
         if model.mode == .overview {
             overviewGrid
         } else {
-            VStack(spacing: 0) {
+            VStack(spacing: DesignTokens.spacingS) {
                 if model.isLoading && model.items.isEmpty {
-                    centeredMessage(CardL10n.text(.cardsLoading), systemImage: "hourglass")
+                    VStack(spacing: DesignTokens.spacingS) {
+                        SuitLoader()
+                        Text(CardL10n.text(.cardsLoading))
+                            .font(.cardiary(.callout))
+                            .foregroundStyle(Palette.inkSecondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if model.items.isEmpty {
-                    centeredMessage(
-                        model.query.isEmpty ? CardL10n.text(.cardsEmpty) : CardL10n.text(.cardsNoResults),
-                        systemImage: "rectangle.on.rectangle"
+                    ThemeEmptyState(
+                        text: model.query.isEmpty ? CardL10n.text(.cardsEmpty) : CardL10n.text(.cardsNoResults),
+                        suit: .diamond
                     )
                 } else {
                     cardList
@@ -164,7 +173,7 @@ struct CardLibraryView: View {
 
     private var cardList: some View {
         ScrollView {
-            LazyVStack(spacing: 1) {
+            LazyVStack(spacing: DesignTokens.spacingS) {
                 ForEach(model.items) { item in
                     CardRowView(
                         item: item,
@@ -179,32 +188,40 @@ struct CardLibraryView: View {
                     }
                 }
                 if model.isLoadingMore {
-                    ProgressView(CardL10n.text(.cardsLoadingMore))
-                        .controlSize(.small)
-                        .padding(DesignTokens.spacingM)
+                    HStack(spacing: DesignTokens.spacingS) {
+                        SuitLoader(size: 7)
+                        Text(CardL10n.text(.cardsLoadingMore))
+                            .font(.cardiary(.caption))
+                            .foregroundStyle(Palette.inkSecondary)
+                    }
+                    .padding(DesignTokens.spacingM)
                 }
             }
-            .padding(DesignTokens.spacingS)
         }
+        .scrollIndicators(.never)
     }
 
     private var overviewGrid: some View {
         ScrollView {
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 12, maximum: 20), spacing: 2)],
-                spacing: 2
+                columns: [GridItem(.adaptive(minimum: 16, maximum: 22), spacing: 4)],
+                spacing: 4
             ) {
                 ForEach(model.items) { item in
                     let appearance = model.appearance(for: item)
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(CardFreshnessFill.overview(for: appearance))
-                        .frame(height: 14)
+                    let suit = CardFreshnessFill.suit(kind: item.kind, lifecycle: item.lifecycle)
+                    let isSelected = model.selectedCardId == item.id
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(CardFreshnessFill.overview(for: appearance, suit: suit))
+                        .frame(height: 18)
                         .overlay {
-                            if model.selectedCardId == item.id {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .stroke(Color.primary, lineWidth: 1.5)
+                            if isSelected {
+                                Circle()
+                                    .fill(Palette.onAccent)
+                                    .frame(width: 6, height: 6)
                             }
                         }
+                        .scaleEffect(isSelected ? 1.15 : 1)
                         .help("\(item.title) · \(CardL10n.text(.cardsDetailFreshness).replacingOccurrences(of: "{value}", with: "\(appearance.value)"))")
                         .onTapGesture {
                             Task {
@@ -217,17 +234,20 @@ struct CardLibraryView: View {
                         }
                 }
             }
-            .padding(DesignTokens.spacingS)
+            .padding(DesignTokens.spacingM)
             if model.isLoadingMore {
-                ProgressView().controlSize(.small).padding(DesignTokens.spacingS)
+                SuitLoader(size: 7).padding(DesignTokens.spacingS)
             }
         }
+        .scrollIndicators(.never)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.panelRadius, style: .continuous))
         .overlay(alignment: .bottom) {
             Text(CardL10n.text(.cardsOverviewHint))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(6)
-                .background(.regularMaterial, in: Capsule())
+                .font(.cardiary(.caption2))
+                .foregroundStyle(Palette.inkSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Palette.sunken, in: Capsule(style: .continuous))
                 .padding(.bottom, DesignTokens.spacingS)
         }
     }
@@ -243,34 +263,56 @@ struct CardLibraryView: View {
                 onDelete: { isDeletePresented = true }
             )
         } else {
-            centeredMessage(CardL10n.text(.cardsDetailEmpty), systemImage: "rectangle.portrait")
+            ThemeEmptyState(text: CardL10n.text(.cardsDetailEmpty), suit: .heart)
         }
     }
 
+    @ViewBuilder
     private var statusBanners: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
-            if let error = model.errorMessage {
-                MessageBanner(text: error, systemImage: "exclamationmark.triangle", tint: .red)
-            }
-            if let notice = model.noticeMessage {
-                MessageBanner(text: notice, systemImage: "checkmark.circle", tint: .secondary)
-            }
+        if let error = model.errorMessage {
+            MessageBanner(text: error, systemImage: "exclamationmark.triangle", tone: .red)
         }
-        .padding(.horizontal, DesignTokens.spacingM)
-        .padding(.bottom, model.errorMessage == nil && model.noticeMessage == nil ? 0 : DesignTokens.spacingS)
+        if let notice = model.noticeMessage {
+            MessageBanner(text: notice, systemImage: "checkmark.circle", tone: .sage)
+        }
     }
+}
 
-    private func centeredMessage(_ text: String, systemImage: String) -> some View {
-        VStack(spacing: DesignTokens.spacingS) {
-            Image(systemName: systemImage)
-                .font(.title2)
-                .foregroundStyle(.secondary)
-            Text(text)
-                .font(.callout)
-                .foregroundStyle(.secondary)
+/// 新鮮度的七格膠囊：亮起的格數對應新鮮度。
+struct FreshnessPips: View {
+    let appearance: CardFreshnessAppearance
+    let suit: Suit
+    var count = 7
+
+    var body: some View {
+        let lit = Int((appearance.fraction * Double(count)).rounded(.up))
+        HStack(spacing: 2) {
+            ForEach(0..<count, id: \.self) { index in
+                Capsule(style: .continuous)
+                    .fill(index < lit ? suit.color : Palette.hover)
+                    .frame(width: 9, height: 5)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(DesignTokens.spacingL)
+        .accessibilityHidden(true)
+    }
+}
+
+/// 花色圖塊：卡片的花色，深淺跟著新鮮度。
+private struct SuitTile: View {
+    let suit: Suit
+    let appearance: CardFreshnessAppearance
+    var size: CGFloat = 34
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.32, style: .continuous)
+                .fill(CardFreshnessFill.block(for: appearance, suit: suit))
+            Image(systemName: suit.symbol)
+                .font(.system(size: size * 0.42, weight: .bold))
+                .foregroundStyle(Palette.onAccent)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 }
 
@@ -281,85 +323,87 @@ private struct CardRowView: View {
     let onSelect: () -> Void
     let onRefresh: () -> Void
 
-    var body: some View {
-        HStack(alignment: .top, spacing: DesignTokens.spacingS) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(Color.accentColor.opacity(0.15 + 0.85 * appearance.fraction))
-                .frame(width: 4)
+    @State private var isHovered = false
 
-            VStack(alignment: .leading, spacing: 3) {
+    private var suit: Suit {
+        CardFreshnessFill.suit(kind: item.kind, lifecycle: item.lifecycle)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            SuitTile(suit: suit, appearance: appearance)
+
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: DesignTokens.spacingXS) {
                     Text(item.title)
-                        .font(.callout.weight(.medium))
+                        .font(.cardiary(.callout, weight: .semibold))
                         .lineLimit(1)
                     if item.broken {
-                        Text(CardL10n.text(.cardsBroken))
-                            .font(.caption2)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(.red.opacity(0.15), in: Capsule())
+                        ThemeChip(text: CardL10n.text(.cardsBroken), tone: .red)
                     }
                     if item.lifecycle == .cold {
                         Image(systemName: "snowflake")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Palette.gray)
                     }
-                    Spacer()
+                    Spacer(minLength: 0)
                     Text(CardL10n.text(item.kind.cardStringKey))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(.cardiary(.caption2, weight: .semibold))
+                        .foregroundStyle(suit == .spade ? Palette.inkSecondary : suit.color)
                 }
                 if let snippet = item.snippet, !snippet.isEmpty {
                     Text(snippet)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.cardiary(.caption))
+                        .foregroundStyle(Palette.inkSecondary)
                         .lineLimit(2)
                 } else if let summary = item.summary, !summary.isEmpty {
                     Text(summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.cardiary(.caption))
+                        .foregroundStyle(Palette.inkSecondary)
                         .lineLimit(2)
                 }
                 HStack(spacing: DesignTokens.spacingXS) {
+                    FreshnessPips(appearance: appearance, suit: suit)
                     Text(CardL10n.format(.cardsDetailFreshness, value: "\(appearance.value)"))
-                        .font(.caption2)
-                        .foregroundStyle(appearance.needsAttention ? .orange : .secondary)
-                    if appearance.isExpired {
-                        Text(CardL10n.text(.cardsExpired))
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    } else if appearance.needsAttention {
-                        Text(CardL10n.text(.cardsNearZero))
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
+                        .font(.cardiary(.caption2, monospacedDigits: true))
+                        .foregroundStyle(appearance.needsAttention ? Palette.orange : Palette.inkSecondary)
+                        .fixedSize()
+                        .help(attentionText ?? "")
                     if appearance.needsAttention {
                         Button(CardL10n.text(.cardsDetailRefresh)) { onRefresh() }
-                            .buttonStyle(.link)
-                            .font(.caption2)
+                            .buttonStyle(.themeLink)
+                            .controlSize(.small)
+                            .fixedSize()
                     }
-                    Spacer()
-                    ForEach(item.tags.prefix(3), id: \.self) { tag in
-                        Text(tag)
-                            .font(.caption2)
-                            .padding(.horizontal, 5)
-                            .background(.quaternary.opacity(0.4), in: Capsule())
+                    Spacer(minLength: 0)
+                    if let tag = item.tags.first {
+                        ThemeChip(text: "# " + tag, tone: suit.tone)
+                            .layoutPriority(-1)
                     }
                 }
             }
         }
-        .padding(DesignTokens.spacingS)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(rowBackground, in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius))
-        .contentShape(Rectangle())
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: DesignTokens.cardRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius, style: .continuous))
         .onTapGesture { onSelect() }
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// 快歸零或已歸零的說明，放在新鮮度的懸停提示裡。
+    private var attentionText: String? {
+        if appearance.isExpired { return CardL10n.text(.cardsExpired) }
+        if appearance.needsAttention { return CardL10n.text(.cardsNearZero) }
+        return nil
     }
 
     private var rowBackground: Color {
-        if isSelected {
-            return Color.accentColor.opacity(0.18)
-        }
-        return CardFreshnessFill.block(for: appearance)
+        if isSelected { return suit.soft }
+        return isHovered ? Palette.surface.opacity(0.75) : Palette.surface
     }
 }
 
@@ -370,104 +414,84 @@ private struct CardDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
-                titleBlock
+            VStack(alignment: .leading, spacing: DesignTokens.spacingL) {
+                faceBlock
                 if card.kind == .image {
                     imageBlock
                 } else if card.kind == .audio {
                     Label(CardL10n.text(.cardsAudioCard), systemImage: "waveform")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .font(.cardiary(.callout))
+                        .foregroundStyle(Palette.inkSecondary)
                 }
                 bodyBlock
                 linksBlock
                 if let error = model.errorMessage {
-                    MessageBanner(text: error, systemImage: "exclamationmark.triangle", tint: .red)
+                    MessageBanner(text: error, systemImage: "exclamationmark.triangle", tone: .red)
                 }
                 if let notice = model.noticeMessage {
-                    MessageBanner(text: notice, systemImage: "checkmark.circle", tint: .secondary)
+                    MessageBanner(text: notice, systemImage: "checkmark.circle", tone: .sage)
                 }
                 HStack {
                     Spacer()
                     Button(role: .destructive, action: onDelete) {
-                        Label(CardL10n.text(.cardsDetailDelete), systemImage: "trash")
+                        Label(CardL10n.text(.cardsDetailDelete), systemImage: "trash.fill")
                     }
+                    .controlSize(.small)
                 }
             }
             .padding(DesignTokens.spacingL)
         }
+        .scrollIndicators(.never)
     }
 
     private var appearance: CardFreshnessAppearance {
         model.freshness.appearance(for: card.cardId, fallback: card.freshness)
     }
 
-    private var freshnessBadge: some View {
-        HStack(spacing: DesignTokens.spacingS) {
-            Text(CardL10n.format(.cardsDetailFreshness, value: "\(appearance.value)"))
-                .font(.caption)
-                .foregroundStyle(appearance.needsAttention ? Color.orange : Color.secondary)
-            ProgressView(value: appearance.fraction)
-                .progressViewStyle(.linear)
-                .frame(width: 90)
-            if appearance.needsAttention {
-                Button(CardL10n.text(.cardsDetailRefresh)) {
-                    Task { await model.refresh(cardId: card.cardId) }
+    private var suit: Suit {
+        CardFreshnessFill.suit(kind: card.kind, lifecycle: card.lifecycle)
+    }
+
+    /// 卡面：花色、種類、標題、新鮮度與標籤，放在花色的淺色色塊上。
+    private var faceBlock: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
+            HStack(spacing: DesignTokens.spacingS) {
+                SuitTile(suit: suit, appearance: appearance, size: 30)
+                ThemeChip(text: CardL10n.text(card.kind.cardStringKey), tone: suit.tone, filled: true)
+                Spacer()
+                if !model.isEditing {
+                    Button(CardL10n.text(.cardsDetailEdit)) { model.beginEditing() }
+                        .buttonStyle(ThemeButtonStyle(kind: .surface))
+                        .controlSize(.small)
                 }
-                .controlSize(.small)
             }
-        }
-    }
-
-    private var titleBlock: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
-            titleRow
-            freshnessRow
-            tagsRow
-        }
-    }
-
-    private var titleRow: some View {
-        HStack(alignment: .firstTextBaseline) {
             Text(card.title)
-                .font(.title3.bold())
+                .font(.cardiary(.title2, weight: .bold))
                 .textSelection(.enabled)
-            Spacer()
-            Text(CardL10n.text(card.kind.cardStringKey))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var freshnessRow: some View {
-        HStack(spacing: DesignTokens.spacingS) {
-            freshnessBadge
-            Spacer()
-            editButton
-        }
-    }
-
-    private var editButton: some View {
-        Group {
-            if !model.isEditing {
-                Button(CardL10n.text(.cardsDetailEdit)) { model.beginEditing() }
+            HStack(spacing: DesignTokens.spacingS) {
+                Text(CardL10n.format(.cardsDetailFreshness, value: "\(appearance.value)"))
+                    .font(.cardiary(.callout, weight: .semibold, monospacedDigits: true))
+                    .foregroundStyle(appearance.needsAttention ? Palette.orange : Palette.ink)
+                FreshnessPips(appearance: appearance, suit: suit)
+                if appearance.needsAttention {
+                    Button(CardL10n.text(.cardsDetailRefresh)) {
+                        Task { await model.refresh(cardId: card.cardId) }
+                    }
+                    .buttonStyle(ThemeButtonStyle(kind: .primary, tone: .orange))
                     .controlSize(.small)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var tagsRow: some View {
-        if !card.tags.isEmpty {
-            HStack(spacing: DesignTokens.spacingXS) {
-                ForEach(card.tags, id: \.self) { tag in
-                    Text(tag)
-                        .font(.caption)
-                        .padding(.horizontal, 6)
-                        .background(.quaternary.opacity(0.4), in: Capsule())
                 }
+                Spacer(minLength: 0)
+                Image(systemName: suit.symbol)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(suit.color)
+                    .accessibilityHidden(true)
+            }
+            if !card.tags.isEmpty {
+                FlowTags(tags: card.tags, tone: suit.tone)
             }
         }
+        .padding(DesignTokens.spacingL)
+        .background(suit.soft, in: RoundedRectangle(cornerRadius: DesignTokens.cardRadius, style: .continuous))
     }
 
     @ViewBuilder
@@ -477,13 +501,13 @@ private struct CardDetailView: View {
                 .resizable()
                 .scaledToFit()
                 .frame(maxHeight: 260)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius, style: .continuous))
         } else {
-            HStack(spacing: DesignTokens.spacingXS) {
-                ProgressView().controlSize(.small)
+            HStack(spacing: DesignTokens.spacingS) {
+                SuitLoader(size: 7)
                 Text(CardL10n.text(.cardsImageLoading))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
             }
         }
     }
@@ -494,38 +518,35 @@ private struct CardDetailView: View {
             VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
                 TextEditor(text: $model.editingBody)
                     .font(.body.monospaced())
-                    .frame(minHeight: 220)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: DesignTokens.cornerRadius)
-                            .stroke(.quaternary)
-                    }
+                    .themeEditor(minHeight: 220)
                 HStack {
                     Button(CardL10n.text(.cardsDetailSave)) {
                         Task { await model.save() }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                    .buttonStyle(.themePrimary)
                     Button(CardL10n.text(.cardsDetailCancel)) { model.cancelEditing() }
-                        .controlSize(.small)
+                        .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
                 }
+                .controlSize(.small)
             }
         } else {
             Text(card.body.isEmpty ? CardL10n.text(.cardsBodyPlaceholder) : card.body)
-                .font(.body)
+                .font(.cardiary(.body))
+                .foregroundStyle(card.body.isEmpty ? Palette.inkTertiary : Palette.ink)
+                .lineSpacing(3)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DesignTokens.spacingXS)
         }
     }
 
     private var linksBlock: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
-            Divider()
-            Text(CardL10n.text(.cardsBacklinks))
-                .font(.caption.weight(.semibold))
+        VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
+            SuitHeading(title: CardL10n.text(.cardsBacklinks), suit: .club, font: .cardiary(.caption, weight: .bold))
             if card.links.backlinks.isEmpty && card.links.outgoing.isEmpty {
                 Text(CardL10n.text(.cardsLinksNone))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkTertiary)
             } else {
                 ForEach(card.links.backlinks, id: \.self) { id in
                     linkRow(id, systemImage: "arrow.turn.up.left")
@@ -535,13 +556,15 @@ private struct CardDetailView: View {
                 }
             }
             if !card.sources.isEmpty {
-                Text(CardL10n.text(.cardsSources))
-                    .font(.caption.weight(.semibold))
+                SuitHeading(title: CardL10n.text(.cardsSources), suit: .diamond, font: .cardiary(.caption, weight: .bold))
+                    .padding(.top, DesignTokens.spacingXS)
                 ForEach(card.sources, id: \.self) { id in
-                    linkRow(id, systemImage: "doc.on.doc")
+                    linkRow(id, systemImage: "doc.on.doc.fill")
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .themeBlock(Palette.canvas, radius: DesignTokens.cardRadius)
     }
 
     private func linkRow(_ id: String, systemImage: String) -> some View {
@@ -550,9 +573,79 @@ private struct CardDetailView: View {
             Task { await model.select(cardId: id) }
         } label: {
             Label(title, systemImage: systemImage)
-                .font(.caption)
+                .lineLimit(1)
         }
-        .buttonStyle(.link)
+        .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .pink))
+        .controlSize(.small)
+    }
+}
+
+/// 會自動換行的標籤列。
+private struct FlowTags: View {
+    let tags: [String]
+    let tone: Tone
+
+    var body: some View {
+        FlowLayout(spacing: DesignTokens.spacingXS) {
+            ForEach(tags, id: \.self) { tag in
+                Text("# " + tag)
+                    .font(.cardiary(.caption, weight: .semibold))
+                    .foregroundStyle(tone == .gray ? Palette.inkSecondary : tone.color)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3)
+                    .background(Palette.surface.opacity(0.8), in: Capsule(style: .continuous))
+            }
+        }
+    }
+}
+
+/// 簡單的換行排版：放不下就換到下一行。
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(proposal: proposal, subviews: subviews)
+        let height = rows.last.map { $0.y + $0.height } ?? 0
+        let width = rows.map { $0.width }.max() ?? 0
+        return CGSize(width: proposal.width ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = arrange(proposal: ProposedViewSize(width: bounds.width, height: nil), subviews: subviews)
+        for row in rows {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: bounds.minY + row.y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+        }
+    }
+
+    private struct Row {
+        var indices: [Int] = []
+        var y: CGFloat = 0
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func arrange(proposal: ProposedViewSize, subviews: Subviews) -> [Row] {
+        let maxWidth = proposal.width ?? .infinity
+        var rows: [Row] = []
+        var current = Row()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let needed = current.indices.isEmpty ? size.width : current.width + spacing + size.width
+            if needed > maxWidth, !current.indices.isEmpty {
+                rows.append(current)
+                current = Row(y: current.y + current.height + spacing)
+            }
+            current.width = current.indices.isEmpty ? size.width : current.width + spacing + size.width
+            current.height = max(current.height, size.height)
+            current.indices.append(index)
+        }
+        if !current.indices.isEmpty { rows.append(current) }
+        return rows
     }
 }
 
@@ -567,23 +660,19 @@ private struct NewCardSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
-            Text(CardL10n.text(.cardsNew))
-                .font(.title3.bold())
+            ThemePageTitle(title: CardL10n.text(.cardsNew), suit: .club)
             TextField(CardL10n.text(.cardsNewTitle), text: $title)
             TextField(CardL10n.text(.cardsNewTags), text: $tags)
             Text(CardL10n.text(.cardsNewBody))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.cardiary(.caption, weight: .semibold))
+                .foregroundStyle(Palette.inkSecondary)
             TextEditor(text: $bodyText)
                 .font(.body.monospaced())
-                .frame(minHeight: 160)
-                .overlay {
-                    RoundedRectangle(cornerRadius: DesignTokens.cornerRadius)
-                        .stroke(.quaternary)
-                }
+                .themeEditor(minHeight: 160)
             HStack {
                 Spacer()
                 Button(AppL10n.text(.genericCancel)) { dismiss() }
+                    .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
                 Button(CardL10n.text(.cardsCreateAction)) {
                     isSaving = true
                     Task {
@@ -596,12 +685,15 @@ private struct NewCardSheet: View {
                         if created { dismiss() }
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.themePrimary)
+                .keyboardShortcut(.defaultAction)
                 .disabled(isSaving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .padding(DesignTokens.spacingL)
+        .padding(DesignTokens.spacingXL)
         .frame(width: 520)
+        .background(Palette.canvas)
+        .cardiaryTheme()
     }
 
     private static func parseTags(_ text: String) -> [String] {

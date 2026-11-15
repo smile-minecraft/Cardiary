@@ -26,13 +26,9 @@ struct ApprovalPanelView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             if !model.isKnown {
-                Text(AppL10n.text(.approvalServiceUnavailable))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                emptyLine(AppL10n.text(.approvalServiceUnavailable), systemImage: "bolt.horizontal.fill")
             } else if model.requests.isEmpty {
-                Text(AppL10n.text(.inspectorApprovalsEmpty))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                emptyLine(AppL10n.text(.inspectorApprovalsEmpty), systemImage: "checkmark")
             } else {
                 ForEach(model.requests) { approval in
                     ApprovalCard(model: model, approval: approval)
@@ -40,26 +36,36 @@ struct ApprovalPanelView: View {
             }
 
             if model.isPaused {
-                Label(AppL10n.text(.approvalPaused), systemImage: "pause.circle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                MessageBanner(text: AppL10n.text(.approvalPaused), systemImage: "pause.fill", tone: .orange)
             }
             if let error = model.errorMessage {
-                MessageBanner(text: error, systemImage: "exclamationmark.triangle", tint: .red)
+                MessageBanner(text: error, systemImage: "exclamationmark.triangle", tone: .red)
             }
             if let notice = model.noticeMessage {
-                MessageBanner(text: notice, systemImage: "checkmark.circle", tint: .secondary)
+                MessageBanner(text: notice, systemImage: "checkmark.circle", tone: .sage)
             }
-
-            Divider()
 
             Button(role: .destructive) {
                 Task { await model.pauseAll() }
             } label: {
-                Label(AppL10n.text(.approvalPauseAll), systemImage: "pause.circle")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Label(AppL10n.text(.approvalPauseAll), systemImage: "pause.fill")
+                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.themeDanger)
             .disabled(!model.isKnown)
+        }
+    }
+
+    private func emptyLine(_ text: String, systemImage: String) -> some View {
+        HStack(spacing: DesignTokens.spacingS) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Palette.sage)
+                .frame(width: 22, height: 22)
+                .background(Palette.sageSoft, in: Circle())
+            Text(text)
+                .font(.cardiary(.callout))
+                .foregroundStyle(Palette.inkSecondary)
         }
     }
 }
@@ -75,35 +81,45 @@ private struct ApprovalCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
-            Text(approval.title)
-                .font(.callout.weight(.semibold))
-            if let toolName = approval.toolName {
-                Text(AppL10n.format(.approvalTool, value: toolName))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: DesignTokens.spacingS) {
+                Image(systemName: "hand.raised.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Palette.onAccent)
+                    .frame(width: 24, height: 24)
+                    .background(Palette.orange, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(approval.title)
+                        .font(.cardiary(.callout, weight: .semibold))
+                    if let toolName = approval.toolName {
+                        Text(AppL10n.format(.approvalTool, value: toolName))
+                            .font(.cardiary(.caption))
+                            .foregroundStyle(Palette.inkSecondary)
+                    }
+                }
             }
             if let summary = approval.summary, !summary.isEmpty {
                 Text(summary)
-                    .font(.caption)
+                    .font(.cardiary(.caption))
                     .textSelection(.enabled)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.ink)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(DesignTokens.spacingS)
+                    .background(Palette.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
             }
 
             if isDeciding {
-                HStack(spacing: DesignTokens.spacingXS) {
-                    ProgressView()
-                        .controlSize(.small)
+                HStack(spacing: DesignTokens.spacingS) {
+                    SuitLoader(size: 7)
                     Text(AppL10n.text(.approvalDeciding))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.cardiary(.caption))
+                        .foregroundStyle(Palette.inkSecondary)
                 }
             } else {
                 decisionButtons
             }
         }
-        .padding(DesignTokens.spacingM)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+        .themeBlock(Palette.orangeSoft)
     }
 
     private var decisionButtons: some View {
@@ -112,22 +128,20 @@ private struct ApprovalCard: View {
                 Button(AppL10n.text(.approvalApprove)) {
                     Task { await model.approve(approval) }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .buttonStyle(.themePrimary)
 
                 Button(AppL10n.text(.approvalReject)) {
                     Task { await model.reject(approval) }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
             }
             if approval.supportsApproveAlways {
                 Button(AppL10n.text(.approvalAlways)) {
                     Task { await model.approveAlways(approval) }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.themeLink)
             }
         }
+        .controlSize(.small)
     }
 }

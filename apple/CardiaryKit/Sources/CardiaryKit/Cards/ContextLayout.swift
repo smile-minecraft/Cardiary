@@ -74,9 +74,11 @@ public struct ContextTreemapItem: Equatable, Sendable {
     }
 }
 
-/// 矩形樹狀圖（ordered squarified treemap）。
+/// 矩形樹狀圖（ordered strip treemap）。
 ///
-/// 分層由左到右，層內依上下文順序排列；面積對應 token。面積佔比小於
+/// 依上下文順序由左到右、由上到下排列，一列放不下就換列；面積對應 token。
+/// 每列放幾張由長寬比決定：加入下一張會讓整列的平均長寬比變差時就換列，
+/// 所以窄的檢視欄也會排成多列，不會變成一排細長條。面積佔比小於
 /// `minimumShare` 的卡合併成一塊「其他 N 張」，位置落在第一張小卡的位置。
 public enum ContextTreemap {
     public static func layout(
@@ -89,20 +91,11 @@ public enum ContextTreemap {
         let total = visible.reduce(0) { $0 + $1.tokenEstimate }
         guard total > 0 else { return [] }
 
-        let layers = groupByLayer(visible)
-        var items: [ContextTreemapItem] = []
-        var x = 0.0
-        for (index, layer) in layers.enumerated() {
-            let width =
-                index == layers.count - 1
-                ? size.width - x
-                : size.width * Double(layer.tokens) / Double(total)
-            let rect = ContextLayoutRect(x: x, y: 0, width: width, height: size.height)
-            let nodes = mergeSmallCards(layer.entries, total: total, minimumShare: minimumShare)
-            items.append(contentsOf: squarify(nodes, in: rect))
-            x += width
+        // 小卡只在同一層裡合併，合併塊留在該層第一張小卡的位置。
+        let nodes = groupByLayer(visible).flatMap {
+            mergeSmallCards($0.entries, total: total, minimumShare: minimumShare)
         }
-        return items
+        return strips(nodes, in: size)
     }
 
     // MARK: - 分層與合併
@@ -168,95 +161,60 @@ public enum ContextTreemap {
         return nodes
     }
 
-    // MARK: - Squarify
+    // MARK: - 依序換列
 
-    private static func squarify(
-        _ nodes: [Node],
-        in rect: ContextLayoutRect
-    ) -> [ContextTreemapItem] {
-        guard rect.area > 0, !nodes.isEmpty else { return [] }
-        var remaining = nodes
-        var remainingTokens = nodes.reduce(0) { $0 + $1.tokens }
-        var area = rect
+    private static func strips(_ nodes: [Node], in size: ContextLayoutSize) -> [ContextTreemapItem] {
+        let total = Double(nodes.reduce(0) { $0 + $1.tokens })
+        guard total > 0 else { return [] }
+        // 每個 token 佔的面積；整張圖剛好填滿。
+        let scale = size.width * size.height / total
         var result: [ContextTreemapItem] = []
+        var y = 0.0
+        var start = 0
 
-        while !remaining.isEmpty, remainingTokens > 0, area.width > 0, area.height > 0 {
-            let side = min(area.width, area.height)
-            var row: [Node] = []
-            var rowTokens = 0
-            var rowMax = 0
-            var rowMin = Int.max
-            var index = 0
-
-            while index < remaining.count {
-                let candidate = remaining[index]
-                let candidateMax = max(rowMax, candidate.tokens)
-                let candidateMin = min(rowMin, candidate.tokens)
-                if !row.isEmpty {
-                    let currentWorst = worst(rowTokens: rowTokens, maxTokens: rowMax, minTokens: rowMin, side: side)
-                    let candidateWorst = worst(
-                        rowTokens: rowTokens + candidate.tokens,
-                        maxTokens: candidateMax,
-                        minTokens: candidateMin,
-                        side: side
-                    )
-                    if candidateWorst > currentWorst { break }
-                }
-                row.append(candidate)
-                rowTokens += candidate.tokens
-                rowMax = candidateMax
-                rowMin = candidateMin
-                index += 1
+        while start < nodes.count {
+            var end = start + 1
+            var best = averageAspect(nodes[start..<end], width: size.width, scale: scale)
+            while end < nodes.count {
+                let candidate = averageAspect(nodes[start...end], width: size.width, scale: scale)
+                if candidate > best { break }
+                best = candidate
+                end += 1
             }
 
-            let rowArea = area.area * Double(rowTokens) / Double(remainingTokens)
-            var placed: [ContextTreemapItem] = []
-            if area.width >= area.height {
-                // 直條：由上而下堆疊。
-                let stripWidth = min(area.width, rowArea / area.height)
-                var y = area.y
-                for node in row {
-                    let height = area.height * Double(node.tokens) / Double(rowTokens)
-                    placed.append(item(node, rect: ContextLayoutRect(
-                        x: area.x,
-                        y: y,
-                        width: stripWidth,
-                        height: height
-                    )))
-                    y += height
-                }
-                area = ContextLayoutRect(
-                    x: area.x + stripWidth,
-                    y: area.y,
-                    width: max(0, area.width - stripWidth),
-                    height: area.height
-                )
-            } else {
-                // 橫條：由左而右排列。
-                let stripHeight = min(area.height, rowArea / area.width)
-                var x = area.x
-                for node in row {
-                    let width = area.width * Double(node.tokens) / Double(rowTokens)
-                    placed.append(item(node, rect: ContextLayoutRect(
-                        x: x,
-                        y: area.y,
-                        width: width,
-                        height: stripHeight
-                    )))
-                    x += width
-                }
-                area = ContextLayoutRect(
-                    x: area.x,
-                    y: area.y + stripHeight,
-                    width: area.width,
-                    height: max(0, area.height - stripHeight)
-                )
+            let row = nodes[start..<end]
+            let rowTokens = Double(row.reduce(0) { $0 + $1.tokens })
+            // 最後一列吃掉剩下的高度，避免浮點誤差留下縫。
+            let height = end == nodes.count ? size.height - y : rowTokens * scale / size.width
+            var x = 0.0
+            for (offset, node) in row.enumerated() {
+                let width = offset == row.count - 1
+                    ? size.width - x
+                    : size.width * Double(node.tokens) / rowTokens
+                result.append(item(node, rect: ContextLayoutRect(x: x, y: y, width: width, height: height)))
+                x += width
             }
-            result.append(contentsOf: placed)
-            remaining.removeFirst(row.count)
-            remainingTokens -= rowTokens
+            y += height
+            start = end
         }
         return result
+    }
+
+    /// 一列裡每塊的平均長寬比（長邊除以短邊，1 是正方形）。
+    private static func averageAspect(
+        _ row: ArraySlice<Node>,
+        width: Double,
+        scale: Double
+    ) -> Double {
+        let rowTokens = Double(row.reduce(0) { $0 + $1.tokens })
+        guard rowTokens > 0 else { return .infinity }
+        let height = rowTokens * scale / width
+        let sum = row.reduce(0.0) { partial, node in
+            let blockWidth = width * Double(node.tokens) / rowTokens
+            guard blockWidth > 0, height > 0 else { return partial + .infinity }
+            return partial + max(blockWidth / height, height / blockWidth)
+        }
+        return sum / Double(row.count)
     }
 
     private static func item(_ node: Node, rect: ContextLayoutRect) -> ContextTreemapItem {
@@ -277,20 +235,6 @@ public enum ContextTreemap {
         }
     }
 
-    private static func worst(
-        rowTokens: Int,
-        maxTokens: Int,
-        minTokens: Int,
-        side: Double
-    ) -> Double {
-        guard rowTokens > 0, minTokens > 0, side > 0 else { return .infinity }
-        let sideSquared = side * side
-        let rowSquared = Double(rowTokens) * Double(rowTokens)
-        return max(
-            sideSquared * Double(maxTokens) / rowSquared,
-            rowSquared / (sideSquared * Double(minTokens))
-        )
-    }
 }
 
 // MARK: - 比例熱力格

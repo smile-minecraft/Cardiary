@@ -2347,6 +2347,23 @@
         }
       }
     },
+    "sidebarSectionTools": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cards & tools"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "卡片與工具"
+          }
+        }
+      }
+    },
     "statusIdle": {
       "extractionState": "manual",
       "localizations": {

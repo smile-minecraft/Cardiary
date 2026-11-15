@@ -21,41 +21,41 @@ enum AppRegistry {
         app.sidebar.register(SidebarSlot(
             id: conversationsSlotId,
             titleKey: .sidebarSectionSession,
-            systemImage: "bubble.left.and.bubble.right"
+            systemImage: "bubble.left.and.bubble.right.fill"
         ))
         // 卡片庫與封存區：位置在這裡保留，內容由 `CardUIModule.install` 掛上。
         app.sidebar.register(SidebarSlot(
             id: cardsSlotId,
             titleKey: .destinationCards,
-            systemImage: "square.grid.2x2",
+            systemImage: "rectangle.stack.fill",
             placeholderKey: .placeholderCards
         ))
         app.sidebar.register(SidebarSlot(
             id: archiveSlotId,
             titleKey: .destinationArchive,
-            systemImage: "archivebox",
+            systemImage: "archivebox.fill",
             placeholderKey: .placeholderArchive
         ))
         // 通知、白板與文件：M1 只保留入口。
         app.sidebar.register(SidebarSlot(
             id: "notifications",
             titleKey: .destinationNotifications,
-            systemImage: "bell"
+            systemImage: "bell.fill"
         ))
         app.sidebar.register(SidebarSlot(
             id: "whiteboard",
             titleKey: .destinationWhiteboard,
-            systemImage: "rectangle.on.rectangle"
+            systemImage: "paintbrush.pointed.fill"
         ))
         app.sidebar.register(SidebarSlot(
             id: "documents",
             titleKey: .destinationDocuments,
-            systemImage: "doc.text"
+            systemImage: "doc.text.fill"
         ))
         app.sidebar.register(SidebarSlot(
             id: settingsSlotId,
             titleKey: .settingsTitle,
-            systemImage: "gearshape"
+            systemImage: "gearshape.fill"
         ))
 
         // 檢視欄：審批面板是真的實作；上下文面板由卡片介面提供。

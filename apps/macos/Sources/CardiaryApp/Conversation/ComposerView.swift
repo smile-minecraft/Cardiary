@@ -1,7 +1,7 @@
 import CardiaryKit
 import SwiftUI
 
-/// 輸入框：送出、選擇排隊或插話，以及中斷目前回合。
+/// 輸入框：送出、選擇排隊或插話，以及中斷目前回合。整個輸入區是一塊圓角色塊。
 struct ComposerView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var conversation: ConversationModel
@@ -9,71 +9,84 @@ struct ComposerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
             if let error = conversation.errorMessage {
-                messageBar(error, systemImage: "exclamationmark.triangle", tint: .red)
+                messageBar(error, systemImage: "exclamationmark.triangle.fill", tone: .red)
             }
             if let notice = conversation.noticeMessage {
-                messageBar(notice, systemImage: "info.circle", tint: .secondary)
+                messageBar(notice, systemImage: "info.circle.fill", tone: .gray)
             }
 
-            HStack(alignment: .bottom, spacing: DesignTokens.spacingS) {
+            VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
                 TextField(
                     AppL10n.text(.conversationInputPlaceholder),
                     text: $conversation.composerText,
                     axis: .vertical
                 )
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .font(.cardiary(.body))
                 .lineLimit(1...8)
-                .frame(minHeight: DesignTokens.composerMinHeight, alignment: .top)
+                .frame(minHeight: 22, alignment: .top)
                 .onSubmit {
                     Task { await conversation.send() }
                 }
 
-                Picker("", selection: $conversation.delivery) {
-                    Text(AppL10n.text(.conversationDeliveryQueue)).tag(DeliveryMode.queue)
-                    Text(AppL10n.text(.conversationDeliverySteer)).tag(DeliveryMode.steer)
-                }
-                .labelsHidden()
-                .frame(width: 96)
-                .help(AppL10n.text(.conversationDeliveryQueue) + " / " + AppL10n.text(.conversationDeliverySteer))
+                HStack(spacing: DesignTokens.spacingS) {
+                    ThemeSegmented(
+                        selection: $conversation.delivery,
+                        options: [
+                            (DeliveryMode.queue, AppL10n.text(.conversationDeliveryQueue)),
+                            (DeliveryMode.steer, AppL10n.text(.conversationDeliverySteer)),
+                        ]
+                    )
+                    .fixedSize()
+                    .help(AppL10n.text(.conversationDeliveryQueue) + " / " + AppL10n.text(.conversationDeliverySteer))
 
-                if conversation.isBusy {
-                    Button {
-                        Task { await conversation.interrupt() }
-                    } label: {
-                        Image(systemName: "stop.circle")
+                    Spacer()
+
+                    if conversation.isBusy {
+                        Button {
+                            Task { await conversation.interrupt() }
+                        } label: {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .buttonStyle(ThemeIconButtonStyle(fill: Palette.redSoft, foreground: Palette.red, diameter: 32))
+                        .help(AppL10n.text(.conversationInterrupt))
                     }
-                    .help(AppL10n.text(.conversationInterrupt))
-                }
 
-                Button {
-                    Task { await conversation.send() }
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
+                    Button {
+                        Task { await conversation.send() }
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 14, weight: .bold))
+                    }
+                    .buttonStyle(ThemeIconButtonStyle(fill: Palette.red, foreground: Palette.onAccent, diameter: 32))
+                    .disabled(conversation.isSending || !model.isServiceAvailable)
+                    .help(AppL10n.text(.conversationSend))
+                    .accessibilityLabel(AppL10n.text(.conversationSend))
                 }
-                .buttonStyle(.borderless)
-                .disabled(conversation.isSending || !model.isServiceAvailable)
-                .help(AppL10n.text(.conversationSend))
             }
+            .padding(.horizontal, DesignTokens.spacingM)
+            .padding(.top, DesignTokens.spacingM)
+            .padding(.bottom, DesignTokens.spacingS)
+            .background(Palette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.panelRadius, style: .continuous))
         }
-        .padding(DesignTokens.spacingM)
+        .frame(maxWidth: DesignTokens.transcriptMaxWidth)
+        .padding(.horizontal, DesignTokens.spacingL)
+        .padding(.bottom, DesignTokens.spacingL)
+        .padding(.top, DesignTokens.spacingXS)
+        .frame(maxWidth: .infinity)
     }
 
-    private func messageBar(_ text: String, systemImage: String, tint: Color) -> some View {
-        HStack(spacing: DesignTokens.spacingXS) {
-            Image(systemName: systemImage)
-                .foregroundStyle(tint)
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(tint)
-            Spacer()
+    private func messageBar(_ text: String, systemImage: String, tone: Tone) -> some View {
+        HStack(spacing: DesignTokens.spacingS) {
+            MessageBanner(text: text, systemImage: systemImage, tone: tone)
             Button {
                 conversation.dismissMessages()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.caption2)
+                    .font(.system(size: 9, weight: .bold))
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(ThemeIconButtonStyle(diameter: 22))
         }
     }
 }

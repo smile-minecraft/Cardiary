@@ -51,6 +51,8 @@ enum ImportWindow {
             defer: false
         )
         window.title = ImportL10n.text(.importTitle)
+        window.titlebarAppearsTransparent = true
+        window.backgroundColor = NSColor(Palette.canvas)
         window.isReleasedWhenClosed = false
         window.contentViewController = NSHostingController(rootView: ImportView(model: model))
 

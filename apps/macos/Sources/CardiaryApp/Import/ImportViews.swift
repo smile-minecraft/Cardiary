@@ -31,17 +31,21 @@ public struct ImportView: View {
                 reimportSection
                 actions
                 if let message = model.errorMessage {
-                    Text(message)
-                        .font(.callout)
-                        .foregroundStyle(.red)
+                    MessageBanner(text: message, systemImage: "exclamationmark.triangle", tone: .red)
                 }
                 if let progress = model.progress {
-                    Text(ImportL10n.format(
-                        .importProgress,
-                        value: "\(progress.done) / \(progress.total)"
-                    ))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(ImportL10n.format(
+                            .importProgress,
+                            value: "\(progress.done) / \(progress.total)"
+                        ))
+                        .font(.cardiary(.callout, monospacedDigits: true))
+                        .foregroundStyle(Palette.inkSecondary)
+                        ThemeProgressBar(
+                            value: progress.total > 0 ? Double(progress.done) / Double(progress.total) : 0,
+                            tone: .orange
+                        )
+                    }
                 }
                 if let preview = model.preview {
                     previewSection(preview)
@@ -52,8 +56,11 @@ public struct ImportView: View {
             }
             .padding(DesignTokens.spacingXL)
             .frame(maxWidth: DesignTokens.settingsMaxWidth, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
+        .scrollIndicators(.never)
+        .background(Palette.canvas)
+        .cardiaryTheme()
         .task {
             if case .idle = model.phase {
                 await model.load()
@@ -64,44 +71,47 @@ public struct ImportView: View {
     // MARK: - 區塊
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
-            Text(ImportL10n.text(.importTitle))
-                .font(.title2.bold())
-            Text(ImportL10n.text(.importSubtitle))
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
+        ThemePageTitle(
+            title: ImportL10n.text(.importTitle),
+            subtitle: ImportL10n.text(.importSubtitle),
+            suit: .diamond
+        )
     }
 
     private var sourceSection: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
-            Text(ImportL10n.text(.importSources))
-                .font(.headline)
+            SuitHeading(title: ImportL10n.text(.importSources), suit: .heart)
             ForEach(model.sources) { source in
-                HStack(alignment: .firstTextBaseline, spacing: DesignTokens.spacingM) {
-                    Button {
-                        Task { await model.chooseSource(kind: source.kind, path: source.path) }
-                    } label: {
-                        HStack(spacing: DesignTokens.spacingS) {
-                            Image(systemName: model.sourceKind == source.kind
-                                ? "largecircle.fill.circle"
-                                : "circle")
+                let isChosen = model.sourceKind == source.kind
+                Button {
+                    Task { await model.chooseSource(kind: source.kind, path: source.path) }
+                } label: {
+                    HStack(alignment: .top, spacing: DesignTokens.spacingM) {
+                        Image(systemName: isChosen ? "checkmark" : Suit.diamond.symbol)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(isChosen ? Palette.onAccent : Palette.orange)
+                            .frame(width: 24, height: 24)
+                            .background(isChosen ? Palette.red : Palette.orangeSoft, in: Circle())
+                        VStack(alignment: .leading, spacing: 2) {
                             Text(source.name)
+                                .font(.cardiary(.callout, weight: .semibold))
+                            Text(source.detail)
+                                .font(.cardiary(.caption))
+                                .foregroundStyle(Palette.inkSecondary)
+                            if let unverified = source.unverified {
+                                Text(ImportL10n.format(.importSourceUnverified, value: unverified))
+                                    .font(.cardiary(.caption))
+                                    .foregroundStyle(Palette.orange)
+                            }
                         }
+                        Spacer(minLength: 0)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!source.available && source.kind != .generic)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(source.detail)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                        if let unverified = source.unverified {
-                            Text(ImportL10n.format(.importSourceUnverified, value: unverified))
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                    }
+                    .padding(DesignTokens.spacingM)
+                    .background(isChosen ? Palette.redSoft : Palette.canvas, in: RoundedRectangle(cornerRadius: DesignTokens.cardRadius, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius, style: .continuous))
                 }
+                .buttonStyle(.plain)
+                .disabled(!source.available && source.kind != .generic)
             }
             if model.sourceKind == .generic {
                 HStack(spacing: DesignTokens.spacingM) {
@@ -110,14 +120,15 @@ public struct ImportView: View {
                     }
                     if !model.sourcePath.isEmpty {
                         Text(model.sourcePath)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(.cardiary(.caption))
+                            .foregroundStyle(Palette.inkSecondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
                 }
             }
         }
+        .themeBlock(Palette.surface, radius: DesignTokens.panelRadius, padding: DesignTokens.spacingL)
     }
 
     private func chooseFolder() {
@@ -133,32 +144,30 @@ public struct ImportView: View {
 
     private var fileSection: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
-            Text(ImportL10n.text(.importCategoriesTitle))
-                .font(.headline)
+            SuitHeading(title: ImportL10n.text(.importCategoriesTitle), suit: .club)
             if model.files.isEmpty {
                 Text(ImportL10n.text(.importChooseFolder))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.callout))
+                    .foregroundStyle(Palette.inkSecondary)
             } else {
                 ForEach(model.files) { file in
                     HStack(spacing: DesignTokens.spacingM) {
                         Text(file.relativePath)
-                            .font(.callout)
+                            .font(.cardiary(.callout))
                             .lineLimit(1)
                         Spacer()
-                        Picker("", selection: categoryBinding(for: file)) {
-                            Text(ImportL10n.text(.importUnsupported)).tag(ImportCategory?.none)
-                            ForEach(ImportCategory.allCases, id: \.self) { category in
-                                Text(ImportL10n.text(category.titleKey)).tag(ImportCategory?.some(category))
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 160)
+                        ThemeMenuPicker(
+                            selection: categoryBinding(for: file),
+                            options: [(ImportCategory?.none, ImportL10n.text(.importUnsupported))]
+                                + ImportCategory.allCases.map { (ImportCategory?.some($0), ImportL10n.text($0.titleKey)) }
+                        )
                         .disabled(!file.supported)
                     }
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .themeBlock(Palette.surface, radius: DesignTokens.panelRadius, padding: DesignTokens.spacingL)
     }
 
     private var includesPersonaField: Bool {
@@ -168,15 +177,11 @@ public struct ImportView: View {
     private var personaSection: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
             Text(ImportL10n.text(.importPersonaProvided))
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                .font(.cardiary(.callout))
+                .foregroundStyle(Palette.inkSecondary)
             TextEditor(text: $model.personaText)
-                .font(.callout)
-                .frame(minHeight: 96)
-                .overlay(
-                    RoundedRectangle(cornerRadius: DesignTokens.cornerRadius)
-                        .stroke(.quaternary)
-                )
+                .font(.cardiary(.callout))
+                .themeEditor(minHeight: 96)
                 .accessibilityLabel(ImportL10n.text(.importPersonaPlaceholder))
         }
     }
@@ -205,11 +210,13 @@ public struct ImportView: View {
                 }
                 if model.requiresRange {
                     Text(ImportL10n.text(.importRangeRequired))
-                        .font(.callout)
-                        .foregroundStyle(.orange)
+                        .font(.cardiary(.callout))
+                        .foregroundStyle(Palette.orange)
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .themeBlock(Palette.surface, radius: DesignTokens.panelRadius, padding: DesignTokens.spacingL)
     }
 
     /// 有重複項目時才出現；打開後，重複的項目可以勾選再建立一份。
@@ -219,8 +226,8 @@ public struct ImportView: View {
             VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
                 Toggle(ImportL10n.text(.importReimport), isOn: $model.allowReimport)
                 Text(ImportL10n.text(.importReimportDetail))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
             }
         }
     }
@@ -236,6 +243,7 @@ public struct ImportView: View {
             Button(ImportL10n.count(.importWrite, count: model.selectedCardCount)) {
                 Task { await model.write() }
             }
+            .buttonStyle(.themePrimary)
             .disabled(!model.canWrite)
 
             Spacer()
@@ -243,11 +251,11 @@ public struct ImportView: View {
             Button(ImportL10n.text(.importSelectAll)) {
                 model.selectAll()
             }
-            .buttonStyle(.link)
+            .buttonStyle(.themeLink)
             Button(ImportL10n.text(.importDeselectAll)) {
                 model.deselectAll()
             }
-            .buttonStyle(.link)
+            .buttonStyle(.themeLink)
         }
     }
 
@@ -260,10 +268,10 @@ public struct ImportView: View {
                 Text(ImportL10n.count(.importNewCards, count: preview.newCards))
                 if preview.duplicates > 0 {
                     Text(ImportL10n.count(.importDuplicates, count: preview.duplicates))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Palette.inkSecondary)
                 }
             }
-            .font(.headline)
+            .font(.cardiary(.headline))
 
             if let estimate = preview.conversationEstimate {
                 estimateSection(estimate)
@@ -295,12 +303,14 @@ public struct ImportView: View {
                 )
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .themeBlock(Palette.surface, radius: DesignTokens.panelRadius, padding: DesignTokens.spacingL)
     }
 
     private func estimateSection(_ estimate: ImportConversationEstimate) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(ImportL10n.text(.importEstimateTitle))
-                .font(.headline)
+                .font(.cardiary(.headline))
             Text(ImportL10n.count(.importEstimateConversations, count: estimate.candidates))
             Text(ImportL10n.count(.importEstimateTokens, count: estimate.estimatedModelInputTokens))
             if estimate.existingSummaries > 0 {
@@ -308,10 +318,10 @@ public struct ImportView: View {
                     .importEstimateExisting,
                     count: estimate.existingSummaries
                 ))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Palette.inkSecondary)
             }
         }
-        .font(.callout)
+        .font(.cardiary(.callout))
     }
 
     private func categorySection(
@@ -320,7 +330,7 @@ public struct ImportView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(ImportL10n.text(category.titleKey))
-                .font(.headline)
+                .font(.cardiary(.headline))
             ForEach(items) { item in
                 selectableRow(
                     item: item,
@@ -335,7 +345,7 @@ public struct ImportView: View {
     private func conversationList(_ conversations: [ImportConversation]) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(ImportL10n.text(.importCategoryConversation))
-                .font(.headline)
+                .font(.cardiary(.headline))
             ForEach(conversations) { conversation in
                 let item = ImportPreviewItem(
                     key: conversation.key,
@@ -363,14 +373,14 @@ public struct ImportView: View {
     private func skillList(_ skills: [ImportPreviewSkill]) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(ImportL10n.text(.importCategorySkill))
-                .font(.headline)
+                .font(.cardiary(.headline))
             ForEach(skills) { skill in
                 Toggle(isOn: binding(for: skill.key, duplicate: skill.existingSkillPath != nil)) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(skill.name)
                         Text(skill.description)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(.cardiary(.caption))
+                            .foregroundStyle(Palette.inkSecondary)
                     }
                 }
                 .disabled(skill.existingSkillPath != nil)
@@ -393,15 +403,15 @@ public struct ImportView: View {
                 .disabled(isDuplicate && !model.allowReimport)
                 if isDuplicate {
                     Text(ImportL10n.text(.importDuplicate))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.cardiary(.caption))
+                        .foregroundStyle(Palette.inkSecondary)
                 }
                 Spacer()
             }
             if !item.body.isEmpty {
                 Text(item.body)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
                     .lineLimit(3)
             }
             if showsCoreMemory || item.category == .user || item.category == .memory {
@@ -409,7 +419,7 @@ public struct ImportView: View {
                     ImportL10n.text(.importCoreMemory),
                     isOn: coreMemoryBinding(for: item.key)
                 )
-                .font(.caption)
+                .font(.cardiary(.caption))
                 .disabled(!isSelected)
             }
         }
@@ -418,11 +428,11 @@ public struct ImportView: View {
     private func skippedList(_ skipped: [ImportSkippedItem]) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(ImportL10n.text(.importSkippedTitle))
-                .font(.headline)
+                .font(.cardiary(.headline))
             ForEach(Array(skipped.enumerated()), id: \.offset) { _, item in
                 Text("\(item.path)：\(item.reason)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
             }
         }
     }
@@ -430,11 +440,11 @@ public struct ImportView: View {
     private func noteList(_ title: String, _ notes: [String]) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(title)
-                .font(.headline)
+                .font(.cardiary(.headline))
             ForEach(Array(notes.enumerated()), id: \.offset) { _, note in
                 Text(note)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
             }
         }
     }
@@ -444,19 +454,21 @@ public struct ImportView: View {
     private func resultSection(_ result: ImportWriteResult) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(ImportL10n.text(.importResultTitle))
-                .font(.headline)
+                .font(.cardiary(.headline))
             Text(ImportL10n.count(.importResultCards, count: result.cardsCreated))
             Text(ImportL10n.count(.importResultSkills, count: result.skillsCopied))
             if result.duplicates > 0 {
                 Text(ImportL10n.count(.importDuplicates, count: result.duplicates))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.inkSecondary)
             }
             if result.failed > 0 {
                 Text(ImportL10n.format(.importFailed, value: "\(result.failed)"))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Palette.red)
             }
         }
-        .font(.callout)
+        .font(.cardiary(.callout))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .themeBlock(Palette.sageSoft, radius: DesignTokens.panelRadius, padding: DesignTokens.spacingL)
     }
 
     // MARK: - 綁定

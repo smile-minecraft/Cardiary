@@ -245,16 +245,6 @@ struct PlaceholderTextView: View {
     let messageKey: AppString
 
     var body: some View {
-        VStack(spacing: DesignTokens.spacingS) {
-            Image(systemName: "rectangle.dashed")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-            Text(AppL10n.text(messageKey))
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(DesignTokens.spacingL)
+        ThemeEmptyState(text: AppL10n.text(messageKey), suit: .club, systemImage: "sparkles")
     }
 }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 三欄主視窗：左側欄、主內容、可收合的檢視欄。
+/// 三欄主視窗：左側欄、主內容、可收合的檢視欄。三欄用底色區分，不畫分隔線。
 struct MainWindowView: View {
     @ObservedObject var model: AppModel
 
@@ -19,9 +19,9 @@ struct MainWindowView: View {
                     MainContentView(model: model)
                 }
                 .frame(minWidth: DesignTokens.contentMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+                .background(Palette.canvas)
 
                 if model.isInspectorVisible {
-                    Divider()
                     InspectorHostView(model: model)
                         .frame(
                             minWidth: DesignTokens.inspectorMinWidth,
@@ -29,11 +29,15 @@ struct MainWindowView: View {
                             maxWidth: DesignTokens.inspectorMaxWidth,
                             maxHeight: .infinity
                         )
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
             // 檢視欄與內容欄都以可用寬度排列；視窗縮小時不能讓內容溢出被裁切。
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Palette.canvas)
+            .animation(.easeOut(duration: 0.2), value: model.isInspectorVisible)
         }
+        .toolbarBackground(Palette.canvas, for: .windowToolbar)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -43,7 +47,10 @@ struct MainWindowView: View {
                         AppL10n.text(model.isInspectorVisible ? .inspectorHide : .inspectorShow),
                         systemImage: "sidebar.trailing"
                     )
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(model.isInspectorVisible ? Palette.red : Palette.inkSecondary)
                 }
+                .buttonStyle(ThemeIconButtonStyle(diameter: 30))
                 .help(AppL10n.text(model.isInspectorVisible ? .inspectorHide : .inspectorShow))
             }
         }

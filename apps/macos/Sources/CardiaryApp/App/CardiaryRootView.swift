@@ -22,6 +22,8 @@ public struct CardiaryRootView: View {
             }
         }
         .frame(minWidth: DesignTokens.windowMinWidth, minHeight: DesignTokens.windowMinHeight)
+        .background(Palette.canvas)
+        .cardiaryTheme()
     }
 }
 
@@ -31,44 +33,68 @@ struct UnavailableView: View {
     let folderState: FolderPresentation.Availability
 
     var body: some View {
-        VStack(spacing: DesignTokens.spacingL) {
-            Image(systemName: "externaldrive.badge.questionmark")
-                .font(.system(size: 42))
-                .foregroundStyle(.secondary)
+        StatusCard(suit: .diamond, systemImage: "externaldrive.badge.questionmark") {
             Text(AppL10n.text(.unavailableTitle))
-                .font(.title2.bold())
+                .font(.cardiary(.title2, weight: .bold))
             Text(AppL10n.format(.folderLabel, value: model.bridge.folder.path ?? model.bridge.folder.displayName ?? "—"))
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                .font(.cardiary(.callout))
+                .foregroundStyle(Palette.inkSecondary)
+                .padding(.horizontal, DesignTokens.spacingM)
+                .padding(.vertical, DesignTokens.spacingXS)
+                .background(Palette.sunken, in: Capsule(style: .continuous))
             Text(AppL10n.text(.unavailableBody))
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: DesignTokens.firstRunMaxWidth)
+                .foregroundStyle(Palette.inkSecondary)
             HStack(spacing: DesignTokens.spacingM) {
                 Button(AppL10n.text(.unavailableChooseFolder)) { model.chooseFolder() }
+                    .buttonStyle(.themePrimary)
                     .keyboardShortcut(.defaultAction)
                 Button(AppL10n.text(.unavailableRetry)) { model.retry() }
             }
+            .padding(.top, DesignTokens.spacingS)
         }
-        .padding(DesignTokens.spacingXL)
     }
 }
 
 /// 服務或協定版本不符：重連沒有用，要更新 App。
 struct NeedsUpdateView: View {
     var body: some View {
-        VStack(spacing: DesignTokens.spacingL) {
-            Image(systemName: "arrow.down.circle")
-                .font(.system(size: 42))
-                .foregroundStyle(.secondary)
+        StatusCard(suit: .spade, systemImage: "arrow.down.circle") {
             Text(AppL10n.text(.updateRequiredTitle))
-                .font(.title2.bold())
+                .font(.cardiary(.title2, weight: .bold))
             Text(AppL10n.text(.updateRequiredBody))
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: DesignTokens.firstRunMaxWidth)
+                .foregroundStyle(Palette.inkSecondary)
         }
+    }
+}
+
+/// 置中的大色塊：花色圖示、標題、說明與動作。資料不可用與需要更新共用。
+private struct StatusCard<Content: View>: View {
+    let suit: Suit
+    let systemImage: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(spacing: DesignTokens.spacingL) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(suit.soft)
+                    .frame(width: 76, height: 76)
+                Image(systemName: systemImage)
+                    .font(.system(size: 32, weight: .semibold))
+                    .foregroundStyle(suit.color)
+            }
+            content
+            SuitDivider()
+                .frame(width: 160)
+                .padding(.top, DesignTokens.spacingS)
+        }
+        .frame(maxWidth: DesignTokens.firstRunMaxWidth)
         .padding(DesignTokens.spacingXL)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.panelRadius, style: .continuous))
+        .padding(DesignTokens.spacingXL)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -79,19 +105,24 @@ struct ConnectionBanner: View {
     var body: some View {
         if let text {
             HStack(spacing: DesignTokens.spacingS) {
-                Image(systemName: "bolt.horizontal.circle")
-                    .foregroundStyle(.orange)
+                Image(systemName: "bolt.horizontal.circle.fill")
+                    .foregroundStyle(Palette.orange)
                 Text(text)
-                    .font(.callout)
+                    .font(.cardiary(.callout))
                 Spacer()
                 if case .disconnected = model.bridge.connection {
                     Button(AppL10n.text(.connectionRetry)) { model.retry() }
+                        .buttonStyle(ThemeButtonStyle(kind: .primary, tone: .orange))
                         .controlSize(.small)
+                } else {
+                    SuitLoader(size: 7)
                 }
             }
             .padding(.horizontal, DesignTokens.spacingM)
             .padding(.vertical, DesignTokens.spacingS)
-            .background(.orange.opacity(0.12))
+            .background(Palette.orangeSoft, in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
+            .padding(.horizontal, DesignTokens.spacingM)
+            .padding(.top, DesignTokens.spacingS)
         }
     }
 

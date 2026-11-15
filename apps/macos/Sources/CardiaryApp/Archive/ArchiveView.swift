@@ -7,13 +7,13 @@ struct ArchiveView: View {
     @ObservedObject var model: ArchiveModel
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: DesignTokens.spacingM) {
             header
-            Divider()
             content
             statusBanners
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .padding(DesignTokens.spacingL)
+        .background(Palette.canvas)
         .task {
             if model.items.isEmpty {
                 await model.reload()
@@ -40,36 +40,27 @@ struct ArchiveView: View {
 
     private var header: some View {
         HStack(spacing: DesignTokens.spacingM) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(CardL10n.text(.archiveTitle))
-                    .font(.title3.bold())
-                Text(countText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            ThemePageTitle(title: CardL10n.text(.archiveTitle), subtitle: countText, suit: .spade)
             Spacer()
             if model.isPreviewingDeletion {
-                HStack(spacing: DesignTokens.spacingXS) {
-                    ProgressView()
-                        .controlSize(.small)
+                HStack(spacing: DesignTokens.spacingS) {
+                    SuitLoader(size: 7)
                     Text(CardL10n.text(.archivePreviewLoading))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.cardiary(.caption))
+                        .foregroundStyle(Palette.inkSecondary)
                 }
             } else if model.deletingSessionId != nil {
-                ProgressView()
-                    .controlSize(.small)
+                SuitLoader(size: 7)
             }
             Button {
                 Task { await model.reload() }
             } label: {
                 Label(CardL10n.text(.archiveRefresh), systemImage: "arrow.clockwise")
             }
+            .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
             .controlSize(.small)
             .disabled(model.isLoading)
         }
-        .padding(.horizontal, DesignTokens.spacingL)
-        .padding(.vertical, DesignTokens.spacingM)
     }
 
     private var countText: String {
@@ -96,41 +87,27 @@ struct ArchiveView: View {
                         )
                     }
                 }
-                .padding(DesignTokens.spacingM)
             }
+            .scrollIndicators(.never)
         }
     }
 
+    @ViewBuilder
     private var statusBanners: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
-            if let error = model.errorMessage {
-                MessageBanner(text: error, systemImage: "exclamationmark.triangle", tint: .red)
-            }
-            if let notice = model.noticeMessage {
-                MessageBanner(text: notice, systemImage: "checkmark.circle", tint: .secondary)
-            }
+        if let error = model.errorMessage {
+            MessageBanner(text: error, systemImage: "exclamationmark.triangle", tone: .red)
         }
-        .padding(.horizontal, DesignTokens.spacingM)
-        .padding(.bottom, model.errorMessage == nil && model.noticeMessage == nil ? 0 : DesignTokens.spacingS)
+        if let notice = model.noticeMessage {
+            MessageBanner(text: notice, systemImage: "checkmark.circle", tone: .sage)
+        }
     }
 
     private func centeredMessage(_ text: String, systemImage: String) -> some View {
-        VStack(spacing: DesignTokens.spacingS) {
-            Image(systemName: systemImage)
-                .font(.title2)
-                .foregroundStyle(.secondary)
-            Text(text)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(DesignTokens.spacingL)
+        ThemeEmptyState(text: text, suit: .spade, systemImage: systemImage)
     }
 
     private func centeredSpinner() -> some View {
-        ProgressView()
-            .controlSize(.regular)
+        SuitLoader(size: 11)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(DesignTokens.spacingL)
     }
@@ -143,57 +120,60 @@ private struct ArchiveRowView: View {
     let onDelete: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: DesignTokens.spacingM) {
-            Image(systemName: "archivebox")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-                .frame(width: 28)
+        HStack(alignment: .center, spacing: DesignTokens.spacingM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Palette.graySoft)
+                    .frame(width: 38, height: 38)
+                Image(systemName: "archivebox.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Palette.gray)
+            }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(entry.title)
-                    .font(.body.weight(.medium))
+                    .font(.cardiary(.body, weight: .semibold))
                     .lineLimit(1)
 
                 Text(CardL10n.format(.archiveArchivedAt, value: Self.displayDate(entry.archivedAt)))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
 
                 Text(CardL10n.format(.archivePurgeAt, value: Self.displayDate(entry.purgeAt)))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: DesignTokens.spacingXS) {
+            VStack(alignment: .trailing, spacing: DesignTokens.spacingS) {
                 remainingBadge
                 HStack(spacing: DesignTokens.spacingXS) {
                     Button(action: onUnarchive) {
                         Text(CardL10n.text(.archiveUnarchive))
                     }
-                    .controlSize(.small)
                     Button(action: onDelete) {
                         Text(CardL10n.text(.archiveDelete))
                     }
-                    .controlSize(.small)
-                    .tint(.red)
+                    .buttonStyle(.themeDanger)
                 }
+                .controlSize(.small)
             }
         }
-        .padding(DesignTokens.spacingM)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+        .themeBlock(Palette.surface, radius: DesignTokens.cardRadius)
     }
 
     @ViewBuilder
     private var remainingBadge: some View {
         if let remainingDays {
-            Text(CardL10n.count(.archiveRemainingDays, count: remainingDays))
-                .font(.caption.bold().monospacedDigit())
-                .foregroundStyle(remainingDays <= 1 ? .red : .secondary)
+            ThemeChip(
+                text: CardL10n.count(.archiveRemainingDays, count: remainingDays),
+                tone: remainingDays <= 1 ? .red : .gray,
+                systemImage: "hourglass",
+                filled: remainingDays <= 1
+            )
         } else {
-            Text(CardL10n.text(.archiveDaysUnknown))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            ThemeChip(text: CardL10n.text(.archiveDaysUnknown), tone: .gray)
         }
     }
 
@@ -214,54 +194,64 @@ private struct DeleteConfirmationView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
-            Label(CardL10n.text(.archiveDeleteConfirmTitle), systemImage: "trash")
-                .font(.headline)
+            HStack(spacing: DesignTokens.spacingM) {
+                Image(systemName: "trash.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Palette.onAccent)
+                    .frame(width: 34, height: 34)
+                    .background(Palette.red, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                Text(CardL10n.text(.archiveDeleteConfirmTitle))
+                    .font(.cardiary(.title3, weight: .bold))
+            }
 
             Text(target.sessionTitle)
-                .font(.body.weight(.medium))
+                .font(.cardiary(.body, weight: .semibold))
                 .lineLimit(2)
 
             Text(CardL10n.text(.archiveDeleteConfirmBody))
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                .font(.cardiary(.callout))
+                .foregroundStyle(Palette.inkSecondary)
 
-            VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
-                row(CardL10n.count(.archiveDeleteSessions, count: target.subtreeSessionIds.count))
-                row(CardL10n.count(.archiveDeleteExclusiveCards, count: target.exclusiveCards))
-                row(CardL10n.count(.archiveDeleteSharedCards, count: target.sharedCards))
-                row(CardL10n.count(.archiveDeleteAssets, count: target.assets))
+            VStack(alignment: .leading, spacing: 6) {
+                row(CardL10n.count(.archiveDeleteSessions, count: target.subtreeSessionIds.count), suit: .spade)
+                row(CardL10n.count(.archiveDeleteExclusiveCards, count: target.exclusiveCards), suit: .heart)
+                row(CardL10n.count(.archiveDeleteSharedCards, count: target.sharedCards), suit: .club)
+                row(CardL10n.count(.archiveDeleteAssets, count: target.assets), suit: .diamond)
             }
-            .padding(DesignTokens.spacingS)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: DesignTokens.cardRadius))
+            .themeBlock(Palette.surface, radius: DesignTokens.cardRadius)
 
-            HStack {
+            HStack(spacing: DesignTokens.spacingS) {
                 Spacer()
-                Button(CardL10n.text(.archiveDeleteCancel), action: onCancel)
-                    .disabled(isDeleting)
                 if isDeleting {
-                    ProgressView()
-                        .controlSize(.small)
+                    SuitLoader(size: 7)
                 }
+                Button(CardL10n.text(.archiveDeleteCancel), action: onCancel)
+                    .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(isDeleting)
                 Button(role: .destructive, action: onConfirm) {
                     Text(isDeleting
                         ? CardL10n.text(.archiveDeleting)
                         : CardL10n.text(.archiveDeleteConfirm))
                 }
+                .buttonStyle(.themePrimary)
                 .disabled(isDeleting)
             }
         }
-        .padding(DesignTokens.spacingL)
-        .frame(width: 420)
+        .padding(DesignTokens.spacingXL)
+        .frame(width: 440)
+        .background(Palette.canvas)
+        .cardiaryTheme()
     }
 
-    private func row(_ text: String) -> some View {
-        HStack {
-            Image(systemName: "circle.fill")
-                .font(.system(size: 4))
-                .foregroundStyle(.secondary)
+    private func row(_ text: String, suit: Suit) -> some View {
+        HStack(spacing: DesignTokens.spacingS) {
+            Image(systemName: suit.symbol)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(suit.color)
             Text(text)
-                .font(.callout.monospacedDigit())
+                .font(.cardiary(.callout, monospacedDigits: true))
         }
     }
 }
