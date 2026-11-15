@@ -53,8 +53,13 @@ import {
   protocolErrorFromEngine,
   type ProtocolErrorInfo,
 } from "../errors.js";
-import type { ModuleHostBridge } from "../modules/contract.js";
-import { ProtocolHandlerError, type AlwaysAllowService } from "../modules/contract.js";
+import { UNCONFIGURED_MODEL } from "../models/state.js";
+import {
+  HOST_SERVICE_NAMES,
+  ProtocolHandlerError,
+  type AlwaysAllowService,
+  type ModuleHostBridge,
+} from "../modules/contract.js";
 import { lifecycleErrorCode } from "../modules/registry.js";
 import type { DedupeRecord, StorageBundle } from "../storage/interfaces.js";
 import { constantTimeEqual, isValidToken } from "../tokens.js";
@@ -73,6 +78,27 @@ import { StreamLog, type StoredEvent } from "./streams.js";
 import { StreamingBuffer } from "./textBuffer.js";
 
 export type ModuleHandler = (payload: JSONObject) => Promise<JSONObject>;
+
+/**
+ * 建立對話前要看的模型狀態；由 `models` 服務（設定模組的 `ModelRuntime`）提供。
+ *
+ * 閘道只需要「主力模型是否已設定」，解析結果與引擎要用的模型仍由模型服務
+ * 與引擎持有，不在閘道重算一次。
+ */
+export interface ModelsAvailability {
+  configured(): boolean;
+}
+
+/**
+ * 模組主機實際物件（`LoadedModules`）帶著服務註冊表。
+ *
+ * `ModuleHostBridge` 是閘道看到的窄介面，刻意不含服務註冊表；`models` 由
+ * 設定模組提供、可能比閘道晚出現，所以每次建立對話都用結構檢查重新取，
+ * 不擴大模組契約。
+ */
+interface ModuleHostServices {
+  readonly hostServices?: { get(name: string): unknown };
+}
 
 export interface GatewayOptions {
   readonly engine: HostEngine;
@@ -1559,6 +1585,7 @@ export class Gateway {
   // ---- 會話請求 ---------------------------------------------------------
 
   async #createSession(request: ParsedRequest): Promise<Unknown> {
+    await this.#requireMainModel();
     const title = optionalString(request.payload, "title");
     const clientRequestId = optionalString(request.payload, "clientRequestId");
     const key = clientRequestId ? `session-create:${clientRequestId}` : null;
@@ -1580,6 +1607,77 @@ export class Gateway {
       await this.#options.storage.dedupe.complete(key, payload as unknown as JSONValue);
     }
     return response(request.id, "session.create", payload);
+  }
+
+  /**
+   * 建立對話前確認主力模型可用。
+   *
+   * 設計（`models.md` 第 6 節）：沒有設定 main 時 `session.create` 回
+   * `unsupported`、`details.reason = "model_not_configured"`，使用者不必等到
+   * 第一次請求才看到失敗。
+   *
+   * 判斷分兩步：
+   *
+   * 1. 引擎建立對話時實際會用的主力模型（`getModelSettings().roles.main`）
+   *    必須不是「沒有設定」的佔位值；否則對話建立後第一個請求一定失敗。
+   * 2. 需要回原因碼時才看 `models` 服務。服務存在且明確回報未設定，就是
+   *    設計要的 `model_not_configured`；服務缺席或查詢失敗代表主機拿不到
+   *    模型設定，回 `model_unavailable`。
+   *
+   * 沒有設定模組的組裝（假引擎、腳本化模型、`--engine fake`）由引擎自己
+   * 持有模型，引擎的設定就是事實；不能因為 `models` 服務缺席而擋掉可用的
+   * 對話。`models` 服務由設定模組在啟用時提供，可能比閘道晚出現，所以每次
+   * 建立對話都重新取。
+   */
+  async #requireMainModel(): Promise<void> {
+    const models = this.#modelsService();
+    const configured = this.#modelsConfigured(models);
+    const settings = await this.#options.engine.getModelSettings();
+    if (!isUnconfigured(settings.roles.main)) return;
+    if (configured === false) {
+      throw new RequestFailure(
+        protocolError("unsupported", "尚未設定主力模型，請先在設定中選擇模型。", {
+          details: { reason: "model_not_configured" },
+        }),
+      );
+    }
+    // 服務缺席、查詢失敗，或服務說有模型但引擎沒有（兩邊不一致）：都不建立
+    // 一個第一個請求一定失敗的對話。
+    throw new RequestFailure(
+      protocolError("unsupported", "目前沒有可用的模型設定，請確認模型設定模組已啟用。", {
+        details: { reason: "model_unavailable" },
+      }),
+    );
+  }
+
+  /**
+   * `models` 服務回報的主力模型是否已設定。
+   *
+   * `undefined` 代表服務不存在或查詢失敗：呼叫端改看引擎的模型設定，不把
+   * 服務的錯誤當成閘道崩潰。
+   */
+  #modelsConfigured(models: ModelsAvailability | undefined): boolean | undefined {
+    if (models === undefined) return undefined;
+    try {
+      return models.configured();
+    } catch (error) {
+      this.#logger.warn("查詢模型設定失敗，改用引擎目前的模型", {
+        message: errorMessage(error),
+      });
+      return undefined;
+    }
+  }
+
+  /**
+   * 目前的 `models` 服務；沒有模組主機或設定模組沒提供時回 `undefined`。
+   *
+   * 服務的介面只需要 `configured()`；取不到不是錯誤，建立對話時再依引擎
+   * 當下的模型設定判斷。
+   */
+  #modelsService(): ModelsAvailability | undefined {
+    const host = this.#modules as (ModuleHostBridge & ModuleHostServices) | null;
+    const registry = host?.hostServices;
+    return registry?.get(HOST_SERVICE_NAMES.models) as ModelsAvailability | undefined;
   }
 
   async #createConversation(
@@ -2478,6 +2576,22 @@ function isLoopbackOrigin(origin: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * 引擎回報的「沒有設定模型」佔位值。
+ *
+ * 轉接層在沒有模型設定時用 `unconfigured/unconfigured` 填滿角色欄位；假引擎
+ * 與腳本化模型不會用它，所以這個值可以區分「真的沒有模型」與「模型由引擎
+ * 自己持有」。
+ */
+function isUnconfigured(
+  model: { readonly provider: string; readonly model: string } | undefined,
+): boolean {
+  return (
+    model === undefined ||
+    (model.provider === UNCONFIGURED_MODEL.provider && model.model === UNCONFIGURED_MODEL.model)
+  );
 }
 
 const ENGINE_ERROR_CODES = new Set([
