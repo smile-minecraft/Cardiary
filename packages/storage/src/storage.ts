@@ -126,9 +126,15 @@ export class Storage {
     let state: Database | null = null;
     let engine: Database | null = null;
     let cache: Database | null = null;
+    // 建立完成後由實例統一標記目前的連線；開啟前的失敗才用上面的區域變數。
+    let storage: Storage | null = null;
     const onDatabaseFailure = (error: unknown): void => {
       folder.markStorageFailed();
       // 任何一條連線失效都停止整個儲存層的寫入，不只失效的那一個。
+      if (storage !== null) {
+        storage.#markDatabasesFailed(error);
+        return;
+      }
       for (const database of [state, engine, cache]) {
         database?.markFailed(error);
       }
@@ -206,32 +212,11 @@ export class Storage {
         sizeBytes: cache.fileSize(),
       });
 
-      let storage: Storage | null = null;
-      const resetCacheIndex = (): Database => {
-        cache?.close();
-        for (const suffix of ["", "-wal", "-shm"]) {
-          const target = `${layout.absolute("cache/index.sqlite")}${suffix}`;
-          if (existsSync(target)) {
-            removeFileSafely(layout, target, ["cache"]);
-          }
+      const resetCacheIndex = (): void => {
+        if (storage === null) {
+          throw new StorageError("storage-failed", "儲存層尚未完成開啟");
         }
-        const reopened = openCacheDatabase({
-          filePath: layout.absolute("cache/index.sqlite"),
-          layout,
-          now,
-          ...(trace === undefined ? {} : { trace }),
-          onFailure: onDatabaseFailure,
-        }).db;
-        registry.register({
-          relPath: "cache/index.sqlite",
-          ownerKind: "index",
-          sizeBytes: reopened.fileSize(),
-        });
-        if (storage !== null) {
-          storage.#cache = reopened;
-        }
-        cache = reopened;
-        return reopened;
+        storage.#rebuildCache();
       };
 
       const deletions = new ConversationDeletionService({
@@ -239,14 +224,13 @@ export class Storage {
         engine,
         layout,
         registry,
-        resetCacheIndex: () => {
-          resetCacheIndex();
-        },
+        resetCacheIndex,
+        // 讀實例上的連線：暫停後重開快取會換一個，這裡不能留著開啟時的舊連線。
         cache: () => {
-          if (cache === null) {
-            throw new StorageError("storage-failed", "快取索引資料庫尚未開啟");
+          if (storage === null) {
+            throw new StorageError("storage-failed", "儲存層尚未完成開啟");
           }
-          return cache;
+          return storage.cache;
         },
         now,
         ...(trace === undefined ? {} : { trace }),
@@ -299,6 +283,13 @@ export class Storage {
     return this.#cache;
   }
 
+  /** 任何一條連線失效都停止整個儲存層的寫入；標記的是目前的連線，暫停重開後也一樣。 */
+  #markDatabasesFailed(error: unknown): void {
+    for (const database of [this.state, this.engine, this.#cache]) {
+      database.markFailed(error);
+    }
+  }
+
   /**
    * 暫停時關掉引擎資料庫連線。
    *
@@ -334,18 +325,37 @@ export class Storage {
     if (!this.#cache.isClosed) {
       return;
     }
-    this.#cache = openCacheDatabase({
+    this.#openCache();
+  }
+
+  /** 開一條快取連線並登記檔案大小；`reopenCache` 與刪除後重建共用。 */
+  #openCache(): Database {
+    const cache = openCacheDatabase({
       filePath: this.layout.absolute("cache/index.sqlite"),
       layout: this.layout,
       now: this.#now,
       ...(this.#trace === undefined ? {} : { trace: this.#trace }),
       onFailure: this.#onDatabaseFailure,
     }).db;
+    this.#cache = cache;
     this.registry.register({
       relPath: "cache/index.sqlite",
       ownerKind: "index",
-      sizeBytes: this.#cache.fileSize(),
+      sizeBytes: cache.fileSize(),
     });
+    return cache;
+  }
+
+  /** 刪除流程重建快取索引：關掉目前連線、刪檔、重開；快取本來就可以整區重來。 */
+  #rebuildCache(): Database {
+    this.#cache.close();
+    for (const suffix of ["", "-wal", "-shm"]) {
+      const target = `${this.layout.absolute("cache/index.sqlite")}${suffix}`;
+      if (existsSync(target)) {
+        removeFileSafely(this.layout, target, ["cache"]);
+      }
+    }
+    return this.#openCache();
   }
 
   /**

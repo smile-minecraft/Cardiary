@@ -4,7 +4,14 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ApprovalLedger, Storage, addDaysIso, newUlid, nowIso } from "../src/index.js";
+import {
+  ApprovalLedger,
+  CardIndexStore,
+  Storage,
+  addDaysIso,
+  newUlid,
+  nowIso,
+} from "../src/index.js";
 import { byteSearch } from "../src/testing.js";
 import { EngineFixture } from "./helpers/engine.js";
 import { createTempRoot, openTestStorage, type TempRoot } from "./helpers/temp.js";
@@ -506,9 +513,9 @@ describe("刪除對話", () => {
     mkdirSync(cardsDirectory, { recursive: true });
     mkdirSync(assetsDirectory, { recursive: true });
 
-    const exclusive = "01CARDEXCLUSIVE00000000001";
-    const shared = "01CARDSHARED00000000000002";
-    const pinned = "01CARDPINNED00000000000003";
+    const exclusive = newUlid();
+    const shared = newUlid();
+    const pinned = newUlid();
     const assetOf = (cardId: string): string => createHash("sha256").update(cardId).digest("hex");
 
     const writeCard = (cardId: string): void => {
@@ -539,6 +546,8 @@ describe("刪除對話", () => {
         nowIso(),
       );
     }
+    // 卡片庫的索引已完成；刪除時才會一併回收沒有引用的原檔。
+    new CardIndexStore({ db: storage.cache }).setReady(true);
     const now = nowIso();
     storage.state.run(
       `INSERT INTO conversations (conversation_id, title, created_at, updated_at, last_activity_at)
@@ -579,6 +588,10 @@ describe("刪除對話", () => {
     expect(existsSync(path.join(cardsDirectory, `${exclusive}.md`))).toBe(false);
     expect(existsSync(path.join(cardsDirectory, `${shared}.md`))).toBe(true);
     expect(existsSync(path.join(cardsDirectory, `${pinned}.md`))).toBe(true);
+    // 專屬卡片的原檔一起回收；共享與釘選卡片還在引用的原檔留著。
+    expect(existsSync(path.join(assetsDirectory, `${assetOf(exclusive)}.png`))).toBe(false);
+    expect(existsSync(path.join(assetsDirectory, `${assetOf(shared)}.png`))).toBe(true);
+    expect(existsSync(path.join(assetsDirectory, `${assetOf(pinned)}.png`))).toBe(true);
     expect(
       storage.state.get<{ n: number }>(
         "SELECT COUNT(*) AS n FROM card_state WHERE card_id = ?",

@@ -1,9 +1,10 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import type { Database, Queryable } from "./db.js";
 import { ApprovalLedger } from "./approvals.js";
-import { isCardFileName } from "./cards/files.js";
+import { assetIdsInText, listAssetFiles } from "./cards/asset-scan.js";
+import { LocalAssetStore } from "./cards/assets.js";
 import { CardIndexStore } from "./cards/index-store.js";
 import { RequestDedupeStore } from "./dedupe.js";
 import { StorageError } from "./errors.js";
@@ -349,9 +350,11 @@ export class ConversationDeletionService {
   /**
    * 卡片檔刪完後的收尾：清掉快取索引的列，回收沒有其他卡片檔引用的原檔。
    *
-   * 原檔的權威是 `cards/*.md` 的實際內容：任何檔案還寫著這個雜湊就保留；
-   * 索引的引用計數只是第二道保險（卡片已索引、檔案還沒寫完的中間狀態）。
-   * 掃描不到卡片檔就整批跳過，不能把「看不到」當成「沒有」。
+   * 原檔的回收規則與 `LocalAssetStore` 共用一份（`releaseCandidates`）：
+   * 索引未完成或掃描不到卡片檔就整批跳過；有任何卡片檔寫著這個雜湊就保留。
+   * 索引未完成同時代表其他查詢也不可信，寧可晚一點刪（設計見
+   * `docs/design/cards.md` 第 5 節）。索引列照樣先刪——幽靈列留著會讓
+   * `card.list` 看到已刪的卡。
    */
   #finishCardRemoval(cardIds: readonly string[], assetIds: readonly string[]): void {
     let index: CardIndexStore | null = null;
@@ -373,66 +376,24 @@ export class ConversationDeletionService {
     if (assetIds.length === 0) {
       return;
     }
-    const referenced = this.#cardFileAssetIds();
-    if (referenced === null) {
-      this.#trace("deletion:asset-scan-skipped");
-      return;
-    }
-    for (const assetId of assetIds) {
-      if (referenced.has(assetId)) {
-        continue;
-      }
-      try {
-        if (indexStore().assetRefCount(assetId) > 0) {
-          continue;
-        }
-        this.#removeAssetFiles(assetId);
-        indexStore().removeAssetMeta(assetId);
-        this.#trace("deletion:asset-removed");
-      } catch {
-        this.#trace("deletion:asset-removal-failed");
-      }
-    }
-  }
-
-  /** 所有卡片檔裡出現的原檔雜湊；掃描不到回 null，呼叫端要跳過回收。 */
-  #cardFileAssetIds(): Set<string> | null {
-    const directory = this.#layout.subfolderPath("cards");
-    let names: string[];
     try {
-      names = readdirSync(directory);
-    } catch (error) {
-      return (error as NodeJS.ErrnoException).code === "ENOENT" ? new Set() : null;
-    }
-    const found = new Set<string>();
-    for (const name of names) {
-      if (!isCardFileName(name)) continue;
-      const text = loadText(path.join(directory, name));
-      if (text === null) return null;
-      for (const assetId of assetIdsInCardText(text)) {
-        found.add(assetId);
+      const assets = new LocalAssetStore({
+        layout: this.#layout,
+        index: indexStore(),
+        now: this.#now,
+        trace: this.#trace,
+      });
+      const result = assets.releaseCandidates(assetIds);
+      if (result.skipped) {
+        this.#trace("deletion:asset-reclaim-skipped");
+        return;
       }
-    }
-    return found;
-  }
-
-  /** 刪掉 `assets/<雜湊>.*`；同內容不同副檔名都會刪，符號連結只刪連結。 */
-  #removeAssetFiles(assetId: string): void {
-    const directory = this.#layout.subfolderPath("assets");
-    let names: string[];
-    try {
-      names = readdirSync(directory);
+      if (result.reclaimed.length > 0) {
+        this.#trace("deletion:assets-removed");
+      }
     } catch {
-      return;
-    }
-    const pattern = new RegExp(`^${assetId}\\.[a-z0-9]{1,12}$`, "i");
-    for (const name of names) {
-      if (!pattern.test(name)) continue;
-      try {
-        removeFileSafely(this.#layout, path.join(directory, name), ["origin"]);
-      } catch {
-        this.#trace("deletion:asset-file-failed");
-      }
+      // 回收失敗不能擋住刪除意圖；留下的原檔由啟動掃描再試。
+      this.#trace("deletion:asset-removal-failed");
     }
   }
 
@@ -536,15 +497,16 @@ export class ConversationDeletionService {
   /**
    * 卡片檔裡出現的原檔候選。
    *
-   * 用 `assets/<64 位雜湊>` 的字面比對，不解析 frontmatter；格式不符的卡
-   * 片檔一樣算數。讀不到的卡片檔略過，回收時會再掃描一次確認。
+   * 與原檔回收用同一條比對規則（`assetIdsInText`）：檔案任何地方出現 64 位
+   * 雜湊就算，不解析 frontmatter。讀不到的卡片檔略過，回收時會再掃描一次
+   * 確認；多帶候選不會誤刪，少帶才會漏收。
    */
   #assetIdsOf(cardIds: readonly string[]): string[] {
     const directory = this.#layout.subfolderPath("cards");
     const found = new Set<string>();
     for (const cardId of cardIds) {
       const text = loadText(path.join(directory, `${cardId}.md`));
-      for (const assetId of text === null ? [] : assetIdsInCardText(text)) {
+      for (const assetId of text === null ? [] : assetIdsInText(text)) {
         found.add(assetId);
       }
     }
@@ -1064,36 +1026,29 @@ function loadText(filePath: string): string | null {
   }
 }
 
-/** 卡片檔裡出現的 `assets/<雜湊>`；不解析 frontmatter。 */
+/**
+ * 卡片檔裡出現的原檔雜湊；與回收共用 `assetIdsInText`。
+ *
+ * 保留這個名字給對話刪除的預覽使用：預覽與實際回收必須用同一條規則，
+ * 才不會出現「預覽說有、回收卻不算」的情況。
+ */
 export function assetIdsInCardText(text: string): string[] {
-  const found = new Set<string>();
-  for (const match of text.matchAll(/assets\/([0-9a-f]{64})/gi)) {
-    const assetId = match[1];
-    if (assetId !== undefined) found.add(assetId.toLowerCase());
-  }
-  return [...found].sort();
+  return assetIdsInText(text);
 }
 
 /** 這些雜湊實際存在哪些原檔；讀不到資料夾時回空集合。 */
 export function existingAssetIds(layout: FolderLayout, assetIds: readonly string[]): Set<string> {
   if (assetIds.length === 0) return new Set();
-  const directory = layout.subfolderPath("assets");
   const wanted = new Set(assetIds.map((assetId) => assetId.toLowerCase()));
-  let names: string[];
   try {
-    names = readdirSync(directory);
+    return new Set(
+      listAssetFiles(layout)
+        .map((entry) => entry.assetId)
+        .filter((assetId) => wanted.has(assetId)),
+    );
   } catch {
     return new Set();
   }
-  const found = new Set<string>();
-  for (const name of names) {
-    const match = /^([0-9a-f]{64})\.[a-z0-9]{1,12}$/i.exec(name);
-    const assetId = match?.[1]?.toLowerCase();
-    if (assetId !== undefined && wanted.has(assetId)) {
-      found.add(assetId);
-    }
-  }
-  return found;
 }
 
 function rowToIntent(row: IntentRow): ConversationDeletionIntent {

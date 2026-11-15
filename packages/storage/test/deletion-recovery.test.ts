@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   CardIndexStore,
   Database,
+  LocalAssetStore,
   STATE_APPLICATION_ID,
   Storage,
   fullVacuumAndMeasure,
@@ -189,7 +190,7 @@ describe("刪除意圖與啟動恢復", () => {
     expect(await storage.deletions.recoverAtStartup({})).toBe(0);
   });
 
-  it("崩潰後依意圖的 card_ids 與 asset_ids 補刪卡片檔", async () => {
+  it("崩潰後依意圖的 card_ids 與 asset_ids 補刪卡片檔，共享原檔保留", async () => {
     const tempRoot = temp();
     const first = open(tempRoot);
     const engine = seedSmall(first);
@@ -197,13 +198,17 @@ describe("刪除意圖與啟動恢復", () => {
     const assetsDirectory = path.join(tempRoot.folder, "assets");
     mkdirSync(cardsDirectory, { recursive: true });
     mkdirSync(assetsDirectory, { recursive: true });
-    const exclusive = "01RECOVERYCARD000000000001";
-    const shared = "01RECOVERYCARD000000000002";
-    const pinned = "01RECOVERYCARD000000000003";
+    const exclusive = newUlid();
+    const shared = newUlid();
+    const pinned = newUlid();
     const exclusiveAsset = `${"a".repeat(63)}1`;
     const sharedAsset = `${"b".repeat(63)}2`;
     const pinnedAsset = `${"c".repeat(63)}3`;
-    const writeCard = (cardId: string, assetId: string): void => {
+    const writeCard = (
+      cardId: string,
+      assetLine: string | undefined,
+      body: readonly string[] = [],
+    ): void => {
       writeFileSync(
         path.join(cardsDirectory, `${cardId}.md`),
         [
@@ -212,16 +217,23 @@ describe("刪除意圖與啟動恢復", () => {
           "kind: image",
           "title: 卡片",
           `created: ${nowIso()}`,
-          `asset: assets/${assetId}.png`,
+          ...(assetLine === undefined ? [] : [`asset: ${assetLine}`]),
           "---",
           `${MARKER} ${cardId}`,
+          ...body,
         ].join("\n"),
       );
-      writeFileSync(path.join(assetsDirectory, `${assetId}.png`), `${MARKER} ${assetId}`);
     };
-    writeCard(exclusive, exclusiveAsset);
-    writeCard(shared, sharedAsset);
-    writeCard(pinned, pinnedAsset);
+    // 專屬卡片用掉兩個原檔：一個只有它在用，一個共享卡片也用。
+    writeCard(exclusive, `assets/${exclusiveAsset}.png`, [`共享原檔：assets/${sharedAsset}.png`]);
+    // 共享卡片只在內文寫雜湊，沒有 `assets/` 前綴；任何 64 位雜湊都算引用。
+    writeCard(shared, undefined, [`原始檔 ${sharedAsset}`]);
+    writeCard(pinned, `assets/${pinnedAsset}.png`);
+    for (const assetId of [exclusiveAsset, sharedAsset, pinnedAsset]) {
+      writeFileSync(path.join(assetsDirectory, `${assetId}.png`), `${MARKER} ${assetId}`);
+    }
+    // 上一次啟動的索引已完成，原檔回收才會進行。
+    new CardIndexStore({ db: first.cache }).setReady(true);
     const now = nowIso();
     for (const [cardId, pinnedValue] of [
       [exclusive, 0],
@@ -265,7 +277,7 @@ describe("刪除意圖與啟動恢復", () => {
     const intent = first.deletions.getIntent("1");
     expect(intent?.phase).toBe("rows");
     expect(intent?.cardIds).toEqual([exclusive]);
-    expect(intent?.assetIds).toEqual([exclusiveAsset]);
+    expect(intent?.assetIds).toEqual([exclusiveAsset, sharedAsset]);
     // 列已提交，卡片檔還沒動：重啟後要補完。
     expect(existsSync(path.join(cardsDirectory, `${exclusive}.md`))).toBe(true);
     expect(existsSync(path.join(assetsDirectory, `${exclusiveAsset}.png`))).toBe(true);
@@ -283,7 +295,7 @@ describe("刪除意圖與啟動恢復", () => {
         shared,
       )?.n,
     ).toBe(1);
-    // 原檔依意圖的 asset_ids 補刪；共享與釘選卡片的原檔不受影響。
+    // 只有專屬卡片用到的原檔刪掉；共享卡片仍在引用（即使只寫雜湊）的留著。
     expect(existsSync(path.join(assetsDirectory, `${exclusiveAsset}.png`))).toBe(false);
     expect(existsSync(path.join(assetsDirectory, `${sharedAsset}.png`))).toBe(true);
     expect(existsSync(path.join(assetsDirectory, `${pinnedAsset}.png`))).toBe(true);
@@ -302,7 +314,7 @@ describe("刪除意圖與啟動恢復", () => {
     const assetsDirectory = path.join(tempRoot.folder, "assets");
     mkdirSync(cardsDirectory, { recursive: true });
     mkdirSync(assetsDirectory, { recursive: true });
-    const cardId = "01RECOVERYGHOST00000000001";
+    const cardId = newUlid();
     const assetId = `${"d".repeat(63)}4`;
     writeFileSync(
       path.join(cardsDirectory, `${cardId}.md`),
@@ -335,6 +347,7 @@ describe("刪除意圖與啟動恢復", () => {
     );
     const index = new CardIndexStore({ db: first.cache });
     index.putAssetMeta({ assetId, mediaType: "image/png", sizeBytes: 1 });
+    index.setReady(true);
     first.cache.run(
       `INSERT INTO card_index
          (card_id, path, mtime_ms, size_bytes, content_hash, revision, kind, title, title_norm,
@@ -372,6 +385,132 @@ describe("刪除意圖與啟動恢復", () => {
       second.cache.get("SELECT 1 AS one FROM asset_refs WHERE asset_id = ?", assetId),
     ).toBeUndefined();
     expect(byteSearch(tempRoot.folder, [`${MARKER} ghost`, `${MARKER} ${assetId}`])).toEqual([]);
+  });
+
+  it("暫停後恢復：removeIntent 換到新的快取連線，清索引列並回收原檔", () => {
+    const tempRoot = temp();
+    const storage = open(tempRoot);
+    const cardsDirectory = path.join(tempRoot.folder, "cards");
+    const assetsDirectory = path.join(tempRoot.folder, "assets");
+    mkdirSync(cardsDirectory, { recursive: true });
+    mkdirSync(assetsDirectory, { recursive: true });
+    const cardId = newUlid();
+    const assetId = `${"e".repeat(63)}5`;
+    writeFileSync(
+      path.join(cardsDirectory, `${cardId}.md`),
+      [
+        "---",
+        `id: ${cardId}`,
+        "kind: image",
+        "title: 暫停恢復",
+        `created: ${nowIso()}`,
+        `asset: assets/${assetId}.png`,
+        "---",
+        `${MARKER} pause`,
+      ].join("\n"),
+    );
+    writeFileSync(path.join(assetsDirectory, `${assetId}.png`), `${MARKER} ${assetId}`);
+    const index = new CardIndexStore({ db: storage.cache });
+    index.upsert({
+      cardId,
+      path: `cards/${cardId}.md`,
+      mtimeMs: 1,
+      sizeBytes: 1,
+      contentHash: "hash-pause",
+      indexedAt: nowIso(),
+      broken: false,
+      revision: "rev-pause",
+      kind: "image",
+      title: "暫停恢復",
+      body: "",
+      tags: [],
+      sources: [],
+      links: [],
+      persona: "default",
+      createdAt: nowIso(),
+      assetId,
+    });
+    index.putAssetMeta({ assetId, mediaType: "image/png", sizeBytes: 1 });
+    index.setReady(true);
+    storage.deletions.putIntent({
+      rootId: "1",
+      conversationIds: ["1"],
+      clientRequestIds: [],
+      cardIds: [cardId],
+      assetIds: [assetId],
+      phase: "rows",
+      requestedAt: nowIso(),
+      updatedAt: nowIso(),
+    });
+
+    const beforePause = storage.cache;
+    storage.closeCache();
+    expect(storage.cache.isClosed).toBe(true);
+    storage.reopenCache();
+    expect(storage.cache).not.toBe(beforePause);
+
+    storage.deletions.removeIntent("1");
+
+    expect(storage.deletions.getIntent("1")).toBeNull();
+    expect(existsSync(path.join(cardsDirectory, `${cardId}.md`))).toBe(false);
+    expect(existsSync(path.join(assetsDirectory, `${assetId}.png`))).toBe(false);
+    // 幽靈列與原檔中繼資料都要用恢復後的連線清掉，不是開啟時那一條。
+    const reopened = new CardIndexStore({ db: storage.cache });
+    expect(reopened.get(cardId)).toBeUndefined();
+    expect(reopened.assetRefCount(assetId)).toBe(0);
+    expect(reopened.getAssetMeta(assetId)).toBeUndefined();
+  });
+
+  it("索引還沒完成時，removeIntent 只清卡片檔與索引列，原檔留給後續掃描", () => {
+    const tempRoot = temp();
+    const storage = open(tempRoot);
+    const cardsDirectory = path.join(tempRoot.folder, "cards");
+    const assetsDirectory = path.join(tempRoot.folder, "assets");
+    mkdirSync(cardsDirectory, { recursive: true });
+    mkdirSync(assetsDirectory, { recursive: true });
+    const cardId = newUlid();
+    const assetId = `${"f".repeat(63)}6`;
+    writeFileSync(
+      path.join(cardsDirectory, `${cardId}.md`),
+      [
+        "---",
+        `id: ${cardId}`,
+        "kind: image",
+        "title: 尚未索引",
+        `created: ${nowIso()}`,
+        `asset: assets/${assetId}.png`,
+        "---",
+        `${MARKER} not-ready`,
+      ].join("\n"),
+    );
+    writeFileSync(path.join(assetsDirectory, `${assetId}.png`), `${MARKER} ${assetId}`);
+    const index = new CardIndexStore({ db: storage.cache });
+    index.putAssetMeta({ assetId, mediaType: "image/png", sizeBytes: 1 });
+    expect(index.isReady).toBe(false);
+    storage.deletions.putIntent({
+      rootId: "1",
+      conversationIds: ["1"],
+      clientRequestIds: [],
+      cardIds: [cardId],
+      assetIds: [assetId],
+      phase: "rows",
+      requestedAt: nowIso(),
+      updatedAt: nowIso(),
+    });
+
+    storage.deletions.removeIntent("1");
+
+    expect(existsSync(path.join(cardsDirectory, `${cardId}.md`))).toBe(false);
+    expect(existsSync(path.join(assetsDirectory, `${assetId}.png`))).toBe(true);
+    expect(new CardIndexStore({ db: storage.cache }).getAssetMeta(assetId)).toBeDefined();
+
+    // 索引完成後，啟動掃描的整批回收會把留下來的原檔收掉。
+    const ready = new CardIndexStore({ db: storage.cache });
+    ready.setReady(true);
+    const assets = new LocalAssetStore({ layout: storage.layout, index: ready });
+    expect(assets.sweep()).toMatchObject({ deleted: 1, skipped: false });
+    expect(existsSync(path.join(assetsDirectory, `${assetId}.png`))).toBe(false);
+    expect(ready.getAssetMeta(assetId)).toBeUndefined();
   });
 });
 

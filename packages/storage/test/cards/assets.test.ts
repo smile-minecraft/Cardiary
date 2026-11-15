@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  linkSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -275,6 +283,21 @@ describe("原檔的回收", () => {
     expect(assetFiles(fixture)).toEqual([`${blobId}.png`]);
   });
 
+  it("卡片檔只在內文寫雜湊、沒有 `assets/` 前綴時仍然算引用", async () => {
+    const fixture = setup();
+    const { blobId } = await fixture.assets.put({
+      bytes: PNG_BYTES,
+      mediaType: "image/png",
+      extension: "png",
+    });
+    // 掃描規則是「任何 64 位雜湊都算引用」，不是只認 `asset:` 行。
+    writeCard(fixture, CARD_A, cardFile(CARD_A, "note").replace("內文\n", `原始檔 ${blobId}\n`));
+    fixture.index.rebuild([card(CARD_B, { kind: "note" })]);
+
+    expect(fixture.assets.release(blobId)).toBe("retained");
+    expect(assetFiles(fixture)).toEqual([`${blobId}.png`]);
+  });
+
   it("格式不符的卡片檔仍然算引用：檔案裡的 asset 行就是引用", async () => {
     const fixture = setup();
     const { blobId } = await fixture.assets.put({
@@ -317,6 +340,29 @@ describe("原檔的回收", () => {
 
     expect(fixture.assets.release(blobId)).toBe("deleted");
     expect(assetFiles(fixture)).toEqual([]);
+  });
+
+  it("硬連結的原檔不刪，中繼資料留著；最後一個連結消失才回收", async () => {
+    const fixture = setup();
+    const { blobId } = await fixture.assets.put({
+      bytes: PNG_BYTES,
+      mediaType: "image/png",
+      extension: "png",
+    });
+    fixture.index.rebuild([card(CARD_A, { kind: "note" })]);
+    const directory = path.join(fixture.temp.folder, "assets");
+    const linked = path.join(directory, `${blobId}.jpg`);
+    linkSync(path.join(directory, `${blobId}.png`), linked);
+
+    // 刪除走 `removeFileSafely`：硬連結的另一端可能還在別處，不刪檔案。
+    expect(fixture.assets.release(blobId)).toBe("retained");
+    expect(assetFiles(fixture)).toEqual([`${blobId}.jpg`, `${blobId}.png`].sort());
+    expect(fixture.index.getAssetMeta(blobId)).toBeDefined();
+
+    rmSync(linked);
+    expect(fixture.assets.release(blobId)).toBe("deleted");
+    expect(assetFiles(fixture)).toEqual([]);
+    expect(fixture.index.getAssetMeta(blobId)).toBeUndefined();
   });
 
   it("卡片檔把雜湊寫成大寫時仍然算引用", async () => {

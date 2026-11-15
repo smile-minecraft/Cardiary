@@ -3,11 +3,9 @@ import {
   closeSync,
   existsSync,
   fsyncSync,
-  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
-  readdirSync,
   renameSync,
   rmSync,
   statSync,
@@ -17,13 +15,11 @@ import path from "node:path";
 
 import { StorageError } from "../errors.js";
 import type { FolderLayout } from "../paths.js";
-import { isCardFileName } from "./files.js";
+import { assetFilesFor, cardFileAssetIds, listAssetFiles, removeAssetFiles } from "./asset-scan.js";
 import type { CardIndexStore } from "./index-store.js";
 
 const BLOB_ID = /^[0-9a-f]{64}$/;
 const EXTENSION = /^[a-z0-9]{1,12}$/i;
-const ASSET_FILE = /^([0-9a-f]{64})\.[a-z0-9]{1,12}$/i;
-const HASH_TOKEN = /[0-9a-f]{64}/g;
 
 export interface PutAssetInput {
   readonly bytes: Uint8Array | AsyncIterable<Uint8Array>;
@@ -58,6 +54,13 @@ export interface LocalAssetStoreOptions {
   readonly trace?: (operation: string) => void;
 }
 
+export interface ReleaseCandidatesResult {
+  /** 已確認沒有引用、檔案與 `asset_meta` 都處理完的雜湊。 */
+  readonly reclaimed: readonly string[];
+  /** 索引未完成或讀不到卡片檔，整批沒有動。 */
+  readonly skipped: boolean;
+}
+
 /**
  * `assets/` 正本區：以內容雜湊命名，永不改寫，引用計數歸零才刪。
  *
@@ -67,6 +70,8 @@ export interface LocalAssetStoreOptions {
  * 還有引用就保留，它說沒有仍要掃描檔案。索引還沒追上 `cards/`
  * （`index.isReady === false`）或掃描不完整時一律跳過回收（`release` 與 `sweep` 都跳過），
  * 寧可晚一點刪，也不能誤刪使用者的原檔。
+ *
+ * 卡片檔的掃描與原檔刪除規則在 `asset-scan.ts`，對話刪除的收尾也用同一份。
  *
  * 主機啟動掃描會呼叫 `sweep()`，整批比對所有原檔與卡片檔：沒有引用就刪。
  */
@@ -163,36 +168,78 @@ export class LocalAssetStore {
   /**
    * 引用計數歸零時刪掉原檔與 `asset_meta`。
    *
-   * 回傳 `retained`（還有卡片引用）、`skipped`（索引未完成或無法確認，
-   * 不能判斷）或 `deleted`（已刪除，或本來就沒有檔案）。
+   * 回傳 `retained`（還有卡片引用，或檔案是硬連結不能刪）、`skipped`
+   * （索引未完成或無法確認，不能判斷）或 `deleted`（已刪除，或本來就
+   * 沒有檔案）。
    *
    * 判斷順序：索引未完成就跳過；索引說還有引用就保留；否則掃描
    * `cards/*.md` 的實際內容，連格式不符的檔案與還沒進索引的外部檔一起看。
    */
   release(blobId: string): ReleaseResult {
-    const assetId = assertBlobId(blobId);
-    if (!this.#index.isReady) {
+    const result = this.releaseCandidates([assertBlobId(blobId)]);
+    if (result.skipped) {
       this.#trace?.("assets:release-skipped");
       return "skipped";
     }
-    if (this.#index.assetRefCount(assetId) > 0) {
+    if (result.reclaimed.length === 0) {
       return "retained";
     }
-    const referenced = this.#referencedByCardFiles(assetId);
-    if (referenced === null) {
-      this.#trace?.("assets:release-skipped");
-      return "skipped";
-    }
-    if (referenced) {
-      return "retained";
-    }
-    const files = this.#findFiles(assetId);
-    this.#removeAssetFiles(assetId, files);
-    if (files.length > 0) {
-      syncDirectory(this.directory);
-      this.#trace?.("assets:deleted");
-    }
+    this.#trace?.("assets:deleted");
     return "deleted";
+  }
+
+  /**
+   * 批次回收指定的雜湊；`release()` 的候選清單版，卡片檔只掃一次。
+   *
+   * 對話刪除的收尾用它：候選來自刪除意圖的 `asset_ids`，卡片檔刪完後在
+   * 這裡確認其他卡片檔與索引都沒有引用才刪。判斷規則與 `release()` 相同。
+   */
+  releaseCandidates(assetIds: readonly string[]): ReleaseCandidatesResult {
+    if (!this.#index.isReady) {
+      return { reclaimed: [], skipped: true };
+    }
+    // 索引說還有引用就先保留，不必掃描卡片檔；這也是 `release()` 原本的順序。
+    const candidates = new Set<string>();
+    for (const raw of assetIds) {
+      const assetId = raw.toLowerCase();
+      if (this.#index.assetRefCount(assetId) === 0) {
+        candidates.add(assetId);
+      }
+    }
+    if (candidates.size === 0) {
+      return { reclaimed: [], skipped: false };
+    }
+    const referenced = cardFileAssetIds(this.#layout);
+    if (referenced === null) {
+      return { reclaimed: [], skipped: true };
+    }
+    const filesById = new Map<string, string[]>();
+    for (const entry of listAssetFiles(this.#layout)) {
+      const files = filesById.get(entry.assetId);
+      if (files === undefined) {
+        filesById.set(entry.assetId, [entry.path]);
+      } else {
+        files.push(entry.path);
+      }
+    }
+    const reclaimed: string[] = [];
+    let removedFiles = 0;
+    for (const assetId of candidates) {
+      if (referenced.has(assetId)) {
+        continue;
+      }
+      const { removed, kept } = removeAssetFiles(this.#layout, filesById.get(assetId) ?? []);
+      removedFiles += removed;
+      if (kept > 0) {
+        continue;
+      }
+      this.#index.removeAssetMeta(assetId);
+      reclaimed.push(assetId);
+    }
+    if (removedFiles > 0) {
+      syncDirectory(this.directory);
+    }
+    return { reclaimed, skipped: false };
   }
 
   /**
@@ -211,117 +258,16 @@ export class LocalAssetStore {
       this.#trace?.("assets:sweep-skipped");
       return { scanned: 0, deleted: 0, skipped: true };
     }
-    const referenced = this.#cardFileHashes();
-    if (referenced === null) {
+    const groups = new Set(listAssetFiles(this.#layout).map((entry) => entry.assetId));
+    const result = this.releaseCandidates([...groups]);
+    if (result.skipped) {
       this.#trace?.("assets:sweep-skipped");
       return { scanned: 0, deleted: 0, skipped: true };
     }
-    const groups = new Map<string, string[]>();
-    for (const entry of this.#assetInventory()) {
-      const list = groups.get(entry.assetId);
-      if (list) {
-        list.push(entry.path);
-      } else {
-        groups.set(entry.assetId, [entry.path]);
-      }
-    }
-    let deleted = 0;
-    for (const [assetId, files] of groups) {
-      if (referenced.has(assetId)) {
-        continue;
-      }
-      this.#removeAssetFiles(assetId, files);
-      deleted += 1;
-    }
-    if (deleted > 0) {
-      syncDirectory(this.directory);
+    if (result.reclaimed.length > 0) {
       this.#trace?.("assets:sweep-deleted");
     }
-    return { scanned: groups.size, deleted, skipped: false };
-  }
-
-  /**
-   * 掃描 `cards/`，回傳所有卡片檔裡出現的 64 位雜湊（小寫）。
-   *
-   * 檔案內容任何地方出現這段雜湊就算引用：不解析 frontmatter，所以格式不符、
-   * 仍然寫著 `asset:` 的檔案也算數；還沒被索引的外部檔也算。
-   * 比對不分大小寫：外部把 `asset:` 改成大寫，APFS 仍然讀得到同一個原檔。
-   * 回 `null` 代表無法確認（列不出資料夾、讀不到某個檔案），呼叫端要跳過
-   * 回收，不能把「看不到」當成「沒有」。`cards/` 不存在時回空集合。
-   */
-  #cardFileHashes(): Set<string> | null {
-    const directory = this.#layout.subfolderPath("cards");
-    let names: string[];
-    try {
-      names = readdirSync(directory);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return new Set();
-      }
-      return null;
-    }
-    const hashes = new Set<string>();
-    for (const name of names) {
-      if (!isCardFileName(name)) continue;
-      const target = path.join(directory, name);
-      let text: string;
-      try {
-        const stats = lstatSync(target);
-        if (!stats.isFile() || stats.isSymbolicLink()) continue;
-        text = readFileSync(target, "utf8");
-      } catch {
-        return null;
-      }
-      for (const match of text.toLowerCase().matchAll(HASH_TOKEN)) {
-        hashes.add(match[0]);
-      }
-    }
-    return hashes;
-  }
-
-  #referencedByCardFiles(assetId: string): boolean | null {
-    const hashes = this.#cardFileHashes();
-    if (hashes === null) {
-      return null;
-    }
-    return hashes.has(assetId);
-  }
-
-  /** `assets/` 底下所有可刪的原檔；同內容不同副檔名會有多個。 */
-  #assetInventory(): Array<{ readonly assetId: string; readonly path: string }> {
-    let names: string[];
-    try {
-      names = readdirSync(this.directory);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return [];
-      }
-      throw asStorageError(error, "列出原檔資料夾失敗");
-    }
-    const inventory: Array<{ assetId: string; path: string }> = [];
-    for (const name of names) {
-      const match = ASSET_FILE.exec(name);
-      if (match === null) continue;
-      const target = path.join(this.directory, name);
-      try {
-        const stats = lstatSync(target);
-        if (!stats.isFile() || stats.isSymbolicLink()) continue;
-      } catch {
-        continue;
-      }
-      const assetId = match[1]?.toLowerCase();
-      if (assetId === undefined) continue;
-      inventory.push({ assetId, path: target });
-    }
-    return inventory;
-  }
-
-  #removeAssetFiles(assetId: string, files: readonly string[]): void {
-    for (const target of files) {
-      this.#layout.assertInside(target);
-      rmSync(target, { force: true });
-    }
-    this.#index.removeAssetMeta(assetId);
+    return { scanned: groups.size, deleted: result.reclaimed.length, skipped: false };
   }
 
   /** 這個雜湊在 `assets/` 底下的所有檔案；同內容不同副檔名會有多個。 */
@@ -330,11 +276,7 @@ export class LocalAssetStore {
   }
 
   #findFiles(blobId: string): string[] {
-    const assetId = assertBlobId(blobId);
-    return this.#assetInventory()
-      .filter((entry) => entry.assetId === assetId)
-      .map((entry) => entry.path)
-      .sort();
+    return assetFilesFor(this.#layout, assertBlobId(blobId));
   }
 
   /** 目前時間；給呼叫端組中繼資料用。 */
