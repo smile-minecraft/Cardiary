@@ -2,8 +2,9 @@ import Foundation
 
 /// 殼提供給服務的系統能力代理。
 ///
-/// 只有三個路由、都只回單一項目：沒有列舉、沒有搜尋、沒有 keychain.list。
-/// 回應不含金鑰長度、指紋或建立時間。
+/// 五個路由、都只回單一項目：沒有列舉、沒有搜尋、沒有 keychain.list。
+/// 三個同步路由（資料夾、鑰匙圈、殼狀態）加兩個辨識路由（OCR、語音轉
+/// 文字）；回應不含金鑰長度、指紋或建立時間，也不含檔案內容。
 public final class BrokerService: @unchecked Sendable {
     public struct KeychainAccount: Equatable, Sendable {
         public let value: String
@@ -30,18 +31,41 @@ public final class BrokerService: @unchecked Sendable {
     private let keychain: any KeychainReading
     private let stateDirectory: ShellStateDirectory
     private let folderProvider: @Sendable () -> FolderSnapshot
+    private let recognition: any RecognitionHandling
 
     public init(
         keychain: any KeychainReading,
         stateDirectory: ShellStateDirectory,
-        folderProvider: @escaping @Sendable () -> FolderSnapshot
+        folderProvider: @escaping @Sendable () -> FolderSnapshot,
+        recognition: any RecognitionHandling = RecognitionService()
     ) {
         self.keychain = keychain
         self.stateDirectory = stateDirectory
         self.folderProvider = folderProvider
+        self.recognition = recognition
     }
 
+    /// 同步路由：資料夾、鑰匙圈與殼狀態。
+    ///
+    /// 辨識路由要等 Vision／Speech，走非同步的 `handle(route:payload:) async`；
+    /// 從同步呼叫端碰不到那兩條路由。
     public func handle(route: String, payload: JSONValue) -> BrokerReply {
+        handleSynchronously(route: route, payload: payload)
+    }
+
+    /// 全部路由；控制通道用這一個，辨識會等到有結果或逾時才回應。
+    public func handle(route: String, payload: JSONValue) async -> BrokerReply {
+        switch route {
+        case ControlRoute.brokerRecognitionOcr:
+            return await recognition.ocr(payload: payload)
+        case ControlRoute.brokerRecognitionTranscribe:
+            return await recognition.transcribe(payload: payload)
+        default:
+            return handleSynchronously(route: route, payload: payload)
+        }
+    }
+
+    private func handleSynchronously(route: String, payload: JSONValue) -> BrokerReply {
         switch route {
         case ControlRoute.brokerFolderGet:
             return .ok(folderPayload())

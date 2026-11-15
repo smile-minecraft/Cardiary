@@ -71,10 +71,16 @@ final class ShellController: NSObject {
         }
 
         let folderBox = self.folderBox
+        let log = self.log
         brokerService = BrokerService(
             keychain: keychain,
             stateDirectory: stateDirectory,
-            folderProvider: { folderBox.snapshot }
+            folderProvider: { folderBox.snapshot },
+            recognition: RecognitionService(
+                folderProvider: { folderBox.snapshot },
+                // 只記路徑、大小、耗時與結果碼，不記辨識內容。
+                onLog: { message in log.write(message) }
+            )
         )
 
         installStatusItem()
@@ -360,8 +366,8 @@ final class ShellController: NSObject {
                 configuration: configuration,
                 folder: folder,
                 brokerHandler: { route, payload in
-                    broker?.handle(route: route, payload: payload)
-                        ?? .unavailable("殼尚未準備好。")
+                    guard let broker else { return .unavailable("殼尚未準備好。") }
+                    return await broker.handle(route: route, payload: payload)
                 }
             )
             supervisor.onStatusChange = { [weak self] snapshot in

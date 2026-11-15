@@ -117,7 +117,11 @@ export class ControlChannel {
     this.#handshakeDone = true;
   }
 
-  async requestBroker(route: string, payload: JSONObject): Promise<JSONObject> {
+  async requestBroker(
+    route: string,
+    payload: JSONObject,
+    options?: { readonly timeoutMs?: number },
+  ): Promise<JSONObject> {
     if (this.#closed) throw new ControlError("unavailable", "控制通道已關閉");
     if (!this.#handshakeDone) throw new ControlError("unavailable", "尚未完成 hello 交握");
     if (!BROKER_ROUTES.has(route)) {
@@ -127,7 +131,7 @@ export class ControlChannel {
       throw new ControlError("busy", `代理路由已有在途請求：${route}`);
     }
     const id = `brk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    const timeoutMs = this.#options.brokerTimeoutMs ?? 5000;
+    const timeoutMs = options?.timeoutMs ?? this.#options.brokerTimeoutMs ?? 5000;
     const promise = new Promise<JSONObject>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);

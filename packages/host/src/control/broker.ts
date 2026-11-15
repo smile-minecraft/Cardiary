@@ -3,6 +3,7 @@ import type {
   ProviderCredentialSource,
   CredentialRef,
 } from "@cardiary/engine-adapter";
+import type { JSONObject } from "@cardiary/protocol";
 
 import type { ControlChannel } from "./channel.js";
 
@@ -68,6 +69,19 @@ export class BrokerClient {
       usedBytes: Number(payload.usedBytes ?? 0),
       limitBytes: Number(payload.limitBytes ?? 0),
     };
+  }
+
+  /**
+   * 原始代理請求；辨識路由需要比一般系統能力更長的逾時。
+   *
+   * 路由仍由控制通道的白名單擋下，呼叫端不能送任意路由。
+   */
+  async requestBroker(
+    route: string,
+    payload: JSONObject,
+    options?: { readonly timeoutMs?: number },
+  ): Promise<JSONObject> {
+    return this.#channel.requestBroker(route, payload, options);
   }
 }
 

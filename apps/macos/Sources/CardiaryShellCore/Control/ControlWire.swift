@@ -21,6 +21,8 @@ public enum ControlRoute {
     public static let brokerFolderGet = "broker.folder.get"
     public static let brokerKeychainGet = "broker.keychain.get"
     public static let brokerShellStateGet = "broker.shell-state.get"
+    public static let brokerRecognitionOcr = "broker.recognition.ocr"
+    public static let brokerRecognitionTranscribe = "broker.recognition.transcribe"
 
     // 服務 → 殼（通知）
     public static let notifyFatal = "notify.fatal"
@@ -32,6 +34,7 @@ public enum ControlRoute {
     /// 殼願意回應的代理路由。沒有列舉、沒有搜尋。
     public static let brokerRoutes: Set<String> = [
         brokerFolderGet, brokerKeychainGet, brokerShellStateGet,
+        brokerRecognitionOcr, brokerRecognitionTranscribe,
     ]
 
     /// 殼願意接受的通知。

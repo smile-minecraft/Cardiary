@@ -105,7 +105,11 @@ public final class ControlChannel: @unchecked Sendable {
     private var closeReason: ChannelError?
     private var helloDeadlineScheduled = false
 
-    public var brokerHandler: (@Sendable (String, JSONValue) -> BrokerReply)?
+    /// 代理路由的處理器；可以等待（OCR 與語音轉文字要幾十秒）。
+    ///
+    /// 回應依 `replyTo` 配對，所以慢的請求不會擋住同一個通道上的其他請求；
+    /// 通道關閉後才完成的處理器結果直接丟棄，不寫回已關閉的通道。
+    public var brokerHandler: (@Sendable (String, JSONValue) async -> BrokerReply)?
     public var onNotification: (@Sendable (ControlNotification) -> Void)?
     public var onLog: (@Sendable (String) -> Void)?
     public var onClosed: (@Sendable (ChannelError) -> Void)?
@@ -367,12 +371,27 @@ public final class ControlChannel: @unchecked Sendable {
         }
 
         let payload = envelope.payload ?? .object([:])
-        let reply = brokerHandler?(route, payload) ?? .unavailable("殼沒有處理這個路由。")
-        switch reply {
-        case .ok(let payload):
-            respond(id: id, payload: payload)
-        case .unavailable(let message):
-            respondError(id: id, error: ControlErrorPayload(code: .unavailable, message: message))
+        guard let handler = brokerHandler else {
+            respondError(id: id, error: ControlErrorPayload(code: .unavailable, message: "殼沒有處理這個路由。"))
+            return
+        }
+        Task { [weak self] in
+            let reply = await handler(route, payload)
+            guard let self else { return }
+            // 回呼在通道佇列上寫回：與其他 frame 的寫入序列化，且通道已關閉時
+            // 不再回應。請求與回應靠 replyTo 配對，慢的結果晚到不影響順序。
+            self.queue.async {
+                guard self.state == .established else { return }
+                switch reply {
+                case .ok(let replyPayload):
+                    self.respond(id: id, payload: replyPayload)
+                case .unavailable(let message):
+                    self.respondError(
+                        id: id,
+                        error: ControlErrorPayload(code: .unavailable, message: message)
+                    )
+                }
+            }
         }
     }
 

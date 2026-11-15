@@ -150,7 +150,7 @@ public final class ServiceSupervisor: @unchecked Sendable {
 
     private let configuration: ServiceSupervisorConfiguration
     private let launcher: Launcher
-    private let brokerHandler: @Sendable (String, JSONValue) -> BrokerReply
+    private let brokerHandler: @Sendable (String, JSONValue) async -> BrokerReply
     private let queue = DispatchQueue(label: "com.cardiary.shell.service-supervisor")
 
     private var status = ServiceStatusSnapshot()
@@ -177,7 +177,7 @@ public final class ServiceSupervisor: @unchecked Sendable {
     public init(
         configuration: ServiceSupervisorConfiguration,
         folder: FolderSnapshot = .unselected,
-        brokerHandler: @escaping @Sendable (String, JSONValue) -> BrokerReply,
+        brokerHandler: @escaping @Sendable (String, JSONValue) async -> BrokerReply,
         launcher: @escaping Launcher = { try ProcessServiceHandle(plan: $0) }
     ) {
         self.configuration = configuration

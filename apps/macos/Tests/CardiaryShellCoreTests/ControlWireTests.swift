@@ -102,4 +102,16 @@ final class ControlWireTests: XCTestCase {
         XCTAssertTrue(ControlRoute.controlRoutes.contains("control.shutdown"))
         XCTAssertFalse(ControlRoute.controlRoutes.contains("control.health.extra"))
     }
+
+    func testRecognitionRoutesAreWhitelistedExactly() {
+        XCTAssertEqual(ControlRoute.brokerRecognitionOcr, "broker.recognition.ocr")
+        XCTAssertEqual(ControlRoute.brokerRecognitionTranscribe, "broker.recognition.transcribe")
+        XCTAssertTrue(ControlRoute.brokerRoutes.contains(ControlRoute.brokerRecognitionOcr))
+        XCTAssertTrue(ControlRoute.brokerRoutes.contains(ControlRoute.brokerRecognitionTranscribe))
+        // 只有這兩個辨識路由；沒有列舉、刪除或其他能力。
+        XCTAssertFalse(ControlRoute.brokerRoutes.contains("broker.recognition"))
+        XCTAssertFalse(ControlRoute.brokerRoutes.contains("broker.recognition.delete"))
+        XCTAssertFalse(ControlRoute.brokerRoutes.contains("broker.speech.transcribe"))
+        XCTAssertFalse(ControlRoute.controlRoutes.contains(ControlRoute.brokerRecognitionOcr))
+    }
 }

@@ -35,6 +35,8 @@
 	<string>Cardiary 需要讀寫你放在文件的資料夾，用來存放卡片與附件。</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>Cardiary 需要讀取你下載的檔案，用來匯入卡片。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Cardiary 需要把匯入的音訊轉成逐字稿，辨識由 macOS 的 Speech 完成。</string>
 	<key>NSRemovableVolumesUsageDescription</key>
 	<string>Cardiary 需要讀寫外接硬碟上的 Cardiary 資料夾。</string>
 	<key>NSNetworkVolumesUsageDescription</key>

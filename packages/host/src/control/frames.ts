@@ -17,6 +17,8 @@ export const BROKER_ROUTES = new Set([
   "broker.folder.get",
   "broker.keychain.get",
   "broker.shell-state.get",
+  "broker.recognition.ocr",
+  "broker.recognition.transcribe",
 ]);
 
 /** 服務 → 殼的通知。 */
