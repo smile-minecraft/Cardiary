@@ -6,6 +6,7 @@ export * from "./deletions.js";
 export * from "./errors.js";
 export * from "./events.js";
 export * from "./folder.js";
+export * from "./freshness/index.js";
 export * from "./identity.js";
 export * from "./ids.js";
 export * from "./json.js";

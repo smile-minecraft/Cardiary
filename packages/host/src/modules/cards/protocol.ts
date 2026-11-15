@@ -308,7 +308,7 @@ function wireSummaryOf(library: CardLibrary, row: CardIndexRow): WireCardSummary
     persona: summary.persona,
     createdAt: summary.createdAt,
     ...(summary.updatedAt === undefined ? {} : { updatedAt: summary.updatedAt }),
-    freshness: library.freshnessOf(summary.cardId),
+    freshness: wireFreshness(library.freshnessOf(summary.cardId)),
     lifecycle: summary.lifecycle as CardLifecycle,
     ...(summary.supersededBy === undefined ? {} : { supersededBy: summary.supersededBy }),
     ...(asset === undefined ? {} : { asset }),
@@ -345,7 +345,7 @@ function wireCardOf(
     persona: card.frontmatter.persona,
     createdAt: card.frontmatter.created,
     ...(card.frontmatter.updated === undefined ? {} : { updatedAt: card.frontmatter.updated }),
-    freshness: library.freshnessOf(card.cardId),
+    freshness: wireFreshness(library.freshnessOf(card.cardId)),
     lifecycle: (summary?.lifecycle ?? "live") as CardLifecycle,
     ...(summary?.supersededBy === undefined ? {} : { supersededBy: summary.supersededBy }),
     ...(card.frontmatter.supersedes === undefined
@@ -441,6 +441,11 @@ function lifecycleOf(input: JSONObject): CardLifecycle | "all" | undefined {
     });
   }
   return value as CardLifecycle | "all";
+}
+
+/** 卡片變更的種類；線路的新鮮度是整數，狀態庫保留精確的浮點值。 */
+function wireFreshness(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)));
 }
 
 /** 卡片的領域錯誤已經是協定錯誤；儲存層的游標錯誤轉成輸入錯誤。 */

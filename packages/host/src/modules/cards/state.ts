@@ -1,11 +1,15 @@
 import type { CardLifecycle } from "@cardiary/domain";
-import type { Database } from "@cardiary/storage";
+import { FreshnessStore, type Database } from "@cardiary/storage";
 
 /**
  * `state/cardiary.sqlite` 的卡片狀態。
  *
  * 新鮮度、載入紀錄與對話引用都是運行狀態，只存在狀態庫；卡片檔是正本，
  * 這裡的資料不能從檔案重建（見 `docs/design/cards.md` 第 4 節）。
+ *
+ * 新鮮度是「讀取當下算出來」的值：狀態庫只存錨點（`freshness` 與
+ * `freshness_at`），實際數值隨時間與對話的封存狀態變化。只讀錨點會讓
+ * 長跑的服務在兩次重算之間看起來不會老化。
  */
 
 export interface CardStateView {
@@ -24,13 +28,22 @@ interface CardStateRow {
   readonly superseded_by: string | null;
 }
 
+export interface CardStateStoreOptions {
+  readonly db: () => Database;
+  readonly now?: () => Date;
+  /** 半衰期（天）；可以用 getter 讀設定，呼叫當下才解析。 */
+  readonly halfLifeDays?: number | (() => number);
+}
+
 export class CardStateStore {
   readonly #db: () => Database;
   readonly #now: () => Date;
+  readonly #halfLifeDays: number | (() => number) | undefined;
 
-  constructor(options: { readonly db: () => Database; readonly now?: () => Date }) {
+  constructor(options: CardStateStoreOptions) {
     this.#db = options.db;
     this.#now = options.now ?? (() => new Date());
+    this.#halfLifeDays = options.halfLifeDays;
   }
 
   /** 讀一張卡的狀態；沒有資料列時回預設值（新鮮度 100、live）。 */
@@ -48,6 +61,15 @@ export class CardStateStore {
       pinned: row.pinned === 1,
       ...(row.superseded_by === null ? {} : { supersededBy: row.superseded_by }),
     };
+  }
+
+  /**
+   * 讀取當下的新鮮度：依錨點、經過的時間與對話引用即時計算，不寫回。
+   *
+   * 卡片檔是正本，這裡只讀狀態庫，所以讀取不會改動卡片檔的位元組。
+   */
+  freshnessAt(cardId: string): number {
+    return this.#freshness().compute(cardId);
   }
 
   /** 建立卡片時補上狀態列；已存在時只更新 persona，不動新鮮度。 */
@@ -94,9 +116,15 @@ export class CardStateStore {
     this.#db().run("DELETE FROM conversation_cards WHERE card_id = ?", cardId);
   }
 
-  /** 對話引用過這張卡；`first_loaded_at` 保留第一次的時間。 */
+  /**
+   * 對話引用過這張卡；`first_loaded_at` 保留第一次的時間。
+   *
+   * 加入引用會讓「全部封存中」的卡片切回平時衰減；先留下當下的有效值，
+   * 才不會從舊錨點重算而回春。
+   */
   recordReference(conversationId: string, cardId: string): void {
     const now = this.#now().toISOString();
+    this.#freshness().anchorBeforeLiveReference(cardId, now);
     this.#db().run(
       `INSERT INTO conversation_cards (conversation_id, card_id, first_loaded_at, last_loaded_at, load_count)
        VALUES (?, ?, ?, ?, 0)
@@ -118,6 +146,7 @@ export class CardStateStore {
     this.ensure(cardId, "default");
     const now = this.#now().toISOString();
     if (conversationId !== null) {
+      this.#freshness().anchorBeforeLiveReference(cardId, now);
       this.#db().run(
         `INSERT INTO conversation_cards (conversation_id, card_id, first_loaded_at, last_loaded_at, load_count)
          VALUES (?, ?, ?, ?, 1)
@@ -139,5 +168,14 @@ export class CardStateStore {
       countsAsLoad ? 1 : 0,
       now,
     );
+  }
+
+  /** 新鮮度的計算與錨點寫入都交給儲存層的 `FreshnessStore`，規則只有一份。 */
+  #freshness(): FreshnessStore {
+    return new FreshnessStore({
+      db: this.#db(),
+      now: this.#now,
+      ...(this.#halfLifeDays === undefined ? {} : { halfLifeDays: this.#halfLifeDays }),
+    });
   }
 }

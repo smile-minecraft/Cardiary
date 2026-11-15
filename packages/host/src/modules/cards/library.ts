@@ -538,9 +538,14 @@ export class CardLibrary {
     return this.#index().sourcesOf(cardId);
   }
 
-  /** 目前的新鮮度；沒有狀態列時是 100。 */
+  /**
+   * 讀取當下的新鮮度；沒有狀態列時是 100。
+   *
+   * 依錨點、經過的時間與對話的封存狀態即時計算，服務長跑時數值也會隨時間
+   * 下降；不寫回狀態庫，也不碰卡片檔。
+   */
   freshnessOf(cardId: string): number {
-    return this.#state.get(cardId).freshness;
+    return this.#state.freshnessAt(cardId);
   }
 
   #matches(row: CardIndexRow, query: CardQuery): boolean {

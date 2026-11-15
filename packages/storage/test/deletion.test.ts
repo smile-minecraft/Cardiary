@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -496,5 +497,119 @@ describe("刪除對話", () => {
     expect(new ApprovalLedger(storage.state).findByApprovalKey("approval-kept")).not.toBeNull();
     new ApprovalLedger(storage.state).prune({ now: new Date(), retainDays: 30 });
     expect(new ApprovalLedger(storage.state).findByApprovalKey("approval-kept")).toBeNull();
+  });
+
+  it("刪除對話會刪專屬卡片檔與狀態列，保留共享與釘選的卡片", async () => {
+    const { tempRoot, storage } = seed();
+    const cardsDirectory = path.join(tempRoot.folder, "cards");
+    const assetsDirectory = path.join(tempRoot.folder, "assets");
+    mkdirSync(cardsDirectory, { recursive: true });
+    mkdirSync(assetsDirectory, { recursive: true });
+
+    const exclusive = "01CARDEXCLUSIVE00000000001";
+    const shared = "01CARDSHARED00000000000002";
+    const pinned = "01CARDPINNED00000000000003";
+    const assetOf = (cardId: string): string => createHash("sha256").update(cardId).digest("hex");
+
+    const writeCard = (cardId: string): void => {
+      const hash = assetOf(cardId);
+      writeFileSync(
+        path.join(cardsDirectory, `${cardId}.md`),
+        [
+          "---",
+          `id: ${cardId}`,
+          "kind: image",
+          "title: 卡片",
+          `created: ${nowIso()}`,
+          `asset: assets/${hash}.png`,
+          "---",
+          "內容",
+        ].join("\n"),
+      );
+      writeFileSync(path.join(assetsDirectory, `${hash}.png`), `asset-${cardId}`);
+    };
+    for (const cardId of [exclusive, shared, pinned]) {
+      writeCard(cardId);
+      storage.state.run(
+        `INSERT INTO card_state (card_id, persona, freshness, freshness_at, lifecycle, pinned, updated_at)
+         VALUES (?, 'default', 100, ?, 'live', ?, ?)`,
+        cardId,
+        nowIso(),
+        cardId === pinned ? 1 : 0,
+        nowIso(),
+      );
+    }
+    const now = nowIso();
+    storage.state.run(
+      `INSERT INTO conversations (conversation_id, title, created_at, updated_at, last_activity_at)
+       VALUES ('1', '主線', ?, ?, ?), ('2', '支線', ?, ?, ?), ('3', '保留', ?, ?, ?)`,
+      now,
+      now,
+      now,
+      now,
+      now,
+      now,
+      now,
+      now,
+      now,
+    );
+    const reference = (conversationId: string, cardId: string): void => {
+      storage.state.run(
+        `INSERT INTO conversation_cards
+           (conversation_id, card_id, first_loaded_at, last_loaded_at, load_count)
+         VALUES (?, ?, ?, ?, 1)`,
+        conversationId,
+        cardId,
+        now,
+        now,
+      );
+    };
+    reference("1", exclusive);
+    reference("2", exclusive);
+    reference("1", shared);
+    reference("3", shared);
+    reference("1", pinned);
+
+    const report = await storage.deletions.deleteConversation("1");
+    expect(report.deleted).toBe(true);
+    expect(report.counts.conversations).toBe(2);
+    expect(report.counts.conversationCards).toBe(4);
+    expect(report.counts.cardState).toBe(1);
+
+    expect(existsSync(path.join(cardsDirectory, `${exclusive}.md`))).toBe(false);
+    expect(existsSync(path.join(cardsDirectory, `${shared}.md`))).toBe(true);
+    expect(existsSync(path.join(cardsDirectory, `${pinned}.md`))).toBe(true);
+    expect(
+      storage.state.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM card_state WHERE card_id = ?",
+        exclusive,
+      )?.n,
+    ).toBe(0);
+    expect(
+      storage.state.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM card_state WHERE card_id = ?",
+        shared,
+      )?.n,
+    ).toBe(1);
+    expect(
+      storage.state.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM card_state WHERE card_id = ?",
+        pinned,
+      )?.n,
+    ).toBe(1);
+    // 共享卡片仍保留另一個對話的引用；釘選卡片的引用已隨對話消失，但卡片還在。
+    expect(
+      storage.state.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM conversation_cards WHERE card_id = ?",
+        shared,
+      )?.n,
+    ).toBe(1);
+    expect(
+      storage.state.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM conversation_cards WHERE card_id = ?",
+        pinned,
+      )?.n,
+    ).toBe(0);
+    expect(storage.state.countRows("conversation_deletions")).toBe(0);
   });
 });

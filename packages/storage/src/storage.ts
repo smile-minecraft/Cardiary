@@ -242,6 +242,12 @@ export class Storage {
         resetCacheIndex: () => {
           resetCacheIndex();
         },
+        cache: () => {
+          if (cache === null) {
+            throw new StorageError("storage-failed", "快取索引資料庫尚未開啟");
+          }
+          return cache;
+        },
         now,
         ...(trace === undefined ? {} : { trace }),
       });

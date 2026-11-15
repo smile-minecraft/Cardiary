@@ -1,7 +1,13 @@
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
+
 import type { Database, Queryable } from "./db.js";
 import { ApprovalLedger } from "./approvals.js";
+import { isCardFileName } from "./cards/files.js";
+import { CardIndexStore } from "./cards/index-store.js";
 import { RequestDedupeStore } from "./dedupe.js";
 import { StorageError } from "./errors.js";
+import { deleteConversationRows } from "./freshness/conversations.js";
 import { removeFileSafely, type FolderLayout } from "./paths.js";
 import { EventLog } from "./events.js";
 import type { FileRegistry } from "./registry.js";
@@ -19,6 +25,14 @@ export interface ConversationDeletionIntent {
   readonly rootId: string;
   readonly conversationIds: readonly string[];
   readonly clientRequestIds: readonly string[];
+  /**
+   * 這筆刪除會一起移除的專屬卡片；寫入意圖時由 `conversation_cards` 算出。
+   *
+   * 恢復時用它刪卡片檔，不依賴索引或引擎的對話列。
+   */
+  readonly cardIds?: readonly string[];
+  /** 專屬卡片引用過的原檔候選；真正刪除前仍會掃描所有卡片檔確認。 */
+  readonly assetIds?: readonly string[];
   readonly phase: DeletionPhase;
   readonly requestedAt: string;
   readonly updatedAt: string;
@@ -47,6 +61,12 @@ export interface DeletionTableCounts {
   readonly subagentRuns: number;
   readonly fileRegistry: number;
   readonly nextTurnInjections: number;
+  readonly conversations: number;
+  readonly conversationCards: number;
+  readonly conversationContext: number;
+  readonly contextEntries: number;
+  readonly conversationUsage: number;
+  readonly cardState: number;
   readonly engineConversations: number;
   readonly engineEntries: number;
   readonly engineTasks: number;
@@ -73,6 +93,8 @@ export interface DeletionServiceOptions {
   readonly layout: FolderLayout;
   readonly registry: FileRegistry;
   readonly resetCacheIndex: () => void;
+  /** 快取索引的連線會換，所以用 getter；刪除卡片後用它清索引列與原檔。 */
+  readonly cache: () => Database;
   readonly now?: () => Date;
   readonly trace?: (operation: string) => void;
 }
@@ -81,6 +103,8 @@ interface IntentRow {
   readonly root_id: string;
   readonly conversation_ids: string;
   readonly client_request_ids: string;
+  readonly card_ids: string;
+  readonly asset_ids: string;
   readonly phase: string;
   readonly requested_at: string;
   readonly updated_at: string;
@@ -115,6 +139,7 @@ export class ConversationDeletionService {
   readonly #engine: Database;
   readonly #registry: FileRegistry;
   readonly #resetCacheIndex: () => void;
+  readonly #cache: () => Database;
   readonly #now: () => Date;
   readonly #trace: (operation: string) => void;
   readonly #layout: FolderLayout;
@@ -124,6 +149,7 @@ export class ConversationDeletionService {
     this.#engine = options.engine;
     this.#registry = options.registry;
     this.#resetCacheIndex = options.resetCacheIndex;
+    this.#cache = options.cache;
     this.#now = options.now ?? (() => new Date());
     this.#trace = options.trace ?? (() => {});
     this.#layout = options.layout;
@@ -161,15 +187,14 @@ export class ConversationDeletionService {
           return emptyReport(rootId);
         }
         const clientRequestIds = listClientRequestIds(this.#engine, conversationIds);
-        intent = {
+        intent = this.insertIntent({
           rootId,
           conversationIds,
           clientRequestIds,
           phase: "rows",
           requestedAt: nowIso(this.#now),
           updatedAt: nowIso(this.#now),
-        };
-        this.insertIntent(intent);
+        });
       }
 
       const stateSizeBefore = this.#state.fileSize();
@@ -268,7 +293,147 @@ export class ConversationDeletionService {
 
   /** 刪掉意圖列；刪除完成或呼叫端已自行完成收斂時使用。 */
   removeIntent(rootId: string): void {
+    const intent = this.getIntent(rootId);
+    if (intent !== null) {
+      // 引擎路徑（`purge` → 引擎交易 → `removeIntent`）沒有 storage 的
+      // `vacuum`；卡片檔要在這裡補刪。重試時檔案已不在，操作是冪等的。
+      this.completeCardDeletion(intent);
+    }
     this.deleteIntent(rootId);
+  }
+
+  /**
+   * 刪掉意圖裡的專屬卡片檔，再收掉索引列與沒有其他卡片引用的原檔。
+   *
+   * 卡片狀態列已由 `deleteCardiaryRows` 的交易處理；卡片檔、`card_index`
+   * 與原檔都在這裡收。重啟恢復只會走到這個方法（`removeIntent`），所以
+   * 不在這裡收的話，`card.list` 會看到幽靈卡，原檔也要等下一次啟動掃描
+   * 才回收。被另一個對話引用或釘在白板的卡片一律保留。
+   */
+  completeCardDeletion(intent: ConversationDeletionIntent): { readonly deletedCards: number } {
+    let deletedCards = 0;
+    const removed: string[] = [];
+    for (const cardId of intent.cardIds ?? []) {
+      const refs = this.#state.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM conversation_cards WHERE card_id = ?",
+        cardId,
+      );
+      if (Number(refs?.n ?? 0) > 0) {
+        continue;
+      }
+      const state = this.#state.get<{ pinned: number }>(
+        "SELECT pinned FROM card_state WHERE card_id = ?",
+        cardId,
+      );
+      if ((state?.pinned ?? 0) === 1) {
+        continue;
+      }
+      try {
+        const absolutePath = this.#layout.absolute(`cards/${cardId}.md`);
+        removeFileSafely(this.#layout, absolutePath, ["origin"]);
+      } catch {
+        // 單張卡刪不掉不能讓整個對話的刪除卡住；留著的是孤兒卡片檔，
+        // 下次啟動掃描仍會看到它，不會被誤認成已刪。
+        this.#trace("deletion:card-file-failed");
+        continue;
+      }
+      this.#state.run("DELETE FROM card_state WHERE card_id = ?", cardId);
+      deletedCards += 1;
+      removed.push(cardId);
+      this.#trace("deletion:card-removed");
+    }
+    this.#finishCardRemoval(removed, intent.assetIds ?? []);
+    return { deletedCards };
+  }
+
+  /**
+   * 卡片檔刪完後的收尾：清掉快取索引的列，回收沒有其他卡片檔引用的原檔。
+   *
+   * 原檔的權威是 `cards/*.md` 的實際內容：任何檔案還寫著這個雜湊就保留；
+   * 索引的引用計數只是第二道保險（卡片已索引、檔案還沒寫完的中間狀態）。
+   * 掃描不到卡片檔就整批跳過，不能把「看不到」當成「沒有」。
+   */
+  #finishCardRemoval(cardIds: readonly string[], assetIds: readonly string[]): void {
+    let index: CardIndexStore | null = null;
+    const indexStore = (): CardIndexStore => {
+      if (index === null) {
+        index = new CardIndexStore({ db: this.#cache(), now: this.#now });
+      }
+      return index;
+    };
+    for (const cardId of cardIds) {
+      try {
+        indexStore().remove(cardId);
+      } catch {
+        // 索引壞掉不能擋住刪除；下一次啟動掃描會重建。
+        this.#trace("deletion:index-cleanup-failed");
+        break;
+      }
+    }
+    if (assetIds.length === 0) {
+      return;
+    }
+    const referenced = this.#cardFileAssetIds();
+    if (referenced === null) {
+      this.#trace("deletion:asset-scan-skipped");
+      return;
+    }
+    for (const assetId of assetIds) {
+      if (referenced.has(assetId)) {
+        continue;
+      }
+      try {
+        if (indexStore().assetRefCount(assetId) > 0) {
+          continue;
+        }
+        this.#removeAssetFiles(assetId);
+        indexStore().removeAssetMeta(assetId);
+        this.#trace("deletion:asset-removed");
+      } catch {
+        this.#trace("deletion:asset-removal-failed");
+      }
+    }
+  }
+
+  /** 所有卡片檔裡出現的原檔雜湊；掃描不到回 null，呼叫端要跳過回收。 */
+  #cardFileAssetIds(): Set<string> | null {
+    const directory = this.#layout.subfolderPath("cards");
+    let names: string[];
+    try {
+      names = readdirSync(directory);
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "ENOENT" ? new Set() : null;
+    }
+    const found = new Set<string>();
+    for (const name of names) {
+      if (!isCardFileName(name)) continue;
+      const text = loadText(path.join(directory, name));
+      if (text === null) return null;
+      for (const assetId of assetIdsInCardText(text)) {
+        found.add(assetId);
+      }
+    }
+    return found;
+  }
+
+  /** 刪掉 `assets/<雜湊>.*`；同內容不同副檔名都會刪，符號連結只刪連結。 */
+  #removeAssetFiles(assetId: string): void {
+    const directory = this.#layout.subfolderPath("assets");
+    let names: string[];
+    try {
+      names = readdirSync(directory);
+    } catch {
+      return;
+    }
+    const pattern = new RegExp(`^${assetId}\\.[a-z0-9]{1,12}$`, "i");
+    for (const name of names) {
+      if (!pattern.test(name)) continue;
+      try {
+        removeFileSafely(this.#layout, path.join(directory, name), ["origin"]);
+      } catch {
+        this.#trace("deletion:asset-file-failed");
+      }
+    }
   }
 
   /**
@@ -282,10 +447,13 @@ export class ConversationDeletionService {
     readonly conversationIds: readonly string[];
     readonly clientRequestIds: readonly string[];
   }): DeletionTableCounts {
+    const stored = this.getIntent(intent.rootId);
     const full: ConversationDeletionIntent = {
       rootId: intent.rootId,
       conversationIds: intent.conversationIds,
       clientRequestIds: intent.clientRequestIds,
+      ...(stored?.cardIds === undefined ? {} : { cardIds: stored.cardIds }),
+      ...(stored?.assetIds === undefined ? {} : { assetIds: stored.assetIds }),
       phase: "rows",
       requestedAt: "",
       updatedAt: "",
@@ -293,19 +461,24 @@ export class ConversationDeletionService {
     return this.deleteCardiaryRows(full, listTaskIds(this.#engine, intent.conversationIds), []);
   }
 
-  private insertIntent(intent: ConversationDeletionIntent): void {
+  private insertIntent(intent: ConversationDeletionIntent): ConversationDeletionIntent {
+    const cardIds = intent.cardIds ?? this.#exclusiveCardIds(intent.conversationIds);
+    const assetIds = intent.assetIds ?? this.#assetIdsOf(cardIds);
     this.#state.run(
       `INSERT INTO conversation_deletions
-         (root_id, conversation_ids, client_request_ids, phase, requested_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (root_id, conversation_ids, client_request_ids, card_ids, asset_ids, phase, requested_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       intent.rootId,
       JSON.stringify(intent.conversationIds),
       JSON.stringify(intent.clientRequestIds),
+      JSON.stringify(cardIds),
+      JSON.stringify(assetIds),
       intent.phase,
       intent.requestedAt,
       intent.updatedAt,
     );
     this.#trace("deletion:intent-written");
+    return { ...intent, cardIds, assetIds };
   }
 
   private updatePhase(rootId: string, phase: DeletionPhase): void {
@@ -320,6 +493,62 @@ export class ConversationDeletionService {
 
   private deleteIntent(rootId: string): void {
     this.#state.run("DELETE FROM conversation_deletions WHERE root_id = ?", rootId);
+  }
+
+  /**
+   * 寫入意圖時算出專屬卡片：只被這些對話引用、而且沒釘在白板。
+   *
+   * 結果是候選；真正刪檔前會再確認一次，刪除期間新增的引用不會被誤刪。
+   */
+  #exclusiveCardIds(conversationIds: readonly string[]): string[] {
+    if (conversationIds.length === 0) return [];
+    const wanted = new Set(conversationIds);
+    const rows = this.#state.all<{ card_id: string; conversation_id: string }>(
+      "SELECT card_id, conversation_id FROM conversation_cards",
+    );
+    const referenced = new Set<string>();
+    for (const row of rows) {
+      if (wanted.has(row.conversation_id)) referenced.add(row.card_id);
+    }
+    const refsByCard = new Map<string, string[]>();
+    for (const row of rows) {
+      if (!referenced.has(row.card_id)) continue;
+      const refs = refsByCard.get(row.card_id) ?? [];
+      refs.push(row.conversation_id);
+      refsByCard.set(row.card_id, refs);
+    }
+    const result: string[] = [];
+    for (const cardId of referenced) {
+      const outside = (refsByCard.get(cardId) ?? []).some(
+        (conversationId) => !wanted.has(conversationId),
+      );
+      if (outside) continue;
+      const state = this.#state.get<{ pinned: number }>(
+        "SELECT pinned FROM card_state WHERE card_id = ?",
+        cardId,
+      );
+      if ((state?.pinned ?? 0) === 1) continue;
+      result.push(cardId);
+    }
+    return result.sort();
+  }
+
+  /**
+   * 卡片檔裡出現的原檔候選。
+   *
+   * 用 `assets/<64 位雜湊>` 的字面比對，不解析 frontmatter；格式不符的卡
+   * 片檔一樣算數。讀不到的卡片檔略過，回收時會再掃描一次確認。
+   */
+  #assetIdsOf(cardIds: readonly string[]): string[] {
+    const directory = this.#layout.subfolderPath("cards");
+    const found = new Set<string>();
+    for (const cardId of cardIds) {
+      const text = loadText(path.join(directory, `${cardId}.md`));
+      for (const assetId of text === null ? [] : assetIdsInCardText(text)) {
+        found.add(assetId);
+      }
+    }
+    return [...found].sort();
   }
 
   private cleanupResidualEngine(): void {
@@ -370,6 +599,13 @@ export class ConversationDeletionService {
         tx.run("DELETE FROM next_turn_injections WHERE conversation_id = ?", conversationId);
       }
       const fileRegistry = deleteRegistryRows(tx, intent.conversationIds, taskIds, toolCallIds);
+      // M1 的對話列：先刪子表與引用，再刪 conversations；刪完引用後才算得出
+      // 哪些專屬卡片的狀態列可以一起消失。
+      const conversationRows = deleteConversationRows(tx, intent.conversationIds);
+      let cardState = 0;
+      for (const cardId of intent.cardIds ?? []) {
+        cardState += deleteCardStateIfUnreferenced(tx, cardId);
+      }
 
       Object.assign(counts, {
         eventLog,
@@ -379,6 +615,12 @@ export class ConversationDeletionService {
         subagentRuns,
         fileRegistry,
         nextTurnInjections,
+        conversations: conversationRows.conversations,
+        conversationCards: conversationRows.conversationCards,
+        conversationContext: conversationRows.context,
+        contextEntries: conversationRows.contextEntries,
+        conversationUsage: conversationRows.usage,
+        cardState,
       });
     });
 
@@ -388,6 +630,8 @@ export class ConversationDeletionService {
   }
 
   private vacuum(intent: ConversationDeletionIntent): void {
+    // 兩個資料庫的交易都完成了，才動正本區的卡片檔；重試時是冪等的。
+    this.completeCardDeletion(intent);
     this.#state.checkpoint();
     this.#state.incrementalVacuum();
     this.#state.checkpoint();
@@ -664,6 +908,25 @@ function countNextTurnRows(tx: Queryable, conversationIds: readonly string[]): n
   return count;
 }
 
+/** 刪掉專屬卡片的狀態列；還有其他引用或釘在白板時不動。 */
+function deleteCardStateIfUnreferenced(tx: Queryable, cardId: string): number {
+  const refs = tx.get<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM conversation_cards WHERE card_id = ?",
+    cardId,
+  );
+  if (Number(refs?.n ?? 0) > 0) {
+    return 0;
+  }
+  const state = tx.get<{ pinned: number }>(
+    "SELECT pinned FROM card_state WHERE card_id = ?",
+    cardId,
+  );
+  if ((state?.pinned ?? 0) === 1) {
+    return 0;
+  }
+  return tx.run("DELETE FROM card_state WHERE card_id = ?", cardId).changes;
+}
+
 function deleteOrphanSessionIndexes(tx: Queryable): number {
   const rows = tx.all<DocumentRow>(
     "SELECT id, kind, key_value, scope_kind, owner_id, record FROM documents WHERE scope_kind = 'session' AND kind IN (?, ?)",
@@ -792,11 +1055,54 @@ function readString(record: Record<string, unknown> | null, key: string): string
   return null;
 }
 
+/** 讀文字檔；讀不到回 null。卡片檔讀不到時略過原檔候選，回收會再掃描。 */
+function loadText(filePath: string): string | null {
+  try {
+    return readFileSync(filePath, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/** 卡片檔裡出現的 `assets/<雜湊>`；不解析 frontmatter。 */
+export function assetIdsInCardText(text: string): string[] {
+  const found = new Set<string>();
+  for (const match of text.matchAll(/assets\/([0-9a-f]{64})/gi)) {
+    const assetId = match[1];
+    if (assetId !== undefined) found.add(assetId.toLowerCase());
+  }
+  return [...found].sort();
+}
+
+/** 這些雜湊實際存在哪些原檔；讀不到資料夾時回空集合。 */
+export function existingAssetIds(layout: FolderLayout, assetIds: readonly string[]): Set<string> {
+  if (assetIds.length === 0) return new Set();
+  const directory = layout.subfolderPath("assets");
+  const wanted = new Set(assetIds.map((assetId) => assetId.toLowerCase()));
+  let names: string[];
+  try {
+    names = readdirSync(directory);
+  } catch {
+    return new Set();
+  }
+  const found = new Set<string>();
+  for (const name of names) {
+    const match = /^([0-9a-f]{64})\.[a-z0-9]{1,12}$/i.exec(name);
+    const assetId = match?.[1]?.toLowerCase();
+    if (assetId !== undefined && wanted.has(assetId)) {
+      found.add(assetId);
+    }
+  }
+  return found;
+}
+
 function rowToIntent(row: IntentRow): ConversationDeletionIntent {
   return {
     rootId: row.root_id,
     conversationIds: parseArray(row.conversation_ids),
     clientRequestIds: parseArray(row.client_request_ids),
+    cardIds: parseArray(row.card_ids),
+    assetIds: parseArray(row.asset_ids),
     phase: row.phase === "vacuum" ? "vacuum" : "rows",
     requestedAt: row.requested_at,
     updatedAt: row.updated_at,
@@ -820,6 +1126,12 @@ function emptyCounts(): DeletionTableCounts {
     subagentRuns: 0,
     fileRegistry: 0,
     nextTurnInjections: 0,
+    conversations: 0,
+    conversationCards: 0,
+    conversationContext: 0,
+    contextEntries: 0,
+    conversationUsage: 0,
+    cardState: 0,
     engineConversations: 0,
     engineEntries: 0,
     engineTasks: 0,

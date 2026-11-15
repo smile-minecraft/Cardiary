@@ -13,6 +13,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  CardIndexStore,
   Database,
   STATE_APPLICATION_ID,
   Storage,
@@ -186,6 +187,191 @@ describe("刪除意圖與啟動恢復", () => {
   it("恢復是冪等的：沒有意圖列時不會做任何事", async () => {
     const storage = open(temp());
     expect(await storage.deletions.recoverAtStartup({})).toBe(0);
+  });
+
+  it("崩潰後依意圖的 card_ids 與 asset_ids 補刪卡片檔", async () => {
+    const tempRoot = temp();
+    const first = open(tempRoot);
+    const engine = seedSmall(first);
+    const cardsDirectory = path.join(tempRoot.folder, "cards");
+    const assetsDirectory = path.join(tempRoot.folder, "assets");
+    mkdirSync(cardsDirectory, { recursive: true });
+    mkdirSync(assetsDirectory, { recursive: true });
+    const exclusive = "01RECOVERYCARD000000000001";
+    const shared = "01RECOVERYCARD000000000002";
+    const pinned = "01RECOVERYCARD000000000003";
+    const exclusiveAsset = `${"a".repeat(63)}1`;
+    const sharedAsset = `${"b".repeat(63)}2`;
+    const pinnedAsset = `${"c".repeat(63)}3`;
+    const writeCard = (cardId: string, assetId: string): void => {
+      writeFileSync(
+        path.join(cardsDirectory, `${cardId}.md`),
+        [
+          "---",
+          `id: ${cardId}`,
+          "kind: image",
+          "title: 卡片",
+          `created: ${nowIso()}`,
+          `asset: assets/${assetId}.png`,
+          "---",
+          `${MARKER} ${cardId}`,
+        ].join("\n"),
+      );
+      writeFileSync(path.join(assetsDirectory, `${assetId}.png`), `${MARKER} ${assetId}`);
+    };
+    writeCard(exclusive, exclusiveAsset);
+    writeCard(shared, sharedAsset);
+    writeCard(pinned, pinnedAsset);
+    const now = nowIso();
+    for (const [cardId, pinnedValue] of [
+      [exclusive, 0],
+      [shared, 0],
+      [pinned, 1],
+    ] as const) {
+      first.state.run(
+        `INSERT INTO card_state (card_id, persona, freshness, freshness_at, lifecycle, pinned, updated_at)
+         VALUES (?, 'default', 100, ?, 'live', ?, ?)`,
+        cardId,
+        now,
+        pinnedValue,
+        now,
+      );
+    }
+    const reference = (conversationId: string, cardId: string): void => {
+      first.state.run(
+        `INSERT INTO conversation_cards
+           (conversation_id, card_id, first_loaded_at, last_loaded_at, load_count)
+         VALUES (?, ?, ?, ?, 1)`,
+        conversationId,
+        cardId,
+        now,
+        now,
+      );
+    };
+    reference("1", exclusive);
+    reference("2", exclusive);
+    reference("1", shared);
+    reference("9", shared);
+    reference("1", pinned);
+
+    await expect(
+      first.deletions.deleteConversation("1", {
+        onAfterCardiaryCommit: () => {
+          throw new Error("simulated crash");
+        },
+      }),
+    ).rejects.toThrowError("simulated crash");
+
+    const intent = first.deletions.getIntent("1");
+    expect(intent?.phase).toBe("rows");
+    expect(intent?.cardIds).toEqual([exclusive]);
+    expect(intent?.assetIds).toEqual([exclusiveAsset]);
+    // 列已提交，卡片檔還沒動：重啟後要補完。
+    expect(existsSync(path.join(cardsDirectory, `${exclusive}.md`))).toBe(true);
+    expect(existsSync(path.join(assetsDirectory, `${exclusiveAsset}.png`))).toBe(true);
+    first.close();
+
+    const second = open(tempRoot);
+    await second.deletions.recoverAtStartup({});
+    expect(second.deletions.getIntent("1")).toBeNull();
+    expect(existsSync(path.join(cardsDirectory, `${exclusive}.md`))).toBe(false);
+    expect(existsSync(path.join(cardsDirectory, `${shared}.md`))).toBe(true);
+    expect(existsSync(path.join(cardsDirectory, `${pinned}.md`))).toBe(true);
+    expect(
+      second.state.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM conversation_cards WHERE card_id = ?",
+        shared,
+      )?.n,
+    ).toBe(1);
+    // 原檔依意圖的 asset_ids 補刪；共享與釘選卡片的原檔不受影響。
+    expect(existsSync(path.join(assetsDirectory, `${exclusiveAsset}.png`))).toBe(false);
+    expect(existsSync(path.join(assetsDirectory, `${sharedAsset}.png`))).toBe(true);
+    expect(existsSync(path.join(assetsDirectory, `${pinnedAsset}.png`))).toBe(true);
+    // 對整個資料夾做字串搜尋，專屬卡片與原檔的內容都不能留下。
+    expect(
+      byteSearch(tempRoot.folder, [`${MARKER} ${exclusive}`, `${MARKER} ${exclusiveAsset}`]),
+    ).toEqual([]);
+    expect(engine.count("SELECT COUNT(*) AS n FROM conversations WHERE id IN (1, 2)")).toBe(0);
+  });
+
+  it("移除意圖時順便清掉快取索引的幽靈列與原檔", async () => {
+    const tempRoot = temp();
+    const first = open(tempRoot);
+    seedSmall(first);
+    const cardsDirectory = path.join(tempRoot.folder, "cards");
+    const assetsDirectory = path.join(tempRoot.folder, "assets");
+    mkdirSync(cardsDirectory, { recursive: true });
+    mkdirSync(assetsDirectory, { recursive: true });
+    const cardId = "01RECOVERYGHOST00000000001";
+    const assetId = `${"d".repeat(63)}4`;
+    writeFileSync(
+      path.join(cardsDirectory, `${cardId}.md`),
+      [
+        "---",
+        `id: ${cardId}`,
+        "kind: image",
+        "title: 幽靈卡",
+        `asset: assets/${assetId}.png`,
+        "---",
+        `${MARKER} ghost`,
+      ].join("\n"),
+    );
+    writeFileSync(path.join(assetsDirectory, `${assetId}.png`), `${MARKER} ${assetId}`);
+    const now = nowIso();
+    first.state.run(
+      `INSERT INTO card_state (card_id, persona, freshness, freshness_at, lifecycle, pinned, updated_at)
+       VALUES (?, 'default', 100, ?, 'live', 0, ?)`,
+      cardId,
+      now,
+      now,
+    );
+    first.state.run(
+      `INSERT INTO conversation_cards
+         (conversation_id, card_id, first_loaded_at, last_loaded_at, load_count)
+       VALUES ('1', ?, ?, ?, 1)`,
+      cardId,
+      now,
+      now,
+    );
+    const index = new CardIndexStore({ db: first.cache });
+    index.putAssetMeta({ assetId, mediaType: "image/png", sizeBytes: 1 });
+    first.cache.run(
+      `INSERT INTO card_index
+         (card_id, path, mtime_ms, size_bytes, content_hash, revision, kind, title, title_norm,
+          summary, created_at, updated_at, persona, asset_id, supersedes, broken, broken_reason, indexed_at)
+       VALUES (?, ?, 1, 1, 'hash', '', 'image', '幽靈卡', '幽靈卡', NULL, ?, NULL, 'default', ?, NULL, 0, NULL, ?)`,
+      cardId,
+      `cards/${cardId}.md`,
+      now,
+      assetId,
+      now,
+    );
+    first.cache.run("INSERT INTO asset_refs (asset_id, card_id) VALUES (?, ?)", assetId, cardId);
+
+    // 列刪完、卡片檔還在時中斷；意圖停在 vacuum，啟動由 removeIntent 收尾。
+    await expect(
+      first.deletions.deleteConversation("1", {
+        onVacuumStart: () => {
+          throw new Error("simulated crash");
+        },
+      }),
+    ).rejects.toThrowError("simulated crash");
+    expect(existsSync(path.join(cardsDirectory, `${cardId}.md`))).toBe(true);
+    first.close();
+
+    const second = open(tempRoot);
+    second.deletions.removeIntent("1");
+    expect(second.deletions.getIntent("1")).toBeNull();
+    expect(existsSync(path.join(cardsDirectory, `${cardId}.md`))).toBe(false);
+    expect(existsSync(path.join(assetsDirectory, `${assetId}.png`))).toBe(false);
+    // 快取索引不留幽靈列：card.list 與原檔引用都不會再看到它。
+    expect(
+      second.cache.get("SELECT 1 AS one FROM card_index WHERE card_id = ?", cardId),
+    ).toBeUndefined();
+    expect(
+      second.cache.get("SELECT 1 AS one FROM asset_refs WHERE asset_id = ?", assetId),
+    ).toBeUndefined();
+    expect(byteSearch(tempRoot.folder, [`${MARKER} ghost`, `${MARKER} ${assetId}`])).toEqual([]);
   });
 });
 

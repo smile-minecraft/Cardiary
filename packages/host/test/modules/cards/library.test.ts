@@ -72,10 +72,10 @@ afterEach(() => {
   }
 });
 
-async function makeFixture(): Promise<Fixture> {
+async function makeFixture(clock: { now: Date } = { now: new Date() }): Promise<Fixture> {
   const folder = await mkdtemp(join(tmpdir(), "cardiary-cards-"));
   const storage = Storage.open({ path: folder, initialize: true });
-  const now = (): Date => new Date();
+  const now = (): Date => clock.now;
   const files = new CardFileStore({ layout: storage.layout, now });
   const indexFor = (database: Database): CardIndexStore =>
     new CardIndexStore({ db: database, now });
@@ -722,8 +722,13 @@ describe("卡片庫", () => {
     const card = await library.create({ kind: "note", title: "狀態", body: "內容\n" });
     expect(library.freshnessOf(card.cardId)).toBe(100);
 
-    storage.state.run("UPDATE card_state SET freshness = 12 WHERE card_id = ?", card.cardId);
-    expect(library.freshnessOf(card.cardId)).toBe(12);
+    storage.state.run(
+      "UPDATE card_state SET freshness = 25, freshness_at = ? WHERE card_id = ?",
+      new Date(Date.now() - 30 * 86_400_000).toISOString(),
+      card.cardId,
+    );
+    // 讀取當下計算：30 天前 25，現在約剩一半。
+    expect(library.freshnessOf(card.cardId)).toBeCloseTo(12.5, 1);
     expect(await library.refresh(card.cardId)).toBe(100);
     expect(library.freshnessOf(card.cardId)).toBe(100);
 
@@ -744,6 +749,34 @@ describe("卡片庫", () => {
       card.cardId,
     );
     expect(Number(loads?.n)).toBe(1);
+  }, 20_000);
+
+  it("不重啟、把時間推進，新鮮度會隨讀取時間下降；卡片檔位元組不變", async () => {
+    const clock = { now: new Date("2026-01-01T00:00:00.000Z") };
+    const fixture = await makeFixture(clock);
+    const { library, files, storage } = fixture;
+    const card = await library.create({ kind: "note", title: "時間卡", body: "會老化\n" });
+    expect(library.freshnessOf(card.cardId)).toBe(100);
+    const before = files.read(card.cardId)?.text;
+    const bytesBefore = await readFile(join(fixture.folder, "cards", `${card.cardId}.md`));
+
+    clock.now = new Date("2026-01-16T00:00:00.000Z"); // 半個半衰期
+    const halfLife = library.freshnessOf(card.cardId);
+    expect(halfLife).toBeCloseTo(100 * Math.SQRT1_2, 3);
+
+    clock.now = new Date("2026-03-02T00:00:00.000Z"); // 兩個半衰期
+    const twoHalfLives = library.freshnessOf(card.cardId);
+    expect(twoHalfLives).toBeCloseTo(25, 2);
+    expect(twoHalfLives).toBeLessThan(halfLife);
+
+    // 讀取只計算不寫回；卡片檔不動。
+    expect(files.read(card.cardId)?.text).toBe(before);
+    expect(await readFile(join(fixture.folder, "cards", `${card.cardId}.md`))).toEqual(bytesBefore);
+    const row = storage.state.get<{ freshness: number }>(
+      "SELECT freshness FROM card_state WHERE card_id = ?",
+      card.cardId,
+    );
+    expect(Number(row?.freshness)).toBe(100);
   }, 20_000);
 
   it("重建索引：刪掉快取後 rebuild 得到同樣的搜尋結果", async () => {

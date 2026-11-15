@@ -211,7 +211,11 @@ const CORE_TYPES: ReadonlySet<string> = new Set([
 /** 整段保留的命名空間；模組連子型別都不能登記。 */
 const RESERVED_NAMESPACES: readonly string[] = ["approval", "system.modules"];
 
-const REGISTRATION_KEY = /^[a-z][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
+/**
+ * 登記鍵的格式：命名空間用小寫英文字母、數字與連字號；動作段沿用協定型別，
+ * 允許底線（例如 `session.deletion_preview`）。
+ */
+const REGISTRATION_KEY = /^[a-z][a-z0-9-]*(?:\.[a-z0-9][a-z0-9_-]*)*$/;
 
 interface ProtocolEntry {
   readonly moduleId: string;

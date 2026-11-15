@@ -1,7 +1,13 @@
 import type { AssetStore, CardIndex, CardService } from "@cardiary/domain";
 import type { HostModule, ModuleActivationContext } from "@cardiary/module-api";
 import type { JsonValue } from "@cardiary/engine-adapter";
-import { CardFileStore, CardIndexStore, LocalAssetStore, type Database } from "@cardiary/storage";
+import {
+  CardFileStore,
+  CardIndexStore,
+  LocalAssetStore,
+  type Database,
+  type SettingsStore,
+} from "@cardiary/storage";
 
 import { HOST_SERVICE_NAMES, type CardEnvironment } from "../contract.js";
 import { CardLibrary } from "./library.js";
@@ -56,7 +62,11 @@ async function activate(context: ModuleActivationContext): Promise<void> {
     files,
     index,
     assets,
-    state: new CardStateStore({ db: () => cabinet.state, now }),
+    state: new CardStateStore({
+      db: () => cabinet.state,
+      now,
+      halfLifeDays: () => settingNumber(cabinet.settings, "freshness.halfLifeDays", 30),
+    }),
     now,
     emit: (intent) => context.services.protocol.emit(intent),
     warn,
@@ -101,6 +111,13 @@ async function activate(context: ModuleActivationContext): Promise<void> {
 }
 
 const runningWatchers = new Set<CardWatcher>();
+
+/** 讀設定裡的數字；沒有值或格式不對時用預設。與生命週期服務的解析一致。 */
+function settingNumber(settings: SettingsStore, key: string, fallback: number): number {
+  const raw = settings.get(key)?.value;
+  const parsed = raw === undefined ? Number.NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 /** 停用：停止監看；協定、工具與服務的註冊由主機撤銷。 */
 export function deactivate(): void {
