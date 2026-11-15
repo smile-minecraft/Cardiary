@@ -492,11 +492,28 @@ add("TranscriptEntry", {
 });
 
 add(
+  "TurnErrorDetails",
+  objectOf(
+    "TurnErrorDetails",
+    [],
+    {
+      reason: str(
+        "機器可讀的原因碼，例如 credential_missing、credential_invalid、quota_exceeded、provider_timeout、connection_failed、model_not_configured。開放字串，閘道可以帶其他診斷碼。",
+      ),
+      retryAfterMs: int("建議的重試等待毫秒數；只在可以判斷時帶上。", { minimum: 0 }),
+      field: str("出錯的設定或請求欄位，例如 roles。"),
+    },
+    "回合失敗的機器可讀補充資訊。不能放金鑰、Token 或個人資料；給人看的說明放在 message。",
+  ),
+);
+
+add(
   "TurnError",
   objectOf("TurnError", ["code", "message", "retryable"], {
     code: str("錯誤碼。"),
     message: str("錯誤說明。"),
     retryable: bool("這回合是否可以重試。"),
+    details: ref("TurnErrorDetails"),
   }),
 );
 

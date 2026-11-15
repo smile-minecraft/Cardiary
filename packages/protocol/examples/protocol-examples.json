@@ -484,6 +484,48 @@
       "startedAt": "2026-11-14T10:07:00Z"
     }
   },
+  "streamTurnStateFailedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "stream.turn_state",
+    "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+    "seq": 26,
+    "emittedAt": "2026-11-14T10:07:11Z",
+    "payload": {
+      "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+      "state": "failed",
+      "startedAt": "2026-11-14T10:07:00Z",
+      "endedAt": "2026-11-14T10:07:10Z",
+      "error": {
+        "code": "rate_limited",
+        "message": "供應商回報額度用盡。",
+        "retryable": true,
+        "details": {
+          "reason": "quota_exceeded",
+          "retryAfterMs": 30000
+        }
+      }
+    }
+  },
+  "streamTurnStateFailedWithoutDetailsEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "stream.turn_state",
+    "stream": "session:sess_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3",
+    "seq": 27,
+    "emittedAt": "2026-11-14T10:07:12Z",
+    "payload": {
+      "turnId": "turn_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4",
+      "state": "failed",
+      "startedAt": "2026-11-14T10:07:00Z",
+      "endedAt": "2026-11-14T10:07:12Z",
+      "error": {
+        "code": "unavailable",
+        "message": "供應商暫時無法連線。",
+        "retryable": true
+      }
+    }
+  },
   "streamUiEvent": {
     "v": 1,
     "kind": "event",

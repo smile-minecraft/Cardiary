@@ -850,6 +850,28 @@
         }
       ]
     },
+    "TurnErrorDetails": {
+      "title": "TurnErrorDetails",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "機器可讀的原因碼，例如 credential_missing、credential_invalid、quota_exceeded、provider_timeout、connection_failed、model_not_configured。開放字串，閘道可以帶其他診斷碼。"
+        },
+        "retryAfterMs": {
+          "type": "integer",
+          "description": "建議的重試等待毫秒數；只在可以判斷時帶上。",
+          "minimum": 0
+        },
+        "field": {
+          "type": "string",
+          "description": "出錯的設定或請求欄位，例如 roles。"
+        }
+      },
+      "description": "回合失敗的機器可讀補充資訊。不能放金鑰、Token 或個人資料；給人看的說明放在 message。"
+    },
     "TurnError": {
       "title": "TurnError",
       "type": "object",
@@ -867,6 +889,9 @@
         "retryable": {
           "type": "boolean",
           "description": "這回合是否可以重試。"
+        },
+        "details": {
+          "$ref": "#/$defs/TurnErrorDetails"
         }
       }
     },

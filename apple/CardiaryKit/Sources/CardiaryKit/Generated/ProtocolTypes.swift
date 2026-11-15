@@ -12509,21 +12509,25 @@ public struct TurnError: Codable, Equatable, Sendable {
     public let code: String
     public let message: String
     public let retryable: Bool
+    public let details: TurnErrorDetails?
 
     public init(
         code: String,
         message: String,
-        retryable: Bool
+        retryable: Bool,
+        details: TurnErrorDetails? = nil
     ) {
         self.code = code
         self.message = message
         self.retryable = retryable
+        self.details = details
     }
 
     private enum CodingKeys: String, CodingKey {
         case code = "code"
         case message = "message"
         case retryable = "retryable"
+        case details = "details"
     }
 
     public init(from decoder: Decoder) throws {
@@ -12531,10 +12535,12 @@ public struct TurnError: Codable, Equatable, Sendable {
         let code = try container.decode(String.self, forKey: .code)
         let message = try container.decode(String.self, forKey: .message)
         let retryable = try container.decode(Bool.self, forKey: .retryable)
+        let details = try container.decodeIfPresent(TurnErrorDetails.self, forKey: .details)
         self.init(
             code: code,
             message: message,
-            retryable: retryable
+            retryable: retryable,
+            details: details
         )
     }
 
@@ -12543,6 +12549,50 @@ public struct TurnError: Codable, Equatable, Sendable {
         try container.encode(code, forKey: .code)
         try container.encode(message, forKey: .message)
         try container.encode(retryable, forKey: .retryable)
+        try container.encodeIfPresent(details, forKey: .details)
+    }
+}
+
+// MARK: - TurnErrorDetails
+
+public struct TurnErrorDetails: Codable, Equatable, Sendable {
+    public let reason: String?
+    public let retryAfterMs: Int?
+    public let field: String?
+
+    public init(
+        reason: String? = nil,
+        retryAfterMs: Int? = nil,
+        field: String? = nil
+    ) {
+        self.reason = reason
+        self.retryAfterMs = retryAfterMs
+        self.field = field
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case reason = "reason"
+        case retryAfterMs = "retryAfterMs"
+        case field = "field"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let reason = try container.decodeIfPresent(String.self, forKey: .reason)
+        let retryAfterMs = try container.decodeIfPresent(Int.self, forKey: .retryAfterMs)
+        let field = try container.decodeIfPresent(String.self, forKey: .field)
+        self.init(
+            reason: reason,
+            retryAfterMs: retryAfterMs,
+            field: field
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(reason, forKey: .reason)
+        try container.encodeIfPresent(retryAfterMs, forKey: .retryAfterMs)
+        try container.encodeIfPresent(field, forKey: .field)
     }
 }
 

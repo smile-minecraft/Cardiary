@@ -195,6 +195,49 @@ describe("協定 schema 與範例", () => {
     expect(validateServer(streamingWrongType)).toBe(false);
   });
 
+  it("TurnError 的 details 只接受定義過的欄位與型別", () => {
+    const withDetails = structuredClone(examples.streamTurnStateFailedEvent);
+    expect(validateServer(withDetails)).toBe(true);
+    expect(withDetails.payload.error.details.reason).toBe("quota_exceeded");
+
+    const withoutDetails = structuredClone(examples.streamTurnStateFailedWithoutDetailsEvent);
+    expect(validateServer(withoutDetails)).toBe(true);
+    expect(withoutDetails.payload.error.details).toBeUndefined();
+
+    // 三個欄位都是選填；只帶其中一個也合法。
+    const reasonOnly = structuredClone(withDetails);
+    reasonOnly.payload.error.details = { reason: "credential_missing" };
+    expect(validateServer(reasonOnly)).toBe(true);
+
+    const fieldOnly = structuredClone(withDetails);
+    fieldOnly.payload.error.details = { field: "roles" };
+    expect(validateServer(fieldOnly)).toBe(true);
+
+    const unknownField = structuredClone(withDetails);
+    unknownField.payload.error.details.apiKey = "secret";
+    expect(validateServer(unknownField)).toBe(false);
+
+    const wrongReason = structuredClone(withDetails);
+    wrongReason.payload.error.details.reason = 42;
+    expect(validateServer(wrongReason)).toBe(false);
+
+    const negativeDelay = structuredClone(withDetails);
+    negativeDelay.payload.error.details.retryAfterMs = -1;
+    expect(validateServer(negativeDelay)).toBe(false);
+
+    const fractionalDelay = structuredClone(withDetails);
+    fractionalDelay.payload.error.details.retryAfterMs = 1.5;
+    expect(validateServer(fractionalDelay)).toBe(false);
+
+    const wrongField = structuredClone(withDetails);
+    wrongField.payload.error.details.field = ["roles"];
+    expect(validateServer(wrongField)).toBe(false);
+
+    const stringDetails = structuredClone(withDetails);
+    stringDetails.payload.error.details = "credential_invalid";
+    expect(validateServer(stringDetails)).toBe(false);
+  });
+
   it("schema 與設計文件沒有出現引擎的型別或欄位名稱", () => {
     const engineIdentifiers = [
       "@earendil-works",
