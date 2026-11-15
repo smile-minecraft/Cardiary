@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import Ajv2020 from "ajv/dist/2020.js";
@@ -273,6 +273,14 @@ describe("協定 schema 與範例", () => {
   });
 
   it("schema 與設計文件沒有出現引擎的型別或欄位名稱", () => {
+    // 設計文件（docs/design/protocol.md）不進版控：公開前重寫歷史後，公開 clone 與 CI 沒有這個檔案。
+    // 這裡只把它當成額外的本機檢查，檔案不存在時略過；核心斷言（schema 本身）一定執行，
+    // 不讓 CI 因為缺少未版控的私人文件而失敗，也不把 docs/ 加回版控。
+    const designDocPath = `${repoRoot}/docs/design/protocol.md`;
+    const sources: [string, string][] = [["schema", JSON.stringify(schema)]];
+    if (existsSync(designDocPath)) {
+      sources.push(["設計文件", readFileSync(designDocPath, "utf8")]);
+    }
     const engineIdentifiers = [
       "@earendil-works",
       "observeCommits",
@@ -295,11 +303,6 @@ describe("協定 schema 與範例", () => {
       "pi.assistant",
       "pi.tool-result",
     ];
-
-    const sources = [
-      ["schema", JSON.stringify(schema)],
-      ["設計文件", readFileSync(`${repoRoot}/docs/design/protocol.md`, "utf8")],
-    ] as const;
 
     for (const [label, source] of sources) {
       for (const identifier of engineIdentifiers) {
