@@ -367,6 +367,31 @@ public actor CardiaryConnection {
         return response.payload
     }
 
+    /// 對第一方模組的 `module.*` 請求。
+    ///
+    /// 請求與回應的 payload 都是 `{ data: … }`（`protocol.md` 第 6 節）；這裡
+    /// 回傳整個回應 payload，呼叫端自己從 `data` 解碼。回應由 `perform` 的
+    /// `replyTo` 對應，與其他請求走同一條 resume 路徑。
+    public func sendModuleRequest(
+        type: String,
+        payload: JSONValue,
+        options: RequestOptions = .default
+    ) async throws -> JSONValue {
+        guard case .object(let data) = payload else {
+            throw CardiaryClientError.invalidFrame("\(type) 的 payload 必須是 JSON 物件。")
+        }
+        let request = ModuleRequest(
+            id: RequestID.next(),
+            type: type,
+            payload: ModuleRequestPayload(data: data)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .moduleResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame("\(type) 收到 \(frame.kindLabel) 而不是回應。")
+        }
+        return .object(["data": .object(response.payload.data)])
+    }
+
     /// 送一則使用者訊息；`clientMessageId` 讓重送不會新增訊息。
     public func sendMessage(
         sessionId: String,

@@ -24,8 +24,8 @@ public struct ImportUIEntry {
 /// `makeEntry` 換成它，`App/` 的其他檔案不用動。
 @MainActor
 public enum ImportUIModule {
-    /// 匯入介面提供的命令。預設沒有命令。
-    public static var makeEntry: @MainActor (AppModel) -> ImportUIEntry = { _ in .pending }
+    /// 匯入介面提供的命令。預設接到 `Import/` 的匯入流程；測試可以換掉。
+    public static var makeEntry: @MainActor (AppModel) -> ImportUIEntry = ImportUIEntry.live
 
     /// 把匯入介面掛上 App。重複呼叫時同一個命令只留一份。
     public static func install(_ app: AppModel) {

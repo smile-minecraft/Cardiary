@@ -282,6 +282,19 @@ public actor CardiaryClient {
         )
     }
 
+    // MARK: - 模組請求
+
+    /// 對第一方模組（`module.*`）送請求，回傳回應的整個 payload（`{ data: … }`）。
+    ///
+    /// 匯入介面用它送 `module.import.*`；呼叫端從 `data` 解碼自己需要的型別。
+    public func sendModuleRequest(
+        _ type: String,
+        payload: JSONValue
+    ) async throws -> JSONValue {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.sendModuleRequest(type: type, payload: payload)
+    }
+
     // MARK: - 卡片、上下文與封存
 
     /// 列出一頁卡片；翻頁帶上一次的 `cursor`。
@@ -628,6 +641,9 @@ public actor CardiaryClient {
     ) {
         // 每一則事件都轉交給介面；view model 自己過濾感興趣的串流。
         handlers.onSessionEvent?(frame)
+        if case .moduleEvent = frame {
+            handlers.onModuleEvent?(frame)
+        }
 
         switch frame {
         case .systemStatusEvent(let event):
@@ -694,6 +710,7 @@ public final class Handlers: @unchecked Sendable {
     private var approvalsHandler: (@Sendable ([ApprovalRequest]) -> Void)?
     private var diagnosticHandler: (@Sendable (String) -> Void)?
     private var sessionEventHandler: (@Sendable (ServerFrame) -> Void)?
+    private var moduleEventHandler: (@Sendable (ServerFrame) -> Void)?
     private var epochChangeHandler: (@Sendable (String) -> Void)?
 
     public init() {}
@@ -728,6 +745,12 @@ public final class Handlers: @unchecked Sendable {
     public var onSessionEvent: (@Sendable (ServerFrame) -> Void)? {
         get { lock.lock(); defer { lock.unlock() }; return sessionEventHandler }
         set { lock.lock(); sessionEventHandler = newValue; lock.unlock() }
+    }
+
+    /// 只轉送 `module.*` 事件；匯入流程用它接進度，不必動共用的 `onSessionEvent`。
+    public var onModuleEvent: (@Sendable (ServerFrame) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return moduleEventHandler }
+        set { lock.lock(); moduleEventHandler = newValue; lock.unlock() }
     }
 
     /// 收到與先前不同的 epoch（或串流缺口後被迫重載）時觸發，帶新的 epoch。

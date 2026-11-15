@@ -81,12 +81,20 @@ final class ExtensionPointTests: XCTestCase {
         let model = AppModel(setupCompleted: true)
         XCTAssertEqual(model.commands.groups.map(\.id), ["view", "cards", "import"])
         XCTAssertEqual(model.commands.group("cards")?.commands.isEmpty, true)
+        XCTAssertEqual(
+            model.commands.group("import")?.commands.map(\.id),
+            ["import.open"],
+            "匯入流程預設掛上開啟命令"
+        )
 
         XCTAssertTrue(model.commands.append(
-            AppCommand(id: "import.open", titleKey: .commandGroupImport, action: {}),
+            AppCommand(id: "import.preview", titleKey: .commandGroupImport, action: {}),
             to: "import"
         ))
-        XCTAssertEqual(model.commands.group("import")?.commands.map(\.id), ["import.open"])
+        XCTAssertEqual(
+            model.commands.group("import")?.commands.map(\.id),
+            ["import.open", "import.preview"]
+        )
         XCTAssertFalse(model.commands.append(
             AppCommand(id: "nope", titleKey: .commandGroupImport, action: {}),
             to: "missing-group"
