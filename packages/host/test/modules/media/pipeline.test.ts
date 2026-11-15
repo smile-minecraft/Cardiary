@@ -100,11 +100,38 @@ describe("多模態匯入", () => {
     expect(second.blobId).toBe(first.blobId);
     const once = await f.media.import({ blobId: first.blobId, title: "同一張" });
     const twice = await f.media.import({ blobId: first.blobId, title: "同一張" });
+    expect(once.deduped).toBe(false);
+    expect(twice.deduped).toBe(true);
     expect(twice.card.cardId).toBe(once.card.cardId);
     expect(readdirSync(join(f.folder, "assets"))).toEqual([`${first.blobId}.png`]);
     expect(
       readdirSync(join(f.folder, "cards")).filter((name) => name.endsWith(".md")),
     ).toHaveLength(1);
+  });
+
+  it("同一個 blobId 的並行匯入共用一次辨識，只建一張卡", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    const broker = {
+      async requestBroker() {
+        calls += 1;
+        await gate;
+        return { available: true, text: "同樣的圖" };
+      },
+    };
+    const f = await fixture({ recognition: broker, models: fakeModels() });
+    const bytes = await pngBytes();
+    const blob = await f.store.put({ bytes: chunks(bytes), mediaType: "image/png" });
+    const first = f.media.import({ blobId: blob.blobId });
+    const second = f.media.import({ blobId: blob.blobId });
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.card.cardId).toBe(b.card.cardId);
+    expect(b.deduped).toBe(a.deduped);
+    expect(calls).toBe(1);
   });
 
   it("沒有殼（獨立執行）時匯入仍完成，卡片標明缺少的部分", async () => {
@@ -117,6 +144,12 @@ describe("多模態匯入", () => {
     expect(imported.standIn.sources.description).toBe("none");
     expect(imported.card.body).toContain("## 缺少的部分");
     expect(imported.card.body).toContain("no_shell");
+    expect(imported.standIn.missing.length).toBeGreaterThan(0);
+
+    // 重送回同一張卡時，缺少的部分要從卡片內文讀回來，不能變成空的。
+    const again = await f.media.import({ blobId: blob.blobId });
+    expect(again.deduped).toBe(true);
+    expect(again.standIn.missing).toEqual(imported.standIn.missing);
   });
 
   it("殼路由回 available:false 時一樣完成，卡片寫出原因", async () => {

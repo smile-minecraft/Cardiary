@@ -10,6 +10,7 @@ import {
   type ImportMediaInput,
   type ImportMediaResult,
 } from "./pipeline.js";
+import { registerMediaProtocol } from "./protocol.js";
 import { RecognitionClient } from "./recognition.js";
 import { MediaStore, type BlobInfo, type StoredBlobInfo } from "./store.js";
 import { createMediaToolBundle } from "./tools.js";
@@ -33,9 +34,9 @@ export interface BlobStore {
 /**
  * 多模態模組的進入點。
  *
- * 協定面只註冊 HTTP blob 路由；匯入與翻牌以服務與工具提供給卡片、匯入
- * 與未來的介面使用。沒有殼時 `broker` 不存在，辨識一律回
- * `available:false`，匯入仍會完成並在卡片標明缺少的部分。
+ * 協定面註冊 HTTP blob 路由與 `media.import`；匯入與翻牌以服務與工具
+ * 提供給卡片、匯入與未來的介面使用。沒有殼時 `broker` 不存在，辨識
+ * 一律回 `available:false`，匯入仍會完成並在卡片標明缺少的部分。
  */
 export const hostModule: HostModule = {
   manifest,
@@ -76,6 +77,7 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   context.services.host.provide(HOST_SERVICE_NAMES.recognition, recognition);
   context.services.host.provide(HOST_SERVICE_NAMES.blobs, blobs);
   registerMediaHttpRoutes({ store, protocol: context.services.protocol });
+  registerMediaProtocol({ media, protocol: context.services.protocol });
   context.registerToolBundle(createMediaToolBundle({ media }));
   context.services.logger.info("多模態模組已啟用", {
     blobs: true,

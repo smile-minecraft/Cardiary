@@ -33,6 +33,7 @@ export type ClientFrame =
   | CardDeleteRequest
   | CardSearchRequest
   | CardRefreshRequest
+  | MediaImportRequest
   | ContextGetRequest
   | ContextAddCardRequest
   | ContextRemoveCardRequest
@@ -120,6 +121,7 @@ export type ServerFrame =
   | CardDeleteResponse
   | CardSearchResponse
   | CardRefreshResponse
+  | MediaImportResponse
   | ContextGetResponse
   | ContextAddCardResponse
   | ContextRemoveCardResponse
@@ -194,6 +196,18 @@ export type ApprovalEffect = "approve" | "reject" | "approve_always";
  * 卡片生命週期；cold 是蒸餾後的冷封存。
  */
 export type CardLifecycle = "live" | "cold";
+/**
+ * 多模態的種類；只有圖片與音訊。
+ */
+export type MediaKind = "image" | "audio";
+/**
+ * 由本機能力產生的文字來源；none 表示沒有產生。
+ */
+export type MediaLocalTextSource = "local" | "none";
+/**
+ * 由小模型產生的文字來源；none 表示沒有產生。
+ */
+export type MediaModelTextSource = "small-model" | "none";
 /**
  * 八層的識別碼，順序由前往後。
  */
@@ -857,6 +871,49 @@ export interface CardRefreshRequestPayload {
    * 要保鮮的卡片。
    */
   cardId: string;
+}
+/**
+ * 以已上傳的 blobId 匯入圖片或音訊。
+ */
+export interface MediaImportRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "media.import";
+  payload: MediaImportRequestPayload;
+}
+export interface MediaImportRequestPayload {
+  /**
+   * 已上傳原檔的 SHA-256 小寫十六進位；先用 POST /v1/blobs 上傳。
+   */
+  blobId: string;
+  /**
+   * 語音轉文字的語言，例如 zh-TW；只有音訊使用。
+   */
+  locale?: string;
+  /**
+   * 圖片的 OCR 語言，依優先順序。
+   *
+   * Items: OCR 語言。
+   */
+  ocrLocales?: string[];
+  /**
+   * 卡片標題；省略時由文字替身產生。
+   */
+  title?: string;
+  /**
+   * 標籤。
+   *
+   * Items: 標籤。
+   */
+  tags?: string[];
+  /**
+   * 人格分區；省略時用 default。
+   */
+  persona?: string;
 }
 /**
  * 取得目前上下文。
@@ -2257,6 +2314,49 @@ export interface CardRefreshResponsePayload {
    * 保鮮後的新鮮度，固定 100。
    */
   freshness: number;
+}
+/**
+ * 匯入結果與文字替身狀態。
+ */
+export interface MediaImportResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "media.import";
+  payload: MediaImportResponsePayload;
+}
+export interface MediaImportResponsePayload {
+  /**
+   * 建立的卡片；同一個 blobId 重送回同一張卡。
+   */
+  cardId: string;
+  kind: MediaKind;
+  textStandIn: MediaTextStandIn;
+  /**
+   * 這個 blobId 已經有卡片，這次接回既有的卡片。
+   */
+  deduped: boolean;
+}
+export interface MediaTextStandIn {
+  sources: MediaTextStandInSources;
+  /**
+   * 無法產生的部分；完整時是空陣列。卡片內文的「缺少的部分」與這裡一致。
+   *
+   * Items: 給人看的缺少說明。
+   */
+  missingParts: string[];
+}
+/**
+ * 文字替身每一塊的來源；缺哪一塊要說清楚。
+ */
+export interface MediaTextStandInSources {
+  ocr: MediaLocalTextSource;
+  description: MediaModelTextSource;
+  transcript: MediaLocalTextSource;
+  summary: MediaModelTextSource;
 }
 /**
  * 上下文視圖。

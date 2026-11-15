@@ -3098,6 +3098,7 @@ public enum ClientFrame: Codable, Equatable, Sendable {
     case cardDeleteRequest(CardDeleteRequest)
     case cardSearchRequest(CardSearchRequest)
     case cardRefreshRequest(CardRefreshRequest)
+    case mediaImportRequest(MediaImportRequest)
     case contextGetRequest(ContextGetRequest)
     case contextAddCardRequest(ContextAddCardRequest)
     case contextRemoveCardRequest(ContextRemoveCardRequest)
@@ -3162,6 +3163,8 @@ public enum ClientFrame: Codable, Equatable, Sendable {
             self = .cardSearchRequest(try CardSearchRequest(from: decoder))
         case .some("card.refresh"):
             self = .cardRefreshRequest(try CardRefreshRequest(from: decoder))
+        case .some("media.import"):
+            self = .mediaImportRequest(try MediaImportRequest(from: decoder))
         case .some("context.get"):
             self = .contextGetRequest(try ContextGetRequest(from: decoder))
         case .some("context.add_card"):
@@ -3236,6 +3239,8 @@ public enum ClientFrame: Codable, Equatable, Sendable {
         case .cardSearchRequest(let value):
             try value.encode(to: encoder)
         case .cardRefreshRequest(let value):
+            try value.encode(to: encoder)
+        case .mediaImportRequest(let value):
             try value.encode(to: encoder)
         case .contextGetRequest(let value):
             try value.encode(to: encoder)
@@ -4808,6 +4813,359 @@ public struct HelloResume: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - MediaImportRequest
+
+public struct MediaImportRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: MediaImportRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "media.import",
+        payload: MediaImportRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "MediaImportRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "MediaImportRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "media.import" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "MediaImportRequest.type 必須是 media.import")
+        }
+        let payload = try container.decode(MediaImportRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - MediaImportRequestPayload
+
+public struct MediaImportRequestPayload: Codable, Equatable, Sendable {
+    public let blobId: String
+    public let locale: String?
+    public let ocrLocales: [String]?
+    public let title: String?
+    public let tags: [String]?
+    public let persona: String?
+
+    public init(
+        blobId: String,
+        locale: String? = nil,
+        ocrLocales: [String]? = nil,
+        title: String? = nil,
+        tags: [String]? = nil,
+        persona: String? = nil
+    ) {
+        self.blobId = blobId
+        self.locale = locale
+        self.ocrLocales = ocrLocales
+        self.title = title
+        self.tags = tags
+        self.persona = persona
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case blobId = "blobId"
+        case locale = "locale"
+        case ocrLocales = "ocrLocales"
+        case title = "title"
+        case tags = "tags"
+        case persona = "persona"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let blobId = try container.decode(String.self, forKey: .blobId)
+        let locale = try container.decodeIfPresent(String.self, forKey: .locale)
+        let ocrLocales = try container.decodeIfPresent([String].self, forKey: .ocrLocales)
+        let title = try container.decodeIfPresent(String.self, forKey: .title)
+        let tags = try container.decodeIfPresent([String].self, forKey: .tags)
+        let persona = try container.decodeIfPresent(String.self, forKey: .persona)
+        self.init(
+            blobId: blobId,
+            locale: locale,
+            ocrLocales: ocrLocales,
+            title: title,
+            tags: tags,
+            persona: persona
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(blobId, forKey: .blobId)
+        try container.encodeIfPresent(locale, forKey: .locale)
+        try container.encodeIfPresent(ocrLocales, forKey: .ocrLocales)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encodeIfPresent(tags, forKey: .tags)
+        try container.encodeIfPresent(persona, forKey: .persona)
+    }
+}
+
+// MARK: - MediaImportResponse
+
+public struct MediaImportResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: MediaImportResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "media.import",
+        payload: MediaImportResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "MediaImportResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "MediaImportResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "media.import" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "MediaImportResponse.type 必須是 media.import")
+        }
+        let payload = try container.decode(MediaImportResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - MediaImportResponsePayload
+
+public struct MediaImportResponsePayload: Codable, Equatable, Sendable {
+    public let cardId: String
+    public let kind: MediaKind
+    public let textStandIn: MediaTextStandIn
+    public let deduped: Bool
+
+    public init(
+        cardId: String,
+        kind: MediaKind,
+        textStandIn: MediaTextStandIn,
+        deduped: Bool
+    ) {
+        self.cardId = cardId
+        self.kind = kind
+        self.textStandIn = textStandIn
+        self.deduped = deduped
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case cardId = "cardId"
+        case kind = "kind"
+        case textStandIn = "textStandIn"
+        case deduped = "deduped"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let cardId = try container.decode(String.self, forKey: .cardId)
+        let kind = try container.decode(MediaKind.self, forKey: .kind)
+        let textStandIn = try container.decode(MediaTextStandIn.self, forKey: .textStandIn)
+        let deduped = try container.decode(Bool.self, forKey: .deduped)
+        self.init(
+            cardId: cardId,
+            kind: kind,
+            textStandIn: textStandIn,
+            deduped: deduped
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cardId, forKey: .cardId)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(textStandIn, forKey: .textStandIn)
+        try container.encode(deduped, forKey: .deduped)
+    }
+}
+
+// MARK: - MediaKind
+
+public enum MediaKind: String, Codable, Equatable, Sendable, CaseIterable {
+    case image = "image"
+    case audio = "audio"
+}
+
+// MARK: - MediaLocalTextSource
+
+public enum MediaLocalTextSource: String, Codable, Equatable, Sendable, CaseIterable {
+    case local = "local"
+    case none = "none"
+}
+
+// MARK: - MediaModelTextSource
+
+public enum MediaModelTextSource: String, Codable, Equatable, Sendable, CaseIterable {
+    case smallModel = "small-model"
+    case none = "none"
+}
+
+// MARK: - MediaTextStandIn
+
+public struct MediaTextStandIn: Codable, Equatable, Sendable {
+    public let sources: MediaTextStandInSources
+    public let missingParts: [String]
+
+    public init(
+        sources: MediaTextStandInSources,
+        missingParts: [String]
+    ) {
+        self.sources = sources
+        self.missingParts = missingParts
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sources = "sources"
+        case missingParts = "missingParts"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let sources = try container.decode(MediaTextStandInSources.self, forKey: .sources)
+        let missingParts = try container.decode([String].self, forKey: .missingParts)
+        self.init(
+            sources: sources,
+            missingParts: missingParts
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sources, forKey: .sources)
+        try container.encode(missingParts, forKey: .missingParts)
+    }
+}
+
+// MARK: - MediaTextStandInSources
+
+public struct MediaTextStandInSources: Codable, Equatable, Sendable {
+    public let ocr: MediaLocalTextSource
+    public let description: MediaModelTextSource
+    public let transcript: MediaLocalTextSource
+    public let summary: MediaModelTextSource
+
+    public init(
+        ocr: MediaLocalTextSource,
+        description: MediaModelTextSource,
+        transcript: MediaLocalTextSource,
+        summary: MediaModelTextSource
+    ) {
+        self.ocr = ocr
+        self.description = description
+        self.transcript = transcript
+        self.summary = summary
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case ocr = "ocr"
+        case description = "description"
+        case transcript = "transcript"
+        case summary = "summary"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let ocr = try container.decode(MediaLocalTextSource.self, forKey: .ocr)
+        let description = try container.decode(MediaModelTextSource.self, forKey: .description)
+        let transcript = try container.decode(MediaLocalTextSource.self, forKey: .transcript)
+        let summary = try container.decode(MediaModelTextSource.self, forKey: .summary)
+        self.init(
+            ocr: ocr,
+            description: description,
+            transcript: transcript,
+            summary: summary
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(ocr, forKey: .ocr)
+        try container.encode(description, forKey: .description)
+        try container.encode(transcript, forKey: .transcript)
+        try container.encode(summary, forKey: .summary)
+    }
+}
+
 // MARK: - MessageStatus
 
 public enum MessageStatus: String, Codable, Equatable, Sendable, CaseIterable {
@@ -5726,6 +6084,7 @@ public enum ServerFrame: Codable, Equatable, Sendable {
     case cardDeleteResponse(CardDeleteResponse)
     case cardSearchResponse(CardSearchResponse)
     case cardRefreshResponse(CardRefreshResponse)
+    case mediaImportResponse(MediaImportResponse)
     case contextGetResponse(ContextGetResponse)
     case contextAddCardResponse(ContextAddCardResponse)
     case contextRemoveCardResponse(ContextRemoveCardResponse)
@@ -5814,6 +6173,8 @@ public enum ServerFrame: Codable, Equatable, Sendable {
             self = .cardSearchResponse(try CardSearchResponse(from: decoder))
         case (.some("response"), .some("card.refresh")):
             self = .cardRefreshResponse(try CardRefreshResponse(from: decoder))
+        case (.some("response"), .some("media.import")):
+            self = .mediaImportResponse(try MediaImportResponse(from: decoder))
         case (.some("response"), .some("context.get")):
             self = .contextGetResponse(try ContextGetResponse(from: decoder))
         case (.some("response"), .some("context.add_card")):
@@ -5930,6 +6291,8 @@ public enum ServerFrame: Codable, Equatable, Sendable {
         case .cardSearchResponse(let value):
             try value.encode(to: encoder)
         case .cardRefreshResponse(let value):
+            try value.encode(to: encoder)
+        case .mediaImportResponse(let value):
             try value.encode(to: encoder)
         case .contextGetResponse(let value):
             try value.encode(to: encoder)

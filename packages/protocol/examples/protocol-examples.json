@@ -931,6 +931,38 @@
       "freshness": 100
     }
   },
+  "mediaImportRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_media_import",
+    "type": "media.import",
+    "payload": {
+      "blobId": "9f2c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a",
+      "locale": "zh-TW",
+      "title": "會議白板",
+      "tags": ["會議"]
+    }
+  },
+  "mediaImportResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_media_import",
+    "type": "media.import",
+    "payload": {
+      "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZM",
+      "kind": "image",
+      "textStandIn": {
+        "sources": {
+          "ocr": "local",
+          "description": "small-model",
+          "transcript": "none",
+          "summary": "none"
+        },
+        "missingParts": []
+      },
+      "deduped": false
+    }
+  },
   "contextGetRequest": {
     "v": 1,
     "kind": "request",

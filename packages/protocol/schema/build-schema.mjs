@@ -1109,6 +1109,72 @@ add(
 );
 
 // ---------------------------------------------------------------------------
+// M1：多模態
+// ---------------------------------------------------------------------------
+
+add("MediaKind", stringEnum(["image", "audio"], "多模態的種類；只有圖片與音訊。"));
+
+add(
+  "MediaLocalTextSource",
+  stringEnum(["local", "none"], "由本機能力產生的文字來源；none 表示沒有產生。"),
+);
+
+add(
+  "MediaModelTextSource",
+  stringEnum(["small-model", "none"], "由小模型產生的文字來源；none 表示沒有產生。"),
+);
+
+add(
+  "MediaTextStandInSources",
+  objectOf(
+    "MediaTextStandInSources",
+    ["ocr", "description", "transcript", "summary"],
+    {
+      ocr: ref("MediaLocalTextSource"),
+      description: ref("MediaModelTextSource"),
+      transcript: ref("MediaLocalTextSource"),
+      summary: ref("MediaModelTextSource"),
+    },
+    "文字替身每一塊的來源；缺哪一塊要說清楚。",
+  ),
+);
+
+add(
+  "MediaTextStandIn",
+  objectOf("MediaTextStandIn", ["sources", "missingParts"], {
+    sources: ref("MediaTextStandInSources"),
+    missingParts: arrayOf(
+      str("給人看的缺少說明。"),
+      "無法產生的部分；完整時是空陣列。卡片內文的「缺少的部分」與這裡一致。",
+    ),
+  }),
+);
+
+add(
+  "MediaImportRequestPayload",
+  objectOf("MediaImportRequestPayload", ["blobId"], {
+    blobId: str("已上傳原檔的 SHA-256 小寫十六進位；先用 POST /v1/blobs 上傳。", {
+      pattern: "^[0-9a-f]{64}$",
+    }),
+    locale: str("語音轉文字的語言，例如 zh-TW；只有音訊使用。"),
+    ocrLocales: arrayOf(str("OCR 語言。"), "圖片的 OCR 語言，依優先順序。"),
+    title: str("卡片標題；省略時由文字替身產生。"),
+    tags: arrayOf(str("標籤。"), "標籤。"),
+    persona: str("人格分區；省略時用 default。"),
+  }),
+);
+
+add(
+  "MediaImportResponsePayload",
+  objectOf("MediaImportResponsePayload", ["cardId", "kind", "textStandIn", "deduped"], {
+    cardId: str("建立的卡片；同一個 blobId 重送回同一張卡。"),
+    kind: ref("MediaKind"),
+    textStandIn: ref("MediaTextStandIn"),
+    deduped: bool("這個 blobId 已經有卡片，這次接回既有的卡片。"),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // M1：上下文
 // ---------------------------------------------------------------------------
 
@@ -1952,6 +2018,20 @@ eventFrame(
   "卡片建立、更新、刪除、保鮮或重新索引；掛在 system 串流。",
 );
 
+// 多模態
+requestFrame(
+  "MediaImportRequest",
+  "media.import",
+  "MediaImportRequestPayload",
+  "以已上傳的 blobId 匯入圖片或音訊。",
+);
+responseFrame(
+  "MediaImportResponse",
+  "media.import",
+  "MediaImportResponsePayload",
+  "匯入結果與文字替身狀態。",
+);
+
 // 上下文
 requestFrame("ContextGetRequest", "context.get", "ContextGetRequestPayload", "取得目前上下文。");
 responseFrame("ContextGetResponse", "context.get", "ContextGetResponsePayload", "上下文視圖。");
@@ -2196,6 +2276,7 @@ add("ClientFrame", {
     ref("CardDeleteRequest"),
     ref("CardSearchRequest"),
     ref("CardRefreshRequest"),
+    ref("MediaImportRequest"),
     ref("ContextGetRequest"),
     ref("ContextAddCardRequest"),
     ref("ContextRemoveCardRequest"),
@@ -2237,6 +2318,7 @@ add("ServerFrame", {
     ref("CardDeleteResponse"),
     ref("CardSearchResponse"),
     ref("CardRefreshResponse"),
+    ref("MediaImportResponse"),
     ref("ContextGetResponse"),
     ref("ContextAddCardResponse"),
     ref("ContextRemoveCardResponse"),

@@ -34,6 +34,9 @@ export interface ImportMediaInput {
 export interface ImportMediaResult {
   readonly card: Card;
   readonly standIn: TextStandIn;
+  readonly kind: MediaKind;
+  /** 這個 blobId 已經有卡片，這次接回既有的卡片；沒有重新辨識。 */
+  readonly deduped: boolean;
 }
 
 export interface FlipInput {
@@ -65,13 +68,30 @@ export interface MediaServiceOptions {
 export class MediaService {
   readonly #options: MediaServiceOptions;
   readonly #flipping = new Map<string, Promise<FlipResult>>();
+  readonly #importing = new Map<string, Promise<ImportMediaResult>>();
 
   constructor(options: MediaServiceOptions) {
     this.#options = options;
   }
 
-  /** 匯入一個已上傳的原檔；同一個 blobId 已經有卡片時直接回它。 */
+  /**
+   * 匯入一個已上傳的原檔；同一個 blobId 已經有卡片時直接回它。
+   *
+   * 同一個 blobId 的並行呼叫共用一次匯入：使用者連按兩次或回應遺失後
+   * 重送時，不會同時跑兩次辨識，也不會建立第二張卡。
+   */
   async import(input: ImportMediaInput): Promise<ImportMediaResult> {
+    const key = input.blobId.trim().toLowerCase();
+    const running = this.#importing.get(key);
+    if (running !== undefined) return running;
+    const task = this.#import(input).finally(() => {
+      this.#importing.delete(key);
+    });
+    this.#importing.set(key, task);
+    return task;
+  }
+
+  async #import(input: ImportMediaInput): Promise<ImportMediaResult> {
     const info = this.#options.store.info(input.blobId);
     if (info === undefined) {
       throw new MediaError("not_found", "找不到已上傳的原檔。", { blobId: input.blobId });
@@ -79,7 +99,7 @@ export class MediaService {
     const cards = this.#cards();
     const existing = await this.#existingCard(cards, info.blobId);
     if (existing !== null) {
-      return { card: existing, standIn: standInOf(existing) };
+      return { card: existing, standIn: standInOf(existing), kind: info.kind, deduped: true };
     }
     const missing: string[] = [];
     let ocrText: string | undefined;
@@ -148,7 +168,7 @@ export class MediaService {
       ...(locale === undefined ? {} : { locale }),
     });
     this.#options.trace?.("media:import");
-    return { card, standIn };
+    return { card, standIn, kind: info.kind, deduped: false };
   }
 
   /**
@@ -392,8 +412,22 @@ function standInOf(card: Card): TextStandIn {
       transcript: mediaKind === "audio" && card.body.includes("## 逐字稿") ? "local" : "none",
       summary: mediaKind === "audio" && card.body.includes("## 摘要") ? "small-model" : "none",
     },
-    missing: [],
+    missing: missingPartsOf(card.body),
   };
+}
+
+/** 從卡片內文的「缺少的部分」讀回原本的說明；重送回同一張卡時要照實回報。 */
+function missingPartsOf(body: string): string[] {
+  const lines = body.split("\n");
+  const heading = lines.findIndex((line) => line.trim() === "## 缺少的部分");
+  if (heading < 0) return [];
+  const parts: string[] = [];
+  for (const line of lines.slice(heading + 1)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("## ")) break;
+    if (trimmed.startsWith("- ")) parts.push(trimmed.slice(2).trim());
+  }
+  return parts;
 }
 
 function assetIdOf(asset: string): string | undefined {

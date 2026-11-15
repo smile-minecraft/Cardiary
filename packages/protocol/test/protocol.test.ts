@@ -158,6 +158,40 @@ describe("協定 schema 與範例", () => {
     expect(validateClient(badModuleType)).toBe(false);
   });
 
+  it("media.import 的 blobId 與文字替身狀態有固定形狀", () => {
+    const missingBlob = structuredClone(examples.mediaImportRequest);
+    delete missingBlob.payload.blobId;
+    expect(validateClient(missingBlob)).toBe(false);
+
+    const badBlob = structuredClone(examples.mediaImportRequest);
+    badBlob.payload.blobId = "not-a-sha256";
+    expect(validateClient(badBlob)).toBe(false);
+
+    const badKind = structuredClone(examples.mediaImportResponse);
+    badKind.payload.kind = "video";
+    expect(validateServer(badKind)).toBe(false);
+
+    const missingStandIn = structuredClone(examples.mediaImportResponse);
+    delete missingStandIn.payload.textStandIn;
+    expect(validateServer(missingStandIn)).toBe(false);
+
+    const badSource = structuredClone(examples.mediaImportResponse);
+    badSource.payload.textStandIn.sources.ocr = "remote";
+    expect(validateServer(badSource)).toBe(false);
+
+    const missingParts = structuredClone(examples.mediaImportResponse);
+    missingParts.payload.textStandIn.missingParts = "no_shell";
+    expect(validateServer(missingParts)).toBe(false);
+
+    const missingDeduped = structuredClone(examples.mediaImportResponse);
+    delete missingDeduped.payload.deduped;
+    expect(validateServer(missingDeduped)).toBe(false);
+
+    const unknownField = structuredClone(examples.mediaImportRequest);
+    unknownField.payload.needAudio = true;
+    expect(validateClient(unknownField)).toBe(false);
+  });
+
   it("epoch 與 streaming 的必填與選填規則", () => {
     // hello 回應一定要帶 epoch：沒有它，客戶端無法判斷上次的事件歷史是否還連續。
     const helloWithoutEpoch = structuredClone(examples.helloResponse);

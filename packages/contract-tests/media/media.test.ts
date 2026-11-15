@@ -3,14 +3,18 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { spawnService, type SpawnedService } from "../test/support.js";
+import {
+  connectAndHello,
+  spawnService,
+  type ProtocolClient,
+  type SpawnedService,
+} from "../test/support.js";
 
 /**
  * 多模態原檔的 HTTP 契約：對真的主機行程跑。
  *
  * 大型內容只走 HTTP，不走 WebSocket；這一組驗認證、上限、ETag、Range、
- * HEAD 與縮圖變體。匯入成卡片需要 `media.*` 協定入口，M1 還沒有，管線
- * 由主機單元測試覆蓋。
+ * HEAD 與縮圖變體。匯入成卡片走 `media.import`，在下面的協定組驗。
  */
 
 /** 1×1 PNG；sharp 讀得出來，足以驗縮圖。 */
@@ -45,6 +49,11 @@ async function upload(
   });
   expect(response.status).toBe(201);
   return (await response.json()) as BlobInfo;
+}
+
+/** 每個測試用不同內容，避免 blobId 去重讓測試互相影響。 */
+function imageBytes(variant: number): Uint8Array {
+  return new Uint8Array(Buffer.concat([TINY_PNG, Buffer.from([variant])]));
 }
 
 /** 用原始 http 送出「宣告很大、實際沒有內容」的上傳，驗 413 不讀檔。 */
@@ -236,5 +245,158 @@ describe("多模態原檔 HTTP 端點", () => {
     });
     expect(badVariant.status).toBe(400);
     expect(((await badVariant.json()) as Record<string, unknown>).code).toBe("invalid_message");
+  });
+});
+
+interface ImportResponse {
+  readonly cardId: string;
+  readonly kind: "image" | "audio";
+  readonly textStandIn: {
+    readonly sources: {
+      readonly ocr: "local" | "none";
+      readonly description: "small-model" | "none";
+      readonly transcript: "local" | "none";
+      readonly summary: "small-model" | "none";
+    };
+    readonly missingParts: string[];
+  };
+  readonly deduped: boolean;
+}
+
+async function call<T = Record<string, unknown>>(
+  client: ProtocolClient,
+  type: string,
+  payload: Record<string, unknown>,
+  ms = 15_000,
+): Promise<T> {
+  const id = client.request(type, payload);
+  const reply = await client.waitForReply(id, ms);
+  if (reply.kind === "error") {
+    throw new Error(`${type} 失敗：${String(reply.code)} ${String(reply.message)}`);
+  }
+  return reply.payload as T;
+}
+
+describe("media.import 協定", () => {
+  let service: SpawnedService;
+  let client: ProtocolClient;
+  const brokerCalls: Array<{ route: string; payload: Record<string, unknown> }> = [];
+
+  beforeAll(async () => {
+    service = await spawnService({ control: true });
+    service.setBrokerHandler((route, payload) => {
+      brokerCalls.push({ route, payload });
+      if (route === "broker.recognition.ocr") {
+        return { available: true, text: "預算 120 萬\n排程延到三月", locale: "zh-Hant" };
+      }
+      if (route === "broker.recognition.transcribe") {
+        return { available: true, text: "我們下週去看房子。", locale: "zh-TW" };
+      }
+      return null;
+    });
+    client = await connectAndHello(service);
+  }, 30_000);
+
+  afterAll(async () => {
+    await client?.close().catch(() => undefined);
+    await service?.stop().catch(() => undefined);
+  });
+
+  it("上傳 blob 後匯入圖片：產生卡片與文字替身，內文看得到 OCR", async () => {
+    const blob = await upload(service, imageBytes(1));
+    const response = await call<ImportResponse>(client, "media.import", {
+      blobId: blob.blobId,
+      title: "會議白板",
+      tags: ["會議"],
+      ocrLocales: ["zh-Hant"],
+    });
+    expect(response.cardId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(response.kind).toBe("image");
+    expect(response.deduped).toBe(false);
+    expect(response.textStandIn.sources.ocr).toBe("local");
+    expect(response.textStandIn.sources.transcript).toBe("none");
+
+    const ocrCall = brokerCalls.find((entry) => entry.route === "broker.recognition.ocr");
+    expect(ocrCall?.payload.locales).toEqual(["zh-Hant"]);
+
+    const card = await call<{
+      card: { title: string; body: string; kind: string; asset?: { blobId: string } };
+    }>(client, "card.get", { cardId: response.cardId });
+    expect(card.card.title).toBe("會議白板");
+    expect(card.card.kind).toBe("image");
+    expect(card.card.asset?.blobId).toBe(blob.blobId);
+    expect(card.card.body).toContain("## OCR 文字");
+    expect(card.card.body).toContain("預算 120 萬");
+  });
+
+  it("同一個 blobId 重送回同一張卡，deduped 為 true", async () => {
+    const blob = await upload(service, imageBytes(2));
+    const first = await call<ImportResponse>(client, "media.import", { blobId: blob.blobId });
+    const second = await call<ImportResponse>(client, "media.import", { blobId: blob.blobId });
+    expect(second.cardId).toBe(first.cardId);
+    expect(second.deduped).toBe(true);
+    expect(second.textStandIn.sources).toEqual(first.textStandIn.sources);
+    expect(second.textStandIn.missingParts).toEqual(first.textStandIn.missingParts);
+  });
+
+  it("音訊的 locale 傳給語音轉文字，摘要在文字替身裡", async () => {
+    const blob = await upload(service, new TextEncoder().encode("fake audio"), "audio/mp4");
+    const response = await call<ImportResponse>(client, "media.import", {
+      blobId: blob.blobId,
+      locale: "zh-TW",
+    });
+    expect(response.kind).toBe("audio");
+    expect(response.textStandIn.sources.transcript).toBe("local");
+    expect(response.textStandIn.sources.ocr).toBe("none");
+
+    const transcribeCall = brokerCalls.find(
+      (entry) => entry.route === "broker.recognition.transcribe",
+    );
+    expect(transcribeCall?.payload.locale).toBe("zh-TW");
+
+    const card = await call<{ card: { body: string } }>(client, "card.get", {
+      cardId: response.cardId,
+    });
+    expect(card.card.body).toContain("## 逐字稿");
+    expect(card.card.body).toContain("下週去看房子");
+  });
+
+  it("未知的 blobId 回 not_found", async () => {
+    const id = client.request("media.import", { blobId: "f".repeat(64) });
+    const reply = await client.waitForReply(id);
+    expect(reply).toMatchObject({ kind: "error", code: "not_found" });
+  });
+});
+
+describe("media.import 沒有殼", () => {
+  let service: SpawnedService;
+  let client: ProtocolClient;
+
+  beforeAll(async () => {
+    service = await spawnService({});
+    client = await connectAndHello(service);
+  }, 30_000);
+
+  afterAll(async () => {
+    await client?.close().catch(() => undefined);
+    await service?.stop().catch(() => undefined);
+  });
+
+  it("匯入仍完成，回應與卡片都標明缺少本機辨識", async () => {
+    const blob = await upload(service, imageBytes(3));
+    const response = await call<ImportResponse>(client, "media.import", { blobId: blob.blobId });
+    expect(response.textStandIn.sources).toEqual({
+      ocr: "none",
+      description: "none",
+      transcript: "none",
+      summary: "none",
+    });
+    expect(response.textStandIn.missingParts.join()).toContain("no_shell");
+
+    const card = await call<{ card: { body: string } }>(client, "card.get", {
+      cardId: response.cardId,
+    });
+    expect(card.card.body).toContain("## 缺少的部分");
+    expect(card.card.body).toContain("no_shell");
   });
 });

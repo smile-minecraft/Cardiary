@@ -2179,6 +2179,127 @@
         }
       }
     },
+    "MediaKind": {
+      "title": "MediaKind",
+      "type": "string",
+      "enum": ["image", "audio"],
+      "description": "多模態的種類；只有圖片與音訊。"
+    },
+    "MediaLocalTextSource": {
+      "title": "MediaLocalTextSource",
+      "type": "string",
+      "enum": ["local", "none"],
+      "description": "由本機能力產生的文字來源；none 表示沒有產生。"
+    },
+    "MediaModelTextSource": {
+      "title": "MediaModelTextSource",
+      "type": "string",
+      "enum": ["small-model", "none"],
+      "description": "由小模型產生的文字來源；none 表示沒有產生。"
+    },
+    "MediaTextStandInSources": {
+      "title": "MediaTextStandInSources",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ocr", "description", "transcript", "summary"],
+      "properties": {
+        "ocr": {
+          "$ref": "#/$defs/MediaLocalTextSource"
+        },
+        "description": {
+          "$ref": "#/$defs/MediaModelTextSource"
+        },
+        "transcript": {
+          "$ref": "#/$defs/MediaLocalTextSource"
+        },
+        "summary": {
+          "$ref": "#/$defs/MediaModelTextSource"
+        }
+      },
+      "description": "文字替身每一塊的來源；缺哪一塊要說清楚。"
+    },
+    "MediaTextStandIn": {
+      "title": "MediaTextStandIn",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sources", "missingParts"],
+      "properties": {
+        "sources": {
+          "$ref": "#/$defs/MediaTextStandInSources"
+        },
+        "missingParts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "給人看的缺少說明。"
+          },
+          "description": "無法產生的部分；完整時是空陣列。卡片內文的「缺少的部分」與這裡一致。"
+        }
+      }
+    },
+    "MediaImportRequestPayload": {
+      "title": "MediaImportRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blobId"],
+      "properties": {
+        "blobId": {
+          "type": "string",
+          "description": "已上傳原檔的 SHA-256 小寫十六進位；先用 POST /v1/blobs 上傳。",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "locale": {
+          "type": "string",
+          "description": "語音轉文字的語言，例如 zh-TW；只有音訊使用。"
+        },
+        "ocrLocales": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "OCR 語言。"
+          },
+          "description": "圖片的 OCR 語言，依優先順序。"
+        },
+        "title": {
+          "type": "string",
+          "description": "卡片標題；省略時由文字替身產生。"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "標籤。"
+          },
+          "description": "標籤。"
+        },
+        "persona": {
+          "type": "string",
+          "description": "人格分區；省略時用 default。"
+        }
+      }
+    },
+    "MediaImportResponsePayload": {
+      "title": "MediaImportResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cardId", "kind", "textStandIn", "deduped"],
+      "properties": {
+        "cardId": {
+          "type": "string",
+          "description": "建立的卡片；同一個 blobId 重送回同一張卡。"
+        },
+        "kind": {
+          "$ref": "#/$defs/MediaKind"
+        },
+        "textStandIn": {
+          "$ref": "#/$defs/MediaTextStandIn"
+        },
+        "deduped": {
+          "type": "boolean",
+          "description": "這個 blobId 已經有卡片，這次接回既有的卡片。"
+        }
+      }
+    },
     "ContextLayer": {
       "title": "ContextLayer",
       "type": "string",
@@ -4632,6 +4753,56 @@
       },
       "description": "卡片建立、更新、刪除、保鮮或重新索引；掛在 system 串流。"
     },
+    "MediaImportRequest": {
+      "title": "MediaImportRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "media.import"
+        },
+        "payload": {
+          "$ref": "#/$defs/MediaImportRequestPayload"
+        }
+      },
+      "description": "以已上傳的 blobId 匯入圖片或音訊。"
+    },
+    "MediaImportResponse": {
+      "title": "MediaImportResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "media.import"
+        },
+        "payload": {
+          "$ref": "#/$defs/MediaImportResponsePayload"
+        }
+      },
+      "description": "匯入結果與文字替身狀態。"
+    },
     "ContextGetRequest": {
       "title": "ContextGetRequest",
       "type": "object",
@@ -5680,6 +5851,9 @@
           "$ref": "#/$defs/CardRefreshRequest"
         },
         {
+          "$ref": "#/$defs/MediaImportRequest"
+        },
+        {
           "$ref": "#/$defs/ContextGetRequest"
         },
         {
@@ -5789,6 +5963,9 @@
         },
         {
           "$ref": "#/$defs/CardRefreshResponse"
+        },
+        {
+          "$ref": "#/$defs/MediaImportResponse"
         },
         {
           "$ref": "#/$defs/ContextGetResponse"

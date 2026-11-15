@@ -149,6 +149,7 @@ extension ServerFrame {
         case .cardDeleteResponse: return "card.delete"
         case .cardSearchResponse: return "card.search"
         case .cardRefreshResponse: return "card.refresh"
+        case .mediaImportResponse: return "media.import"
         case .contextGetResponse: return "context.get"
         case .contextAddCardResponse: return "context.add_card"
         case .contextRemoveCardResponse: return "context.remove_card"
