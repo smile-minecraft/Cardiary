@@ -1,45 +1,62 @@
 /**
- * 上下文的領域型別：八層、項目、視圖與服務介面。
+ * 上下文的領域型別與純函式：八層、估算、視圖、壓縮範圍與摘要提示。
  *
- * 實作由上下文組裝工作補上；協定的線路形狀在 `@cardiary/protocol`。
+ * 協定的線路形狀在 `@cardiary/protocol`；這裡是主機內部用的領域模型。
  */
 
-/** 八層的識別碼，順序由前往後。 */
-export type ContextLayer =
-  | "bedrock"
-  | "persona"
-  | "core-memory"
-  | "opening-memory"
-  | "short-term-memory"
-  | "other-cards"
-  | "working-context"
-  | "volatile-state";
+import type { ContextView } from "./view.js";
 
-/** 項目在上下文中的狀態。 */
-export type ContextEntryState = "active" | "pending-removal";
-
-/** 上下文中的一個項目。 */
-export interface ContextEntry {
-  readonly entryId: string;
-  readonly layer: ContextLayer;
-  readonly cardId?: string;
-  readonly title: string;
-  readonly tokenEstimate: number;
-  readonly state: ContextEntryState;
-  readonly position: number;
-}
-
-/** 目前上下文的視圖；`usedTokens` 等於項目估算的加總。 */
-export interface ContextView {
-  readonly sessionId: string;
-  readonly version: number;
-  readonly entries: readonly ContextEntry[];
-  readonly usedTokens: number;
-  readonly budgetTokens: number;
-  readonly contextWindow: number;
-  readonly compactionThreshold: number;
-  readonly lastCompactedAt?: string;
-}
+export {
+  CONTEXT_LAYERS,
+  SYSTEM_LAYERS,
+  assembleSystemContext,
+  isSystemLayer,
+  layerIndex,
+  volatileStateText,
+  type ContextEntryState,
+  type ContextLayer,
+  type SystemSection,
+} from "./layers.js";
+export {
+  CHARS_PER_TOKEN,
+  MAX_CORRECTION,
+  MIN_CORRECTION,
+  correctEstimates,
+  correctionFactor,
+  estimateTokens,
+  requestTokensOf,
+  type TurnUsage,
+} from "./estimate.js";
+export {
+  DEFAULT_COMPACTION_THRESHOLD,
+  DEFAULT_RESERVE_TOKENS,
+  budgetTokensOf,
+  buildContextView,
+  compactionTriggerTokens,
+  isCompactionDue,
+  layerTotals,
+  nextPosition,
+  sortEntries,
+  type ContextEntry,
+  type ContextView,
+  type ContextViewInput,
+} from "./view.js";
+export {
+  DEFAULT_KEEP_RECENT_TOKENS,
+  MAX_RELATED_PATHS,
+  SUMMARY_MAX_OUTPUT_TOKENS,
+  buildSummaryPrompt,
+  encodeSummaryFooter,
+  extractRelatedPaths,
+  parseSummaryFooter,
+  planCompaction,
+  renderTranscript,
+  summaryTitle,
+  type CompactionMessage,
+  type CompactionPlan,
+  type SummaryFooter,
+  type SummaryPromptInput,
+} from "./compaction.js";
 
 /** 估算一段文字的 token 數；實作要用同一場對話的校正係數。 */
 export type TokenEstimator = (text: string) => number;

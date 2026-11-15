@@ -1,9 +1,27 @@
 import type {
+  ConversationId,
   ConversationSummary,
   EngineAdapter,
   MessageReceipt,
   SendMessageRequest,
 } from "@cardiary/engine-adapter";
+
+/** 一輪助理訊息回報的用量；形狀與引擎轉接層相同。 */
+export interface HostConversationUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly requestTokens: number;
+}
+
+/** 主機要求引擎套用的壓縮；範圍由主機決定。 */
+export interface HostCompactionRequest {
+  readonly summary: string;
+  readonly keepFromCursor: string;
+  readonly beforeTokens: number;
+  readonly afterTokens: number;
+}
 
 /**
  * 主機需要的轉接層擴充方法。
@@ -23,6 +41,18 @@ export interface HostEngineExtensions {
   sendMessageWithClientId?(
     request: SendMessageRequest & { readonly clientMessageId?: string },
   ): Promise<MessageReceipt>;
+  /** 換掉第 1 到 6 層的固定前綴；沒有這個方法時上下文只讀。 */
+  configureConversationContext?(
+    conversationId: ConversationId,
+    systemContext: string,
+  ): Promise<void>;
+  /** 套用主機算好的壓縮；等待中的工具組與前綴在同一步換版。 */
+  compactConversation?(
+    conversationId: ConversationId,
+    request: HostCompactionRequest,
+  ): Promise<{ readonly beforeTokens: number; readonly afterTokens: number }>;
+  /** 最近一輪的用量；還沒有一輪時回 `null`。 */
+  readConversationUsage?(conversationId: ConversationId): Promise<HostConversationUsage | null>;
 }
 
 export type HostEngine = EngineAdapter & HostEngineExtensions;

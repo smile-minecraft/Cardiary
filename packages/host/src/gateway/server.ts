@@ -100,6 +100,23 @@ interface ModuleHostServices {
   readonly hostServices?: { get(name: string): unknown };
 }
 
+/**
+ * 模組主機多帶的服務註冊表。
+ *
+ * 組合根接上的是 `LoadedModules`；閘道只需要在建立對話後取得上下文服務，
+ * 所以用這個窄介面，不把載入器的型別帶進閘道。
+ */
+interface ModuleHostWithServices extends ModuleHostBridge {
+  readonly hostServices?: {
+    get<T>(name: string): T | undefined;
+  };
+}
+
+/** 建立對話後要接上的上下文服務；閘道只用 `attach`。 */
+interface ContextAttachService {
+  attach(sessionId: string): Promise<void>;
+}
+
 export interface GatewayOptions {
   readonly engine: HostEngine;
   readonly storage: StorageBundle;
@@ -1591,6 +1608,7 @@ export class Gateway {
     const key = clientRequestId ? `session-create:${clientRequestId}` : null;
     if (key === null) {
       const summary = await this.#createConversation(title, undefined);
+      await this.#attachContext(summary.id);
       return response(request.id, "session.create", { session: summary });
     }
     const dedupe = await this.#options.storage.dedupe.claim(key, "session-create");
@@ -1598,6 +1616,7 @@ export class Gateway {
       return this.#recoverCreateSession(dedupe.record, clientRequestId ?? "", request.id);
     }
     const summary = await this.#createConversation(title, clientRequestId);
+    await this.#attachContext(summary.id);
     await this.#options.storage.dedupe.setResource(key, summary.id);
     const payload = { session: summary };
     if (this.#faultSkipComplete) {
@@ -1703,6 +1722,27 @@ export class Gateway {
       updatedAt: summary.updatedAt,
       messageCount: this.#messageCounts.get(summary.id) ?? 0,
     };
+  }
+
+  /**
+   * 建立對話後接上上下文：推送固定前綴並開始記錄用量。
+   *
+   * 模組可能還沒啟用，所以呼叫當下才取服務；接不上時記一筆警告，不擋
+   * 建立對話。`context.*` 的請求仍會自己接上，所以這裡只是讓第一輪就
+   * 對齊。
+   */
+  async #attachContext(sessionId: string): Promise<void> {
+    const modules = this.#modules as ModuleHostWithServices | null;
+    const context = modules?.hostServices?.get<ContextAttachService>(HOST_SERVICE_NAMES.context);
+    if (context === undefined) return;
+    try {
+      await context.attach(sessionId);
+    } catch (error) {
+      this.#logger.warn("接上對話上下文失敗", {
+        sessionId,
+        message: errorMessage(error),
+      });
+    }
   }
 
   /**

@@ -69,6 +69,9 @@ import { ApprovalServiceImpl } from "./approval-service.js";
 import { BundleIndex, type RegisteredBundle } from "./bundle-index.js";
 import type { ActiveTurn, CatalogSnapshot, ConversationMeta } from "./catalog.js";
 import { CatalogDoc, emptyCatalog } from "./catalog.js";
+import { appendCompactionEntry, type CompactionCommitRequest } from "./context/compaction.js";
+import { usageOfAssistantEntry, type ConversationUsage } from "./context/usage.js";
+import { CONTEXT_EXTENSION_NAME, createContextExtension } from "./context/volatile-tail.js";
 import { compactAfterDelete, deleteEngineSubtree, listConversationSubtree } from "./delete.js";
 import { EngineAdapterFailure, engineError } from "./errors.js";
 import { EventBus } from "./event-bus.js";
@@ -116,6 +119,8 @@ export class PiEngineAdapter implements EngineAdapter {
   readonly #session: EngineSession;
   readonly #engineRegistry: ReturnType<typeof createEngineRegistry>;
   readonly #registry = new Map<string, ReturnType<typeof defineExtension>>();
+  /** 第 8 層的上下文擴充；每場對話都要選它，掛鉤才會生效。 */
+  #contextExtension: ReturnType<typeof defineExtension> | null = null;
   #state: EngineState = "starting";
   #pause: EmergencyPause | null = null;
   #descriptor: EngineDescriptor | null = null;
@@ -168,7 +173,16 @@ export class PiEngineAdapter implements EngineAdapter {
       registry: this.#engineRegistry,
       models: () => this.#currentModels(),
     });
+    // 第 8 層的尾端訊息由這個擴充掛在每次請求上；對話要選它才會生效。
+    this.#installContextExtension();
     this.tools = this.#createToolRegistry();
+  }
+
+  /** 安裝（或重新安裝）上下文擴充；註冊表以名字取代舊版。 */
+  #installContextExtension(): void {
+    const extension = createContextExtension({ clock: this.#clock });
+    this.#engineRegistry.install(extension);
+    this.#contextExtension = extension;
   }
 
   // ── 生命週期 ───────────────────────────────────────────────────────────
@@ -259,6 +273,7 @@ export class PiEngineAdapter implements EngineAdapter {
   async #openHarness(resume: boolean): Promise<void> {
     await this.#session.open();
     // 重新註冊所有工具組 generation；registry 是新的，擴充要以名稱重新安裝。
+    this.#installContextExtension();
     for (const bundle of this.#bundles.list()) {
       const registered = this.#bundles.get(bundle.bundleId, bundle.generation);
       if (registered !== undefined) {
@@ -377,7 +392,9 @@ export class PiEngineAdapter implements EngineAdapter {
   #extensionObjects(
     pins: readonly { readonly bundleId: ToolBundleId; readonly generation: number }[],
   ): ReturnType<typeof defineExtension>[] {
-    return pins.map((pin) => {
+    const context = this.#contextExtension ?? this.#installedContextExtension();
+    const extensions: ReturnType<typeof defineExtension>[] = [context];
+    for (const pin of pins) {
       const extension = this.#registry.get(this.#extensionName(pin.bundleId, pin.generation));
       if (extension === undefined) {
         throw engineError(
@@ -385,8 +402,23 @@ export class PiEngineAdapter implements EngineAdapter {
           `工具組 ${pin.bundleId}@${pin.generation} 尚未註冊`,
         );
       }
-      return extension;
-    });
+      extensions.push(extension);
+    }
+    return extensions;
+  }
+
+  /** 從註冊表取回上下文擴充；沒有時重新安裝一個。 */
+  #installedContextExtension(): ReturnType<typeof defineExtension> {
+    const existing = this.#engineRegistry.snapshot().extension(CONTEXT_EXTENSION_NAME);
+    if (existing !== undefined) {
+      this.#contextExtension = existing;
+      return existing;
+    }
+    this.#installContextExtension();
+    if (this.#contextExtension === null) {
+      throw engineError("internal", "上下文擴充沒有安裝成功");
+    }
+    return this.#contextExtension;
   }
 
   #extensionName(bundleId: ToolBundleId, generation: number): string {
@@ -1135,6 +1167,82 @@ export class PiEngineAdapter implements EngineAdapter {
     }, BACKGROUND_CONTEXT);
     // 進行中的對話沒有回合在跑也要換版：等下一次壓縮出現時套用。
     void this.#watchForCompaction(conversationId);
+  }
+
+  /**
+   * 換掉這場對話的固定前綴（第 1 到 6 層）。
+   *
+   * 卡片追加只改第 6 層的尾端，原本的前綴仍是新前綴的前面；呼叫端只要
+   * 送完整的新內容，不必自行比對差異。
+   */
+  async configureConversationContext(
+    conversationId: ConversationId,
+    systemContext: string,
+  ): Promise<void> {
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(conversationId),
+      BACKGROUND_CONTEXT,
+    );
+    if (conversation === undefined) {
+      throw engineError("conversation-not-found", `找不到對話 ${conversationId}`);
+    }
+    await conversation.configure({ instructions: systemContext }, BACKGROUND_CONTEXT);
+    await this.#session.harness.commit(async (tx) => {
+      const draft = await tx.doc(CatalogDoc);
+      const meta = draft.conversations[conversationId];
+      if (meta !== undefined) {
+        meta.systemContext = systemContext;
+      }
+    }, BACKGROUND_CONTEXT);
+  }
+
+  /**
+   * 套用主機算好的壓縮：摘要 entry 指向第一則保留的訊息。
+   *
+   * 等待中的工具組與固定前綴在同一個步驟換版，這樣「工具定義改變」與
+   * 「壓縮」只讓前綴失效一次。
+   */
+  async compactConversation(
+    conversationId: ConversationId,
+    request: CompactionCommitRequest,
+  ): Promise<{ readonly beforeTokens: number; readonly afterTokens: number }> {
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(conversationId),
+      BACKGROUND_CONTEXT,
+    );
+    if (conversation === undefined) {
+      throw engineError("conversation-not-found", `找不到對話 ${conversationId}`);
+    }
+    await appendCompactionEntry(
+      conversation,
+      engineConversationId(conversationId) as unknown as number,
+      request,
+      this.#clock.now().getTime(),
+    );
+    await this.#applyStagedUpdate(conversationId);
+    return { beforeTokens: request.beforeTokens, afterTokens: request.afterTokens };
+  }
+
+  /** 最近一輪助理訊息的用量；還沒有一輪時回 `null`。 */
+  async readConversationUsage(conversationId: ConversationId): Promise<ConversationUsage | null> {
+    const conversation = await this.#session.harness.conversation(
+      engineConversationId(conversationId),
+      BACKGROUND_CONTEXT,
+    );
+    if (conversation === undefined) {
+      throw engineError("conversation-not-found", `找不到對話 ${conversationId}`);
+    }
+    const page = await conversation.entries(
+      { order: "descending" },
+      8,
+      undefined,
+      BACKGROUND_CONTEXT,
+    );
+    for (const entry of page.items) {
+      const usage = usageOfAssistantEntry(entry);
+      if (usage !== null) return usage;
+    }
+    return null;
   }
 
   /** 等這場對話出現下一個壓縮 entry，套用預告的變更。 */

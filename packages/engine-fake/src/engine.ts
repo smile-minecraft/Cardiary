@@ -61,6 +61,13 @@ import type { JsonValue } from "@cardiary/engine-adapter";
 
 import { FakeApprovalService } from "./approvals.js";
 import { EventChannel } from "./channel.js";
+import {
+  estimatePromptTokens,
+  type FakeCompactionRequest,
+  type FakeConversationUsage,
+  type FakePromptMessage,
+  type FakePromptSnapshot,
+} from "./context.js";
 import { EngineFailure } from "./errors.js";
 import { prefixed } from "./ids.js";
 import { FakeToolSpawner } from "./spawn.js";
@@ -121,6 +128,10 @@ interface TurnRuntime {
   assistantMessageId: MessageId;
   text: string;
   readonly toolCalls: ToolCallRecord[];
+  /** 這一輪送出的請求快照；用量在回合結束時一起記。 */
+  prompt: FakePromptSnapshot | null;
+  /** 這一輪開始時的訊息數；用來算輸出量。 */
+  readonly messageCountAtStart: number;
 }
 
 interface RecoveredTurn {
@@ -147,6 +158,12 @@ interface ConversationRecord {
   systemContext: string;
   staged: ConversationUpdate | null;
   messages: StoredMessage[];
+  /** 第 7 層從哪一則訊息開始；壓縮把它往後移，歷史不受影響。 */
+  contextStart: number;
+  /** 每次模型請求的快照；測試驗八層順序與前綴。 */
+  readonly promptLog: FakePromptSnapshot[];
+  /** 每一輪回報的用量；最新一筆在最後。 */
+  readonly usageLog: FakeConversationUsage[];
   channel: EventChannel;
   activeTurn: TurnRuntime | null;
   queue: QueuedMessage[];
@@ -162,6 +179,13 @@ export interface FakeEngineOptions extends EngineAdapterOptions {
   readonly isInRoot?: (conversationId: string, rootConversationId: string) => boolean;
   /** 預設腳本；佇列用完時使用。 */
   readonly defaultScript?: readonly FakeModelStep[];
+  /**
+   * 第 8 層的尾端文字；有提供時每次請求都會追加一則 `user` 訊息。
+   *
+   * 真正的引擎由轉接層的 `beforeRequest` 掛鉤產生同樣的內容；假引擎用
+   * 這個回呼讓主機與測試注入同一份組裝規則。
+   */
+  readonly volatileTail?: (conversationId: ConversationId, now: string) => string | null;
 }
 
 const DEFAULT_SCRIPT: readonly FakeModelStep[] = [{ kind: "text", text: "收到。" }];
@@ -418,6 +442,9 @@ export class FakeEngine implements EngineAdapter {
       systemContext: request.systemContext,
       staged: null,
       messages: [],
+      contextStart: 0,
+      promptLog: [],
+      usageLog: [],
       channel: new EventChannel(this.#options.eventBufferSize ?? 512),
       activeTurn: null,
       queue: [],
@@ -562,6 +589,9 @@ export class FakeEngine implements EngineAdapter {
       systemContext: source.systemContext,
       staged: null,
       messages: source.messages.slice(0, at).map((entry) => ({ ...entry })),
+      contextStart: 0,
+      promptLog: [],
+      usageLog: [],
       channel: new EventChannel(this.#options.eventBufferSize ?? 512),
       activeTurn: null,
       queue: [],
@@ -580,19 +610,24 @@ export class FakeEngine implements EngineAdapter {
     conversation.staged = update;
   }
 
+  /** 套用等待中的工具組與固定前綴；回傳這次有沒有換版。 */
+  #applyStaged(conversation: ConversationRecord): boolean {
+    const staged = conversation.staged;
+    if (staged === null) return false;
+    if (staged.systemContext !== undefined) {
+      conversation.systemContext = staged.systemContext;
+    }
+    if (staged.toolBundles !== undefined) {
+      conversation.toolBundles = staged.toolBundles;
+    }
+    conversation.staged = null;
+    return true;
+  }
+
   /** 手動觸發壓縮；套用預告的變更。 */
   async compact(id: ConversationId): Promise<void> {
     const conversation = this.#conversation(id);
-    const applied = conversation.staged !== null;
-    if (conversation.staged) {
-      if (conversation.staged.systemContext !== undefined) {
-        conversation.systemContext = conversation.staged.systemContext;
-      }
-      if (conversation.staged.toolBundles !== undefined) {
-        conversation.toolBundles = conversation.staged.toolBundles;
-      }
-      conversation.staged = null;
-    }
+    const applied = this.#applyStaged(conversation);
     this.#emit(conversation, (seq) => ({
       kind: "conversation.compacted",
       seq,
@@ -603,6 +638,73 @@ export class FakeEngine implements EngineAdapter {
       beforeTokens: null,
       afterTokens: null,
     }));
+  }
+
+  /**
+   * 換掉第 1 到 6 層的固定前綴。
+   *
+   * 卡片追加只在尾端，重新送出的前綴仍是原本內容的延伸；內容相同時
+   * 位元組不變，呼叫端不必自行比對。
+   */
+  async configureConversationContext(id: ConversationId, systemContext: string): Promise<void> {
+    const conversation = this.#conversation(id);
+    conversation.systemContext = systemContext;
+    conversation.updatedAt = this.#now();
+  }
+
+  /**
+   * 主機算好的壓縮：丟棄保留範圍之前的逐字稿，套用等待中的變更。
+   *
+   * 歷史（`readConversationHistory`）仍看得到被摘要的訊息；只有模型看到的
+   * 第 7 層從 `keepFromCursor` 開始，和真正引擎的 `pi.compaction` 一致。
+   */
+  async commitCompaction(
+    id: ConversationId,
+    request: FakeCompactionRequest,
+  ): Promise<{ readonly beforeTokens: number; readonly afterTokens: number }> {
+    const conversation = this.#conversation(id);
+    const index = conversation.messages.findIndex(
+      (entry) => entry.message.cursor === request.keepFromCursor,
+    );
+    if (index < 0) {
+      throw new EngineFailure("invalid-request", "保留範圍的游標不在這場對話裡");
+    }
+    conversation.contextStart = index;
+    const applied = this.#applyStaged(conversation);
+    this.#emit(conversation, (seq) => ({
+      kind: "conversation.compacted",
+      seq,
+      at: this.#now(),
+      conversationId: id,
+      turnId: null,
+      appliedUpdate: applied,
+      beforeTokens: request.beforeTokens,
+      afterTokens: request.afterTokens,
+    }));
+    return { beforeTokens: request.beforeTokens, afterTokens: request.afterTokens };
+  }
+
+  /** 主機算好的壓縮；名稱與 Pi 轉接層一致，主機只依賴這個方法。 */
+  async compactConversation(
+    id: ConversationId,
+    request: FakeCompactionRequest,
+  ): Promise<{ readonly beforeTokens: number; readonly afterTokens: number }> {
+    return this.commitCompaction(id, request);
+  }
+
+  /** 每次模型請求的快照；測試驗八層順序與前綴。 */
+  readPromptLog(id: ConversationId): readonly FakePromptSnapshot[] {
+    return [...this.#conversation(id).promptLog];
+  }
+
+  /** 最新一輪回報的用量；沒有回合時回 `null`。 */
+  readConversationUsage(id: ConversationId): FakeConversationUsage | null {
+    return this.#conversation(id).usageLog.at(-1) ?? null;
+  }
+
+  /** 第 7 層目前的起點（訊息索引）；沒有壓縮過時是 0。 */
+  readContextStart(id: ConversationId): number {
+    return this.#conversation(id).contextStart;
   }
 
   async sendMessage(request: SendMessageRequest): Promise<MessageReceipt> {
@@ -817,6 +919,9 @@ export class FakeEngine implements EngineAdapter {
       systemContext: parent.systemContext,
       staged: null,
       messages: [],
+      contextStart: 0,
+      promptLog: [],
+      usageLog: [],
       channel: new EventChannel(this.#options.eventBufferSize ?? 512),
       activeTurn: null,
       queue: [],
@@ -1056,6 +1161,66 @@ export class FakeEngine implements EngineAdapter {
     return this.#scripts.shift() ?? this.#options.defaultScript ?? DEFAULT_SCRIPT;
   }
 
+  /**
+   * 記下這次請求看到的內容。
+   *
+   * 第 8 層只放在快照的 `volatileTail`，不進 `messages`：它每次請求重算、
+   * 不落地，和真正的引擎一致。
+   */
+  #recordPrompt(conversation: ConversationRecord, turnId: TurnId): FakePromptSnapshot {
+    const tail = this.#options.volatileTail?.(conversation.id, this.#now()) ?? null;
+    const messages: FakePromptMessage[] = conversation.messages
+      .slice(conversation.contextStart)
+      .filter((entry) => entry.message.role !== "system")
+      .map((entry) => ({
+        cursor: entry.message.cursor,
+        role: entry.message.role as FakePromptMessage["role"],
+        text: entry.message.content
+          .map((block) => (block.type === "text" ? block.text : ""))
+          .join(""),
+      }));
+    const snapshot: FakePromptSnapshot = {
+      at: this.#now(),
+      turnId,
+      systemContext: conversation.systemContext,
+      messages,
+      volatileTail: tail,
+    };
+    conversation.promptLog.push(snapshot);
+    return snapshot;
+  }
+
+  /** 記下這一輪的用量；`request_tokens` 是請求內容的估算。 */
+  #recordUsage(conversation: ConversationRecord, turn: TurnRuntime): void {
+    const prompt = turn.prompt;
+    if (prompt === null) return;
+    const parts = [prompt.systemContext];
+    for (const message of prompt.messages) parts.push(message.text);
+    if (prompt.volatileTail !== null) parts.push(prompt.volatileTail);
+    const requestTokens = estimatePromptTokens(parts.join("\n"));
+    const outputTokens = conversation.messages
+      .slice(turn.messageCountAtStart)
+      .filter((entry) => entry.message.role === "assistant")
+      .reduce(
+        (sum, entry) =>
+          sum +
+          estimatePromptTokens(
+            entry.message.content
+              .map((block) => (block.type === "text" ? block.text : ""))
+              .join(""),
+          ),
+        0,
+      );
+    conversation.usageLog.push({
+      turnId: turn.turnId,
+      inputTokens: requestTokens,
+      outputTokens,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      requestTokens,
+    });
+  }
+
   async #startTurn(conversation: ConversationRecord, queued: QueuedMessage): Promise<void> {
     if (conversation.activeTurn || conversation.deleted) {
       conversation.queue.push(queued);
@@ -1070,6 +1235,8 @@ export class FakeEngine implements EngineAdapter {
       assistantMessageId: prefixed("msg"),
       text: "",
       toolCalls: [],
+      prompt: null,
+      messageCountAtStart: conversation.messages.length,
     };
     conversation.activeTurn = turn;
     conversation.state = "running";
@@ -1082,6 +1249,7 @@ export class FakeEngine implements EngineAdapter {
       turnId: turn.turnId,
       trigger: "user-message" satisfies TurnTrigger,
     }));
+    turn.prompt = this.#recordPrompt(conversation, turn.turnId);
     try {
       const steps = this.#takeScript();
       for (const step of steps) {
@@ -1222,6 +1390,7 @@ export class FakeEngine implements EngineAdapter {
           : "failed",
       );
     }
+    this.#recordUsage(conversation, turn);
     this.#emit(conversation, (seq) => ({
       kind: "turn.completed",
       seq,
