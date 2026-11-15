@@ -27,3 +27,11 @@ xcuserdata/
 
 # 打包後的服務（build-app.sh 會重建）
 apps/macos/build/
+
+/docs/spec.md
+/docs/design/
+/docs/acceptance/
+/docs/spikes/
+/spikes/
+/AGENTS.md
+/CLAUDE.md

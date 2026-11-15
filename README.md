@@ -4,19 +4,19 @@ Cardiary, short for Card + Diary, is a local-first personal agent for Mac where 
 
 ## Status
 
-Cardiary is in early development. Nothing is released: there is no download, no stable version, and the app is not ready for daily use.
+Cardiary is in early development. The app is currently built from source, and its first usable version is in progress.
 
 The foundation is implemented and merged: a host service that runs on its own, an engine adapter around Pi Durable, storage with the data folder rules, a protocol schema with contract tests, and the macOS shell that starts and supervises the service.
 
-The first usable slice, conversations and cards, is in progress. Conversation streaming, the card file format and its index, context assembly and compaction, model settings, image and audio import, permission rules with human approval, local file and terminal tools, and the main macOS window are implemented and merged. What is missing is the integration pass: a full day of real use, and the manual acceptance steps that need a person at the keyboard.
+The first usable slice, conversations and cards, is in progress. Conversation streaming, the card file format and its index, context assembly and compaction, model settings, image and audio import, permission rules with human approval, local file and terminal tools, and the main macOS window are implemented and merged. Integration testing of these features is in progress.
 
-Expect breaking changes in the card format, the protocol and the folder layout before a stable release. Do not put data you cannot lose into it yet.
+The card format, protocol and folder layout may change before a stable release.
 
 Code comments are written in Traditional Chinese. Identifiers are English. The app's interface strings exist in English and Traditional Chinese.
 
 ## What it is
 
-- **Memory is a card, not a transcript.** A card is one Markdown file in `cards/` with YAML front matter: an id, a kind, a title, a summary, sources and tags. You can read the files in any editor, search them with `grep`, back them up with `rsync`, or fix one by hand; the app reindexes on the next scan. Images and audio are imported once into `assets/`, named by content hash.
+- **Memory is a card.** A card is one Markdown file in `cards/` with YAML front matter: an id, a kind, a title, a summary, sources and tags. You can read the files in any editor, search them with `grep`, back them up with `rsync`, or fix one by hand; the app reindexes on the next scan. Images and audio are imported once into `assets/`, named by content hash.
 - **The app is a shell around one long-running service.** A SwiftUI app opens a window and a menu bar item. Conversations, the card index, the agent loop and tool execution all run in a Node host service that the app starts and supervises. Closing the window does not stop the service.
 - **The data stays where you put it.** On first launch you pick a folder, on the internal disk or an external one. There is no account, no sync and no telemetry; the only network traffic is to the model providers you configure.
 - **The agent asks before it touches the machine.** Reading a card needs no approval. Running a shell command, writing a file or patching a card goes through a permission rule, and anything the rules do not cover waits for you.
@@ -121,8 +121,16 @@ Every file is an original, a cache entry or a temp file. Originals are what you 
 - **API keys live in the macOS Keychain.** You enter them in the app. The host service asks the app for a key when a provider request needs one and keeps nothing on disk. Keys never appear in the protocol or in logs.
 - **No accounts, no telemetry.** Cardiary does not report usage anywhere. Outbound requests go to the model providers you configure, and nowhere else.
 - **Approvals gate anything that changes your machine.** Permission rules answer allow, deny or ask; a deny is final, and the agent has no way to change its own rules. Files outside the data folder, shell commands and card edits fall under these rules.
-- **The app is not sandboxed.** It runs as a normal Mac app and relies on macOS privacy permissions for protected resources, its own permission rules and the three-zone rule. Distribution is planned as a signed, notarized direct download, not the Mac App Store.
-- **Nothing here has been audited.** Neither the code nor the release process has been through a security review, and the macOS privacy prompts have not been exercised end to end on a signed build.
+- **The app runs as a normal Mac app.** macOS privacy permissions, Cardiary's permission rules and the three-zone rule govern access to protected resources and data. Distribution is planned as a signed, notarized direct download.
+
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [Architecture](docs/architecture.md)
+- [Cards](docs/cards.md)
+- [Permissions and approvals](docs/permissions.md)
+- [Development](docs/development.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## Contributing
 
