@@ -8032,6 +8032,1809 @@
       },
       "description": "配對結果；成功時帶一次 deviceToken。"
     },
+    "AgentProgress": {
+      "title": "AgentProgress",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step", "label", "completed", "total"],
+      "properties": {
+        "step": {
+          "type": "string",
+          "description": "步驟識別碼。"
+        },
+        "label": {
+          "type": "string",
+          "description": "給人看的步驟說明。"
+        },
+        "completed": {
+          "type": "integer",
+          "description": "已完成的步驟數。",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "description": "總步驟數。",
+          "minimum": 0
+        }
+      }
+    },
+    "AgentKind": {
+      "title": "AgentKind",
+      "type": "string",
+      "enum": ["opencode", "claude-code"],
+      "description": "外部代理的種類。"
+    },
+    "AgentStatus": {
+      "title": "AgentStatus",
+      "type": "string",
+      "enum": ["starting", "running", "waiting-approval", "stopped", "failed"],
+      "description": "外部代理的狀態；waiting-approval 表示等待人工審批才能啟動。"
+    },
+    "AgentSessionInfo": {
+      "title": "AgentSessionInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentSessionId", "agentKind", "status", "workingDirectory", "startedAt"],
+      "properties": {
+        "agentSessionId": {
+          "type": "string",
+          "description": "代理工作階段識別碼。"
+        },
+        "agentKind": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentStatus"
+        },
+        "workingDirectory": {
+          "type": "string",
+          "description": "工作目錄（絕對路徑）。"
+        },
+        "progress": {
+          "$ref": "#/$defs/AgentProgress"
+        },
+        "message": {
+          "type": "string",
+          "description": "給人看的進度或失敗原因。"
+        },
+        "startedAt": {
+          "type": "string",
+          "description": "建立時間，RFC 3339。",
+          "format": "date-time"
+        }
+      }
+    },
+    "AgentStartRequestPayload": {
+      "title": "AgentStartRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentKind", "workingDirectory"],
+      "properties": {
+        "agentKind": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "workingDirectory": {
+          "type": "string",
+          "description": "工作目錄（絕對路徑）；代理會在這個目錄下啟動。"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "要交給代理的任務提示；省略代表只啟動不下任務。"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵；重送只啟動一次。"
+        }
+      }
+    },
+    "AgentStartResponsePayload": {
+      "title": "AgentStartResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentSessionId"],
+      "properties": {
+        "agentSessionId": {
+          "type": "string",
+          "description": "已建立的代理工作階段識別碼；狀態先為 waiting-approval。"
+        },
+        "approvalId": {
+          "type": "string",
+          "description": "啟動的審批識別碼；核准後代理才會啟動。"
+        }
+      }
+    },
+    "AgentStopRequestPayload": {
+      "title": "AgentStopRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentSessionId"],
+      "properties": {
+        "agentSessionId": {
+          "type": "string",
+          "description": "要停止的代理工作階段。"
+        }
+      }
+    },
+    "AgentStopResponsePayload": {
+      "title": "AgentStopResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentSessionId", "stopped"],
+      "properties": {
+        "agentSessionId": {
+          "type": "string",
+          "description": "要停止的代理工作階段。"
+        },
+        "stopped": {
+          "type": "boolean",
+          "description": "是否真的停掉了代理。"
+        }
+      }
+    },
+    "AgentListRequestPayload": {
+      "title": "AgentListRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {},
+      "description": "列出代理工作階段；不需要參數。"
+    },
+    "AgentListResponsePayload": {
+      "title": "AgentListResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agents"],
+      "properties": {
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentSessionInfo"
+          },
+          "description": "目前存在的代理工作階段，依建立時間由新到舊。"
+        }
+      }
+    },
+    "AgentStateChangedEventPayload": {
+      "title": "AgentStateChangedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentSessionId", "agentKind", "status"],
+      "properties": {
+        "agentSessionId": {
+          "type": "string",
+          "description": "代理工作階段識別碼。"
+        },
+        "agentKind": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentStatus"
+        },
+        "progress": {
+          "$ref": "#/$defs/AgentProgress"
+        },
+        "message": {
+          "type": "string",
+          "description": "給人看的進度或失敗原因。"
+        }
+      }
+    },
+    "McpTransport": {
+      "title": "McpTransport",
+      "type": "string",
+      "enum": ["stdio", "http"],
+      "description": "MCP 伺服器的傳輸方式。"
+    },
+    "McpServerState": {
+      "title": "McpServerState",
+      "type": "string",
+      "enum": ["disabled", "ready", "failed"],
+      "description": "MCP 伺服器的狀態。"
+    },
+    "McpServerInfo": {
+      "title": "McpServerInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "serverId",
+        "name",
+        "transport",
+        "allowedHosts",
+        "enabled",
+        "state",
+        "createdAt"
+      ],
+      "properties": {
+        "serverId": {
+          "type": "string",
+          "description": "MCP 伺服器識別碼。"
+        },
+        "name": {
+          "type": "string",
+          "description": "給人看的名稱。"
+        },
+        "transport": {
+          "$ref": "#/$defs/McpTransport"
+        },
+        "command": {
+          "type": "string",
+          "description": "stdio 傳輸的指令。"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "指令參數。"
+          },
+          "description": "stdio 傳輸的指令參數。"
+        },
+        "url": {
+          "type": "string",
+          "description": "http 傳輸的伺服器 URL。"
+        },
+        "allowedHosts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "主機名稱，例如 api.example.com。"
+          },
+          "description": "HTTP 傳輸允許連線的主機；stdio 傳輸不需要外連，可以空陣列。"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "使用者是否啟用。"
+        },
+        "state": {
+          "$ref": "#/$defs/McpServerState"
+        },
+        "failure": {
+          "type": "string",
+          "description": "啟動失敗或沙盒無法套用時的原因。"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "建立時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "最後更新時間，RFC 3339。",
+          "format": "date-time"
+        }
+      }
+    },
+    "McpServersListRequestPayload": {
+      "title": "McpServersListRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {},
+      "description": "列出 MCP 伺服器；不需要參數。"
+    },
+    "McpServersListResponsePayload": {
+      "title": "McpServersListResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["servers"],
+      "properties": {
+        "servers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/McpServerInfo"
+          },
+          "description": "目前存在的 MCP 伺服器，依名稱排序。"
+        }
+      }
+    },
+    "McpServerAddRequestPayload": {
+      "title": "McpServerAddRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "transport", "allowedHosts"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "給人看的名稱。"
+        },
+        "transport": {
+          "$ref": "#/$defs/McpTransport"
+        },
+        "command": {
+          "type": "string",
+          "description": "stdio 傳輸的指令。"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "指令參數。"
+          },
+          "description": "stdio 傳輸的指令參數。"
+        },
+        "url": {
+          "type": "string",
+          "description": "http 傳輸的伺服器 URL。"
+        },
+        "allowedHosts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "主機名稱，例如 api.example.com。"
+          },
+          "description": "HTTP 傳輸允許連線的主機；stdio 傳輸不需要外連，可以空陣列。"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵；重送只提出一次審批。"
+        }
+      }
+    },
+    "McpServerAddResponsePayload": {
+      "title": "McpServerAddResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvalId"],
+      "properties": {
+        "approvalId": {
+          "type": "string",
+          "description": "新增的 MCP 伺服器已送出人工審批；核准前伺服器不存在，也不提供工具。"
+        }
+      }
+    },
+    "McpServerRemoveRequestPayload": {
+      "title": "McpServerRemoveRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serverId"],
+      "properties": {
+        "serverId": {
+          "type": "string",
+          "description": "要移除的 MCP 伺服器。"
+        }
+      }
+    },
+    "McpServerRemoveResponsePayload": {
+      "title": "McpServerRemoveResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serverId", "removed"],
+      "properties": {
+        "serverId": {
+          "type": "string",
+          "description": "要移除的 MCP 伺服器。"
+        },
+        "removed": {
+          "type": "boolean",
+          "description": "是否真的移除了伺服器。"
+        }
+      }
+    },
+    "McpServerSetEnabledRequestPayload": {
+      "title": "McpServerSetEnabledRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serverId", "enabled"],
+      "properties": {
+        "serverId": {
+          "type": "string",
+          "description": "MCP 伺服器。"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "是否啟用。"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵。"
+        }
+      }
+    },
+    "McpServerSetEnabledResponsePayload": {
+      "title": "McpServerSetEnabledResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server"],
+      "properties": {
+        "server": {
+          "$ref": "#/$defs/McpServerInfo"
+        }
+      }
+    },
+    "McpServerAllowHostsRequestPayload": {
+      "title": "McpServerAllowHostsRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serverId", "allowedHosts"],
+      "properties": {
+        "serverId": {
+          "type": "string",
+          "description": "HTTP 傳輸的 MCP 伺服器。"
+        },
+        "allowedHosts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "主機名稱，例如 api.example.com。"
+          },
+          "description": "允許連線的主機；改動只影響這個伺服器。"
+        }
+      }
+    },
+    "McpServerAllowHostsResponsePayload": {
+      "title": "McpServerAllowHostsResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server"],
+      "properties": {
+        "server": {
+          "$ref": "#/$defs/McpServerInfo"
+        }
+      }
+    },
+    "McpServersChangedEventPayload": {
+      "title": "McpServersChangedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server", "removed"],
+      "properties": {
+        "server": {
+          "$ref": "#/$defs/McpServerInfo"
+        },
+        "removed": {
+          "type": "boolean",
+          "description": "true 表示伺服器已被移除；server 是移除前的最後狀態。"
+        }
+      }
+    },
+    "SettingTierItem": {
+      "title": "SettingTierItem",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value", "tier", "updatedAt"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "設定鍵。"
+        },
+        "value": {
+          "$ref": "#/$defs/JSONValue"
+        },
+        "tier": {
+          "$ref": "#/$defs/SettingLevel"
+        },
+        "title": {
+          "type": "string",
+          "description": "給人看的標題。"
+        },
+        "description": {
+          "type": "string",
+          "description": "給人看的說明。"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "最後更新時間，RFC 3339。",
+          "format": "date-time"
+        }
+      },
+      "description": "一項設定與它的分級；agent 看到的清單不含 human-only 的項目。"
+    },
+    "SettingChangeStatus": {
+      "title": "SettingChangeStatus",
+      "type": "string",
+      "enum": ["pending", "applied", "rejected"],
+      "description": "設定變更紀錄的狀態；pending 等待人工決定，applied 已生效，rejected 被拒絕。"
+    },
+    "SettingsChangeDecision": {
+      "title": "SettingsChangeDecision",
+      "type": "string",
+      "enum": ["approve", "reject"],
+      "description": "人工對一個待決設定提議的決定。"
+    },
+    "SettingChangeRecord": {
+      "title": "SettingChangeRecord",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changeId", "key", "value", "tier", "status", "proposedBy", "proposedAt"],
+      "properties": {
+        "changeId": {
+          "type": "string",
+          "description": "設定變更紀錄識別碼。"
+        },
+        "key": {
+          "type": "string",
+          "description": "設定鍵。"
+        },
+        "value": {
+          "$ref": "#/$defs/JSONValue"
+        },
+        "tier": {
+          "$ref": "#/$defs/SettingLevel"
+        },
+        "status": {
+          "$ref": "#/$defs/SettingChangeStatus"
+        },
+        "proposedBy": {
+          "type": "string",
+          "description": "提出者，例如 user:<deviceId>、agent:<conversationId>、system。"
+        },
+        "proposedAt": {
+          "type": "string",
+          "description": "提出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "decidedAt": {
+          "type": "string",
+          "description": "人工決定時間，RFC 3339；尚未決定時省略。",
+          "format": "date-time"
+        }
+      },
+      "description": "一筆設定變更紀錄；approval 分級的變更會先待決再生效。"
+    },
+    "SettingsListRequestPayload": {
+      "title": "SettingsListRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {},
+      "description": "列出設定與分級；不需要參數。"
+    },
+    "SettingsListResponsePayload": {
+      "title": "SettingsListResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["settings"],
+      "properties": {
+        "settings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SettingTierItem"
+          },
+          "description": "這個客戶端看得到的設定，含分級；人看得到全部，agent 看不到 human-only。"
+        }
+      }
+    },
+    "SettingsProposeChangeRequestPayload": {
+      "title": "SettingsProposeChangeRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "設定鍵。"
+        },
+        "value": {
+          "$ref": "#/$defs/JSONValue"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵；重送只提出一次。"
+        }
+      }
+    },
+    "SettingsProposeChangeResponsePayload": {
+      "title": "SettingsProposeChangeResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change"],
+      "properties": {
+        "change": {
+          "$ref": "#/$defs/SettingChangeRecord"
+        }
+      }
+    },
+    "SettingsChangesListRequestPayload": {
+      "title": "SettingsChangesListRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {},
+      "description": "列出設定變更紀錄與待決提議；不需要參數。"
+    },
+    "SettingsChangesListResponsePayload": {
+      "title": "SettingsChangesListResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changes"],
+      "properties": {
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SettingChangeRecord"
+          },
+          "description": "依提出時間由新到舊。"
+        }
+      }
+    },
+    "SettingsChangeDecideRequestPayload": {
+      "title": "SettingsChangeDecideRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changeId", "decision"],
+      "properties": {
+        "changeId": {
+          "type": "string",
+          "description": "待決的設定變更紀錄。"
+        },
+        "decision": {
+          "$ref": "#/$defs/SettingsChangeDecision"
+        }
+      }
+    },
+    "SettingsChangeDecideResponsePayload": {
+      "title": "SettingsChangeDecideResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change"],
+      "properties": {
+        "change": {
+          "$ref": "#/$defs/SettingChangeRecord"
+        }
+      }
+    },
+    "SettingsChangedEventPayload": {
+      "title": "SettingsChangedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changes", "changedBy", "changedAt"],
+      "properties": {
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SettingTierItem"
+          },
+          "description": "變更後的設定；這個客戶端看得到的範圍，agent 看不到 human-only。"
+        },
+        "changedBy": {
+          "type": "string",
+          "description": "變更者，例如 user:<deviceId>、agent:<conversationId>、system。"
+        },
+        "changedAt": {
+          "type": "string",
+          "description": "變更時間，RFC 3339。",
+          "format": "date-time"
+        }
+      }
+    },
+    "StorageUsageCategory": {
+      "title": "StorageUsageCategory",
+      "type": "string",
+      "enum": ["cards", "assets", "cache", "state", "logs"],
+      "description": "儲存用量的類別。"
+    },
+    "StorageCategoryUsage": {
+      "title": "StorageCategoryUsage",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "bytes", "cleanableBytes"],
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/StorageUsageCategory"
+        },
+        "bytes": {
+          "type": "integer",
+          "description": "目前佔用的位元組數。",
+          "minimum": 0
+        },
+        "cleanableBytes": {
+          "type": "integer",
+          "description": "這個類別可安全釋放的位元組數；cards、assets、state 是正本，固定為 0。",
+          "minimum": 0
+        }
+      }
+    },
+    "StorageUsageRequestPayload": {
+      "title": "StorageUsageRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {},
+      "description": "讀取各類別的儲存用量；不需要參數。"
+    },
+    "StorageUsageResponsePayload": {
+      "title": "StorageUsageResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["usage"],
+      "properties": {
+        "usage": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StorageCategoryUsage"
+          },
+          "description": "依類別列出用量。"
+        }
+      }
+    },
+    "StorageCleanupTarget": {
+      "title": "StorageCleanupTarget",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "items", "bytes"],
+      "properties": {
+        "category": {
+          "type": "string",
+          "description": "可清理的類別；只接受 cache、temp、indexes、logs。cards、assets、state 等正本一律拒絕，也不能用符號連結逃到正本。"
+        },
+        "items": {
+          "type": "integer",
+          "description": "要刪除的目標數量（檔案或目錄）。",
+          "minimum": 0
+        },
+        "bytes": {
+          "type": "integer",
+          "description": "估計會釋放的位元組數。",
+          "minimum": 0
+        }
+      }
+    },
+    "StorageCleanupPreviewRequestPayload": {
+      "title": "StorageCleanupPreviewRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["categories"],
+      "properties": {
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "只接受 cache、temp、indexes、logs。"
+          },
+          "description": "要預覽的類別；正本一律拒絕。",
+          "minItems": 1
+        }
+      }
+    },
+    "StorageCleanupPreviewResponsePayload": {
+      "title": "StorageCleanupPreviewResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targets", "totalBytes"],
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StorageCleanupTarget"
+          },
+          "description": "預覽會清掉的目標；沒有目標時為空陣列。"
+        },
+        "totalBytes": {
+          "type": "integer",
+          "description": "預計釋放的總位元組數。",
+          "minimum": 0
+        }
+      }
+    },
+    "StorageCleanupApplyRequestPayload": {
+      "title": "StorageCleanupApplyRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["categories"],
+      "properties": {
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "只接受 cache、temp、indexes、logs。"
+          },
+          "description": "要執行的類別；必須先預覽過、目標沒有改變，而且執行中的暫存不能清。",
+          "minItems": 1
+        }
+      }
+    },
+    "StorageCleanupApplyResponsePayload": {
+      "title": "StorageCleanupApplyResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targets", "totalBytes", "recordId"],
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StorageCleanupTarget"
+          },
+          "description": "實際清理的目標。"
+        },
+        "totalBytes": {
+          "type": "integer",
+          "description": "實際釋放的總位元組數。",
+          "minimum": 0
+        },
+        "recordId": {
+          "type": "string",
+          "description": "這次清理的紀錄識別碼；紀錄是 state 資料庫正本。"
+        }
+      }
+    },
+    "StorageChangedEventPayload": {
+      "title": "StorageChangedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["categories"],
+      "properties": {
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "儲存用量改變的類別。"
+          },
+          "description": "儲存用量變更或清理完成後送出；客戶端應重新讀取 storage.usage。"
+        },
+        "totalBytes": {
+          "type": "integer",
+          "description": "清理釋放的總位元組數；只在清理完成後的事件帶。",
+          "minimum": 0
+        }
+      }
+    },
+    "EmotionGetRequestPayload": {
+      "title": "EmotionGetRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {},
+      "description": "讀取目前情緒狀態；不需要參數。"
+    },
+    "EmotionGetResponsePayload": {
+      "title": "EmotionGetResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dimensions", "updatedAt"],
+      "properties": {
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/JSONValue"
+          }
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "上次更新時間，RFC 3339。",
+          "format": "date-time"
+        }
+      },
+      "description": "目前的情緒維度值；只給介面顯示，代理不能改。具體維度與數值範圍待使用者裁決，協定不約束。"
+    },
+    "AgentStartRequest": {
+      "title": "AgentStartRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "agent.start"
+        },
+        "payload": {
+          "$ref": "#/$defs/AgentStartRequestPayload"
+        }
+      },
+      "description": "啟動外部代理；啟動前需要人工審批。"
+    },
+    "AgentStartResponse": {
+      "title": "AgentStartResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "agent.start"
+        },
+        "payload": {
+          "$ref": "#/$defs/AgentStartResponsePayload"
+        }
+      },
+      "description": "已建立的代理工作階段。"
+    },
+    "AgentStopRequest": {
+      "title": "AgentStopRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "agent.stop"
+        },
+        "payload": {
+          "$ref": "#/$defs/AgentStopRequestPayload"
+        }
+      },
+      "description": "停止一個代理工作階段。"
+    },
+    "AgentStopResponse": {
+      "title": "AgentStopResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "agent.stop"
+        },
+        "payload": {
+          "$ref": "#/$defs/AgentStopResponsePayload"
+        }
+      },
+      "description": "停止結果。"
+    },
+    "AgentListRequest": {
+      "title": "AgentListRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "agent.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/AgentListRequestPayload"
+        }
+      },
+      "description": "列出代理工作階段。"
+    },
+    "AgentListResponse": {
+      "title": "AgentListResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "agent.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/AgentListResponsePayload"
+        }
+      },
+      "description": "目前的代理工作階段清單。"
+    },
+    "AgentStateChangedEvent": {
+      "title": "AgentStateChangedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "agent.state_changed"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/AgentStateChangedEventPayload"
+        }
+      },
+      "description": "代理狀態改變；掛在 system 串流。"
+    },
+    "McpServersListRequest": {
+      "title": "McpServersListRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "mcp.servers.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/McpServersListRequestPayload"
+        }
+      },
+      "description": "列出 MCP 伺服器。"
+    },
+    "McpServersListResponse": {
+      "title": "McpServersListResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "mcp.servers.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/McpServersListResponsePayload"
+        }
+      },
+      "description": "目前的 MCP 伺服器清單。"
+    },
+    "McpServerAddRequest": {
+      "title": "McpServerAddRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "mcp.server.add"
+        },
+        "payload": {
+          "$ref": "#/$defs/McpServerAddRequestPayload"
+        }
+      },
+      "description": "新增一個 MCP 伺服器；需要人工審批，核准前不存在。"
+    },
+    "McpServerAddResponse": {
+      "title": "McpServerAddResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "mcp.server.add"
+        },
+        "payload": {
+          "$ref": "#/$defs/McpServerAddResponsePayload"
+        }
+      },
+      "description": "已送出人工審批。"
+    },
+    "McpServerRemoveRequest": {
+      "title": "McpServerRemoveRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "mcp.server.remove"
+        },
+        "payload": {
+          "$ref": "#/$defs/McpServerRemoveRequestPayload"
+        }
+      },
+      "description": "移除一個 MCP 伺服器。"
+    },
+    "McpServerRemoveResponse": {
+      "title": "McpServerRemoveResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "mcp.server.remove"
+        },
+        "payload": {
+          "$ref": "#/$defs/McpServerRemoveResponsePayload"
+        }
+      },
+      "description": "移除結果。"
+    },
+    "McpServerSetEnabledRequest": {
+      "title": "McpServerSetEnabledRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "mcp.server.set_enabled"
+        },
+        "payload": {
+          "$ref": "#/$defs/McpServerSetEnabledRequestPayload"
+        }
+      },
+      "description": "啟用或停用一個 MCP 伺服器。"
+    },
+    "McpServerSetEnabledResponse": {
+      "title": "McpServerSetEnabledResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "mcp.server.set_enabled"
+        },
+        "payload": {
+          "$ref": "#/$defs/McpServerSetEnabledResponsePayload"
+        }
+      },
+      "description": "更新後的伺服器資訊。"
+    },
+    "McpServerAllowHostsRequest": {
+      "title": "McpServerAllowHostsRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "mcp.server.allow_hosts"
+        },
+        "payload": {
+          "$ref": "#/$defs/McpServerAllowHostsRequestPayload"
+        }
+      },
+      "description": "修改一個 HTTP MCP 伺服器允許連線的主機。"
+    },
+    "McpServerAllowHostsResponse": {
+      "title": "McpServerAllowHostsResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "mcp.server.allow_hosts"
+        },
+        "payload": {
+          "$ref": "#/$defs/McpServerAllowHostsResponsePayload"
+        }
+      },
+      "description": "更新後的伺服器資訊。"
+    },
+    "McpServersChangedEvent": {
+      "title": "McpServersChangedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "mcp.servers_changed"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/McpServersChangedEventPayload"
+        }
+      },
+      "description": "MCP 伺服器清單改變；掛在 system 串流。"
+    },
+    "SettingsListRequest": {
+      "title": "SettingsListRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "settings.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/SettingsListRequestPayload"
+        }
+      },
+      "description": "列出設定與分級。"
+    },
+    "SettingsListResponse": {
+      "title": "SettingsListResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "settings.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/SettingsListResponsePayload"
+        }
+      },
+      "description": "這個客戶端看得到的設定，含分級。"
+    },
+    "SettingsProposeChangeRequest": {
+      "title": "SettingsProposeChangeRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "settings.propose_change"
+        },
+        "payload": {
+          "$ref": "#/$defs/SettingsProposeChangeRequestPayload"
+        }
+      },
+      "description": "提出一個設定變更；分級決定是否需要審批。"
+    },
+    "SettingsProposeChangeResponse": {
+      "title": "SettingsProposeChangeResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "settings.propose_change"
+        },
+        "payload": {
+          "$ref": "#/$defs/SettingsProposeChangeResponsePayload"
+        }
+      },
+      "description": "設定變更紀錄；approval 分級會先待決。"
+    },
+    "SettingsChangesListRequest": {
+      "title": "SettingsChangesListRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "settings.changes.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/SettingsChangesListRequestPayload"
+        }
+      },
+      "description": "列出設定變更紀錄與待決提議。"
+    },
+    "SettingsChangesListResponse": {
+      "title": "SettingsChangesListResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "settings.changes.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/SettingsChangesListResponsePayload"
+        }
+      },
+      "description": "設定變更紀錄清單。"
+    },
+    "SettingsChangeDecideRequest": {
+      "title": "SettingsChangeDecideRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "settings.change.decide"
+        },
+        "payload": {
+          "$ref": "#/$defs/SettingsChangeDecideRequestPayload"
+        }
+      },
+      "description": "核准或拒絕一個待決的設定提議。"
+    },
+    "SettingsChangeDecideResponse": {
+      "title": "SettingsChangeDecideResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "settings.change.decide"
+        },
+        "payload": {
+          "$ref": "#/$defs/SettingsChangeDecideResponsePayload"
+        }
+      },
+      "description": "決定後的設定變更紀錄。"
+    },
+    "SettingsChangedEvent": {
+      "title": "SettingsChangedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "settings.changed"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/SettingsChangedEventPayload"
+        }
+      },
+      "description": "設定變更；掛在 system 串流。"
+    },
+    "StorageUsageRequest": {
+      "title": "StorageUsageRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "storage.usage"
+        },
+        "payload": {
+          "$ref": "#/$defs/StorageUsageRequestPayload"
+        }
+      },
+      "description": "讀取各類別的儲存用量。"
+    },
+    "StorageUsageResponse": {
+      "title": "StorageUsageResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "storage.usage"
+        },
+        "payload": {
+          "$ref": "#/$defs/StorageUsageResponsePayload"
+        }
+      },
+      "description": "各類別的用量與可清理量。"
+    },
+    "StorageCleanupPreviewRequest": {
+      "title": "StorageCleanupPreviewRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "storage.cleanup.preview"
+        },
+        "payload": {
+          "$ref": "#/$defs/StorageCleanupPreviewRequestPayload"
+        }
+      },
+      "description": "預覽一次清理會清掉的目標與釋放空間。"
+    },
+    "StorageCleanupPreviewResponse": {
+      "title": "StorageCleanupPreviewResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "storage.cleanup.preview"
+        },
+        "payload": {
+          "$ref": "#/$defs/StorageCleanupPreviewResponsePayload"
+        }
+      },
+      "description": "預覽結果；先確認這個內容再執行 storage.cleanup.apply。"
+    },
+    "StorageCleanupApplyRequest": {
+      "title": "StorageCleanupApplyRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "storage.cleanup.apply"
+        },
+        "payload": {
+          "$ref": "#/$defs/StorageCleanupApplyRequestPayload"
+        }
+      },
+      "description": "執行預覽過的清理；未預覽、目標改變或碰到正本時拒絕。"
+    },
+    "StorageCleanupApplyResponse": {
+      "title": "StorageCleanupApplyResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "storage.cleanup.apply"
+        },
+        "payload": {
+          "$ref": "#/$defs/StorageCleanupApplyResponsePayload"
+        }
+      },
+      "description": "實際清理結果與紀錄識別碼。"
+    },
+    "StorageChangedEvent": {
+      "title": "StorageChangedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "storage.changed"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/StorageChangedEventPayload"
+        }
+      },
+      "description": "儲存用量改變；掛在 system 串流。"
+    },
+    "EmotionGetRequest": {
+      "title": "EmotionGetRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "emotion.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/EmotionGetRequestPayload"
+        }
+      },
+      "description": "讀取目前情緒維度值與更新時間；只給介面顯示。"
+    },
+    "EmotionGetResponse": {
+      "title": "EmotionGetResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "emotion.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/EmotionGetResponsePayload"
+        }
+      },
+      "description": "目前的情緒狀態。"
+    },
     "ClientFrame": {
       "title": "ClientFrame",
       "description": "客戶端送給主機的所有訊息。",
@@ -8197,6 +10000,54 @@
         },
         {
           "$ref": "#/$defs/PairingCompleteRequest"
+        },
+        {
+          "$ref": "#/$defs/AgentStartRequest"
+        },
+        {
+          "$ref": "#/$defs/AgentStopRequest"
+        },
+        {
+          "$ref": "#/$defs/AgentListRequest"
+        },
+        {
+          "$ref": "#/$defs/McpServersListRequest"
+        },
+        {
+          "$ref": "#/$defs/McpServerAddRequest"
+        },
+        {
+          "$ref": "#/$defs/McpServerRemoveRequest"
+        },
+        {
+          "$ref": "#/$defs/McpServerSetEnabledRequest"
+        },
+        {
+          "$ref": "#/$defs/McpServerAllowHostsRequest"
+        },
+        {
+          "$ref": "#/$defs/SettingsListRequest"
+        },
+        {
+          "$ref": "#/$defs/SettingsProposeChangeRequest"
+        },
+        {
+          "$ref": "#/$defs/SettingsChangesListRequest"
+        },
+        {
+          "$ref": "#/$defs/SettingsChangeDecideRequest"
+        },
+        {
+          "$ref": "#/$defs/StorageUsageRequest"
+        },
+        {
+          "$ref": "#/$defs/StorageCleanupPreviewRequest"
+        },
+        {
+          "$ref": "#/$defs/StorageCleanupApplyRequest"
+        },
+        {
+          "$ref": "#/$defs/EmotionGetRequest"
         }
       ]
     },
@@ -8425,6 +10276,66 @@
         },
         {
           "$ref": "#/$defs/PairingCompleteResponse"
+        },
+        {
+          "$ref": "#/$defs/AgentStartResponse"
+        },
+        {
+          "$ref": "#/$defs/AgentStopResponse"
+        },
+        {
+          "$ref": "#/$defs/AgentListResponse"
+        },
+        {
+          "$ref": "#/$defs/AgentStateChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/McpServersListResponse"
+        },
+        {
+          "$ref": "#/$defs/McpServerAddResponse"
+        },
+        {
+          "$ref": "#/$defs/McpServerRemoveResponse"
+        },
+        {
+          "$ref": "#/$defs/McpServerSetEnabledResponse"
+        },
+        {
+          "$ref": "#/$defs/McpServerAllowHostsResponse"
+        },
+        {
+          "$ref": "#/$defs/McpServersChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/SettingsListResponse"
+        },
+        {
+          "$ref": "#/$defs/SettingsProposeChangeResponse"
+        },
+        {
+          "$ref": "#/$defs/SettingsChangesListResponse"
+        },
+        {
+          "$ref": "#/$defs/SettingsChangeDecideResponse"
+        },
+        {
+          "$ref": "#/$defs/SettingsChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/StorageUsageResponse"
+        },
+        {
+          "$ref": "#/$defs/StorageCleanupPreviewResponse"
+        },
+        {
+          "$ref": "#/$defs/StorageCleanupApplyResponse"
+        },
+        {
+          "$ref": "#/$defs/StorageChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/EmotionGetResponse"
         },
         {
           "$ref": "#/$defs/ErrorFrame"

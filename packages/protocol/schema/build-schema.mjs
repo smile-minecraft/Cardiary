@@ -3083,6 +3083,652 @@ responseFrame(
   "配對結果；成功時帶一次 deviceToken。",
 );
 
+// ---------------------------------------------------------------------------
+// M5：外部代理、MCP、設定分級 API、儲存用量與情緒
+// ---------------------------------------------------------------------------
+
+add(
+  "AgentProgress",
+  objectOf("AgentProgress", ["step", "label", "completed", "total"], {
+    step: str("步驟識別碼。"),
+    label: str("給人看的步驟說明。"),
+    completed: int("已完成的步驟數。", { minimum: 0 }),
+    total: int("總步驟數。", { minimum: 0 }),
+  }),
+);
+
+add("AgentKind", stringEnum(["opencode", "claude-code"], "外部代理的種類。"));
+
+add(
+  "AgentStatus",
+  stringEnum(
+    ["starting", "running", "waiting-approval", "stopped", "failed"],
+    "外部代理的狀態；waiting-approval 表示等待人工審批才能啟動。",
+  ),
+);
+
+add(
+  "AgentSessionInfo",
+  objectOf(
+    "AgentSessionInfo",
+    ["agentSessionId", "agentKind", "status", "workingDirectory", "startedAt"],
+    {
+      agentSessionId: str("代理工作階段識別碼。"),
+      agentKind: ref("AgentKind"),
+      status: ref("AgentStatus"),
+      workingDirectory: str("工作目錄（絕對路徑）。"),
+      progress: ref("AgentProgress"),
+      message: str("給人看的進度或失敗原因。"),
+      startedAt: str("建立時間，RFC 3339。", { format: "date-time" }),
+    },
+  ),
+);
+
+add(
+  "AgentStartRequestPayload",
+  objectOf("AgentStartRequestPayload", ["agentKind", "workingDirectory"], {
+    agentKind: ref("AgentKind"),
+    workingDirectory: str("工作目錄（絕對路徑）；代理會在這個目錄下啟動。"),
+    prompt: str("要交給代理的任務提示；省略代表只啟動不下任務。"),
+    clientRequestId: str("冪等鍵；重送只啟動一次。"),
+  }),
+);
+
+add(
+  "AgentStartResponsePayload",
+  objectOf("AgentStartResponsePayload", ["agentSessionId"], {
+    agentSessionId: str("已建立的代理工作階段識別碼；狀態先為 waiting-approval。"),
+    approvalId: str("啟動的審批識別碼；核准後代理才會啟動。"),
+  }),
+);
+
+add(
+  "AgentStopRequestPayload",
+  objectOf("AgentStopRequestPayload", ["agentSessionId"], {
+    agentSessionId: str("要停止的代理工作階段。"),
+  }),
+);
+
+add(
+  "AgentStopResponsePayload",
+  objectOf("AgentStopResponsePayload", ["agentSessionId", "stopped"], {
+    agentSessionId: str("要停止的代理工作階段。"),
+    stopped: bool("是否真的停掉了代理。"),
+  }),
+);
+
+add(
+  "AgentListRequestPayload",
+  objectOf("AgentListRequestPayload", [], {}, "列出代理工作階段；不需要參數。"),
+);
+
+add(
+  "AgentListResponsePayload",
+  objectOf("AgentListResponsePayload", ["agents"], {
+    agents: arrayOf(ref("AgentSessionInfo"), "目前存在的代理工作階段，依建立時間由新到舊。"),
+  }),
+);
+
+add(
+  "AgentStateChangedEventPayload",
+  objectOf("AgentStateChangedEventPayload", ["agentSessionId", "agentKind", "status"], {
+    agentSessionId: str("代理工作階段識別碼。"),
+    agentKind: ref("AgentKind"),
+    status: ref("AgentStatus"),
+    progress: ref("AgentProgress"),
+    message: str("給人看的進度或失敗原因。"),
+  }),
+);
+
+add("McpTransport", stringEnum(["stdio", "http"], "MCP 伺服器的傳輸方式。"));
+
+add("McpServerState", stringEnum(["disabled", "ready", "failed"], "MCP 伺服器的狀態。"));
+
+add(
+  "McpServerInfo",
+  objectOf(
+    "McpServerInfo",
+    ["serverId", "name", "transport", "allowedHosts", "enabled", "state", "createdAt"],
+    {
+      serverId: str("MCP 伺服器識別碼。"),
+      name: str("給人看的名稱。"),
+      transport: ref("McpTransport"),
+      command: str("stdio 傳輸的指令。"),
+      args: arrayOf(str("指令參數。"), "stdio 傳輸的指令參數。"),
+      url: str("http 傳輸的伺服器 URL。"),
+      allowedHosts: arrayOf(
+        str("主機名稱，例如 api.example.com。"),
+        "HTTP 傳輸允許連線的主機；stdio 傳輸不需要外連，可以空陣列。",
+      ),
+      enabled: bool("使用者是否啟用。"),
+      state: ref("McpServerState"),
+      failure: str("啟動失敗或沙盒無法套用時的原因。"),
+      createdAt: str("建立時間，RFC 3339。", { format: "date-time" }),
+      updatedAt: str("最後更新時間，RFC 3339。", { format: "date-time" }),
+    },
+  ),
+);
+
+add(
+  "McpServersListRequestPayload",
+  objectOf("McpServersListRequestPayload", [], {}, "列出 MCP 伺服器；不需要參數。"),
+);
+
+add(
+  "McpServersListResponsePayload",
+  objectOf("McpServersListResponsePayload", ["servers"], {
+    servers: arrayOf(ref("McpServerInfo"), "目前存在的 MCP 伺服器，依名稱排序。"),
+  }),
+);
+
+add(
+  "McpServerAddRequestPayload",
+  objectOf("McpServerAddRequestPayload", ["name", "transport", "allowedHosts"], {
+    name: str("給人看的名稱。"),
+    transport: ref("McpTransport"),
+    command: str("stdio 傳輸的指令。"),
+    args: arrayOf(str("指令參數。"), "stdio 傳輸的指令參數。"),
+    url: str("http 傳輸的伺服器 URL。"),
+    allowedHosts: arrayOf(
+      str("主機名稱，例如 api.example.com。"),
+      "HTTP 傳輸允許連線的主機；stdio 傳輸不需要外連，可以空陣列。",
+    ),
+    clientRequestId: str("冪等鍵；重送只提出一次審批。"),
+  }),
+);
+
+add(
+  "McpServerAddResponsePayload",
+  objectOf("McpServerAddResponsePayload", ["approvalId"], {
+    approvalId: str("新增的 MCP 伺服器已送出人工審批；核准前伺服器不存在，也不提供工具。"),
+  }),
+);
+
+add(
+  "McpServerRemoveRequestPayload",
+  objectOf("McpServerRemoveRequestPayload", ["serverId"], {
+    serverId: str("要移除的 MCP 伺服器。"),
+  }),
+);
+
+add(
+  "McpServerRemoveResponsePayload",
+  objectOf("McpServerRemoveResponsePayload", ["serverId", "removed"], {
+    serverId: str("要移除的 MCP 伺服器。"),
+    removed: bool("是否真的移除了伺服器。"),
+  }),
+);
+
+add(
+  "McpServerSetEnabledRequestPayload",
+  objectOf("McpServerSetEnabledRequestPayload", ["serverId", "enabled"], {
+    serverId: str("MCP 伺服器。"),
+    enabled: bool("是否啟用。"),
+    clientRequestId: str("冪等鍵。"),
+  }),
+);
+
+add(
+  "McpServerSetEnabledResponsePayload",
+  objectOf("McpServerSetEnabledResponsePayload", ["server"], {
+    server: ref("McpServerInfo"),
+  }),
+);
+
+add(
+  "McpServerAllowHostsRequestPayload",
+  objectOf("McpServerAllowHostsRequestPayload", ["serverId", "allowedHosts"], {
+    serverId: str("HTTP 傳輸的 MCP 伺服器。"),
+    allowedHosts: arrayOf(
+      str("主機名稱，例如 api.example.com。"),
+      "允許連線的主機；改動只影響這個伺服器。",
+    ),
+  }),
+);
+
+add(
+  "McpServerAllowHostsResponsePayload",
+  objectOf("McpServerAllowHostsResponsePayload", ["server"], {
+    server: ref("McpServerInfo"),
+  }),
+);
+
+add(
+  "McpServersChangedEventPayload",
+  objectOf("McpServersChangedEventPayload", ["server", "removed"], {
+    server: ref("McpServerInfo"),
+    removed: bool("true 表示伺服器已被移除；server 是移除前的最後狀態。"),
+  }),
+);
+
+add(
+  "SettingTierItem",
+  objectOf(
+    "SettingTierItem",
+    ["key", "value", "tier", "updatedAt"],
+    {
+      key: str("設定鍵。"),
+      value: ref("JSONValue"),
+      tier: ref("SettingLevel"),
+      title: str("給人看的標題。"),
+      description: str("給人看的說明。"),
+      updatedAt: str("最後更新時間，RFC 3339。", { format: "date-time" }),
+    },
+    "一項設定與它的分級；agent 看到的清單不含 human-only 的項目。",
+  ),
+);
+
+add(
+  "SettingChangeStatus",
+  stringEnum(
+    ["pending", "applied", "rejected"],
+    "設定變更紀錄的狀態；pending 等待人工決定，applied 已生效，rejected 被拒絕。",
+  ),
+);
+
+add("SettingsChangeDecision", stringEnum(["approve", "reject"], "人工對一個待決設定提議的決定。"));
+
+add(
+  "SettingChangeRecord",
+  objectOf(
+    "SettingChangeRecord",
+    ["changeId", "key", "value", "tier", "status", "proposedBy", "proposedAt"],
+    {
+      changeId: str("設定變更紀錄識別碼。"),
+      key: str("設定鍵。"),
+      value: ref("JSONValue"),
+      tier: ref("SettingLevel"),
+      status: ref("SettingChangeStatus"),
+      proposedBy: str("提出者，例如 user:<deviceId>、agent:<conversationId>、system。"),
+      proposedAt: str("提出時間，RFC 3339。", { format: "date-time" }),
+      decidedAt: str("人工決定時間，RFC 3339；尚未決定時省略。", {
+        format: "date-time",
+      }),
+    },
+    "一筆設定變更紀錄；approval 分級的變更會先待決再生效。",
+  ),
+);
+
+add(
+  "SettingsListRequestPayload",
+  objectOf("SettingsListRequestPayload", [], {}, "列出設定與分級；不需要參數。"),
+);
+
+add(
+  "SettingsListResponsePayload",
+  objectOf("SettingsListResponsePayload", ["settings"], {
+    settings: arrayOf(
+      ref("SettingTierItem"),
+      "這個客戶端看得到的設定，含分級；人看得到全部，agent 看不到 human-only。",
+    ),
+  }),
+);
+
+add(
+  "SettingsProposeChangeRequestPayload",
+  objectOf("SettingsProposeChangeRequestPayload", ["key", "value"], {
+    key: str("設定鍵。"),
+    value: ref("JSONValue"),
+    clientRequestId: str("冪等鍵；重送只提出一次。"),
+  }),
+);
+
+add(
+  "SettingsProposeChangeResponsePayload",
+  objectOf("SettingsProposeChangeResponsePayload", ["change"], {
+    change: ref("SettingChangeRecord"),
+  }),
+);
+
+add(
+  "SettingsChangesListRequestPayload",
+  objectOf("SettingsChangesListRequestPayload", [], {}, "列出設定變更紀錄與待決提議；不需要參數。"),
+);
+
+add(
+  "SettingsChangesListResponsePayload",
+  objectOf("SettingsChangesListResponsePayload", ["changes"], {
+    changes: arrayOf(ref("SettingChangeRecord"), "依提出時間由新到舊。"),
+  }),
+);
+
+add(
+  "SettingsChangeDecideRequestPayload",
+  objectOf("SettingsChangeDecideRequestPayload", ["changeId", "decision"], {
+    changeId: str("待決的設定變更紀錄。"),
+    decision: ref("SettingsChangeDecision"),
+  }),
+);
+
+add(
+  "SettingsChangeDecideResponsePayload",
+  objectOf("SettingsChangeDecideResponsePayload", ["change"], {
+    change: ref("SettingChangeRecord"),
+  }),
+);
+
+add(
+  "SettingsChangedEventPayload",
+  objectOf("SettingsChangedEventPayload", ["changes", "changedBy", "changedAt"], {
+    changes: arrayOf(
+      ref("SettingTierItem"),
+      "變更後的設定；這個客戶端看得到的範圍，agent 看不到 human-only。",
+    ),
+    changedBy: str("變更者，例如 user:<deviceId>、agent:<conversationId>、system。"),
+    changedAt: str("變更時間，RFC 3339。", { format: "date-time" }),
+  }),
+);
+
+add(
+  "StorageUsageCategory",
+  stringEnum(["cards", "assets", "cache", "state", "logs"], "儲存用量的類別。"),
+);
+
+add(
+  "StorageCategoryUsage",
+  objectOf("StorageCategoryUsage", ["category", "bytes", "cleanableBytes"], {
+    category: ref("StorageUsageCategory"),
+    bytes: int("目前佔用的位元組數。", { minimum: 0 }),
+    cleanableBytes: int("這個類別可安全釋放的位元組數；cards、assets、state 是正本，固定為 0。", {
+      minimum: 0,
+    }),
+  }),
+);
+
+add(
+  "StorageUsageRequestPayload",
+  objectOf("StorageUsageRequestPayload", [], {}, "讀取各類別的儲存用量；不需要參數。"),
+);
+
+add(
+  "StorageUsageResponsePayload",
+  objectOf("StorageUsageResponsePayload", ["usage"], {
+    usage: arrayOf(ref("StorageCategoryUsage"), "依類別列出用量。"),
+  }),
+);
+
+add(
+  "StorageCleanupTarget",
+  objectOf("StorageCleanupTarget", ["category", "items", "bytes"], {
+    category: str(
+      "可清理的類別；只接受 cache、temp、indexes、logs。cards、assets、state 等正本一律拒絕，也不能用符號連結逃到正本。",
+    ),
+    items: int("要刪除的目標數量（檔案或目錄）。", { minimum: 0 }),
+    bytes: int("估計會釋放的位元組數。", { minimum: 0 }),
+  }),
+);
+
+add(
+  "StorageCleanupPreviewRequestPayload",
+  objectOf("StorageCleanupPreviewRequestPayload", ["categories"], {
+    categories: arrayOf(
+      str("只接受 cache、temp、indexes、logs。"),
+      "要預覽的類別；正本一律拒絕。",
+      { minItems: 1 },
+    ),
+  }),
+);
+
+add(
+  "StorageCleanupPreviewResponsePayload",
+  objectOf("StorageCleanupPreviewResponsePayload", ["targets", "totalBytes"], {
+    targets: arrayOf(ref("StorageCleanupTarget"), "預覽會清掉的目標；沒有目標時為空陣列。"),
+    totalBytes: int("預計釋放的總位元組數。", { minimum: 0 }),
+  }),
+);
+
+add(
+  "StorageCleanupApplyRequestPayload",
+  objectOf("StorageCleanupApplyRequestPayload", ["categories"], {
+    categories: arrayOf(
+      str("只接受 cache、temp、indexes、logs。"),
+      "要執行的類別；必須先預覽過、目標沒有改變，而且執行中的暫存不能清。",
+      { minItems: 1 },
+    ),
+  }),
+);
+
+add(
+  "StorageCleanupApplyResponsePayload",
+  objectOf("StorageCleanupApplyResponsePayload", ["targets", "totalBytes", "recordId"], {
+    targets: arrayOf(ref("StorageCleanupTarget"), "實際清理的目標。"),
+    totalBytes: int("實際釋放的總位元組數。", { minimum: 0 }),
+    recordId: str("這次清理的紀錄識別碼；紀錄是 state 資料庫正本。"),
+  }),
+);
+
+add(
+  "StorageChangedEventPayload",
+  objectOf("StorageChangedEventPayload", ["categories"], {
+    categories: arrayOf(
+      str("儲存用量改變的類別。"),
+      "儲存用量變更或清理完成後送出；客戶端應重新讀取 storage.usage。",
+    ),
+    totalBytes: int("清理釋放的總位元組數；只在清理完成後的事件帶。", {
+      minimum: 0,
+    }),
+  }),
+);
+
+add(
+  "EmotionGetRequestPayload",
+  objectOf("EmotionGetRequestPayload", [], {}, "讀取目前情緒狀態；不需要參數。"),
+);
+
+add(
+  "EmotionGetResponsePayload",
+  objectOf(
+    "EmotionGetResponsePayload",
+    ["dimensions", "updatedAt"],
+    {
+      dimensions: jsonObject(),
+      updatedAt: str("上次更新時間，RFC 3339。", { format: "date-time" }),
+    },
+    "目前的情緒維度值；只給介面顯示，代理不能改。具體維度與數值範圍待使用者裁決，協定不約束。",
+  ),
+);
+
+requestFrame(
+  "AgentStartRequest",
+  "agent.start",
+  "AgentStartRequestPayload",
+  "啟動外部代理；啟動前需要人工審批。",
+);
+responseFrame(
+  "AgentStartResponse",
+  "agent.start",
+  "AgentStartResponsePayload",
+  "已建立的代理工作階段。",
+);
+requestFrame("AgentStopRequest", "agent.stop", "AgentStopRequestPayload", "停止一個代理工作階段。");
+responseFrame("AgentStopResponse", "agent.stop", "AgentStopResponsePayload", "停止結果。");
+requestFrame("AgentListRequest", "agent.list", "AgentListRequestPayload", "列出代理工作階段。");
+responseFrame(
+  "AgentListResponse",
+  "agent.list",
+  "AgentListResponsePayload",
+  "目前的代理工作階段清單。",
+);
+eventFrame(
+  "AgentStateChangedEvent",
+  "agent.state_changed",
+  "AgentStateChangedEventPayload",
+  "代理狀態改變；掛在 system 串流。",
+);
+
+requestFrame(
+  "McpServersListRequest",
+  "mcp.servers.list",
+  "McpServersListRequestPayload",
+  "列出 MCP 伺服器。",
+);
+responseFrame(
+  "McpServersListResponse",
+  "mcp.servers.list",
+  "McpServersListResponsePayload",
+  "目前的 MCP 伺服器清單。",
+);
+requestFrame(
+  "McpServerAddRequest",
+  "mcp.server.add",
+  "McpServerAddRequestPayload",
+  "新增一個 MCP 伺服器；需要人工審批，核准前不存在。",
+);
+responseFrame(
+  "McpServerAddResponse",
+  "mcp.server.add",
+  "McpServerAddResponsePayload",
+  "已送出人工審批。",
+);
+requestFrame(
+  "McpServerRemoveRequest",
+  "mcp.server.remove",
+  "McpServerRemoveRequestPayload",
+  "移除一個 MCP 伺服器。",
+);
+responseFrame(
+  "McpServerRemoveResponse",
+  "mcp.server.remove",
+  "McpServerRemoveResponsePayload",
+  "移除結果。",
+);
+requestFrame(
+  "McpServerSetEnabledRequest",
+  "mcp.server.set_enabled",
+  "McpServerSetEnabledRequestPayload",
+  "啟用或停用一個 MCP 伺服器。",
+);
+responseFrame(
+  "McpServerSetEnabledResponse",
+  "mcp.server.set_enabled",
+  "McpServerSetEnabledResponsePayload",
+  "更新後的伺服器資訊。",
+);
+requestFrame(
+  "McpServerAllowHostsRequest",
+  "mcp.server.allow_hosts",
+  "McpServerAllowHostsRequestPayload",
+  "修改一個 HTTP MCP 伺服器允許連線的主機。",
+);
+responseFrame(
+  "McpServerAllowHostsResponse",
+  "mcp.server.allow_hosts",
+  "McpServerAllowHostsResponsePayload",
+  "更新後的伺服器資訊。",
+);
+eventFrame(
+  "McpServersChangedEvent",
+  "mcp.servers_changed",
+  "McpServersChangedEventPayload",
+  "MCP 伺服器清單改變；掛在 system 串流。",
+);
+
+requestFrame(
+  "SettingsListRequest",
+  "settings.list",
+  "SettingsListRequestPayload",
+  "列出設定與分級。",
+);
+responseFrame(
+  "SettingsListResponse",
+  "settings.list",
+  "SettingsListResponsePayload",
+  "這個客戶端看得到的設定，含分級。",
+);
+requestFrame(
+  "SettingsProposeChangeRequest",
+  "settings.propose_change",
+  "SettingsProposeChangeRequestPayload",
+  "提出一個設定變更；分級決定是否需要審批。",
+);
+responseFrame(
+  "SettingsProposeChangeResponse",
+  "settings.propose_change",
+  "SettingsProposeChangeResponsePayload",
+  "設定變更紀錄；approval 分級會先待決。",
+);
+requestFrame(
+  "SettingsChangesListRequest",
+  "settings.changes.list",
+  "SettingsChangesListRequestPayload",
+  "列出設定變更紀錄與待決提議。",
+);
+responseFrame(
+  "SettingsChangesListResponse",
+  "settings.changes.list",
+  "SettingsChangesListResponsePayload",
+  "設定變更紀錄清單。",
+);
+requestFrame(
+  "SettingsChangeDecideRequest",
+  "settings.change.decide",
+  "SettingsChangeDecideRequestPayload",
+  "核准或拒絕一個待決的設定提議。",
+);
+responseFrame(
+  "SettingsChangeDecideResponse",
+  "settings.change.decide",
+  "SettingsChangeDecideResponsePayload",
+  "決定後的設定變更紀錄。",
+);
+eventFrame(
+  "SettingsChangedEvent",
+  "settings.changed",
+  "SettingsChangedEventPayload",
+  "設定變更；掛在 system 串流。",
+);
+
+requestFrame(
+  "StorageUsageRequest",
+  "storage.usage",
+  "StorageUsageRequestPayload",
+  "讀取各類別的儲存用量。",
+);
+responseFrame(
+  "StorageUsageResponse",
+  "storage.usage",
+  "StorageUsageResponsePayload",
+  "各類別的用量與可清理量。",
+);
+requestFrame(
+  "StorageCleanupPreviewRequest",
+  "storage.cleanup.preview",
+  "StorageCleanupPreviewRequestPayload",
+  "預覽一次清理會清掉的目標與釋放空間。",
+);
+responseFrame(
+  "StorageCleanupPreviewResponse",
+  "storage.cleanup.preview",
+  "StorageCleanupPreviewResponsePayload",
+  "預覽結果；先確認這個內容再執行 storage.cleanup.apply。",
+);
+requestFrame(
+  "StorageCleanupApplyRequest",
+  "storage.cleanup.apply",
+  "StorageCleanupApplyRequestPayload",
+  "執行預覽過的清理；未預覽、目標改變或碰到正本時拒絕。",
+);
+responseFrame(
+  "StorageCleanupApplyResponse",
+  "storage.cleanup.apply",
+  "StorageCleanupApplyResponsePayload",
+  "實際清理結果與紀錄識別碼。",
+);
+eventFrame(
+  "StorageChangedEvent",
+  "storage.changed",
+  "StorageChangedEventPayload",
+  "儲存用量改變；掛在 system 串流。",
+);
+
+requestFrame(
+  "EmotionGetRequest",
+  "emotion.get",
+  "EmotionGetRequestPayload",
+  "讀取目前情緒維度值與更新時間；只給介面顯示。",
+);
+responseFrame("EmotionGetResponse", "emotion.get", "EmotionGetResponsePayload", "目前的情緒狀態。");
+
 add("ClientFrame", {
   description: "客戶端送給主機的所有訊息。",
   oneOf: [
@@ -3140,6 +3786,22 @@ add("ClientFrame", {
     ref("NotificationCreateCardRequest"),
     ref("PairingBeginRequest"),
     ref("PairingCompleteRequest"),
+    ref("AgentStartRequest"),
+    ref("AgentStopRequest"),
+    ref("AgentListRequest"),
+    ref("McpServersListRequest"),
+    ref("McpServerAddRequest"),
+    ref("McpServerRemoveRequest"),
+    ref("McpServerSetEnabledRequest"),
+    ref("McpServerAllowHostsRequest"),
+    ref("SettingsListRequest"),
+    ref("SettingsProposeChangeRequest"),
+    ref("SettingsChangesListRequest"),
+    ref("SettingsChangeDecideRequest"),
+    ref("StorageUsageRequest"),
+    ref("StorageCleanupPreviewRequest"),
+    ref("StorageCleanupApplyRequest"),
+    ref("EmotionGetRequest"),
   ],
 });
 
@@ -3220,6 +3882,26 @@ add("ServerFrame", {
     ref("NotificationChangedEvent"),
     ref("PairingBeginResponse"),
     ref("PairingCompleteResponse"),
+    ref("AgentStartResponse"),
+    ref("AgentStopResponse"),
+    ref("AgentListResponse"),
+    ref("AgentStateChangedEvent"),
+    ref("McpServersListResponse"),
+    ref("McpServerAddResponse"),
+    ref("McpServerRemoveResponse"),
+    ref("McpServerSetEnabledResponse"),
+    ref("McpServerAllowHostsResponse"),
+    ref("McpServersChangedEvent"),
+    ref("SettingsListResponse"),
+    ref("SettingsProposeChangeResponse"),
+    ref("SettingsChangesListResponse"),
+    ref("SettingsChangeDecideResponse"),
+    ref("SettingsChangedEvent"),
+    ref("StorageUsageResponse"),
+    ref("StorageCleanupPreviewResponse"),
+    ref("StorageCleanupApplyResponse"),
+    ref("StorageChangedEvent"),
+    ref("EmotionGetResponse"),
     ref("ErrorFrame"),
     ref("ModuleResponse"),
     ref("ModuleEvent"),
