@@ -244,8 +244,7 @@ final class McpAppWebViewTests: XCTestCase {
         """)
         defer { probe.tearDown() }
 
-        probe.waitForSettled(initial: "pending")
-        let reached = probe.javaScript("String(window.__result)") as? String
+        let reached = probe.waitForSettled(initial: "pending")
         XCTAssertNotEqual(reached, "REACHED:", "頁面不該讀到主機協定的回應")
         XCTAssertEqual(reached, "BLOCKED")
     }
@@ -348,9 +347,7 @@ final class McpAppWebViewTests: XCTestCase {
         defer { probe.tearDown() }
 
         webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/marker")!))
-        let done = expectation(description: "allowed navigation finished")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { done.fulfill() }
-        wait(for: [done], timeout: 5)
+        recorder.waitForResponseAction()
 
         XCTAssertTrue(
             recorder.actions.contains { $0.hasPrefix("response:") },
@@ -574,10 +571,11 @@ final class McpAppWebViewTests: XCTestCase {
         let navProbe = delegate ?? NavigationProbe(coordinator: makeCoordinator())
         let (probe, webView) = makeWindowedWebView(delegate: navProbe)
 
+        // 在目前文件放記號；loadHTMLString 換成新文件時 window 被替換，記號消失，
+        // 可用來分辨「新文件已載入完成」而非剛建立的 about:blank（它一開始就是 complete）。
+        probe.javaScript("window.__probeSentinel = true")
         webView.loadHTMLString(html, baseURL: nil)
-        let loaded = expectation(description: "webView loaded HTML")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { loaded.fulfill() }
-        wait(for: [loaded], timeout: 3)
+        probe.waitForPageLoad()
 
         return (probe, webView)
     }
@@ -604,13 +602,35 @@ private final class WebViewProbe {
         return result
     }
 
-    /// 非同步等待 `window.__result` 從初始值變成明確結果。
-    func waitForSettled(initial: String) {
-        let deadline = Date().addingTimeInterval(2)
-        while Date() < deadline {
-            if let value = javaScript("String(window.__result)") as? String, value != initial {
-                return
-            }
+    /// 輪詢 `document.readyState`，等新文件真的完成載入，最多 10 秒。
+    /// 以 `window.__probeSentinel` 消失判斷新文件已替換舊文件，因為新 webView 一開始的
+    /// about:blank 也是 complete，只看 readyState 會在 loadHTMLString 生效前就誤判完成。
+    func waitForPageLoad() {
+        waitUntil(deadline: Date().addingTimeInterval(10)) {
+            guard let ready = self.javaScript("document.readyState") as? String,
+                  ready == "complete" else { return false }
+            let sentinel = self.javaScript("typeof window.__probeSentinel")
+            return sentinel as? String != "boolean"
+        }
+    }
+
+    /// 非同步等待 `window.__result` 從初始值變成明確字串結果。
+    /// 只有 `typeof` 是 string 且值不同於初始值才算完成；undefined／null 代表頁面腳本還沒執行，必須繼續等。
+    /// 逾時回傳最後讀到的值，讓 assertion 顯示頁面的具體內容。
+    @discardableResult
+    func waitForSettled(initial: String) -> String {
+        waitUntil(deadline: Date().addingTimeInterval(10)) {
+            guard let value = self.javaScript(
+                "typeof window.__result === 'string' ? window.__result : null"
+            ) as? String else { return false }
+            return value != initial
+        }
+        return javaScript("String(window.__result)") as? String ?? "undefined"
+    }
+
+    /// 在期限前反覆檢查條件，每次檢查之間留一拍給 WebKit 的回呼與頁面腳本執行。
+    private func waitUntil(deadline: Date, condition: () -> Bool) {
+        while Date() < deadline, !condition() {
             let done = XCTestExpectation(description: "poll")
             XCTWaiter().wait(for: [done], timeout: 0.05)
         }
@@ -637,6 +657,16 @@ private final class NavigationProbe: NSObject, WKNavigationDelegate, WKUIDelegat
 
     init(coordinator: McpAppWebView.Coordinator) {
         self.coordinator = coordinator
+    }
+
+    /// 輪詢 `actions`，等 response 政策被呼叫，最多 10 秒。
+    /// 每次等待都讓主執行緒的 RunLoop 有機會處理 WebKit 的 delegate 回呼。
+    func waitForResponseAction(timeout: TimeInterval = 10) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline, !actions.contains(where: { $0.hasPrefix("response:") }) {
+            let done = XCTestExpectation(description: "response action poll")
+            XCTWaiter().wait(for: [done], timeout: 0.05)
+        }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
