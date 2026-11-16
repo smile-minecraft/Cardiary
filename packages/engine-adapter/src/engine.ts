@@ -194,6 +194,9 @@ export interface EngineAdapter {
   /** 讀取對話摘要；不存在時回傳 `null`。 */
   getConversation(conversationId: ConversationId): Promise<ConversationSummary | null>;
 
+  /** 列出已建立且尚未刪除的對話。 */
+  listConversations(): Promise<readonly ConversationSummary[]>;
+
   /**
    * 建立對話並持久化。
    *

@@ -116,6 +116,11 @@ describe("以 node 直接啟動的主機服務", () => {
     });
     const accepted = await first.waitForReply(send);
     expect((accepted.payload as { disposition: string }).disposition).toBe("started");
+    const listed = await first.waitForReply(first.request("session.list", {}));
+    const summary = (
+      listed.payload as { sessions: Array<{ id: string; title: string }> }
+    ).sessions.find((session) => session.id === sessionId);
+    expect(summary?.title).toBe("你好");
     const [completedA, completedB] = await Promise.all([
       first.waitForEvent("stream.message_completed"),
       second.waitForEvent("stream.message_completed"),
@@ -127,6 +132,31 @@ describe("以 node 直接啟動的主機服務", () => {
     expect(entryB.text).toBe("契約測試回覆");
     const started = first.frames.find((frame) => frame.type === "stream.turn_started");
     expect(started?.seq).toBe(1);
+  });
+
+  it("首則訊息的標題在產品主機重啟後仍可列出", async () => {
+    const first = await boot({ engine: "pi", scripts: [[{ kind: "text", text: "好的" }]] });
+    const connected = await client(first);
+    const sessionId = await createSession(connected);
+    await subscribe(connected, sessionId);
+    const sent = connected.request("session.send_message", {
+      sessionId,
+      text: "安排週末旅程",
+      delivery: "queue",
+      clientMessageId: "title-first",
+    });
+    const sendReply = await connected.waitForReply(sent);
+    expect(sendReply.kind, JSON.stringify(sendReply)).toBe("response");
+    await connected.waitForEvent("stream.message_completed");
+    await connected.close();
+    await first.stop();
+    const restarted = await boot({ engine: "pi", folder: first.folder, scripts: [] });
+    const reopened = await client(restarted);
+    const listed = await reopened.waitForReply(reopened.request("session.list", {}));
+    const summary = (
+      listed.payload as { sessions: Array<{ id: string; title: string }> }
+    ).sessions.find((session) => session.id === sessionId);
+    expect(summary?.title).toBe("安排週末旅程");
   });
 
   it("中途插話：先中斷目前回合再開始新回合，已生成內容標成 interrupted", async () => {

@@ -93,6 +93,7 @@ public final class ConversationModel: ObservableObject {
 
     private var service: (any CardiaryService)?
     private var nextCursor: String?
+    var onMessageSent: (@MainActor () async -> Void)?
 
     public init(pageSize: Int = 50) {
         self.pageSize = pageSize
@@ -197,6 +198,7 @@ public final class ConversationModel: ObservableObject {
             composerText = ""
             noticeMessage = nil
             upsertUserMessage(id: response.userMessageId, text: text)
+            await onMessageSent?()
             switch response.disposition {
             case .queued:
                 noticeMessage = AppL10n.text(.conversationDeliveryQueue)

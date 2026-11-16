@@ -1019,6 +1019,24 @@ describe("審查修正的回歸測試", () => {
     await client.close();
   });
 
+  it("首則訊息讓清單顯示內容摘要，後續訊息不覆寫標題", async () => {
+    const host = await boot({ scripts: [[{ kind: "text", text: "收到" }]] });
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    const send = client.request("session.send_message", {
+      sessionId,
+      text: "請幫我整理旅行計畫",
+      delivery: "queue",
+    });
+    expect((await client.waitForReply(send)).kind).toBe("response");
+    const list = await client.waitForReply(client.request("session.list", {}));
+    const summary = (
+      list.payload as { sessions: Array<{ id: string; title: string }> }
+    ).sessions.find((session) => session.id === sessionId);
+    expect(summary?.title).toBe("請幫我整理旅行計畫");
+    await client.close();
+  });
+
   it("session.list 的 messageCount 會反映已完成的訊息", async () => {
     const host = await boot({ scripts: [[{ kind: "text", text: "計數" }]] });
     const client = await helloClient(host);

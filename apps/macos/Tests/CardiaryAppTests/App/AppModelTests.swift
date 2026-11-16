@@ -64,6 +64,28 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.approvals.requests.isEmpty)
     }
 
+    func testImportEntryRunsRegisteredCommand() {
+        let model = AppModel()
+        var calls = 0
+        model.installImportUI(ImportUIEntry(commands: [
+            AppCommand(id: "import.open", titleKey: .commandGroupImport) { calls += 1 },
+        ]))
+        model.openImport()
+        XCTAssertEqual(calls, 1)
+        XCTAssertNotEqual(model.commands.group(AppRegistry.importCommandsGroupId)?.titleKey, .commandGroupImport)
+    }
+
+    func testPendingApprovalsOpenInspector() {
+        let model = AppModel()
+        model.toggleInspector()
+        model.showApprovals()
+        XCTAssertFalse(model.isInspectorVisible)
+        model.update(approvals: [Fixtures.approval()])
+        model.showApprovals()
+        XCTAssertTrue(model.isInspectorVisible)
+        XCTAssertEqual(model.approvals.count, 1)
+    }
+
     func testShellActionsAreForwarded() {
         var chooseFolderCalls = 0
         var retryCalls = 0
@@ -87,8 +109,8 @@ final class AppModelTests: XCTestCase {
 
     func testAttachLoadsSessionsAndOpensFirstConversation() async {
         let sessions = [
-            Fixtures.summary("s1", updatedAt: "2026-01-02T00:00:00Z"),
             Fixtures.summary("s2", updatedAt: "2026-01-03T00:00:00Z"),
+            Fixtures.summary("s1", updatedAt: "2026-01-02T00:00:00Z"),
         ]
         let fake = FakeCardiaryService(
             sessions: sessions,
@@ -142,6 +164,50 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.conversation.streamingText)
         let historyCalls = await fake.historyCursors
         XCTAssertEqual(historyCalls, [nil, nil])
+    }
+
+    func testCreatedConversationRefreshesTitleAfterSending() async {
+        let initial = Fixtures.summary("s1", title: "新對話")
+        let titled = Fixtures.summary("s1", title: "規劃旅行")
+        let fake = FakeCardiaryService(
+            listPages: [
+                SessionListResponsePayload(sessions: []),
+                SessionListResponsePayload(sessions: []),
+                SessionListResponsePayload(sessions: [initial]),
+                SessionListResponsePayload(sessions: [titled]),
+            ],
+            createSummary: initial
+        )
+        let model = AppModel(setupCompleted: true)
+        await model.attach(service: fake)
+        _ = await model.createConversation()
+        model.conversation.composerText = "規劃旅行"
+        await model.conversation.send()
+        XCTAssertEqual(model.conversations.sessions.first?.title, "規劃旅行")
+    }
+
+    func testArchivedEventMarksConversation() async {
+        let model = AppModel(setupCompleted: true)
+        await model.attach(service: FakeCardiaryService(sessions: [Fixtures.summary("s1")]))
+        model.handle(sessionEvent: .sessionArchivedEvent(SessionArchivedEvent(
+            stream: "system", seq: 1, emittedAt: "2026-01-10T01:00:00Z",
+            payload: SessionArchivedEventPayload(sessionId: "s1", archive: SessionArchive(
+                archivedAt: "2026-01-10T01:00:00Z", purgeAt: "2026-01-17T01:00:00Z"
+            ))
+        )))
+        XCTAssertEqual(model.conversations.sessions.first?.status, .archived)
+        model.handle(sessionEvent: .sessionUnarchivedEvent(SessionUnarchivedEvent(
+            stream: "system", seq: 2, emittedAt: "2026-01-10T02:00:00Z",
+            payload: SessionUnarchivedEventPayload(sessionId: "s1")
+        )))
+        XCTAssertEqual(model.conversations.sessions.first?.status, .idle)
+        model.handle(sessionEvent: .sessionDeletedEvent(SessionDeletedEvent(
+            stream: "system", seq: 3, emittedAt: "2026-01-10T03:00:00Z",
+            payload: SessionDeletedEventPayload(
+                sessionId: "s1", deletedSessionIds: ["s1"], deletedCards: 0, deletedAssets: 0
+            )
+        )))
+        XCTAssertTrue(model.conversations.sessions.isEmpty)
     }
 
     func testCreateConversationSelectsAndOpensIt() async {

@@ -28,6 +28,7 @@ import type { HostEngine } from "./engine/types.js";
 import { FakeEngine, type FakeModelStep } from "@cardiary/engine-fake";
 import type { GatewayLimits } from "./gateway/limits.js";
 import { Gateway } from "./gateway/server.js";
+import { StoredConversationTitles } from "./gateway/titles.js";
 import { systemClock } from "./ids.js";
 import { SilentLogger } from "./logging.js";
 import { HostService } from "./service.js";
@@ -298,6 +299,9 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   const gateway = new Gateway({
     engine,
     storage,
+    ...(persistent === null
+      ? {}
+      : { titles: new StoredConversationTitles(() => persistent.storage.state) }),
     epoch: snapshot.epoch,
     clientToken: options.clientToken,
     logger,

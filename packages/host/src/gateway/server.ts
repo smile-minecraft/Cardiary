@@ -76,6 +76,7 @@ import { DEFAULT_LIMITS, type GatewayLimits } from "./limits.js";
 import { systemStatus, type HostStatusInput } from "./status.js";
 import { StreamLog, type StoredEvent } from "./streams.js";
 import { StreamingBuffer } from "./textBuffer.js";
+import { MemoryConversationTitles, type ConversationTitles } from "./titles.js";
 
 export type ModuleHandler = (payload: JSONObject) => Promise<JSONObject>;
 
@@ -120,6 +121,7 @@ interface ContextAttachService {
 export interface GatewayOptions {
   readonly engine: HostEngine;
   readonly storage: StorageBundle;
+  readonly titles?: ConversationTitles;
   readonly epoch: string;
   readonly clientToken: string;
   readonly logger: EngineLogger;
@@ -220,6 +222,7 @@ type Unknown = Record<string, unknown>;
  */
 export class Gateway {
   readonly #options: GatewayOptions;
+  readonly #titles: ConversationTitles;
   readonly limits: GatewayLimits;
   readonly streamLog: StreamLog;
   readonly #buffer: StreamingBuffer;
@@ -249,6 +252,7 @@ export class Gateway {
 
   constructor(options: GatewayOptions) {
     this.#options = options;
+    this.#titles = options.titles ?? new MemoryConversationTitles();
     this.limits = { ...DEFAULT_LIMITS, ...options.limits };
     this.streamLog = new StreamLog(options.storage.events, options.epoch);
     this.#buffer = new StreamingBuffer(this.limits.streamingBufferBytes);
@@ -1534,11 +1538,12 @@ export class Gateway {
         : "idle";
     return {
       id: summary.id,
-      title: summary.title,
+      title: this.#titles.get(summary.id) ?? summary.title,
       status,
       createdAt: summary.createdAt,
-      updatedAt: summary.updatedAt,
-      messageCount: this.#messageCounts.get(summary.id) ?? state.messageCount,
+      updatedAt: summary.updatedAt ?? summary.createdAt,
+      messageCount:
+        summary.messageCount ?? this.#messageCounts.get(summary.id) ?? state.messageCount,
     };
   }
 
@@ -1719,8 +1724,8 @@ export class Gateway {
       title: summary.title,
       status: "idle",
       createdAt: summary.createdAt,
-      updatedAt: summary.updatedAt,
-      messageCount: this.#messageCounts.get(summary.id) ?? 0,
+      updatedAt: summary.updatedAt ?? summary.createdAt,
+      messageCount: summary.messageCount ?? this.#messageCounts.get(summary.id) ?? 0,
     };
   }
 
@@ -1804,11 +1809,11 @@ export class Gateway {
   #summaryOf(summary: ConversationSummary): SessionSummary {
     return {
       id: summary.id,
-      title: summary.title,
+      title: this.#titles.get(summary.id) ?? summary.title,
       status: "idle",
       createdAt: summary.createdAt,
-      updatedAt: summary.updatedAt,
-      messageCount: this.#messageCounts.get(summary.id) ?? 0,
+      updatedAt: summary.updatedAt ?? summary.createdAt,
+      messageCount: summary.messageCount ?? this.#messageCounts.get(summary.id) ?? 0,
     };
   }
 
@@ -1821,6 +1826,11 @@ export class Gateway {
     const offset = parseOffsetCursor(cursor);
     const list = await this.#options.engine.listConversations?.();
     const all = (list ?? []).filter((summary) => summary.visibility === "listed");
+    all.sort((a, b) => {
+      if (a.updatedAt === undefined) return b.updatedAt === undefined ? 0 : 1;
+      if (b.updatedAt === undefined) return -1;
+      return b.updatedAt.localeCompare(a.updatedAt);
+    });
     const page = all.slice(offset, offset + limit);
     const nextOffset = offset + limit;
     return response(request.id, "session.list", {
@@ -1926,6 +1936,14 @@ export class Gateway {
     const receipt = this.#options.engine.sendMessageWithClientId
       ? await this.#options.engine.sendMessageWithClientId(sendRequest)
       : await this.#options.engine.sendMessage(sendRequest);
+    const summary = await this.#options.engine.getConversation(sessionId);
+    if (summary && (summary.title.trim() === "" || summary.title === "新對話")) {
+      const characters = Array.from(text.trim().replace(/\s+/gu, " "));
+      if (characters.length > 0) {
+        const title = characters.slice(0, 50).join("") + (characters.length > 50 ? "…" : "");
+        this.#titles.setFirst(summary, title);
+      }
+    }
     // 引擎的 steered 表示訊息已進目前回合、下一個模型請求前送達；協定沒有
     // steered 這個值，記成 started，才不會讓客戶端誤以為訊息排在回合之後。
     const disposition =

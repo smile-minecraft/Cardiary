@@ -589,7 +589,11 @@ export class SessionLifecycleService {
   ): void {
     this.#conversations.ensure({
       conversationId: sessionId,
-      ...(summary?.title === undefined ? {} : { title: summary.title }),
+      ...(this.#conversations.get(sessionId)?.title
+        ? {}
+        : summary?.title === undefined
+          ? {}
+          : { title: summary.title }),
       ...(summary?.createdAt === undefined ? {} : { createdAt: summary.createdAt }),
       ...(summary?.updatedAt === undefined ? {} : { updatedAt: summary.updatedAt }),
       lastActivityAt: summary?.updatedAt ?? archivedAt,

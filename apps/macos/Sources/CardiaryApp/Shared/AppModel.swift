@@ -57,6 +57,9 @@ public final class AppModel: ObservableObject {
         self.firstRun = FirstRunModel(keychain: keychain)
         self.approvals = ApprovalModel(language: language)
         self.settingsModel = SettingsModel(keychain: keychain, language: language)
+        conversation.onMessageSent = { [weak self] in
+            await self?.conversations.reload()
+        }
         AppRegistry.installBuiltins(self)
         if setupCompleted {
             firstRun.markComplete()
@@ -145,6 +148,8 @@ public final class AppModel: ObservableObject {
 
     /// 殼轉來的會話事件。對話只套用目前開啟的那一場；卡片與封存的模型自己過濾。
     public func handle(sessionEvent frame: ServerFrame) {
+        conversations.handle(frame: frame)
+        reconcileSelection()
         conversation.apply(frame: frame)
         for model in contentModels {
             model.handle(event: frame)
@@ -167,6 +172,16 @@ public final class AppModel: ObservableObject {
 
     public func toggleInspector() {
         isInspectorVisible.toggle()
+    }
+
+    public func showApprovals() {
+        guard approvals.count > 0 else { return }
+        isInspectorVisible = true
+    }
+
+    public func openImport() {
+        commands.group(AppRegistry.importCommandsGroupId)?.commands
+            .first(where: { $0.id == "import.open" })?.action()
     }
 
     public func selectSlot(_ id: String) {
