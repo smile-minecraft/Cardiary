@@ -3,6 +3,7 @@ import { StorageCleanup } from "@cardiary/storage";
 
 import { HOST_SERVICE_NAMES, type CardEnvironment } from "../contract.js";
 import type { SpawnRegistry } from "../../spawn/wrapper.js";
+import type { BrokerClient } from "../../control/broker.js";
 import { manifest } from "./manifest.js";
 import { registerStorageProtocol } from "./protocol.js";
 
@@ -15,6 +16,7 @@ export const hostModule: HostModule = {
 async function activate(context: ModuleActivationContext): Promise<void> {
   const cabinet = context.services.host.require<CardEnvironment>(HOST_SERVICE_NAMES.cardStorage);
   const spawn = context.services.host.get<SpawnRegistry>(HOST_SERVICE_NAMES.spawn);
+  const broker = context.services.host.get<BrokerClient>(HOST_SERVICE_NAMES.broker);
   const cleanup = new StorageCleanup({
     layout: cabinet.layout,
     cache: () => cabinet.cache(),
@@ -24,5 +26,6 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   registerStorageProtocol({
     cleanup,
     protocol: context.services.protocol,
+    ...(broker === undefined ? {} : { shellState: () => broker.shellState() }),
   });
 }

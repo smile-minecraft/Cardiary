@@ -122,27 +122,6 @@ export class StorageCleanup {
     ];
   }
 
-  /** 協定 `storage.usage` 只列得下五類；`tmp` 由面板另外取得。 */
-  protocolUsage(): Array<
-    Omit<CleanupUsageItem, "category"> & {
-      readonly category: "cards" | "assets" | "cache" | "state" | "logs";
-    }
-  > {
-    const all = this.usage();
-    const item = (
-      category: "cards" | "assets" | "cache" | "state" | "logs",
-    ): Omit<CleanupUsageItem, "category"> & {
-      readonly category: "cards" | "assets" | "cache" | "state" | "logs";
-    } => {
-      const usage = all.find((entry) => entry.category === category);
-      if (usage === undefined) {
-        throw new StorageError("storage-failed", `少了 ${category} 用量。`);
-      }
-      return { category, bytes: usage.bytes, cleanableBytes: usage.cleanableBytes };
-    };
-    return [item("cards"), item("assets"), item("cache"), item("state"), item("logs")];
-  }
-
   /** 先算出將刪除的目標；不會修改索引內容。 */
   preview(categories: readonly StorageCleanupTargetSelector[]): StorageCleanupPreview {
     const requested = normalizeCategories(categories);

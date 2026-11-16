@@ -160,6 +160,7 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case settingsModuleVersion
     case settingsModulesEmpty
     case settingsModulesTab
+    case settingsStorageTab
     case settingsProviderAdd
     case settingsProviderBaseURL
     case settingsProviderDuplicateID
@@ -193,6 +194,25 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case settingsServiceUnavailable
     case settingsValueInvalid
     case settingsValuePlaceholder
+    case storageCategoryAssets
+    case storageCategoryCache
+    case storageCategoryCards
+    case storageCategoryLogs
+    case storageCategoryShellState
+    case storageCategoryState
+    case storageCategoryTmp
+    case storageCleanable
+    case storageCleanupApply
+    case storageCleanupCategoryIndexes
+    case storageCleanupDone
+    case storageCleanupNothing
+    case storageCleanupPreview
+    case storageCleanupTitle
+    case storagePreviewItems
+    case storagePreviewTotal
+    case storageShellStateNote
+    case storageUsageEmpty
+    case storageUsageTitle
     case genericRetry
     case genericCancel
     case genericClose

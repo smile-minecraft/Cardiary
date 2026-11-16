@@ -2981,7 +2981,9 @@
         { "category": "assets", "bytes": 128493056, "cleanableBytes": 0 },
         { "category": "cache", "bytes": 24576100, "cleanableBytes": 24576100 },
         { "category": "state", "bytes": 1245678, "cleanableBytes": 0 },
-        { "category": "logs", "bytes": 834560, "cleanableBytes": 834560 }
+        { "category": "logs", "bytes": 834560, "cleanableBytes": 834560 },
+        { "category": "tmp", "bytes": 40960, "cleanableBytes": 40960 },
+        { "category": "shellState", "bytes": 2097152, "cleanableBytes": 0 }
       ]
     }
   },

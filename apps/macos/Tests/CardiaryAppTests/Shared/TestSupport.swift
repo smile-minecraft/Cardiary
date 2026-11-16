@@ -6,7 +6,8 @@ import Foundation
 /// 測試用的服務替身：所有請求都回預先設定的資料，並記下呼叫順序。
 actor FakeCardiaryService:
     ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService,
-    CardService, ContextService, SessionManagementService, MediaImportService, NotificationService
+    CardService, ContextService, SessionManagementService, MediaImportService, NotificationService,
+    StorageService
 {
     enum Failure: Error, Equatable {
         case send
@@ -15,6 +16,9 @@ actor FakeCardiaryService:
         case approval
         case pause
         case create
+        case storageUsage
+        case storagePreview
+        case storageApply
     }
 
     private var listPages: [SessionListResponsePayload]
@@ -30,6 +34,9 @@ actor FakeCardiaryService:
     private var modulesList: [ModuleInfo]
     private var cards: [Card]
     private var context: ContextView
+    private var storageUsageRows: [StorageCategoryUsage]
+    private let storagePreviewPayload: StorageCleanupPreviewResponsePayload?
+    private let storageApplyPayload: StorageCleanupApplyResponsePayload?
 
     private(set) var historyCursors: [String?] = []
     private(set) var listCalls = 0
@@ -55,6 +62,9 @@ actor FakeCardiaryService:
     private(set) var deletionPreviews: [String] = []
     private(set) var deletedSessions: [String] = []
     private(set) var importedBlobIds: [String] = []
+    private(set) var storageUsageCalls = 0
+    private(set) var storagePreviewCategories: [[String]] = []
+    private(set) var storageApplyCategories: [[String]] = []
 
     init(
         sessions: [SessionSummary] = [],
@@ -69,6 +79,9 @@ actor FakeCardiaryService:
         modules: [ModuleInfo] = [],
         cards: [Card] = [],
         context: ContextView? = nil,
+        storageUsage: [StorageCategoryUsage] = [],
+        storagePreview: StorageCleanupPreviewResponsePayload? = nil,
+        storageApply: StorageCleanupApplyResponsePayload? = nil,
         failure: Failure? = nil
     ) {
         self.fallbackSessions = sessions
@@ -83,6 +96,9 @@ actor FakeCardiaryService:
         self.modulesList = modules
         self.cards = cards
         self.context = context ?? Fixtures.contextView()
+        self.storageUsageRows = storageUsage
+        self.storagePreviewPayload = storagePreview
+        self.storageApplyPayload = storageApply
         self.failure = failure
     }
 
@@ -446,6 +462,42 @@ actor FakeCardiaryService:
             deletedSessionIds: [sessionId],
             deletedCards: 2,
             deletedAssets: 1
+        )
+    }
+
+    // MARK: - StorageService
+
+    func getStorageUsage() async throws -> StorageUsageResponsePayload {
+        storageUsageCalls += 1
+        if failure == .storageUsage { throw Failure.storageUsage }
+        return StorageUsageResponsePayload(usage: storageUsageRows)
+    }
+
+    func previewStorageCleanup(
+        categories: [String]
+    ) async throws -> StorageCleanupPreviewResponsePayload {
+        storagePreviewCategories.append(categories)
+        if failure == .storagePreview { throw Failure.storagePreview }
+        if let storagePreviewPayload { return storagePreviewPayload }
+        let targets = categories.map {
+            StorageCleanupTarget(category: $0, items: 0, bytes: 0)
+        }
+        return StorageCleanupPreviewResponsePayload(targets: targets, totalBytes: 0)
+    }
+
+    func applyStorageCleanup(
+        categories: [String]
+    ) async throws -> StorageCleanupApplyResponsePayload {
+        storageApplyCategories.append(categories)
+        if failure == .storageApply { throw Failure.storageApply }
+        if let storageApplyPayload { return storageApplyPayload }
+        let targets = categories.map {
+            StorageCleanupTarget(category: $0, items: 0, bytes: 0)
+        }
+        return StorageCleanupApplyResponsePayload(
+            targets: targets,
+            totalBytes: 0,
+            recordId: "rec-storage-\(storageApplyCategories.count)"
         )
     }
 

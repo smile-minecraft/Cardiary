@@ -386,9 +386,10 @@ export type McpServerState = "disabled" | "ready" | "failed";
  */
 export type SettingChangeStatus = "pending" | "applied" | "rejected";
 /**
- * 儲存用量的類別。
+ * 儲存用量的類別；tmp 是暫存，shellState 是殼狀態（只有殼能清，用量經私有控制面取得）。
  */
-export type StorageUsageCategory = "cards" | "assets" | "cache" | "state" | "logs";
+export type StorageUsageCategory =
+  "cards" | "assets" | "cache" | "state" | "logs" | "tmp" | "shellState";
 /**
  * 協定層級的錯誤碼。
  */
@@ -5480,7 +5481,7 @@ export interface StorageCategoryUsage {
    */
   bytes: number;
   /**
-   * 這個類別可安全釋放的位元組數；cards、assets、state 是正本，固定為 0。
+   * 這個類別可安全釋放的位元組數；cards、assets、state、shellState 是正本或由殼管理，固定為 0。
    */
   cleanableBytes: number;
 }

@@ -255,6 +255,72 @@ final class ClientAPITests: XCTestCase {
         await client.stop()
     }
 
+    func testStorageUsageAndCleanupRoundTrip() async throws {
+        let queue = TransportQueue()
+        let transport = FakeServerTransport()
+        queue.append(transport)
+        let statuses = Recorder<SystemStatus>()
+        let client = makeClient(queue: queue, statuses: statuses)
+        try await connect(client: client, transport: transport, epoch: "epoch_a")
+
+        let usageTask = Task { try await client.getStorageUsage() }
+        let usageRequest = JSONFixture.decode(try await transport.nextSent())
+        XCTAssertEqual(usageRequest["type"] as? String, "storage.usage")
+        await transport.push(
+            Self.response(
+                type: "storage.usage",
+                replyTo: try XCTUnwrap(usageRequest["id"] as? String),
+                payload: ["usage": [
+                    ["category": "cache", "bytes": 128, "cleanableBytes": 128],
+                    ["category": "shellState", "bytes": 2048, "cleanableBytes": 0],
+                ]]
+            )
+        )
+        let usage = try await usageTask.value
+        XCTAssertEqual(usage.usage.count, 2)
+        XCTAssertEqual(usage.usage.first?.category, .cache)
+        XCTAssertEqual(usage.usage.last?.category, .shellState)
+        XCTAssertEqual(usage.usage.last?.cleanableBytes, 0)
+
+        let previewTask = Task { try await client.previewStorageCleanup(categories: ["cache"]) }
+        let previewRequest = JSONFixture.decode(try await transport.nextSent())
+        XCTAssertEqual(previewRequest["type"] as? String, "storage.cleanup.preview")
+        let previewPayload = try XCTUnwrap(previewRequest["payload"] as? [String: Any])
+        XCTAssertEqual(previewPayload["categories"] as? [String], ["cache"])
+        await transport.push(
+            Self.response(
+                type: "storage.cleanup.preview",
+                replyTo: try XCTUnwrap(previewRequest["id"] as? String),
+                payload: [
+                    "targets": [["category": "cache", "items": 2, "bytes": 128]],
+                    "totalBytes": 128,
+                ]
+            )
+        )
+        let preview = try await previewTask.value
+        XCTAssertEqual(preview.totalBytes, 128)
+        XCTAssertEqual(preview.targets.first?.items, 2)
+
+        let applyTask = Task { try await client.applyStorageCleanup(categories: ["cache"]) }
+        let applyRequest = JSONFixture.decode(try await transport.nextSent())
+        XCTAssertEqual(applyRequest["type"] as? String, "storage.cleanup.apply")
+        await transport.push(
+            Self.response(
+                type: "storage.cleanup.apply",
+                replyTo: try XCTUnwrap(applyRequest["id"] as? String),
+                payload: [
+                    "targets": [["category": "cache", "items": 2, "bytes": 128]],
+                    "totalBytes": 128,
+                    "recordId": "rec_1",
+                ]
+            )
+        )
+        let apply = try await applyTask.value
+        XCTAssertEqual(apply.recordId, "rec_1")
+
+        await client.stop()
+    }
+
     func testGetModulesAndSetModuleEnabledRoundTrip() async throws {
         let queue = TransportQueue()
         let transport = FakeServerTransport()

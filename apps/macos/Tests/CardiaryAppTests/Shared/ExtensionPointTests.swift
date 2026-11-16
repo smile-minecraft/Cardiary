@@ -51,21 +51,21 @@ final class ExtensionPointTests: XCTestCase {
 
     func testSettingsTabsKeepOrderAndAllowAdding() {
         let model = AppModel(setupCompleted: true)
-        XCTAssertEqual(model.settings.all.map(\.id), ["models", "general", "modules", "remote"])
+        XCTAssertEqual(model.settings.all.map(\.id), ["models", "general", "modules", "storage", "remote"])
 
         model.settings.register(PlaceholderSettingsTab(
             id: "freshness",
             titleKey: .settingsGeneralTab,
             messageKey: .placeholderComingSoon
         ))
-        XCTAssertEqual(model.settings.all.map(\.id), ["models", "general", "modules", "remote", "freshness"])
+        XCTAssertEqual(model.settings.all.map(\.id), ["models", "general", "modules", "storage", "remote", "freshness"])
 
         model.settings.register(PlaceholderSettingsTab(
             id: "models",
             titleKey: .settingsModelsTab,
             messageKey: .placeholderCards
         ))
-        XCTAssertEqual(model.settings.all.map(\.id), ["models", "general", "modules", "remote", "freshness"])
+        XCTAssertEqual(model.settings.all.map(\.id), ["models", "general", "modules", "storage", "remote", "freshness"])
     }
 
     func testBuiltinTabsAndPanelsAreRealImplementations() {
@@ -75,6 +75,7 @@ final class ExtensionPointTests: XCTestCase {
         XCTAssertTrue(model.settings.tab("models") is ModelsSettingsTab)
         XCTAssertTrue(model.settings.tab("general") is GeneralSettingsTab)
         XCTAssertTrue(model.settings.tab("modules") is ModulesSettingsTab)
+        XCTAssertTrue(model.settings.tab("storage") is StorageSettingsTab)
         XCTAssertTrue(model.settings.tab("remote") is RemoteSettingsTab)
     }
 

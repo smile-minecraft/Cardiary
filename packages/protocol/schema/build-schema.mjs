@@ -3427,7 +3427,10 @@ add(
 
 add(
   "StorageUsageCategory",
-  stringEnum(["cards", "assets", "cache", "state", "logs"], "儲存用量的類別。"),
+  stringEnum(
+    ["cards", "assets", "cache", "state", "logs", "tmp", "shellState"],
+    "儲存用量的類別；tmp 是暫存，shellState 是殼狀態（只有殼能清，用量經私有控制面取得）。",
+  ),
 );
 
 add(
@@ -3435,9 +3438,10 @@ add(
   objectOf("StorageCategoryUsage", ["category", "bytes", "cleanableBytes"], {
     category: ref("StorageUsageCategory"),
     bytes: int("目前佔用的位元組數。", { minimum: 0 }),
-    cleanableBytes: int("這個類別可安全釋放的位元組數；cards、assets、state 是正本，固定為 0。", {
-      minimum: 0,
-    }),
+    cleanableBytes: int(
+      "這個類別可安全釋放的位元組數；cards、assets、state、shellState 是正本或由殼管理，固定為 0。",
+      { minimum: 0 },
+    ),
   }),
 );
 

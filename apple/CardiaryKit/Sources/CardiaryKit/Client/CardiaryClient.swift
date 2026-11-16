@@ -282,6 +282,27 @@ public actor CardiaryClient {
         )
     }
 
+    // MARK: - 儲存空間
+
+    public func getStorageUsage() async throws -> StorageUsageResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.getStorageUsage()
+    }
+
+    public func previewStorageCleanup(
+        categories: [String]
+    ) async throws -> StorageCleanupPreviewResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.previewStorageCleanup(categories: categories)
+    }
+
+    public func applyStorageCleanup(
+        categories: [String]
+    ) async throws -> StorageCleanupApplyResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.applyStorageCleanup(categories: categories)
+    }
+
     // MARK: - 模組請求
 
     /// 對第一方模組（`module.*`）送請求，回傳回應的整個 payload（`{ data: … }`）。

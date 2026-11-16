@@ -47,6 +47,13 @@ public protocol ModulesService: Sendable {
     ) async throws -> SystemModulesSetEnabledResponsePayload
 }
 
+/// 設定頁的儲存空間：讀取用量，預覽後才執行清理。
+public protocol StorageService: Sendable {
+    func getStorageUsage() async throws -> StorageUsageResponsePayload
+    func previewStorageCleanup(categories: [String]) async throws -> StorageCleanupPreviewResponsePayload
+    func applyStorageCleanup(categories: [String]) async throws -> StorageCleanupApplyResponsePayload
+}
+
 /// 審批需要的請求。檢視欄與選單列共用同一條路徑。
 public protocol ApprovalService: Sendable {
     func decideApproval(
@@ -245,8 +252,10 @@ public protocol RemoteControlService: Sendable {
 public typealias CardiaryService =
     ConversationService & ModelSettingsService & SettingsService & ModulesService & ApprovalService
     & CardService & ContextService & SessionManagementService & MediaImportService & NotificationService
+    & StorageService
 
 extension CardiaryClient:
     ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService,
-    CardService, ContextService, SessionManagementService, MediaImportService, NotificationService
+    CardService, ContextService, SessionManagementService, MediaImportService, NotificationService,
+    StorageService
 {}
