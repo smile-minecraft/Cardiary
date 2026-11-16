@@ -15,7 +15,6 @@ import type {
   CardSearchResponsePayload,
   CardCreateResponsePayload,
   CardPatchResponsePayload,
-  CardPatchProposeResponsePayload,
   CardPatchesListResponsePayload,
   CardPatchAcceptResponsePayload,
   CardPatchRejectResponsePayload,
@@ -92,8 +91,6 @@ export function registerCardsProtocol(options: CardsProtocolOptions): void {
             return asJson(await createCard(library, request.payload, dedupe, remember));
           case "card.patch":
             return asJson(await patchCard(library, request.payload, dedupe, remember));
-          case "card.patch.propose":
-            return asJson(await proposePatch(library, request.payload));
           case "card.patches.list":
             return asJson(await listPatches(library, request.payload));
           case "card.patch.accept":
@@ -102,6 +99,15 @@ export function registerCardsProtocol(options: CardsProtocolOptions): void {
             return asJson(await rejectPatch(library, request.payload));
           case "card.versions.list":
             return asJson(await listVersions(library, request.payload));
+          case "card.version.get": {
+            const input = objectOf(request.payload);
+            return asJson({
+              body: library.versionBody(
+                requiredString(input, "cardId"),
+                requiredString(input, "versionId"),
+              ),
+            });
+          }
           case "card.version.restore":
             return asJson(await restoreVersion(library, request.payload));
           case "card.delete":
@@ -297,24 +303,6 @@ async function refreshCard(
   return { cardId, freshness };
 }
 
-async function proposePatch(
-  library: CardLibrary,
-  payload: JsonValue,
-): Promise<CardPatchProposeResponsePayload> {
-  const input = objectOf(payload);
-  requiredString(input, "clientRequestId");
-  const patch = patchOf(input);
-  const pending = await library.proposePatch({
-    cardId: requiredString(input, "cardId"),
-    baseRevision: requiredString(input, "baseRevision"),
-    patch,
-    ...optionalStringField(input, "summary"),
-    ...optionalStringField(input, "sourceConversationId"),
-    ...optionalStringField(input, "sourceTurnId"),
-  });
-  return { patch: wirePendingPatch(pending) };
-}
-
 async function listPatches(
   library: CardLibrary,
   payload: JsonValue,
@@ -373,6 +361,7 @@ async function restoreVersion(
   const result = await library.restoreVersion(
     requiredString(input, "cardId"),
     requiredString(input, "versionId"),
+    requiredString(input, "baseRevision"),
   );
   return { card: wireCardOf(library, result.card), version: wireCardVersion(result.version) };
 }
@@ -383,7 +372,7 @@ function patchOf(input: JSONObject): {
 } {
   const patch = objectOf(input["patch"] as JsonValue);
   const format = requiredString(patch, "format");
-  if (format !== "unified" && format !== "replace") {
+  if (format !== "unified") {
     throw new ProtocolHandlerError("invalid_message", `未知的補丁格式：${format}`, {
       reason: "patch_format",
       format,
@@ -435,11 +424,6 @@ function wireCardVersion(version: CardVersion): WireCardVersion {
     ...(version.mergedCount === undefined ? {} : { mergedCount: version.mergedCount }),
     ...(version.mergedSeqRange === null ? {} : { mergedSeqRange: version.mergedSeqRange }),
   };
-}
-
-function optionalStringField(input: JSONObject, key: string): { readonly [key: string]: string } {
-  const value = optionalString(input, key);
-  return value === undefined ? {} : { [key]: value };
 }
 
 // ---- 線路形狀 -----------------------------------------------------------

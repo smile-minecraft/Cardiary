@@ -368,6 +368,36 @@ public actor CardiaryClient {
         )
     }
 
+    public func listCardPatches(cardId: String) async throws -> CardPatchesListResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.listCardPatches(cardId: cardId)
+    }
+
+    public func acceptCardPatch(patchId: String, clientRequestId: String) async throws -> CardPatchAcceptResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.acceptCardPatch(patchId: patchId, clientRequestId: clientRequestId)
+    }
+
+    public func rejectCardPatch(patchId: String, clientRequestId: String) async throws -> CardPatchRejectResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.rejectCardPatch(patchId: patchId, clientRequestId: clientRequestId)
+    }
+
+    public func listCardVersions(cardId: String) async throws -> CardVersionsListResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.listCardVersions(cardId: cardId)
+    }
+
+    public func getCardVersion(cardId: String, versionId: String) async throws -> CardVersionGetResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.getCardVersion(cardId: cardId, versionId: versionId)
+    }
+
+    public func restoreCardVersion(cardId: String, versionId: String, baseRevision: String, clientRequestId: String) async throws -> CardVersionRestoreResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.restoreCardVersion(cardId: cardId, versionId: versionId, baseRevision: baseRevision, clientRequestId: clientRequestId)
+    }
+
     public func deleteCard(
         cardId: String,
         clientRequestId: String

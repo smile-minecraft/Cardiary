@@ -559,6 +559,60 @@ public actor CardiaryConnection {
         return response.payload
     }
 
+    public func listCardPatches(cardId: String, options: RequestOptions = .default) async throws -> CardPatchesListResponsePayload {
+        let request = CardPatchesListRequest(id: RequestID.next(), payload: CardPatchesListRequestPayload(cardId: cardId, status: .pending))
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .cardPatchesListResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame("card.patches.list 收到 \(frame.kindLabel) 而不是回應。")
+        }
+        return response.payload
+    }
+
+    public func acceptCardPatch(patchId: String, clientRequestId: String, options: RequestOptions = .default) async throws -> CardPatchAcceptResponsePayload {
+        let request = CardPatchAcceptRequest(id: RequestID.next(), payload: CardPatchAcceptRequestPayload(patchId: patchId, clientRequestId: clientRequestId))
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .cardPatchAcceptResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame("card.patch.accept 收到 \(frame.kindLabel) 而不是回應。")
+        }
+        return response.payload
+    }
+
+    public func rejectCardPatch(patchId: String, clientRequestId: String, options: RequestOptions = .default) async throws -> CardPatchRejectResponsePayload {
+        let request = CardPatchRejectRequest(id: RequestID.next(), payload: CardPatchRejectRequestPayload(patchId: patchId, clientRequestId: clientRequestId))
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .cardPatchRejectResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame("card.patch.reject 收到 \(frame.kindLabel) 而不是回應。")
+        }
+        return response.payload
+    }
+
+    public func listCardVersions(cardId: String, options: RequestOptions = .default) async throws -> CardVersionsListResponsePayload {
+        let request = CardVersionsListRequest(id: RequestID.next(), payload: CardVersionsListRequestPayload(cardId: cardId))
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .cardVersionsListResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame("card.versions.list 收到 \(frame.kindLabel) 而不是回應。")
+        }
+        return response.payload
+    }
+
+    public func getCardVersion(cardId: String, versionId: String, options: RequestOptions = .default) async throws -> CardVersionGetResponsePayload {
+        let request = CardVersionGetRequest(id: RequestID.next(), payload: CardVersionGetRequestPayload(cardId: cardId, versionId: versionId))
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .cardVersionGetResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame("card.version.get 收到 \(frame.kindLabel) 而不是回應。")
+        }
+        return response.payload
+    }
+
+    public func restoreCardVersion(cardId: String, versionId: String, baseRevision: String, clientRequestId: String, options: RequestOptions = .default) async throws -> CardVersionRestoreResponsePayload {
+        let request = CardVersionRestoreRequest(id: RequestID.next(), payload: CardVersionRestoreRequestPayload(cardId: cardId, versionId: versionId, baseRevision: baseRevision, clientRequestId: clientRequestId))
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .cardVersionRestoreResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame("card.version.restore 收到 \(frame.kindLabel) 而不是回應。")
+        }
+        return response.payload
+    }
+
     public func deleteCard(
         cardId: String,
         clientRequestId: String,

@@ -123,6 +123,33 @@ export class CardLibrary {
     );
   }
 
+  #repairVersion(cardId: string, body: string, revision: string): boolean {
+    try {
+      const latest = this.#versions.latest(cardId);
+      if (latest === null || latest.revision !== revision || latest.bodyHash !== sha256Hex(body)) {
+        this.#versions.checkpoint(cardId, body, revision);
+      }
+      return true;
+    } catch (error) {
+      this.#warn("卡片版本修復失敗", {
+        cardId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  #recordVersion(cardId: string, write: () => void): void {
+    try {
+      write();
+    } catch (error) {
+      this.#warn("卡片版本寫入失敗，將於讀取時修復", {
+        cardId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   get files(): CardFileStore {
     return this.#files;
   }
@@ -235,11 +262,13 @@ export class CardLibrary {
     if (options.conversationId !== undefined) {
       this.#state.recordReference(options.conversationId, id);
     }
+    const revision = computeRevision(parsed.frontmatter, parsed.body);
+    this.#repairVersion(id, parsed.body, revision);
     return {
       cardId: id,
       frontmatter: parsed.frontmatter,
       body: parsed.body,
-      revision: computeRevision(parsed.frontmatter, parsed.body),
+      revision,
     };
   }
 
@@ -372,7 +401,9 @@ export class CardLibrary {
         this.#state.setSupersededBy(frontmatter.supersedes, cardId);
       }
       const revision = computeRevision(frontmatter, body);
-      this.#versions.create(cardId, body, revision, sha256Hex(body));
+      this.#recordVersion(cardId, () =>
+        this.#versions.create(cardId, body, revision, sha256Hex(body)),
+      );
       this.#emit({ kind: "card-changed", cardId, change: "created", revision });
       return { cardId, frontmatter, body, revision };
     });
@@ -394,6 +425,7 @@ export class CardLibrary {
     readonly cardId: string;
     readonly baseRevision: string;
     readonly patch: CardPatch;
+    readonly deferEvent?: boolean;
   }): Card {
     const id = normalizeCardId(input.cardId);
     const content = this.#files.read(id);
@@ -431,19 +463,7 @@ export class CardLibrary {
       throw error;
     }
     const previousRevision = computeRevision(parsed.frontmatter, parsed.body);
-    const latest = this.#versions.latest(id);
-    if (latest === null) {
-      this.#versions.create(id, parsed.body, previousRevision, sha256Hex(parsed.body));
-    } else if (latest.bodyHash !== sha256Hex(parsed.body)) {
-      this.#versions.appendPatch({
-        cardId: id,
-        baseRevision: latest.revision,
-        body: parsed.body,
-        revision: previousRevision,
-        bodyHash: sha256Hex(parsed.body),
-        patch: { format: "replace", text: parsed.body },
-      });
-    }
+    const historyReady = this.#repairVersion(id, parsed.body, previousRevision);
     const now = this.#now().toISOString();
     const frontmatter: CardFrontmatter = { ...parsed.frontmatter, updated: now };
     const presentKeys = withUpdatedKey(parsed.presentKeys);
@@ -461,15 +481,23 @@ export class CardLibrary {
     }
     this.#state.ensure(id, frontmatter.persona);
     const revision = computeRevision(frontmatter, body);
-    this.#versions.appendPatch({
-      cardId: id,
-      baseRevision: input.baseRevision,
-      body,
-      revision,
-      bodyHash: sha256Hex(body),
-      patch: input.patch,
+    this.#recordVersion(id, () => {
+      if (!historyReady) {
+        this.#versions.checkpoint(id, body, revision);
+      } else {
+        this.#versions.appendPatch({
+          cardId: id,
+          baseRevision: input.baseRevision,
+          body,
+          revision,
+          bodyHash: sha256Hex(body),
+          patch: input.patch,
+        });
+      }
     });
-    this.#emit({ kind: "card-changed", cardId: id, change: "updated", revision });
+    if (!input.deferEvent) {
+      this.#emit({ kind: "card-changed", cardId: id, change: "updated", revision });
+    }
     return { cardId: id, frontmatter, body, revision };
   }
 
@@ -520,7 +548,7 @@ export class CardLibrary {
         }
         throw error;
       }
-      return this.#patches.propose({
+      const proposed = this.#patches.propose({
         cardId: id,
         baseRevision: input.baseRevision,
         patch: input.patch,
@@ -530,6 +558,13 @@ export class CardLibrary {
           : { sourceConversationId: input.sourceConversationId }),
         ...(input.sourceTurnId === undefined ? {} : { sourceTurnId: input.sourceTurnId }),
       });
+      this.#emit({
+        kind: "card-changed",
+        cardId: id,
+        change: "updated",
+        revision: input.baseRevision,
+      });
+      return proposed;
     });
   }
 
@@ -560,6 +595,7 @@ export class CardLibrary {
         cardId: pending.cardId,
         baseRevision: pending.baseRevision,
         patch: pending.patch,
+        deferEvent: true,
       });
       const decided = this.#patches.decide(patchId, "accepted");
       if (decided === null) {
@@ -568,6 +604,12 @@ export class CardLibrary {
           patchId,
         });
       }
+      this.#emit({
+        kind: "card-changed",
+        cardId: pending.cardId,
+        change: "updated",
+        revision: card.revision,
+      });
       return { patch: decided, card };
     });
   }
@@ -592,6 +634,12 @@ export class CardLibrary {
           patchId,
         });
       }
+      this.#emit({
+        kind: "card-changed",
+        cardId: pending.cardId,
+        change: "updated",
+        revision: pending.baseRevision,
+      });
       return decided;
     });
   }
@@ -600,10 +648,23 @@ export class CardLibrary {
     return this.#versions.list(normalizeCardId(cardId));
   }
 
+  versionBody(cardId: string, versionId: string): string {
+    const id = normalizeCardId(cardId);
+    const versions = this.#versions.list(id);
+    if (!versions.some((version) => version.versionId === versionId)) {
+      throw new ProtocolHandlerError("not_found", `找不到版本 ${versionId}。`, {
+        cardId: id,
+        versionId,
+      });
+    }
+    return reconstructBody(id, versions, versionId);
+  }
+
   /** 還原：重放目標版內文，再把結果寫成新版本。 */
   async restoreVersion(
     cardId: string,
     versionId: string,
+    baseRevision: string,
   ): Promise<{ readonly card: Card; readonly version: CardVersion }> {
     return this.#serialize(() => {
       const id = normalizeCardId(cardId);
@@ -619,6 +680,12 @@ export class CardLibrary {
         });
       }
       const currentRevision = computeRevision(parsed.frontmatter, parsed.body);
+      if (currentRevision !== baseRevision) {
+        throw new ProtocolHandlerError("conflict", "卡片已變更，請重新確認還原。", {
+          reason: "revision_mismatch",
+          currentRevision,
+        });
+      }
       const versions = this.#versions.list(id);
       if (!versions.some((version) => version.versionId === versionId)) {
         throw new ProtocolHandlerError("not_found", `找不到版本 ${versionId}。`, {
@@ -642,7 +709,16 @@ export class CardLibrary {
         this.#index().upsert(this.#indexedRecord(written, frontmatter, restoredBody));
       }
       const revision = computeRevision(frontmatter, restoredBody);
-      const restored = this.#versions.restore(id, versionId, currentRevision, revision);
+      let restored: ReturnType<CardVersionsStore["restore"]>;
+      try {
+        restored = this.#versions.restore(id, versionId, currentRevision, revision);
+      } catch (error) {
+        this.#warn("卡片還原的版本寫入失敗，將於讀取時修復", {
+          cardId: id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
       this.#emit({ kind: "card-changed", cardId: id, change: "updated", revision });
       return {
         card: { cardId: id, frontmatter, body: restoredBody, revision },
@@ -667,6 +743,7 @@ export class CardLibrary {
       this.#state.remove(id);
       this.#versions.deleteCard(id);
       this.#patches.deleteCard(id);
+      this.#state.database.checkpoint();
       // 兩個來源都當候選：索引記得的，以及檔案目前寫的（外部可能改過）。
       // 多送一個候選不會誤刪——回收前還會掃描所有卡片檔；少送才是漏刪。
       const candidates = new Set<string>();

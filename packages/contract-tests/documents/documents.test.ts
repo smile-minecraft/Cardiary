@@ -135,12 +135,31 @@ describe("文件補丁", () => {
       { cardId },
     );
     expect(after.versions).toHaveLength(2);
+    expect(
+      (
+        await request<{ body: string }>(client, "card.version.get", {
+          cardId,
+          versionId: before.versions[0]!.versionId,
+        })
+      ).body,
+    ).toBe("one\ntwo\n");
+    const staleRestore = await client.waitForReply(
+      client.request("card.version.restore", {
+        cardId,
+        versionId: before.versions[0]!.versionId,
+        baseRevision: initial.card.revision,
+        clientRequestId: "restore-stale",
+      }),
+    );
+    expect(staleRestore.kind).toBe("error");
+    expect(JSON.stringify(staleRestore)).toContain("revision_mismatch");
     const restored = await request<{
       card: { body: string; revision: string };
       version: { kind: string; revision: string };
     }>(client, "card.version.restore", {
       cardId,
       versionId: before.versions[0]!.versionId,
+      baseRevision: accepted.card.revision,
       clientRequestId: "restore-doc",
     });
     expect(restored.card.body).toBe("one\ntwo\n");

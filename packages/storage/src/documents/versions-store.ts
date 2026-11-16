@@ -128,6 +128,22 @@ export class CardVersionsStore {
     });
   }
 
+  /** 以目前的正本建立可獨立重放的檢查點。 */
+  checkpoint(cardId: string, body: string, revision: string): CardVersion {
+    return this.#db.transaction((tx) => {
+      const last = this.#list(tx, cardId).at(-1);
+      return this.#append(tx, {
+        cardId,
+        kind: "checkpoint",
+        revision,
+        bodyHash: sha256Hex(body),
+        baseRevision: last?.revision ?? null,
+        patchFormat: "replace",
+        patchText: body,
+      });
+    });
+  }
+
   /** 還原：重放目標版內文，再寫一筆 `restore` 錨點。 */
   restore(
     cardId: string,

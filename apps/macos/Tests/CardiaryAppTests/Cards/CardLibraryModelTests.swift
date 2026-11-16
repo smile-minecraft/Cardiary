@@ -6,6 +6,38 @@ import XCTest
 
 @MainActor
 final class CardLibraryModelTests: XCTestCase {
+    func testDocumentDecisionsAndRestoreUpdateModel() async {
+        let card = makeCard("document")
+        let first = PendingCardPatch(patchId: "first", cardId: card.cardId, baseRevision: card.revision,
+                                     patch: CardPatch(format: .unified, text: "diff"), status: .pending,
+                                     createdAt: "2026-01-01T00:00:00Z")
+        let second = PendingCardPatch(patchId: "second", cardId: card.cardId, baseRevision: card.revision,
+                                      patch: CardPatch(format: .unified, text: "diff"), status: .pending,
+                                      createdAt: "2026-01-01T00:00:00Z")
+        let initial = documentVersion(cardId: card.cardId, seq: 1, kind: .create, revision: card.revision)
+        let service = PagedCardService(cards: [card])
+        await service.setDocumentState(patches: [first, second], versions: [initial])
+        let model = CardLibraryModel(freshness: CardFreshnessStore())
+        model.attach(service: service)
+        await model.select(cardId: card.cardId)
+        XCTAssertEqual(model.pendingPatches.count, 2)
+        XCTAssertEqual(model.pendingCountLabel, CardL10n.format(.cardsPendingCount, value: "2"))
+        XCTAssertFalse(model.isPatchStale(first))
+        await model.decidePatch(first, accept: true)
+        XCTAssertEqual(model.editingBody, "新內文")
+        XCTAssertEqual(model.versions.count, 2)
+        XCTAssertEqual(model.pendingPatches.count, 1)
+        XCTAssertTrue(model.isPatchStale(second))
+        await model.decidePatch(second, accept: false)
+        XCTAssertEqual(model.editingBody, "新內文")
+        XCTAssertEqual(model.versions.count, 2)
+        XCTAssertTrue(model.pendingPatches.isEmpty)
+        await model.restoreVersion(initial)
+        XCTAssertEqual(model.editingBody, "舊內文")
+        XCTAssertEqual(model.versions.count, 3)
+        XCTAssertEqual(model.versions.last?.kind, .restore)
+    }
+
     func testLoadsOnlyTheFirstPageUntilTheVisibleEnd() async {
         var pages: [CardListResponsePayload] = []
         let pageSize = 100

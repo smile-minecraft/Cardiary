@@ -1,6 +1,193 @@
 {
   "sourceLanguage": "en",
   "strings": {
+      "cardsDraftConflict": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "The card changed elsewhere. Your draft is preserved; copy it before reloading."
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "卡片在別處被改過。草稿仍保留，請先複製草稿並重新載入。"
+            }
+          }
+        }
+      },
+      "cardsPatchConflict": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "This change is stale or already decided. Reload and review it."
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "這項修改已過期或已處理，請重新載入後檢查。"
+            }
+          }
+        }
+      },
+      "cardsPendingCount": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "%@ pending changes"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "有 %@ 個待決修改"
+            }
+          }
+        }
+      },
+      "cardsAccept": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Accept"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "接受"
+            }
+          }
+        }
+      },
+      "cardsReject": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Reject"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "拒絕"
+            }
+          }
+        }
+      },
+      "cardsAcceptAll": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Accept all"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "全部接受"
+            }
+          }
+        }
+      },
+      "cardsRejectAll": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Reject all"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "全部拒絕"
+            }
+          }
+        }
+      },
+      "cardsVersions": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Version history"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "版本歷史"
+            }
+          }
+        }
+      },
+      "cardsCompare": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Compare"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "比較"
+            }
+          }
+        }
+      },
+      "cardsRestore": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Restore"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "還原"
+            }
+          }
+        }
+      },
+      "cardsVersionCurrent": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Changes since this version"
+            }
+          },
+          "zh-Hant": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "目前內容與此版本的差異"
+            }
+          }
+        }
+      },
     "cardsAudioCard": {
       "extractionState": "manual",
       "localizations": {

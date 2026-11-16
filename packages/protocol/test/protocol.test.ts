@@ -1,5 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import Ajv2020 from "ajv/dist/2020.js";
@@ -54,6 +65,31 @@ function unionRefs(name: string): Set<string> {
 }
 
 describe("協定 schema 與範例", () => {
+  it("產生的 TypeScript 和 Swift 與 schema 一致", () => {
+    const temp = mkdtempSync(join(tmpdir(), "cardiary-protocol-"));
+    try {
+      const target = join(temp, "packages/protocol");
+      mkdirSync(join(target, "schema"), { recursive: true });
+      mkdirSync(join(target, "scripts"));
+      cpSync(
+        join(packageRoot, "schema/protocol.schema.json"),
+        join(target, "schema/protocol.schema.json"),
+      );
+      cpSync(join(packageRoot, "scripts/generate.mjs"), join(target, "scripts/generate.mjs"));
+      symlinkSync(join(packageRoot, "node_modules"), join(target, "node_modules"), "dir");
+      execFileSync(process.execPath, [join(target, "scripts/generate.mjs")]);
+      for (const path of [
+        "packages/protocol/src/generated/protocol.ts",
+        "apple/CardiaryKit/Sources/CardiaryKit/Generated/ProtocolTypes.swift",
+      ]) {
+        expect(readFileSync(join(temp, path), "utf8"), path).toBe(
+          readFileSync(join(repoRoot, path), "utf8"),
+        );
+      }
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+  });
   it("每個範例都符合對應的影格 schema", () => {
     for (const [name, example] of Object.entries(examples)) {
       const validator = example.kind === "request" ? validateClient : validateServer;

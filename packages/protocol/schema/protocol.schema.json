@@ -2064,52 +2064,6 @@
         }
       }
     },
-    "CardPatchProposeRequestPayload": {
-      "title": "CardPatchProposeRequestPayload",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["cardId", "baseRevision", "patch"],
-      "properties": {
-        "cardId": {
-          "type": "string",
-          "description": "要修改的卡片。"
-        },
-        "baseRevision": {
-          "type": "string",
-          "description": "提出時讀到的 revision；接受時會重算比對。"
-        },
-        "patch": {
-          "$ref": "#/$defs/CardPatch"
-        },
-        "summary": {
-          "type": "string",
-          "description": "補丁摘要。"
-        },
-        "sourceConversationId": {
-          "type": "string",
-          "description": "來源對話。"
-        },
-        "sourceTurnId": {
-          "type": "string",
-          "description": "來源回合。"
-        },
-        "clientRequestId": {
-          "type": "string",
-          "description": "冪等鍵；重送不會產生兩筆待決補丁。"
-        }
-      }
-    },
-    "CardPatchProposeResponsePayload": {
-      "title": "CardPatchProposeResponsePayload",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["patch"],
-      "properties": {
-        "patch": {
-          "$ref": "#/$defs/PendingCardPatch"
-        }
-      }
-    },
     "CardPatchesListRequestPayload": {
       "title": "CardPatchesListRequestPayload",
       "type": "object",
@@ -2287,11 +2241,39 @@
         }
       }
     },
+    "CardVersionGetRequestPayload": {
+      "title": "CardVersionGetRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cardId", "versionId"],
+      "properties": {
+        "cardId": {
+          "type": "string",
+          "description": "卡片識別碼。"
+        },
+        "versionId": {
+          "type": "string",
+          "description": "要讀取的版本。"
+        }
+      }
+    },
+    "CardVersionGetResponsePayload": {
+      "title": "CardVersionGetResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["body"],
+      "properties": {
+        "body": {
+          "type": "string",
+          "description": "重放後的版本內文。"
+        }
+      }
+    },
     "CardVersionRestoreRequestPayload": {
       "title": "CardVersionRestoreRequestPayload",
       "type": "object",
       "additionalProperties": false,
-      "required": ["cardId", "versionId", "clientRequestId"],
+      "required": ["cardId", "versionId", "baseRevision", "clientRequestId"],
       "properties": {
         "cardId": {
           "type": "string",
@@ -2300,6 +2282,10 @@
         "versionId": {
           "type": "string",
           "description": "要還原到的版本。"
+        },
+        "baseRevision": {
+          "type": "string",
+          "description": "確認還原時看到的 revision。"
         },
         "clientRequestId": {
           "type": "string",
@@ -4893,56 +4879,6 @@
       },
       "description": "編修後的卡片。"
     },
-    "CardPatchProposeRequest": {
-      "title": "CardPatchProposeRequest",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["v", "kind", "id", "type", "payload"],
-      "properties": {
-        "v": {
-          "const": 1
-        },
-        "kind": {
-          "const": "request"
-        },
-        "id": {
-          "type": "string",
-          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
-        },
-        "type": {
-          "const": "card.patch.propose"
-        },
-        "payload": {
-          "$ref": "#/$defs/CardPatchProposeRequestPayload"
-        }
-      },
-      "description": "代理提出補丁；只建立待決項目，不改卡片內文。"
-    },
-    "CardPatchProposeResponse": {
-      "title": "CardPatchProposeResponse",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["v", "kind", "replyTo", "type", "payload"],
-      "properties": {
-        "v": {
-          "const": 1
-        },
-        "kind": {
-          "const": "response"
-        },
-        "replyTo": {
-          "type": "string",
-          "description": "對應的請求 id。"
-        },
-        "type": {
-          "const": "card.patch.propose"
-        },
-        "payload": {
-          "$ref": "#/$defs/CardPatchProposeResponsePayload"
-        }
-      },
-      "description": "提出的待決補丁。"
-    },
     "CardPatchesListRequest": {
       "title": "CardPatchesListRequest",
       "type": "object",
@@ -5142,6 +5078,56 @@
         }
       },
       "description": "版本歷史。"
+    },
+    "CardVersionGetRequest": {
+      "title": "CardVersionGetRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "card.version.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardVersionGetRequestPayload"
+        }
+      },
+      "description": "讀取版本內文。"
+    },
+    "CardVersionGetResponse": {
+      "title": "CardVersionGetResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "card.version.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/CardVersionGetResponsePayload"
+        }
+      },
+      "description": "重放後的版本內文。"
     },
     "CardVersionRestoreRequest": {
       "title": "CardVersionRestoreRequest",
@@ -7189,9 +7175,6 @@
           "$ref": "#/$defs/CardPatchRequest"
         },
         {
-          "$ref": "#/$defs/CardPatchProposeRequest"
-        },
-        {
           "$ref": "#/$defs/CardPatchesListRequest"
         },
         {
@@ -7202,6 +7185,9 @@
         },
         {
           "$ref": "#/$defs/CardVersionsListRequest"
+        },
+        {
+          "$ref": "#/$defs/CardVersionGetRequest"
         },
         {
           "$ref": "#/$defs/CardVersionRestoreRequest"
@@ -7336,9 +7322,6 @@
           "$ref": "#/$defs/CardPatchResponse"
         },
         {
-          "$ref": "#/$defs/CardPatchProposeResponse"
-        },
-        {
           "$ref": "#/$defs/CardPatchesListResponse"
         },
         {
@@ -7349,6 +7332,9 @@
         },
         {
           "$ref": "#/$defs/CardVersionsListResponse"
+        },
+        {
+          "$ref": "#/$defs/CardVersionGetResponse"
         },
         {
           "$ref": "#/$defs/CardVersionRestoreResponse"

@@ -20,6 +20,17 @@ public enum CardsString: String, CaseIterable, CardLocalizedKey {
     case cardsBodyPlaceholder
     case cardsBroken
     case cardsConflictReloaded
+    case cardsDraftConflict
+    case cardsPatchConflict
+    case cardsPendingCount
+    case cardsAccept
+    case cardsReject
+    case cardsAcceptAll
+    case cardsRejectAll
+    case cardsVersions
+    case cardsCompare
+    case cardsRestore
+    case cardsVersionCurrent
     case cardsCount
     case cardsCreateAction
     case cardsCreated
@@ -157,6 +168,17 @@ enum CardStringTables {
             "cardsBodyPlaceholder": "在這裡編輯卡片內文…",
             "cardsBroken": "格式不符",
             "cardsConflictReloaded": "卡片在別處被改過，已重新載入最新版本。",
+            "cardsDraftConflict": "卡片在別處被改過。草稿仍保留，請先複製草稿並重新載入。",
+            "cardsPatchConflict": "這項修改已過期或已處理，請重新載入後檢查。",
+            "cardsPendingCount": "有 %@ 個待決修改",
+            "cardsAccept": "接受",
+            "cardsReject": "拒絕",
+            "cardsAcceptAll": "全部接受",
+            "cardsRejectAll": "全部拒絕",
+            "cardsVersions": "版本歷史",
+            "cardsCompare": "比較",
+            "cardsRestore": "還原",
+            "cardsVersionCurrent": "目前內容與此版本的差異",
             "cardsCount": "共 {count} 張",
             "cardsCreateAction": "建立",
             "cardsCreated": "已建立卡片。",
@@ -217,6 +239,17 @@ enum CardStringTables {
             "cardsBodyPlaceholder": "Edit the card body here…",
             "cardsBroken": "Broken",
             "cardsConflictReloaded": "The card changed elsewhere; the latest revision is loaded.",
+            "cardsDraftConflict": "The card changed elsewhere. Your draft is preserved; copy it before reloading.",
+            "cardsPatchConflict": "This change is stale or already decided. Reload and review it.",
+            "cardsPendingCount": "%@ pending changes",
+            "cardsAccept": "Accept",
+            "cardsReject": "Reject",
+            "cardsAcceptAll": "Accept all",
+            "cardsRejectAll": "Reject all",
+            "cardsVersions": "Version history",
+            "cardsCompare": "Compare",
+            "cardsRestore": "Restore",
+            "cardsVersionCurrent": "Changes since this version",
             "cardsCount": "{count} cards",
             "cardsCreateAction": "Create",
             "cardsCreated": "Card created.",

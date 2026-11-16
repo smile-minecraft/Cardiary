@@ -842,6 +842,174 @@
       }
     }
   },
+  "cardPatchesListRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_patches",
+    "type": "card.patches.list",
+    "payload": { "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC", "status": "pending" }
+  },
+  "cardPatchesListResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_patches",
+    "type": "card.patches.list",
+    "payload": {
+      "patches": [
+        {
+          "patchId": "patch_1",
+          "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC",
+          "baseRevision": "abc",
+          "patch": { "format": "unified", "text": "@@ -1 +1 @@\n-舊\n+新" },
+          "status": "pending",
+          "createdAt": "2026-11-15T02:00:00.000Z"
+        }
+      ]
+    }
+  },
+  "cardPatchAcceptRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_accept",
+    "type": "card.patch.accept",
+    "payload": { "patchId": "patch_1", "clientRequestId": "accept_1" }
+  },
+  "cardPatchAcceptResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_accept",
+    "type": "card.patch.accept",
+    "payload": {
+      "patch": {
+        "patchId": "patch_1",
+        "cardId": "card_1",
+        "baseRevision": "abc",
+        "patch": { "format": "unified", "text": "@@ -1 +1 @@\n-舊\n+新" },
+        "status": "accepted",
+        "createdAt": "2026-11-15T02:00:00.000Z"
+      },
+      "card": {
+        "cardId": "card_1",
+        "kind": "note",
+        "title": "筆記",
+        "body": "新",
+        "tags": [],
+        "persona": "default",
+        "createdAt": "2026-11-15T02:00:00.000Z",
+        "freshness": 100,
+        "lifecycle": "live",
+        "sources": [],
+        "links": { "outgoing": [], "backlinks": [] },
+        "revision": "def"
+      }
+    }
+  },
+  "cardPatchRejectRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_reject",
+    "type": "card.patch.reject",
+    "payload": { "patchId": "patch_1", "clientRequestId": "reject_1" }
+  },
+  "cardPatchRejectResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_reject",
+    "type": "card.patch.reject",
+    "payload": {
+      "patch": {
+        "patchId": "patch_1",
+        "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC",
+        "baseRevision": "abc",
+        "patch": { "format": "unified", "text": "@@ -1 +1 @@\n-舊\n+新" },
+        "status": "rejected",
+        "createdAt": "2026-11-15T02:00:00.000Z"
+      }
+    }
+  },
+  "cardVersionsListRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_versions",
+    "type": "card.versions.list",
+    "payload": { "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC" }
+  },
+  "cardVersionsListResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_versions",
+    "type": "card.versions.list",
+    "payload": {
+      "versions": [
+        {
+          "versionId": "ver_1",
+          "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC",
+          "seq": 1,
+          "kind": "create",
+          "revision": "abc",
+          "bodyHash": "abc",
+          "createdAt": "2026-11-15T02:00:00.000Z"
+        }
+      ]
+    }
+  },
+  "cardVersionGetRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_version",
+    "type": "card.version.get",
+    "payload": { "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC", "versionId": "ver_1" }
+  },
+  "cardVersionGetResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_version",
+    "type": "card.version.get",
+    "payload": { "body": "舊內容" }
+  },
+  "cardVersionRestoreRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_restore",
+    "type": "card.version.restore",
+    "payload": {
+      "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC",
+      "versionId": "ver_1",
+      "baseRevision": "abc",
+      "clientRequestId": "restore_1"
+    }
+  },
+  "cardVersionRestoreResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_restore",
+    "type": "card.version.restore",
+    "payload": {
+      "card": {
+        "cardId": "card_1",
+        "kind": "note",
+        "title": "筆記",
+        "body": "舊",
+        "tags": [],
+        "persona": "default",
+        "createdAt": "2026-11-15T02:00:00.000Z",
+        "freshness": 100,
+        "lifecycle": "live",
+        "sources": [],
+        "links": { "outgoing": [], "backlinks": [] },
+        "revision": "ghi"
+      },
+      "version": {
+        "versionId": "ver_2",
+        "cardId": "card_1",
+        "seq": 2,
+        "kind": "restore",
+        "revision": "ghi",
+        "bodyHash": "abc",
+        "createdAt": "2026-11-15T02:00:00.000Z"
+      }
+    }
+  },
   "cardDeleteRequest": {
     "v": 1,
     "kind": "request",
