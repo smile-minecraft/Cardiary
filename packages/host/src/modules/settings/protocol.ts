@@ -39,9 +39,14 @@ export function registerSettingsProtocol(options: SettingsProtocolOptions): void
   protocol.registerNamespace("system.settings", async (request) => {
     switch (request.type) {
       case "system.settings.get":
-        return { settings: settings.list() } as unknown as JSONValue;
+        return {
+          settings:
+            options.governance === undefined
+              ? settings.list()
+              : legacyItems(options.governance.listFor(actorOf(request).kind)),
+        } as unknown as JSONValue;
       case "system.settings.set":
-        return setSettings(request, settings, protocol, options.now);
+        return setSettings(request, settings, protocol, options.now, options.governance);
       default:
         throw new ProtocolHandlerError("not_found", `主機不支援 ${request.type}。`);
     }
@@ -164,7 +169,8 @@ function actorOf(request: ProtocolRequestContext): GovernanceActor {
 }
 
 function actorText(actor: GovernanceActor): string {
-  return actor.kind === "system" ? "system" : `${actor.kind}:${actor.id ?? "unknown"}`;
+  if (actor.kind === "system") return "system";
+  return `${actor.kind === "human" ? "user" : "agent"}:${actor.id ?? "unknown"}`;
 }
 
 function asProtocolError(error: unknown): unknown {
@@ -207,6 +213,7 @@ function setSettings(
   settings: SettingsService,
   protocol: ProtocolEventEmitter,
   now: () => Date,
+  governance?: SettingsGovernance,
 ): JSONValue {
   const payload = requireObject(request.payload);
   requireClientRequestId(payload);
@@ -216,8 +223,10 @@ function setSettings(
       field: "changes",
     });
   }
-  const actor = `user:${request.clientId}`;
+  const actor = actorOf(request);
   const applied: SettingItem[] = [];
+  let requiresApproval = false;
+  let approvalId: string | undefined;
   for (const [index, change] of changes.entries()) {
     if (typeof change !== "object" || change === null || Array.isArray(change)) {
       throw new ProtocolHandlerError("invalid_message", `changes[${index}] 必須是物件。`, {
@@ -242,24 +251,59 @@ function setSettings(
       });
     }
     validateValue(key, entry.value, `changes[${index}].value`);
-    applied.push(
-      settings.set({
+    if (governance === undefined) {
+      applied.push(
+        settings.set({ key, value: entry.value as JSONValue, actor: actorText(actor) }).item,
+      );
+      continue;
+    }
+    try {
+      const result = governance.change({
         key,
         value: entry.value as JSONValue,
         actor,
-      }).item,
-    );
+        clientRequestId: `${String(payload.clientRequestId)}:${index}`,
+      });
+      if (result.applied) {
+        const item = settings.list().find((candidate) => candidate.key === key);
+        if (item !== undefined) applied.push(item);
+      } else {
+        requiresApproval = true;
+        approvalId ??= result.change.changeId;
+      }
+    } catch (error) {
+      throw asProtocolError(error);
+    }
   }
   const changedAt = now().toISOString();
-  protocol.emit({
-    kind: "settings-changed",
-    payload: {
-      changes: applied,
-      changedBy: actor,
-      changedAt,
-    } as unknown as JSONValue,
-  });
-  return { applied, requiresApproval: false } as unknown as JSONValue;
+  if (applied.length > 0) {
+    protocol.emit({
+      kind: "settings-changed",
+      payload: {
+        changes: applied,
+        changedBy: actorText(actor),
+        changedAt,
+      } as unknown as JSONValue,
+    });
+  }
+  return {
+    applied,
+    requiresApproval,
+    ...(approvalId === undefined ? {} : { approvalId }),
+  } as unknown as JSONValue;
+}
+
+function legacyItems(
+  items: readonly import("@cardiary/protocol").SettingTierItem[],
+): SettingItem[] {
+  return items.map((item) => ({
+    key: item.key,
+    value: item.value,
+    level: item.tier,
+    ...(item.title === undefined ? {} : { title: item.title }),
+    ...(item.description === undefined ? {} : { description: item.description }),
+    updatedAt: item.updatedAt,
+  }));
 }
 
 function validateValue(key: string, value: unknown, field: string): void {

@@ -322,7 +322,8 @@ export class SettingsGovernance {
 }
 
 function actorText(actor: GovernanceActor): string {
-  return actor.kind === "system" ? "system" : `${actor.kind}:${actor.id ?? "unknown"}`;
+  if (actor.kind === "system") return "system";
+  return `${actor.kind === "human" ? "user" : "agent"}:${actor.id ?? "unknown"}`;
 }
 
 function visibleKey(tier: SettingTier, actor: SettingActorKind, key: string): string | undefined {
