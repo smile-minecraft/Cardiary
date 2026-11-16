@@ -367,6 +367,58 @@ public actor CardiaryConnection {
         return response.payload
     }
 
+    // MARK: - 儲存空間
+
+    public func getStorageUsage(
+        options: RequestOptions = .default
+    ) async throws -> StorageUsageResponsePayload {
+        let request = StorageUsageRequest(
+            id: RequestID.next(),
+            payload: StorageUsageRequestPayload()
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .storageUsageResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "storage.usage 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func previewStorageCleanup(
+        categories: [String],
+        options: RequestOptions = .default
+    ) async throws -> StorageCleanupPreviewResponsePayload {
+        let request = StorageCleanupPreviewRequest(
+            id: RequestID.next(),
+            payload: StorageCleanupPreviewRequestPayload(categories: categories)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .storageCleanupPreviewResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "storage.cleanup.preview 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func applyStorageCleanup(
+        categories: [String],
+        options: RequestOptions = .default
+    ) async throws -> StorageCleanupApplyResponsePayload {
+        let request = StorageCleanupApplyRequest(
+            id: RequestID.next(),
+            payload: StorageCleanupApplyRequestPayload(categories: categories)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .storageCleanupApplyResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "storage.cleanup.apply 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
     /// 對第一方模組的 `module.*` 請求。
     ///
     /// 請求與回應的 payload 都是 `{ data: … }`（`protocol.md` 第 6 節）；這裡
@@ -1294,6 +1346,12 @@ public actor CardiaryConnection {
         case .systemModulesGetResponse(let response):
             resume(response.replyTo, with: frame)
         case .systemModulesSetEnabledResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .storageUsageResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .storageCleanupPreviewResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .storageCleanupApplyResponse(let response):
             resume(response.replyTo, with: frame)
         case .moduleResponse(let response):
             resume(response.replyTo, with: frame)
