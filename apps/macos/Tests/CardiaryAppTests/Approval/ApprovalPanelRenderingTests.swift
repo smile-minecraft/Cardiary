@@ -11,6 +11,11 @@ import XCTest
 @MainActor
 final class ApprovalPanelRenderingTests: XCTestCase {
     func testPanelRendersWithApprovalAndWithoutAlwaysOption() throws {
+        // CI runner 沒有視窗伺服器時，ImageRenderer 會卡住。
+        guard NSScreen.main != nil else {
+            throw XCTSkip("需要視窗伺服器")
+        }
+
         let model = ApprovalModel()
 
         model.update(requests: [Fixtures.approval()])
