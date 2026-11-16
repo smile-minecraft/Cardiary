@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { detectCaseSensitivity } from "@cardiary/domain";
 import type { ToolPermissionGate, ToolPermissionRequest } from "@cardiary/engine-adapter";
 
 import { AgentAudit } from "../../src/permissions/agent-audit.js";
@@ -281,7 +282,6 @@ describe("全部允許模式", () => {
     ).toBe("allow");
     const cases: ReadonlyArray<[string, unknown]> = [
       ["write_file", { path: "state/mcp-servers.json", content: "{}" }],
-      ["write_file", { path: "State/MCP-Servers.Json", content: "{}" }],
       ["write_file", { path: "state/cardiary.sqlite", content: "{}" }],
       ["write_file", { path: "state/folder.json", content: "{}" }],
     ];
@@ -290,6 +290,21 @@ describe("全部允許模式", () => {
         "ask-human",
       );
     }
+  });
+
+  it("只保護大小寫變體卷上指向同一檔案的 MCP 設定路徑", async () => {
+    const fixture = setup();
+    fixture.permissions.grantAllowAll({ tools: ["write_file"], paths: [fixture.project] }, 0);
+    const sensitivity = detectCaseSensitivity(fixture.project);
+    const expected = sensitivity === "case-sensitive" ? "allow" : "ask-human";
+
+    expect(
+      (
+        await fixture.gate.evaluate(
+          fixture.request("write_file", { path: "State/MCP-Servers.Json", content: "{}" }),
+        )
+      ).kind,
+    ).toBe(expected);
   });
 });
 
