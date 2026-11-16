@@ -270,14 +270,12 @@ export function listBoardsContainingCard(
   boards: readonly BoardDocument[],
   cardId: string,
 ): readonly string[] {
-  return boards.filter((board) => board.items.some((item) => item.cardId === cardId)).map((board) => board.id);
+  return boards
+    .filter((board) => board.items.some((item) => item.cardId === cardId))
+    .map((board) => board.id);
 }
 
-function finish(
-  board: BoardDocument,
-  change: Partial<BoardDocument>,
-  now: string,
-): BoardDocument {
+function finish(board: BoardDocument, change: Partial<BoardDocument>, now: string): BoardDocument {
   const next: BoardDocument = { ...board, ...change, updatedAt: now };
   assertValidBoard({ board: next });
   return next;

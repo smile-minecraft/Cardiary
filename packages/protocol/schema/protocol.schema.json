@@ -3644,12 +3644,14 @@
         "x": {
           "type": "integer",
           "description": "畫布 x 座標。",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "y": {
           "type": "integer",
           "description": "畫布 y 座標。",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       }
     },
@@ -3662,12 +3664,14 @@
         "width": {
           "type": "integer",
           "description": "投影框寬度。",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "height": {
           "type": "integer",
           "description": "投影框高度。",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       }
     },
@@ -3769,7 +3773,7 @@
         },
         "updatedAt": {
           "type": "string",
-          "description": "最後變更時間；同時是儲存的樂觀鎖。",
+          "description": "最後變更時間；單寫者可用於儲存前比對。",
           "format": "date-time"
         },
         "items": {
@@ -3916,7 +3920,7 @@
         },
         "baseUpdatedAt": {
           "type": "string",
-          "description": "客戶端讀到的 updatedAt；與目前檔不符時回 conflict。",
+          "description": "單寫者比對用的 updatedAt；不保護同時寫入。",
           "format": "date-time"
         },
         "clientRequestId": {

@@ -18,11 +18,12 @@ import type { BoardAgentMode, BoardOperation } from "./types.js";
 export function isAgentBoardOperationAllowed(
   mode: BoardAgentMode,
   operation: BoardOperation,
+  projection?: { readonly isNewCard: boolean; readonly target: "inbox" | "canvas" },
 ): boolean {
   if (mode === "full") return true;
-  return (
-    operation === "read" ||
-    operation === "project_card" ||
-    operation === "create_card_from_selection"
-  );
+  if (operation === "read") return true;
+  if (operation === "project_card" || operation === "create_card_from_selection") {
+    return projection?.isNewCard === true && projection.target === "inbox";
+  }
+  return false;
 }

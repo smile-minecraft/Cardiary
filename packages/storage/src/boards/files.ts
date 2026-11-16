@@ -50,7 +50,7 @@ export interface BoardFileStoreOptions {
 }
 
 export interface WriteBoardOptions {
-  /** 提供時做樂觀鎖：與目前檔的 updatedAt 不符就拒絕寫入。 */
+  /** 單寫者檢查：寫入前比對 updatedAt；不保護並行寫入，呼叫端須確保版本不同。 */
   readonly expectedUpdatedAt?: string | undefined;
 }
 
@@ -165,7 +165,10 @@ export class BoardFileStore {
       }
     }
     const target = this.absolutePath(boardId);
-    const tempPath = path.join(this.directory, `.tmp-${boardId}.${randomBytes(4).toString("hex")}.tmp`);
+    const tempPath = path.join(
+      this.directory,
+      `.tmp-${boardId}.${randomBytes(4).toString("hex")}.tmp`,
+    );
     let fd: number | null = null;
     try {
       fd = openSync(tempPath, "wx", 0o644);

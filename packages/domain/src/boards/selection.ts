@@ -21,9 +21,7 @@ export interface CreateCardDraftInput {
  * `derivedFrom` 日後寫成卡片 frontmatter 的 `sources`，所以這裡就先去重，
  * 避免同一張來源卡在血緣中出現多次。至少要好一張來源卡。
  */
-export function createCardDraftFromSelection(
-  input: CreateCardDraftInput,
-): CardDraftFromSelection {
+export function createCardDraftFromSelection(input: CreateCardDraftInput): CardDraftFromSelection {
   if (input.title.trim().length === 0) {
     throw new BoardDomainError("invalid_id", "新卡標題不能是空的");
   }

@@ -15,7 +15,7 @@ afterEach(() => {
   while (cleanups.length > 0) cleanups.pop()?.();
 });
 
-let clockMs = Date.UTC(2026, 0, 1);
+const clockMs = Date.UTC(2026, 0, 1);
 
 function setup(label = "boards-files"): {
   temp: ReturnType<typeof createTempRoot>;

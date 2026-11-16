@@ -1,4 +1,375 @@
 {
+  "boardListRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req-board",
+    "type": "board.list",
+    "payload": {}
+  },
+  "boardListResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req-board",
+    "type": "board.list",
+    "payload": {
+      "boards": [
+        {
+          "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "title": "筆記",
+          "updatedAt": "2026-11-16T04:02:11Z",
+          "itemCount": 1
+        }
+      ]
+    }
+  },
+  "boardGetRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req-board",
+    "type": "board.get",
+    "payload": {
+      "boardId": "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    }
+  },
+  "boardGetResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req-board",
+    "type": "board.get",
+    "payload": {
+      "board": {
+        "schema": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "title": "筆記",
+        "createdAt": "2026-11-16T04:02:11Z",
+        "updatedAt": "2026-11-16T04:02:11Z",
+        "items": [
+          {
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+            "cardId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "position": {
+              "x": 20,
+              "y": 40
+            },
+            "size": {
+              "width": 200,
+              "height": 100
+            },
+            "pinned": true
+          }
+        ],
+        "edges": [],
+        "groups": []
+      }
+    }
+  },
+  "boardCreateRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req-board",
+    "type": "board.create",
+    "payload": {
+      "boardId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "title": "筆記",
+      "clientRequestId": "create-1"
+    }
+  },
+  "boardCreateResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req-board",
+    "type": "board.create",
+    "payload": {
+      "board": {
+        "schema": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "title": "筆記",
+        "createdAt": "2026-11-16T04:02:11Z",
+        "updatedAt": "2026-11-16T04:02:11Z",
+        "items": [
+          {
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+            "cardId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "position": {
+              "x": 20,
+              "y": 40
+            },
+            "size": {
+              "width": 200,
+              "height": 100
+            },
+            "pinned": true
+          }
+        ],
+        "edges": [],
+        "groups": []
+      }
+    }
+  },
+  "boardSaveRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req-board",
+    "type": "board.save",
+    "payload": {
+      "board": {
+        "schema": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "title": "筆記",
+        "createdAt": "2026-11-16T04:02:11Z",
+        "updatedAt": "2026-11-16T04:02:11Z",
+        "items": [
+          {
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+            "cardId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "position": {
+              "x": 20,
+              "y": 40
+            },
+            "size": {
+              "width": 200,
+              "height": 100
+            },
+            "pinned": true
+          }
+        ],
+        "edges": [],
+        "groups": []
+      },
+      "baseUpdatedAt": "2026-11-16T04:02:11Z"
+    }
+  },
+  "boardSaveResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req-board",
+    "type": "board.save",
+    "payload": {
+      "board": {
+        "schema": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "title": "筆記",
+        "createdAt": "2026-11-16T04:02:11Z",
+        "updatedAt": "2026-11-16T04:02:11Z",
+        "items": [
+          {
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+            "cardId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "position": {
+              "x": 20,
+              "y": 40
+            },
+            "size": {
+              "width": 200,
+              "height": 100
+            },
+            "pinned": true
+          }
+        ],
+        "edges": [],
+        "groups": []
+      }
+    }
+  },
+  "boardDeleteRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req-board",
+    "type": "board.delete",
+    "payload": {
+      "boardId": "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    }
+  },
+  "boardDeleteResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req-board",
+    "type": "board.delete",
+    "payload": {
+      "deleted": true
+    }
+  },
+  "boardProjectCardRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req-board",
+    "type": "board.project_card",
+    "payload": {
+      "boardId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "itemId": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+      "cardId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+      "position": {
+        "x": 20,
+        "y": 40
+      },
+      "size": {
+        "width": 200,
+        "height": 100
+      }
+    }
+  },
+  "boardProjectCardResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req-board",
+    "type": "board.project_card",
+    "payload": {
+      "board": {
+        "schema": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "title": "筆記",
+        "createdAt": "2026-11-16T04:02:11Z",
+        "updatedAt": "2026-11-16T04:02:11Z",
+        "items": [
+          {
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+            "cardId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "position": {
+              "x": 20,
+              "y": 40
+            },
+            "size": {
+              "width": 200,
+              "height": 100
+            },
+            "pinned": true
+          }
+        ],
+        "edges": [],
+        "groups": []
+      }
+    }
+  },
+  "boardUnprojectCardRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req-board",
+    "type": "board.unproject_card",
+    "payload": {
+      "boardId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "itemId": "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+    }
+  },
+  "boardUnprojectCardResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req-board",
+    "type": "board.unproject_card",
+    "payload": {
+      "board": {
+        "schema": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "title": "筆記",
+        "createdAt": "2026-11-16T04:02:11Z",
+        "updatedAt": "2026-11-16T04:02:11Z",
+        "items": [
+          {
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+            "cardId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "position": {
+              "x": 20,
+              "y": 40
+            },
+            "size": {
+              "width": 200,
+              "height": 100
+            },
+            "pinned": true
+          }
+        ],
+        "edges": [],
+        "groups": []
+      }
+    }
+  },
+  "boardCreateCardFromSelectionRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req-board",
+    "type": "board.create_card_from_selection",
+    "payload": {
+      "boardId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "cardIds": ["01ARZ3NDEKTSV4RRFFQ69G5FAW"],
+      "title": "新卡",
+      "body": "內容",
+      "itemId": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+      "position": {
+        "x": 20,
+        "y": 40
+      },
+      "clientRequestId": "selection-1"
+    }
+  },
+  "boardCreateCardFromSelectionResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req-board",
+    "type": "board.create_card_from_selection",
+    "payload": {
+      "board": {
+        "schema": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "title": "筆記",
+        "createdAt": "2026-11-16T04:02:11Z",
+        "updatedAt": "2026-11-16T04:02:11Z",
+        "items": [
+          {
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+            "cardId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "position": {
+              "x": 20,
+              "y": 40
+            },
+            "size": {
+              "width": 200,
+              "height": 100
+            },
+            "pinned": true
+          }
+        ],
+        "edges": [],
+        "groups": []
+      },
+      "cardId": "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+    }
+  },
+  "boardChangedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "board.changed",
+    "stream": "system",
+    "seq": 1,
+    "emittedAt": "2026-11-16T04:02:11Z",
+    "payload": {
+      "boardId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "change": "updated",
+      "board": {
+        "schema": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "title": "筆記",
+        "createdAt": "2026-11-16T04:02:11Z",
+        "updatedAt": "2026-11-16T04:02:11Z",
+        "items": [
+          {
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+            "cardId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "position": {
+              "x": 20,
+              "y": 40
+            },
+            "size": {
+              "width": 200,
+              "height": 100
+            },
+            "pinned": true
+          }
+        ],
+        "edges": [],
+        "groups": []
+      },
+      "cardIds": ["01ARZ3NDEKTSV4RRFFQ69G5FAW"]
+    }
+  },
   "helloRequest": {
     "v": 1,
     "kind": "request",

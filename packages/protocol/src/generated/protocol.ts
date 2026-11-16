@@ -1154,7 +1154,7 @@ export interface BoardSaveRequest {
 export interface BoardSaveRequestPayload {
   board: BoardDocument;
   /**
-   * 客戶端讀到的 updatedAt；與目前檔不符時回 conflict。
+   * 單寫者比對用的 updatedAt；不保護同時寫入。
    */
   baseUpdatedAt: string;
   /**
@@ -1180,7 +1180,7 @@ export interface BoardDocument {
    */
   createdAt: string;
   /**
-   * 最後變更時間；同時是儲存的樂觀鎖。
+   * 最後變更時間；單寫者可用於儲存前比對。
    */
   updatedAt: string;
   /**

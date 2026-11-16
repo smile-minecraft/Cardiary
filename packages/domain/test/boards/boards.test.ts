@@ -125,6 +125,29 @@ describe("投影不是複本", () => {
 });
 
 describe("驗證", () => {
+  it("拒絕小數座標和小數尺寸", () => {
+    for (const [position, size] of [
+      [
+        { x: 0.5, y: 0 },
+        { width: 10, height: 10 },
+      ],
+      [
+        { x: 0, y: 0 },
+        { width: 10, height: 10.5 },
+      ],
+    ] as const) {
+      rejectWith("invalid_point", () =>
+        projectCard({
+          board: emptyBoard(),
+          itemId: newCardId(),
+          cardId: newCardId(),
+          position,
+          size,
+          now: T1,
+        }),
+      );
+    }
+  });
   it("連到不存在的投影會被拒絕", () => {
     const board = projectCard({
       board: emptyBoard(),
@@ -268,8 +291,18 @@ describe("圈選生成新卡草稿", () => {
 describe("代理操作模式", () => {
   it("read_only 只允許讀取、投影與圈選建卡", () => {
     expect(isAgentBoardOperationAllowed("read_only", "read")).toBe(true);
-    expect(isAgentBoardOperationAllowed("read_only", "project_card")).toBe(true);
-    expect(isAgentBoardOperationAllowed("read_only", "create_card_from_selection")).toBe(true);
+    for (const operation of ["project_card", "create_card_from_selection"] as const) {
+      expect(
+        isAgentBoardOperationAllowed("read_only", operation, { isNewCard: true, target: "inbox" }),
+      ).toBe(true);
+      expect(
+        isAgentBoardOperationAllowed("read_only", operation, { isNewCard: false, target: "inbox" }),
+      ).toBe(false);
+      expect(
+        isAgentBoardOperationAllowed("read_only", operation, { isNewCard: true, target: "canvas" }),
+      ).toBe(false);
+      expect(isAgentBoardOperationAllowed("read_only", operation)).toBe(false);
+    }
     for (const operation of [
       "unproject_card",
       "move_item",

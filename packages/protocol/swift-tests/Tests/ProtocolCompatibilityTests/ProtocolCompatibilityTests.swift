@@ -3,6 +3,35 @@ import XCTest
 @testable import CardiaryKit
 
 final class ProtocolCompatibilityTests: XCTestCase {
+    func testBoardExamplesDecodeAndRoundTrip() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let protocolDirectory = testFile.deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let exampleURL = protocolDirectory.appendingPathComponent("examples/protocol-examples.json")
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: exampleURL))
+        let examples = try XCTUnwrap(object as? [String: Any])
+        let boards = examples.filter { $0.key.hasPrefix("board") }
+        XCTAssertEqual(boards.count, 17)
+        for (name, value) in boards {
+            let data = try JSONSerialization.data(withJSONObject: value)
+            if name.hasSuffix("Request") {
+                let frame = try JSONDecoder().decode(ClientFrame.self, from: data)
+                XCTAssertEqual(try JSONDecoder().decode(ClientFrame.self, from: JSONEncoder().encode(frame)), frame)
+            } else {
+                let frame = try JSONDecoder().decode(ServerFrame.self, from: data)
+                XCTAssertEqual(try JSONDecoder().decode(ServerFrame.self, from: JSONEncoder().encode(frame)), frame)
+                let payload = try XCTUnwrap(value as? [String: Any])
+                XCTAssertEqual(frame.kindLabel, payload["type"] as? String, name)
+                XCTAssertNil(frame.eventStream, name)
+                XCTAssertNil(frame.eventSeq, name)
+                var session = SessionStreamModel(sessionId: "s1", epoch: "e1", lastSeq: 7)
+                XCTAssertNil(session.apply(frame), name)
+                XCTAssertEqual(session.cursor.lastSeq, 7, name)
+            }
+        }
+        XCTAssertThrowsError(try JSONDecoder().decode(BoardPoint.self, from: Data(#"{"x":0.5,"y":0}"#.utf8)))
+    }
+
     func testNotificationDoesNotChangeApprovalsOrSessionState() throws {
         let json = #"""
         {"v":1,"kind":"event","type":"notification.changed","stream":"system","seq":1,

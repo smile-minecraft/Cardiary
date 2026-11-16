@@ -87,8 +87,8 @@ function assertId(value: string, label: string): void {
 }
 
 function assertPoint(x: number, y: number, label: string): void {
-  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) {
-    throw new BoardDomainError("invalid_point", `${label}必須是有限非負數`);
+  if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y) || x < 0 || y < 0) {
+    throw new BoardDomainError("invalid_point", `${label}必須是非負安全整數`);
   }
 }
 

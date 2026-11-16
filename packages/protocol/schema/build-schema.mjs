@@ -1845,16 +1845,16 @@ add(
 add(
   "BoardPoint",
   objectOf("BoardPoint", ["x", "y"], {
-    x: int("畫布 x 座標。", { minimum: 0 }),
-    y: int("畫布 y 座標。", { minimum: 0 }),
+    x: int("畫布 x 座標。", { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+    y: int("畫布 y 座標。", { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
   }),
 );
 
 add(
   "BoardSize",
   objectOf("BoardSize", ["width", "height"], {
-    width: int("投影框寬度。", { minimum: 0 }),
-    height: int("投影框高度。", { minimum: 0 }),
+    width: int("投影框寬度。", { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+    height: int("投影框高度。", { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
   }),
 );
 
@@ -1899,7 +1899,7 @@ add(
       id: str("白板 ULID。"),
       title: str("白板名稱。"),
       createdAt: str("建立時間，RFC 3339。", { format: "date-time" }),
-      updatedAt: str("最後變更時間；同時是儲存的樂觀鎖。", { format: "date-time" }),
+      updatedAt: str("最後變更時間；單寫者可用於儲存前比對。", { format: "date-time" }),
       items: arrayOf(ref("BoardItem"), "投影清單。"),
       edges: arrayOf(ref("BoardEdge"), "只屬於這份白板的顯式連線。"),
       groups: arrayOf(ref("BoardGroup"), "可巢狀的分組。"),
@@ -1966,7 +1966,7 @@ add(
   "BoardSaveRequestPayload",
   objectOf("BoardSaveRequestPayload", ["board", "baseUpdatedAt"], {
     board: ref("BoardDocument"),
-    baseUpdatedAt: str("客戶端讀到的 updatedAt；與目前檔不符時回 conflict。", {
+    baseUpdatedAt: str("單寫者比對用的 updatedAt；不保護同時寫入。", {
       format: "date-time",
     }),
     clientRequestId: str("冪等鍵。"),
@@ -1996,19 +1996,15 @@ add(
 
 add(
   "BoardProjectCardRequestPayload",
-  objectOf(
-    "BoardProjectCardRequestPayload",
-    ["boardId", "itemId", "cardId", "position"],
-    {
-      boardId: str("目標白板。"),
-      itemId: str("新投影的 ULID。"),
-      cardId: str("卡片本體的 ULID。"),
-      position: ref("BoardPoint"),
-      size: ref("BoardSize"),
-      groupId: str("放進的分組；省略代表畫布。"),
-      pinned: bool("是否釘選；預設 false。"),
-    },
-  ),
+  objectOf("BoardProjectCardRequestPayload", ["boardId", "itemId", "cardId", "position"], {
+    boardId: str("目標白板。"),
+    itemId: str("新投影的 ULID。"),
+    cardId: str("卡片本體的 ULID。"),
+    position: ref("BoardPoint"),
+    size: ref("BoardSize"),
+    groupId: str("放進的分組；省略代表畫布。"),
+    pinned: bool("是否釘選；預設 false。"),
+  }),
 );
 
 add(
@@ -2495,13 +2491,13 @@ requestFrame("BoardCreateRequest", "board.create", "BoardCreateRequestPayload", 
 responseFrame("BoardCreateResponse", "board.create", "BoardCreateResponsePayload", "建立的白板。");
 requestFrame("BoardSaveRequest", "board.save", "BoardSaveRequestPayload", "整份覆寫白板。");
 responseFrame("BoardSaveResponse", "board.save", "BoardSaveResponsePayload", "儲存後的白板。");
-requestFrame("BoardDeleteRequest", "board.delete", "BoardDeleteRequestPayload", "刪除白板，不刪卡片。");
-responseFrame(
-  "BoardDeleteResponse",
+requestFrame(
+  "BoardDeleteRequest",
   "board.delete",
-  "BoardDeleteResponsePayload",
-  "刪除結果。",
+  "BoardDeleteRequestPayload",
+  "刪除白板，不刪卡片。",
 );
+responseFrame("BoardDeleteResponse", "board.delete", "BoardDeleteResponsePayload", "刪除結果。");
 requestFrame(
   "BoardProjectCardRequest",
   "board.project_card",
