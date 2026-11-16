@@ -99,6 +99,7 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case firstRunStartConversation
     case conversationNew
     case conversationUntitled
+    case conversationArchive
     case conversationListEmpty
     case conversationSelectPrompt
     case conversationInputPlaceholder

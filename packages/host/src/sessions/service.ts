@@ -127,6 +127,13 @@ export class SessionLifecycleService {
     return this.#freshness.recomputeAll();
   }
 
+  /** 從狀態庫讀取目前的封存倒數。 */
+  archiveOf(sessionId: string): ArchiveResult | undefined {
+    const stored = this.#conversations.get(sessionId);
+    if (stored?.archivedAt === undefined || stored.purgeAt === undefined) return undefined;
+    return { archivedAt: stored.archivedAt, purgeAt: stored.purgeAt };
+  }
+
   /** 開始或更新封存倒數；已經在倒數中時保留第一次的 `archived_at`。 */
   async archive(
     sessionId: string,

@@ -262,6 +262,10 @@ final class ArchiveModelTests: XCTestCase {
         XCTAssertEqual(model.items.map(\.id), ["s1"])
         XCTAssertEqual(model.items.first?.title, "舊對話")
         XCTAssertEqual(model.remainingDays(for: model.items[0]), 8)
+
+        // 重新載入時以主機摘要為準，不保留已過期的事件狀態。
+        await model.reload()
+        XCTAssertTrue(model.items.isEmpty)
     }
 
     func testUnarchivedAndDeletedEventsRemoveEntries() async {

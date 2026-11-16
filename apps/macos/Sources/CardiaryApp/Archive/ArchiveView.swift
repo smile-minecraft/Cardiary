@@ -15,9 +15,7 @@ struct ArchiveView: View {
         .padding(DesignTokens.spacingL)
         .background(Palette.canvas)
         .task {
-            if model.items.isEmpty {
-                await model.reload()
-            }
+            await model.reload()
         }
         .sheet(item: deletionTargetBinding) { target in
             DeleteConfirmationView(

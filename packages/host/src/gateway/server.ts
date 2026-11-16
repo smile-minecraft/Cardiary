@@ -1807,6 +1807,11 @@ export class Gateway {
   }
 
   #summaryOf(summary: ConversationSummary): SessionSummary {
+    const modules = this.#modules as ModuleHostWithServices | null;
+    const lifecycle = modules?.hostServices?.get<{
+      archiveOf(sessionId: string): SessionSummary["archive"];
+    }>(HOST_SERVICE_NAMES.sessions);
+    const archive = lifecycle?.archiveOf(summary.id);
     return {
       id: summary.id,
       title: this.#titles.get(summary.id) ?? summary.title,
@@ -1814,6 +1819,7 @@ export class Gateway {
       createdAt: summary.createdAt,
       updatedAt: summary.updatedAt ?? summary.createdAt,
       messageCount: summary.messageCount ?? this.#messageCounts.get(summary.id) ?? 0,
+      ...(archive === undefined ? {} : { archive }),
     };
   }
 

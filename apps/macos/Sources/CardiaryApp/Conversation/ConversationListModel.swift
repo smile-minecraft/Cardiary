@@ -33,7 +33,7 @@ public final class ConversationListModel: ObservableObject {
             self.init(
                 id: summary.id,
                 title: summary.title,
-                status: summary.status,
+                status: summary.archive == nil ? summary.status : .archived,
                 messageCount: summary.messageCount,
                 updatedAt: summary.updatedAt
             )
@@ -50,7 +50,7 @@ public final class ConversationListModel: ObservableObject {
     public let pageLimit: Int
 
     private var service: (any ConversationService)?
-    private var archivedIds: Set<String> = []
+    private var eventsDuringLoad: [ServerFrame] = []
 
     public init(pageSize: Int = 50, pageLimit: Int = 20) {
         self.pageSize = pageSize
@@ -73,6 +73,7 @@ public final class ConversationListModel: ObservableObject {
     /// 重新列出對話。保留目前的選擇；選的那一場不見了才改選第一場。
     public func reload() async {
         guard let service else { return }
+        eventsDuringLoad = []
         isLoading = true
         defer { isLoading = false }
 
@@ -92,15 +93,24 @@ public final class ConversationListModel: ObservableObject {
         }
 
         errorMessage = nil
-        sessions = collected.map { item in
-            var item = item
-            if archivedIds.contains(item.id) { item.status = .archived }
-            return item
+        sessions = collected
+        for event in eventsDuringLoad {
+            apply(frame: event)
         }
+        eventsDuringLoad = []
         if let selectedId, sessions.contains(where: { $0.id == selectedId }) {
             self.selectedId = selectedId
         } else {
             self.selectedId = sessions.first?.id
+        }
+    }
+
+    public func archive(sessionId: String, using management: any SessionManagementService) async {
+        do {
+            _ = try await management.archiveSession(sessionId: sessionId, purgeAfterDays: nil)
+            errorMessage = nil
+        } catch {
+            errorMessage = errorText(error)
         }
     }
 
@@ -138,20 +148,22 @@ public final class ConversationListModel: ObservableObject {
     }
 
     public func handle(frame: ServerFrame) {
+        if isLoading { eventsDuringLoad.append(frame) }
+        apply(frame: frame)
+    }
+
+    private func apply(frame: ServerFrame) {
         switch frame {
         case .sessionArchivedEvent(let event):
-            archivedIds.insert(event.payload.sessionId)
             if let index = sessions.firstIndex(where: { $0.id == event.payload.sessionId }) {
                 sessions[index].status = .archived
             }
         case .sessionUnarchivedEvent(let event):
-            archivedIds.remove(event.payload.sessionId)
             if let index = sessions.firstIndex(where: { $0.id == event.payload.sessionId }) {
                 sessions[index].status = .idle
             }
         case .sessionDeletedEvent(let event):
             for id in event.payload.deletedSessionIds {
-                archivedIds.remove(id)
                 remove(id: id)
             }
         default:
