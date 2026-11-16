@@ -676,6 +676,21 @@ describe("對話生命週期", () => {
     const fixture = await makeFixture();
     fixture.engine.add("conv-1");
     const card = await makeCard(fixture, { title: "刪一半", conversationId: "conv-1" });
+    const before = await fixture.library.get(card.cardId);
+    await fixture.library.proposePatch({
+      cardId: card.cardId,
+      baseRevision: before!.revision,
+      patch: { format: "unified", text: "@@ -1 +1 @@\n-刪一半 的內容\n+待決秘密" },
+    });
+    expect(
+      fixture.storage.state.get("SELECT 1 FROM card_versions WHERE card_id = ?", card.cardId),
+    ).toBeDefined();
+    expect(
+      fixture.storage.state.get(
+        "SELECT 1 FROM pending_card_patches WHERE card_id = ?",
+        card.cardId,
+      ),
+    ).toBeDefined();
     const failingCards = new Proxy(fixture.library as unknown as CardService, {
       get(target, property) {
         if (property === "delete") {
@@ -700,6 +715,16 @@ describe("對話生命週期", () => {
     // 啟動恢復：只補卡片檔與壓縮，不重跑已經完成的刪列。
     expect(await fixture.storage.deletions.recoverAtStartup()).toBe(1);
     expect(existsSync(cardPath(fixture, card.cardId))).toBe(false);
+    expect(
+      fixture.storage.state.get("SELECT 1 FROM card_versions WHERE card_id = ?", card.cardId),
+    ).toBeUndefined();
+    expect(
+      fixture.storage.state.get(
+        "SELECT 1 FROM pending_card_patches WHERE card_id = ?",
+        card.cardId,
+      ),
+    ).toBeUndefined();
+    expect(byteSearch(fixture.folder.path, ["刪一半 的內容", "待決秘密"])).toEqual([]);
     expect(
       fixture.storage.state.get(
         "SELECT 1 AS one FROM conversation_deletions WHERE root_id = 'conv-1'",

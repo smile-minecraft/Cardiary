@@ -424,6 +424,7 @@ private struct CardDetailView: View {
     @ObservedObject var model: CardLibraryModel
     let card: Card
     let onDelete: () -> Void
+    @State private var versionToRestore: CardVersion?
 
     var body: some View {
         ScrollView {
@@ -437,6 +438,8 @@ private struct CardDetailView: View {
                         .foregroundStyle(Palette.inkSecondary)
                 }
                 bodyBlock
+                pendingBlock
+                versionsBlock
                 linksBlock
                 if let error = model.errorMessage {
                     MessageBanner(text: error, systemImage: "exclamationmark.triangle", tone: .red)
@@ -455,6 +458,15 @@ private struct CardDetailView: View {
             .padding(DesignTokens.spacingL)
         }
         .scrollIndicators(.never)
+        .confirmationDialog(CardL10n.text(.cardsRestore), isPresented: Binding(
+            get: { versionToRestore != nil },
+            set: { if !$0 { versionToRestore = nil } }
+        )) {
+            Button(CardL10n.text(.cardsRestore)) {
+                if let version = versionToRestore { Task { await model.restoreVersion(version) } }
+            }
+            Button(CardL10n.text(.cardsDetailCancel), role: .cancel) { versionToRestore = nil }
+        }
     }
 
     private var appearance: CardFreshnessAppearance {
@@ -551,6 +563,57 @@ private struct CardDetailView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, DesignTokens.spacingXS)
+        }
+    }
+
+    @ViewBuilder
+    private var pendingBlock: some View {
+        if !model.pendingPatches.isEmpty {
+            VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
+                Text(model.pendingCountLabel)
+                    .font(.headline)
+                HStack {
+                    Button(CardL10n.text(.cardsAcceptAll)) { Task { await model.decideAllPatches(accept: true) } }
+                    Button(CardL10n.text(.cardsRejectAll)) { Task { await model.decideAllPatches(accept: false) } }
+                }.disabled(model.isEditing || model.isDeciding)
+                ForEach(model.pendingPatches, id: \.patchId) { patch in
+                    DisclosureGroup {
+                        Text(patch.patch.text).font(.body.monospaced()).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack {
+                            Button(CardL10n.text(.cardsAccept)) { Task { await model.decidePatch(patch, accept: true) } }
+                            Button(CardL10n.text(.cardsReject)) { Task { await model.decidePatch(patch, accept: false) } }
+                        }.disabled(model.isEditing || model.isDeciding)
+                    } label: {
+                        VStack(alignment: .leading) {
+                            Text(patch.summary ?? patch.createdAt)
+                            if model.isPatchStale(patch) {
+                                Text(CardL10n.text(.cardsPatchConflict)).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var versionsBlock: some View {
+        DisclosureGroup(CardL10n.text(.cardsVersions)) {
+            VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
+                ForEach(model.versions.reversed(), id: \.versionId) { version in
+                    HStack {
+                        Text("#\(version.seq) · \(version.createdAt)")
+                        Spacer()
+                        Button(CardL10n.text(.cardsCompare)) { Task { await model.compareVersion(version) } }
+                        Button(CardL10n.text(.cardsRestore)) { versionToRestore = version }
+                            .disabled(model.isEditing || model.isDeciding)
+                    }
+                }
+                if let comparison = model.versionComparison {
+                    Text(CardL10n.text(.cardsVersionCurrent)).font(.headline)
+                    Text(comparison).font(.body.monospaced()).textSelection(.enabled)
+                }
+            }
         }
     }
 

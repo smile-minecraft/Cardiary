@@ -88,6 +88,12 @@ public protocol CardService: Sendable {
         patch: CardPatch,
         clientRequestId: String?
     ) async throws -> CardPatchResponsePayload
+    func listCardPatches(cardId: String) async throws -> CardPatchesListResponsePayload
+    func acceptCardPatch(patchId: String, clientRequestId: String) async throws -> CardPatchAcceptResponsePayload
+    func rejectCardPatch(patchId: String, clientRequestId: String) async throws -> CardPatchRejectResponsePayload
+    func listCardVersions(cardId: String) async throws -> CardVersionsListResponsePayload
+    func getCardVersion(cardId: String, versionId: String) async throws -> CardVersionGetResponsePayload
+    func restoreCardVersion(cardId: String, versionId: String, baseRevision: String, clientRequestId: String) async throws -> CardVersionRestoreResponsePayload
     func deleteCard(cardId: String, clientRequestId: String) async throws -> CardDeleteResponsePayload
     func searchCards(
         query: String,

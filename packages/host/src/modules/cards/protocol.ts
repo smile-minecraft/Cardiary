@@ -1,6 +1,7 @@
 import {
   AGENT_CREATABLE_KINDS,
   type CardKind,
+  type CardVersion,
   type CardLifecycle,
   type CardQuery,
 } from "@cardiary/domain";
@@ -14,8 +15,16 @@ import type {
   CardSearchResponsePayload,
   CardCreateResponsePayload,
   CardPatchResponsePayload,
+  CardPatchesListResponsePayload,
+  CardPatchAcceptResponsePayload,
+  CardPatchRejectResponsePayload,
+  CardVersionsListResponsePayload,
+  CardVersionRestoreResponsePayload,
   CardDeleteResponsePayload,
   CardRefreshResponsePayload,
+  CardVersion as WireCardVersion,
+  PendingCardPatch as WirePendingCardPatch,
+  PendingPatchStatus as WirePendingPatchStatus,
   JSONObject,
 } from "@cardiary/protocol";
 import { StorageError, type CardIndexRow } from "@cardiary/storage";
@@ -42,6 +51,7 @@ const KIND_SET: ReadonlySet<string> = new Set([
 ]);
 const CREATABLE: ReadonlySet<string> = new Set(AGENT_CREATABLE_KINDS);
 const LIFECYCLE_SET: ReadonlySet<string> = new Set(["live", "cold", "all"]);
+const PENDING_STATUS_SET: ReadonlySet<string> = new Set(["pending", "accepted", "rejected"]);
 const MAX_LIMIT = 200;
 /** 同一條連線外的重送：記住 clientRequestId 的結果，行程內有效。 */
 const DEDUPE_LIMIT = 512;
@@ -81,6 +91,25 @@ export function registerCardsProtocol(options: CardsProtocolOptions): void {
             return asJson(await createCard(library, request.payload, dedupe, remember));
           case "card.patch":
             return asJson(await patchCard(library, request.payload, dedupe, remember));
+          case "card.patches.list":
+            return asJson(await listPatches(library, request.payload));
+          case "card.patch.accept":
+            return asJson(await acceptPatch(library, request.payload));
+          case "card.patch.reject":
+            return asJson(await rejectPatch(library, request.payload));
+          case "card.versions.list":
+            return asJson(await listVersions(library, request.payload));
+          case "card.version.get": {
+            const input = objectOf(request.payload);
+            return asJson({
+              body: library.versionBody(
+                requiredString(input, "cardId"),
+                requiredString(input, "versionId"),
+              ),
+            });
+          }
+          case "card.version.restore":
+            return asJson(await restoreVersion(library, request.payload));
           case "card.delete":
             return asJson(await deleteCard(library, request.payload, dedupe, remember));
           case "card.search":
@@ -208,18 +237,10 @@ async function patchCard(
   }
   const cardId = requiredString(input, "cardId");
   const baseRevision = requiredString(input, "baseRevision");
-  const patch = objectOf(input["patch"] as JsonValue);
-  const format = requiredString(patch, "format");
-  if (format !== "unified") {
-    throw new ProtocolHandlerError("invalid_message", "補丁只能是 unified 格式。", {
-      reason: "patch_format",
-      format,
-    });
-  }
   const card = await library.patch({
     cardId,
     baseRevision,
-    patch: { format: "unified", text: requiredString(patch, "text") },
+    patch: patchOf(input),
   });
   if (clientRequestId !== undefined) {
     remember(clientRequestId, { operation: "patch", cardId: card.cardId });
@@ -280,6 +301,129 @@ async function refreshCard(
   const cardId = requiredString(input, "cardId");
   const freshness = await library.refresh(cardId);
   return { cardId, freshness };
+}
+
+async function listPatches(
+  library: CardLibrary,
+  payload: JsonValue,
+): Promise<CardPatchesListResponsePayload> {
+  const input = objectOf(payload);
+  const status = optionalString(input, "status");
+  if (status !== undefined && !PENDING_STATUS_SET.has(status)) {
+    throw new ProtocolHandlerError("invalid_message", `未知的補丁狀態：${status}`, {
+      field: "status",
+    });
+  }
+  return {
+    patches: library
+      .listPatches(requiredString(input, "cardId"), status as WirePendingPatchStatus | undefined)
+      .map(wirePendingPatch),
+  };
+}
+
+async function acceptPatch(
+  library: CardLibrary,
+  payload: JsonValue,
+): Promise<CardPatchAcceptResponsePayload> {
+  const input = objectOf(payload);
+  requiredString(input, "clientRequestId");
+  const result = await library.acceptPendingPatch(requiredString(input, "patchId"));
+  return { patch: wirePendingPatch(result.patch), card: wireCardOf(library, result.card) };
+}
+
+async function rejectPatch(
+  library: CardLibrary,
+  payload: JsonValue,
+): Promise<CardPatchRejectResponsePayload> {
+  const input = objectOf(payload);
+  requiredString(input, "clientRequestId");
+  return {
+    patch: wirePendingPatch(await library.rejectPendingPatch(requiredString(input, "patchId"))),
+  };
+}
+
+async function listVersions(
+  library: CardLibrary,
+  payload: JsonValue,
+): Promise<CardVersionsListResponsePayload> {
+  const input = objectOf(payload);
+  return {
+    versions: library.listVersions(requiredString(input, "cardId")).map(wireCardVersion),
+  };
+}
+
+async function restoreVersion(
+  library: CardLibrary,
+  payload: JsonValue,
+): Promise<CardVersionRestoreResponsePayload> {
+  const input = objectOf(payload);
+  requiredString(input, "clientRequestId");
+  const result = await library.restoreVersion(
+    requiredString(input, "cardId"),
+    requiredString(input, "versionId"),
+    requiredString(input, "baseRevision"),
+  );
+  return { card: wireCardOf(library, result.card), version: wireCardVersion(result.version) };
+}
+
+function patchOf(input: JSONObject): {
+  readonly format: "unified" | "replace";
+  readonly text: string;
+} {
+  const patch = objectOf(input["patch"] as JsonValue);
+  const format = requiredString(patch, "format");
+  if (format !== "unified") {
+    throw new ProtocolHandlerError("invalid_message", `未知的補丁格式：${format}`, {
+      reason: "patch_format",
+      format,
+    });
+  }
+  return { format, text: requiredString(patch, "text") };
+}
+
+function wirePendingPatch(patch: {
+  readonly patchId: string;
+  readonly cardId: string;
+  readonly baseRevision: string;
+  readonly patch: { readonly format: "unified" | "replace"; readonly text: string };
+  readonly status: string;
+  readonly summary?: string;
+  readonly sourceConversationId?: string;
+  readonly sourceTurnId?: string;
+  readonly createdAt: string;
+  readonly decidedAt?: string;
+}): WirePendingCardPatch {
+  return {
+    patchId: patch.patchId,
+    cardId: patch.cardId,
+    baseRevision: patch.baseRevision,
+    patch: { format: patch.patch.format, text: patch.patch.text },
+    status: patch.status as WirePendingPatchStatus,
+    ...(patch.summary === undefined ? {} : { summary: patch.summary }),
+    ...(patch.sourceConversationId === undefined
+      ? {}
+      : { sourceConversationId: patch.sourceConversationId }),
+    ...(patch.sourceTurnId === undefined ? {} : { sourceTurnId: patch.sourceTurnId }),
+    createdAt: patch.createdAt,
+    ...(patch.decidedAt === undefined ? {} : { decidedAt: patch.decidedAt }),
+  };
+}
+
+function wireCardVersion(version: CardVersion): WireCardVersion {
+  return {
+    versionId: version.versionId,
+    cardId: version.cardId,
+    seq: version.seq,
+    kind: version.kind as WireCardVersion["kind"],
+    revision: version.revision,
+    bodyHash: version.bodyHash,
+    ...(version.baseRevision === null ? {} : { baseRevision: version.baseRevision }),
+    ...(version.patchFormat === undefined ? {} : { patchFormat: version.patchFormat }),
+    ...(version.patchText === undefined ? {} : { patchText: version.patchText }),
+    createdAt: version.createdAt,
+    ...(version.mergedCount === undefined ? {} : { mergedCount: version.mergedCount }),
+    ...(version.mergedSeqRange === null ? {} : { mergedSeqRange: version.mergedSeqRange }),
+  };
 }
 
 // ---- 線路形狀 -----------------------------------------------------------

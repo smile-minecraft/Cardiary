@@ -28,6 +28,7 @@ export const CARD_TOOL_POLICY = {
   card_read: { approval: "auto", subjectField: "cardId" },
   card_create: { approval: "auto", subjectField: "title" },
   card_patch: { approval: "ask", subjectField: "cardId" },
+  propose_card_patch: { approval: "auto", subjectField: "cardId" },
   card_delete: { approval: "ask", subjectField: "cardId" },
   card_refresh: { approval: "auto", subjectField: "cardId" },
 } as const satisfies Record<string, { approval: CardToolApproval; subjectField?: string }>;
@@ -217,9 +218,43 @@ export function createCardToolBundle(options: CardToolsOptions): ToolBundleDraft
       },
     },
     {
+      name: "propose_card_patch",
+      description: "提出卡片內文的統一 diff，交給使用者接受或拒絕；不直接修改卡片。",
+      parameters: {
+        type: "object",
+        properties: {
+          cardId: { type: "string" },
+          baseRevision: { type: "string", description: "card_read 回傳的 revision。" },
+          patch: { type: "string", description: "統一 diff 文字。" },
+          summary: { type: "string", description: "修改摘要。" },
+        },
+        required: ["cardId", "baseRevision", "patch", "summary"],
+        additionalProperties: false,
+      },
+      replay: "unsafe",
+      async execute(input, context): Promise<ToolOutcome> {
+        return run(async () => {
+          const record = objectOf(input);
+          const pending = await library.proposePatch({
+            cardId: stringOf(record, "cardId"),
+            baseRevision: stringOf(record, "baseRevision"),
+            patch: { format: "unified", text: stringOf(record, "patch") },
+            summary: stringOf(record, "summary"),
+            sourceConversationId: context.conversationId,
+            sourceTurnId: context.turnId,
+          });
+          return {
+            ok: true,
+            content: [
+              { type: "json", value: { patchId: pending.patchId, summary: pending.summary ?? "" } },
+            ],
+          };
+        });
+      },
+    },
+    {
       name: "card_patch",
-      description:
-        "用統一 diff（unified）編修卡片內文。送出前要帶讀到的 revision；不符會回衝突，不會覆寫。",
+      description: "提出卡片內文的統一 diff，交給使用者接受或拒絕。",
       parameters: {
         type: "object",
         properties: {
@@ -231,25 +266,22 @@ export function createCardToolBundle(options: CardToolsOptions): ToolBundleDraft
         additionalProperties: false,
       },
       replay: "unsafe",
-      async execute(input): Promise<ToolOutcome> {
+      async execute(input, context): Promise<ToolOutcome> {
         return run(async () => {
           const record = objectOf(input);
-          const card = await library.patch({
+          const pending = await library.proposePatch({
             cardId: stringOf(record, "cardId"),
             baseRevision: stringOf(record, "baseRevision"),
             patch: { format: "unified", text: stringOf(record, "patch") },
+            sourceConversationId: context.conversationId,
+            sourceTurnId: context.turnId,
           });
           return {
             ok: true,
             content: [
               {
                 type: "json",
-                value: {
-                  cardId: card.cardId,
-                  revision: card.revision,
-                  updatedAt: card.frontmatter.updated ?? null,
-                  title: card.frontmatter.title,
-                },
+                value: { cardId: pending.cardId, patchId: pending.patchId, status: pending.status },
               },
             ],
           };

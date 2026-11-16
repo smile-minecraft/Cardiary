@@ -98,6 +98,10 @@ public final class CardLibraryModel: ObservableObject {
     @Published public private(set) var selectedImageData: Data?
     @Published public private(set) var isEditing = false
     @Published public var editingBody = ""
+    @Published public private(set) var pendingPatches: [PendingCardPatch] = []
+    @Published public private(set) var versions: [CardVersion] = []
+    @Published public private(set) var versionComparison: String?
+    @Published public private(set) var isDeciding = false
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var noticeMessage: String?
     @Published public private(set) var isImporting = false
@@ -258,6 +262,9 @@ public final class CardLibraryModel: ObservableObject {
         let current = selectionGeneration
         selectedCardId = cardId
         selectedImageData = nil
+        pendingPatches = []
+        versions = []
+        versionComparison = nil
         isEditing = false
         do {
             let response = try await service.getCard(cardId: cardId)
@@ -269,6 +276,7 @@ public final class CardLibraryModel: ObservableObject {
             upsert(Item(card: response.card))
             errorMessage = nil
             await loadImage(for: response.card)
+            await reloadDocumentDetails(cardId: cardId)
         } catch {
             guard current == selectionGeneration else { return }
             selectedCard = nil
@@ -281,6 +289,9 @@ public final class CardLibraryModel: ObservableObject {
         selectedCardId = nil
         selectedCard = nil
         selectedImageData = nil
+        pendingPatches = []
+        versions = []
+        versionComparison = nil
         isEditing = false
     }
 
@@ -373,15 +384,14 @@ public final class CardLibraryModel: ObservableObject {
             upsert(Item(card: response.card))
             noticeMessage = CardL10n.text(.cardsSaved)
             errorMessage = nil
+            await reloadDocumentDetails(cardId: response.card.cardId)
             return true
         } catch {
             if let clientError = error as? CardiaryClientError,
                 case .server(let frame) = clientError,
                 frame.code == .conflict
             {
-                isEditing = false
-                noticeMessage = CardL10n.text(.cardsConflictReloaded)
-                await select(cardId: card.cardId)
+                noticeMessage = CardL10n.text(.cardsDraftConflict)
                 return false
             }
             errorMessage = CardL10n.format(.cardsLoadFailed, value: errorText(error))
@@ -424,6 +434,98 @@ public final class CardLibraryModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = CardL10n.format(.cardsLoadFailed, value: errorText(error))
+        }
+    }
+
+    // MARK: - 待決修改與版本
+
+    private func reloadDocumentDetails(cardId: String) async {
+        guard let service else { return }
+        do {
+            let patches = try await service.listCardPatches(cardId: cardId)
+            let history = try await service.listCardVersions(cardId: cardId)
+            guard selectedCardId == cardId else { return }
+            pendingPatches = patches.patches.filter { $0.status == .pending }
+            versions = history.versions
+        } catch {
+            guard selectedCardId == cardId else { return }
+            errorMessage = CardL10n.format(.cardsLoadFailed, value: errorText(error))
+        }
+    }
+
+    public var pendingCountLabel: String {
+        CardL10n.format(.cardsPendingCount, value: "\(pendingPatches.count)")
+    }
+
+    public func isPatchStale(_ patch: PendingCardPatch) -> Bool {
+        guard let card = selectedCard, card.cardId == patch.cardId else { return false }
+        return patch.baseRevision != card.revision
+    }
+
+    public func decidePatch(_ patch: PendingCardPatch, accept: Bool) async {
+        guard let service, !isEditing, !isDeciding, selectedCardId == patch.cardId else { return }
+        isDeciding = true
+        defer { isDeciding = false }
+        do {
+            if accept {
+                let result = try await service.acceptCardPatch(patchId: patch.patchId, clientRequestId: ClientRequestID.next("patch-accept"))
+                if selectedCardId == patch.cardId {
+                    selectedCard = result.card
+                    editingBody = result.card.body
+                    upsert(Item(card: result.card))
+                }
+            } else {
+                _ = try await service.rejectCardPatch(patchId: patch.patchId, clientRequestId: ClientRequestID.next("patch-reject"))
+            }
+            await reloadDocumentDetails(cardId: patch.cardId)
+        } catch {
+            if let clientError = error as? CardiaryClientError, case .server(let frame) = clientError, frame.code == .conflict {
+                errorMessage = CardL10n.text(.cardsPatchConflict)
+            } else {
+                errorMessage = CardL10n.format(.cardsLoadFailed, value: errorText(error))
+            }
+            await reloadDocumentDetails(cardId: patch.cardId)
+        }
+    }
+
+    public func decideAllPatches(accept: Bool) async {
+        let patches = pendingPatches
+        for patch in patches {
+            guard pendingPatches.contains(where: { $0.patchId == patch.patchId }) else { continue }
+            await decidePatch(patch, accept: accept)
+            if pendingPatches.contains(where: { $0.patchId == patch.patchId }) { break }
+        }
+    }
+
+    public func compareVersion(_ version: CardVersion) async {
+        guard let service, let card = selectedCard else { return }
+        do {
+            let response = try await service.getCardVersion(cardId: card.cardId, versionId: version.versionId)
+            guard selectedCardId == card.cardId else { return }
+            versionComparison = UnifiedDiff.make(original: response.body, updated: card.body)
+        } catch {
+            errorMessage = CardL10n.format(.cardsLoadFailed, value: errorText(error))
+        }
+    }
+
+    public func restoreVersion(_ version: CardVersion) async {
+        guard let service, let card = selectedCard, !isEditing, !isDeciding else { return }
+        isDeciding = true
+        defer { isDeciding = false }
+        do {
+            let result = try await service.restoreCardVersion(cardId: card.cardId, versionId: version.versionId, baseRevision: card.revision, clientRequestId: ClientRequestID.next("version-restore"))
+            guard selectedCardId == card.cardId else { return }
+            selectedCard = result.card
+            editingBody = result.card.body
+            upsert(Item(card: result.card))
+            versionComparison = nil
+            await reloadDocumentDetails(cardId: card.cardId)
+        } catch {
+            if let clientError = error as? CardiaryClientError, case .server(let frame) = clientError, frame.code == .conflict {
+                errorMessage = CardL10n.text(.cardsPatchConflict)
+            } else {
+                errorMessage = CardL10n.format(.cardsLoadFailed, value: errorText(error))
+            }
         }
     }
 
@@ -486,9 +588,12 @@ public final class CardLibraryModel: ObservableObject {
         if let index = items.firstIndex(where: { $0.id == response.card.cardId }) {
             items[index] = Item(card: response.card, snippet: items[index].snippet)
         }
-        if selectedCardId == response.card.cardId, !isEditing {
-            selectedCard = response.card
-            editingBody = response.card.body
+        if selectedCardId == response.card.cardId {
+            if !isEditing {
+                selectedCard = response.card
+                editingBody = response.card.body
+            }
+            await reloadDocumentDetails(cardId: response.card.cardId)
         }
     }
 

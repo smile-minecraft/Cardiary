@@ -2264,11 +2264,412 @@ public struct CardPatch: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - CardPatchAcceptRequest
+
+public struct CardPatchAcceptRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: CardPatchAcceptRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "card.patch.accept",
+        payload: CardPatchAcceptRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "CardPatchAcceptRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "CardPatchAcceptRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "card.patch.accept" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "CardPatchAcceptRequest.type 必須是 card.patch.accept")
+        }
+        let payload = try container.decode(CardPatchAcceptRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - CardPatchAcceptRequestPayload
+
+public struct CardPatchAcceptRequestPayload: Codable, Equatable, Sendable {
+    public let patchId: String
+    public let clientRequestId: String
+
+    public init(
+        patchId: String,
+        clientRequestId: String
+    ) {
+        self.patchId = patchId
+        self.clientRequestId = clientRequestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case patchId = "patchId"
+        case clientRequestId = "clientRequestId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let patchId = try container.decode(String.self, forKey: .patchId)
+        let clientRequestId = try container.decode(String.self, forKey: .clientRequestId)
+        self.init(
+            patchId: patchId,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(patchId, forKey: .patchId)
+        try container.encode(clientRequestId, forKey: .clientRequestId)
+    }
+}
+
+// MARK: - CardPatchAcceptResponse
+
+public struct CardPatchAcceptResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: CardPatchAcceptResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "card.patch.accept",
+        payload: CardPatchAcceptResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "CardPatchAcceptResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "CardPatchAcceptResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "card.patch.accept" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "CardPatchAcceptResponse.type 必須是 card.patch.accept")
+        }
+        let payload = try container.decode(CardPatchAcceptResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - CardPatchAcceptResponsePayload
+
+public struct CardPatchAcceptResponsePayload: Codable, Equatable, Sendable {
+    public let patch: PendingCardPatch
+    public let card: Card
+
+    public init(
+        patch: PendingCardPatch,
+        card: Card
+    ) {
+        self.patch = patch
+        self.card = card
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case patch = "patch"
+        case card = "card"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let patch = try container.decode(PendingCardPatch.self, forKey: .patch)
+        let card = try container.decode(Card.self, forKey: .card)
+        self.init(
+            patch: patch,
+            card: card
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(patch, forKey: .patch)
+        try container.encode(card, forKey: .card)
+    }
+}
+
 // MARK: - CardPatchFormat
 
 public enum CardPatchFormat: String, Codable, Equatable, Sendable, CaseIterable {
     case unified = "unified"
     case replace = "replace"
+}
+
+// MARK: - CardPatchRejectRequest
+
+public struct CardPatchRejectRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: CardPatchRejectRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "card.patch.reject",
+        payload: CardPatchRejectRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "CardPatchRejectRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "CardPatchRejectRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "card.patch.reject" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "CardPatchRejectRequest.type 必須是 card.patch.reject")
+        }
+        let payload = try container.decode(CardPatchRejectRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - CardPatchRejectRequestPayload
+
+public struct CardPatchRejectRequestPayload: Codable, Equatable, Sendable {
+    public let patchId: String
+    public let clientRequestId: String
+
+    public init(
+        patchId: String,
+        clientRequestId: String
+    ) {
+        self.patchId = patchId
+        self.clientRequestId = clientRequestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case patchId = "patchId"
+        case clientRequestId = "clientRequestId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let patchId = try container.decode(String.self, forKey: .patchId)
+        let clientRequestId = try container.decode(String.self, forKey: .clientRequestId)
+        self.init(
+            patchId: patchId,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(patchId, forKey: .patchId)
+        try container.encode(clientRequestId, forKey: .clientRequestId)
+    }
+}
+
+// MARK: - CardPatchRejectResponse
+
+public struct CardPatchRejectResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: CardPatchRejectResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "card.patch.reject",
+        payload: CardPatchRejectResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "CardPatchRejectResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "CardPatchRejectResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "card.patch.reject" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "CardPatchRejectResponse.type 必須是 card.patch.reject")
+        }
+        let payload = try container.decode(CardPatchRejectResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - CardPatchRejectResponsePayload
+
+public struct CardPatchRejectResponsePayload: Codable, Equatable, Sendable {
+    public let patch: PendingCardPatch
+
+    public init(
+        patch: PendingCardPatch
+    ) {
+        self.patch = patch
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case patch = "patch"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let patch = try container.decode(PendingCardPatch.self, forKey: .patch)
+        self.init(
+            patch: patch
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(patch, forKey: .patch)
+    }
 }
 
 // MARK: - CardPatchRequest
@@ -2479,6 +2880,203 @@ public struct CardPatchResponsePayload: Codable, Equatable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(card, forKey: .card)
+    }
+}
+
+// MARK: - CardPatchesListRequest
+
+public struct CardPatchesListRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: CardPatchesListRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "card.patches.list",
+        payload: CardPatchesListRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "CardPatchesListRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "CardPatchesListRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "card.patches.list" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "CardPatchesListRequest.type 必須是 card.patches.list")
+        }
+        let payload = try container.decode(CardPatchesListRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - CardPatchesListRequestPayload
+
+public struct CardPatchesListRequestPayload: Codable, Equatable, Sendable {
+    public let cardId: String
+    public let status: PendingPatchStatus?
+
+    public init(
+        cardId: String,
+        status: PendingPatchStatus? = nil
+    ) {
+        self.cardId = cardId
+        self.status = status
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case cardId = "cardId"
+        case status = "status"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let cardId = try container.decode(String.self, forKey: .cardId)
+        let status = try container.decodeIfPresent(PendingPatchStatus.self, forKey: .status)
+        self.init(
+            cardId: cardId,
+            status: status
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cardId, forKey: .cardId)
+        try container.encodeIfPresent(status, forKey: .status)
+    }
+}
+
+// MARK: - CardPatchesListResponse
+
+public struct CardPatchesListResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: CardPatchesListResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "card.patches.list",
+        payload: CardPatchesListResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "CardPatchesListResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "CardPatchesListResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "card.patches.list" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "CardPatchesListResponse.type 必須是 card.patches.list")
+        }
+        let payload = try container.decode(CardPatchesListResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - CardPatchesListResponsePayload
+
+public struct CardPatchesListResponsePayload: Codable, Equatable, Sendable {
+    public let patches: [PendingCardPatch]
+
+    public init(
+        patches: [PendingCardPatch]
+    ) {
+        self.patches = patches
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case patches = "patches"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let patches = try container.decode([PendingCardPatch].self, forKey: .patches)
+        self.init(
+            patches: patches
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(patches, forKey: .patches)
     }
 }
 
@@ -3074,6 +3672,727 @@ public struct CardSummary: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - CardVersion
+
+public struct CardVersion: Codable, Equatable, Sendable {
+    public let versionId: String
+    public let cardId: String
+    public let seq: Int
+    public let kind: CardVersionKind
+    public let revision: String
+    public let bodyHash: String
+    public let baseRevision: String?
+    public let patchFormat: String?
+    public let patchText: String?
+    public let createdAt: String
+    public let mergedCount: Int?
+    public let mergedSeqRange: String?
+
+    public init(
+        versionId: String,
+        cardId: String,
+        seq: Int,
+        kind: CardVersionKind,
+        revision: String,
+        bodyHash: String,
+        baseRevision: String? = nil,
+        patchFormat: String? = nil,
+        patchText: String? = nil,
+        createdAt: String,
+        mergedCount: Int? = nil,
+        mergedSeqRange: String? = nil
+    ) {
+        self.versionId = versionId
+        self.cardId = cardId
+        self.seq = seq
+        self.kind = kind
+        self.revision = revision
+        self.bodyHash = bodyHash
+        self.baseRevision = baseRevision
+        self.patchFormat = patchFormat
+        self.patchText = patchText
+        self.createdAt = createdAt
+        self.mergedCount = mergedCount
+        self.mergedSeqRange = mergedSeqRange
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case versionId = "versionId"
+        case cardId = "cardId"
+        case seq = "seq"
+        case kind = "kind"
+        case revision = "revision"
+        case bodyHash = "bodyHash"
+        case baseRevision = "baseRevision"
+        case patchFormat = "patchFormat"
+        case patchText = "patchText"
+        case createdAt = "createdAt"
+        case mergedCount = "mergedCount"
+        case mergedSeqRange = "mergedSeqRange"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let versionId = try container.decode(String.self, forKey: .versionId)
+        let cardId = try container.decode(String.self, forKey: .cardId)
+        let seq = try container.decode(Int.self, forKey: .seq)
+        let kind = try container.decode(CardVersionKind.self, forKey: .kind)
+        let revision = try container.decode(String.self, forKey: .revision)
+        let bodyHash = try container.decode(String.self, forKey: .bodyHash)
+        let baseRevision = try container.decodeIfPresent(String.self, forKey: .baseRevision)
+        let patchFormat = try container.decodeIfPresent(String.self, forKey: .patchFormat)
+        let patchText = try container.decodeIfPresent(String.self, forKey: .patchText)
+        let createdAt = try container.decode(String.self, forKey: .createdAt)
+        let mergedCount = try container.decodeIfPresent(Int.self, forKey: .mergedCount)
+        let mergedSeqRange = try container.decodeIfPresent(String.self, forKey: .mergedSeqRange)
+        self.init(
+            versionId: versionId,
+            cardId: cardId,
+            seq: seq,
+            kind: kind,
+            revision: revision,
+            bodyHash: bodyHash,
+            baseRevision: baseRevision,
+            patchFormat: patchFormat,
+            patchText: patchText,
+            createdAt: createdAt,
+            mergedCount: mergedCount,
+            mergedSeqRange: mergedSeqRange
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(versionId, forKey: .versionId)
+        try container.encode(cardId, forKey: .cardId)
+        try container.encode(seq, forKey: .seq)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(revision, forKey: .revision)
+        try container.encode(bodyHash, forKey: .bodyHash)
+        try container.encodeIfPresent(baseRevision, forKey: .baseRevision)
+        try container.encodeIfPresent(patchFormat, forKey: .patchFormat)
+        try container.encodeIfPresent(patchText, forKey: .patchText)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(mergedCount, forKey: .mergedCount)
+        try container.encodeIfPresent(mergedSeqRange, forKey: .mergedSeqRange)
+    }
+}
+
+// MARK: - CardVersionGetRequest
+
+public struct CardVersionGetRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: CardVersionGetRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "card.version.get",
+        payload: CardVersionGetRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "CardVersionGetRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "CardVersionGetRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "card.version.get" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "CardVersionGetRequest.type 必須是 card.version.get")
+        }
+        let payload = try container.decode(CardVersionGetRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - CardVersionGetRequestPayload
+
+public struct CardVersionGetRequestPayload: Codable, Equatable, Sendable {
+    public let cardId: String
+    public let versionId: String
+
+    public init(
+        cardId: String,
+        versionId: String
+    ) {
+        self.cardId = cardId
+        self.versionId = versionId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case cardId = "cardId"
+        case versionId = "versionId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let cardId = try container.decode(String.self, forKey: .cardId)
+        let versionId = try container.decode(String.self, forKey: .versionId)
+        self.init(
+            cardId: cardId,
+            versionId: versionId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cardId, forKey: .cardId)
+        try container.encode(versionId, forKey: .versionId)
+    }
+}
+
+// MARK: - CardVersionGetResponse
+
+public struct CardVersionGetResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: CardVersionGetResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "card.version.get",
+        payload: CardVersionGetResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "CardVersionGetResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "CardVersionGetResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "card.version.get" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "CardVersionGetResponse.type 必須是 card.version.get")
+        }
+        let payload = try container.decode(CardVersionGetResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - CardVersionGetResponsePayload
+
+public struct CardVersionGetResponsePayload: Codable, Equatable, Sendable {
+    public let body: String
+
+    public init(
+        body: String
+    ) {
+        self.body = body
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case body = "body"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let body = try container.decode(String.self, forKey: .body)
+        self.init(
+            body: body
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(body, forKey: .body)
+    }
+}
+
+// MARK: - CardVersionKind
+
+public enum CardVersionKind: String, Codable, Equatable, Sendable, CaseIterable {
+    case create = "create"
+    case patch = "patch"
+    case checkpoint = "checkpoint"
+    case restore = "restore"
+    case merge = "merge"
+}
+
+// MARK: - CardVersionRestoreRequest
+
+public struct CardVersionRestoreRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: CardVersionRestoreRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "card.version.restore",
+        payload: CardVersionRestoreRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "CardVersionRestoreRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "CardVersionRestoreRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "card.version.restore" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "CardVersionRestoreRequest.type 必須是 card.version.restore")
+        }
+        let payload = try container.decode(CardVersionRestoreRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - CardVersionRestoreRequestPayload
+
+public struct CardVersionRestoreRequestPayload: Codable, Equatable, Sendable {
+    public let cardId: String
+    public let versionId: String
+    public let baseRevision: String
+    public let clientRequestId: String
+
+    public init(
+        cardId: String,
+        versionId: String,
+        baseRevision: String,
+        clientRequestId: String
+    ) {
+        self.cardId = cardId
+        self.versionId = versionId
+        self.baseRevision = baseRevision
+        self.clientRequestId = clientRequestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case cardId = "cardId"
+        case versionId = "versionId"
+        case baseRevision = "baseRevision"
+        case clientRequestId = "clientRequestId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let cardId = try container.decode(String.self, forKey: .cardId)
+        let versionId = try container.decode(String.self, forKey: .versionId)
+        let baseRevision = try container.decode(String.self, forKey: .baseRevision)
+        let clientRequestId = try container.decode(String.self, forKey: .clientRequestId)
+        self.init(
+            cardId: cardId,
+            versionId: versionId,
+            baseRevision: baseRevision,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cardId, forKey: .cardId)
+        try container.encode(versionId, forKey: .versionId)
+        try container.encode(baseRevision, forKey: .baseRevision)
+        try container.encode(clientRequestId, forKey: .clientRequestId)
+    }
+}
+
+// MARK: - CardVersionRestoreResponse
+
+public struct CardVersionRestoreResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: CardVersionRestoreResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "card.version.restore",
+        payload: CardVersionRestoreResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "CardVersionRestoreResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "CardVersionRestoreResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "card.version.restore" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "CardVersionRestoreResponse.type 必須是 card.version.restore")
+        }
+        let payload = try container.decode(CardVersionRestoreResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - CardVersionRestoreResponsePayload
+
+public struct CardVersionRestoreResponsePayload: Codable, Equatable, Sendable {
+    public let card: Card
+    public let version: CardVersion
+
+    public init(
+        card: Card,
+        version: CardVersion
+    ) {
+        self.card = card
+        self.version = version
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case card = "card"
+        case version = "version"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let card = try container.decode(Card.self, forKey: .card)
+        let version = try container.decode(CardVersion.self, forKey: .version)
+        self.init(
+            card: card,
+            version: version
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(card, forKey: .card)
+        try container.encode(version, forKey: .version)
+    }
+}
+
+// MARK: - CardVersionsListRequest
+
+public struct CardVersionsListRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: CardVersionsListRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "card.versions.list",
+        payload: CardVersionsListRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "CardVersionsListRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "CardVersionsListRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "card.versions.list" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "CardVersionsListRequest.type 必須是 card.versions.list")
+        }
+        let payload = try container.decode(CardVersionsListRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - CardVersionsListRequestPayload
+
+public struct CardVersionsListRequestPayload: Codable, Equatable, Sendable {
+    public let cardId: String
+
+    public init(
+        cardId: String
+    ) {
+        self.cardId = cardId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case cardId = "cardId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let cardId = try container.decode(String.self, forKey: .cardId)
+        self.init(
+            cardId: cardId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cardId, forKey: .cardId)
+    }
+}
+
+// MARK: - CardVersionsListResponse
+
+public struct CardVersionsListResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: CardVersionsListResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "card.versions.list",
+        payload: CardVersionsListResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "CardVersionsListResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "CardVersionsListResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "card.versions.list" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "CardVersionsListResponse.type 必須是 card.versions.list")
+        }
+        let payload = try container.decode(CardVersionsListResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - CardVersionsListResponsePayload
+
+public struct CardVersionsListResponsePayload: Codable, Equatable, Sendable {
+    public let versions: [CardVersion]
+
+    public init(
+        versions: [CardVersion]
+    ) {
+        self.versions = versions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case versions = "versions"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let versions = try container.decode([CardVersion].self, forKey: .versions)
+        self.init(
+            versions: versions
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(versions, forKey: .versions)
+    }
+}
+
 // MARK: - CardiaryNotification
 
 public struct CardiaryNotification: Codable, Equatable, Sendable {
@@ -3180,6 +4499,12 @@ public enum ClientFrame: Codable, Equatable, Sendable {
     case cardGetRequest(CardGetRequest)
     case cardCreateRequest(CardCreateRequest)
     case cardPatchRequest(CardPatchRequest)
+    case cardPatchesListRequest(CardPatchesListRequest)
+    case cardPatchAcceptRequest(CardPatchAcceptRequest)
+    case cardPatchRejectRequest(CardPatchRejectRequest)
+    case cardVersionsListRequest(CardVersionsListRequest)
+    case cardVersionGetRequest(CardVersionGetRequest)
+    case cardVersionRestoreRequest(CardVersionRestoreRequest)
     case cardDeleteRequest(CardDeleteRequest)
     case cardSearchRequest(CardSearchRequest)
     case cardRefreshRequest(CardRefreshRequest)
@@ -3247,6 +4572,18 @@ public enum ClientFrame: Codable, Equatable, Sendable {
             self = .cardCreateRequest(try CardCreateRequest(from: decoder))
         case .some("card.patch"):
             self = .cardPatchRequest(try CardPatchRequest(from: decoder))
+        case .some("card.patches.list"):
+            self = .cardPatchesListRequest(try CardPatchesListRequest(from: decoder))
+        case .some("card.patch.accept"):
+            self = .cardPatchAcceptRequest(try CardPatchAcceptRequest(from: decoder))
+        case .some("card.patch.reject"):
+            self = .cardPatchRejectRequest(try CardPatchRejectRequest(from: decoder))
+        case .some("card.versions.list"):
+            self = .cardVersionsListRequest(try CardVersionsListRequest(from: decoder))
+        case .some("card.version.get"):
+            self = .cardVersionGetRequest(try CardVersionGetRequest(from: decoder))
+        case .some("card.version.restore"):
+            self = .cardVersionRestoreRequest(try CardVersionRestoreRequest(from: decoder))
         case .some("card.delete"):
             self = .cardDeleteRequest(try CardDeleteRequest(from: decoder))
         case .some("card.search"):
@@ -3333,6 +4670,18 @@ public enum ClientFrame: Codable, Equatable, Sendable {
         case .cardCreateRequest(let value):
             try value.encode(to: encoder)
         case .cardPatchRequest(let value):
+            try value.encode(to: encoder)
+        case .cardPatchesListRequest(let value):
+            try value.encode(to: encoder)
+        case .cardPatchAcceptRequest(let value):
+            try value.encode(to: encoder)
+        case .cardPatchRejectRequest(let value):
+            try value.encode(to: encoder)
+        case .cardVersionsListRequest(let value):
+            try value.encode(to: encoder)
+        case .cardVersionGetRequest(let value):
+            try value.encode(to: encoder)
+        case .cardVersionRestoreRequest(let value):
             try value.encode(to: encoder)
         case .cardDeleteRequest(let value):
             try value.encode(to: encoder)
@@ -7522,6 +8871,106 @@ public struct PairingRequestedEventPayload: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - PendingCardPatch
+
+public struct PendingCardPatch: Codable, Equatable, Sendable {
+    public let patchId: String
+    public let cardId: String
+    public let baseRevision: String
+    public let patch: CardPatch
+    public let status: PendingPatchStatus
+    public let summary: String?
+    public let sourceConversationId: String?
+    public let sourceTurnId: String?
+    public let createdAt: String
+    public let decidedAt: String?
+
+    public init(
+        patchId: String,
+        cardId: String,
+        baseRevision: String,
+        patch: CardPatch,
+        status: PendingPatchStatus,
+        summary: String? = nil,
+        sourceConversationId: String? = nil,
+        sourceTurnId: String? = nil,
+        createdAt: String,
+        decidedAt: String? = nil
+    ) {
+        self.patchId = patchId
+        self.cardId = cardId
+        self.baseRevision = baseRevision
+        self.patch = patch
+        self.status = status
+        self.summary = summary
+        self.sourceConversationId = sourceConversationId
+        self.sourceTurnId = sourceTurnId
+        self.createdAt = createdAt
+        self.decidedAt = decidedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case patchId = "patchId"
+        case cardId = "cardId"
+        case baseRevision = "baseRevision"
+        case patch = "patch"
+        case status = "status"
+        case summary = "summary"
+        case sourceConversationId = "sourceConversationId"
+        case sourceTurnId = "sourceTurnId"
+        case createdAt = "createdAt"
+        case decidedAt = "decidedAt"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let patchId = try container.decode(String.self, forKey: .patchId)
+        let cardId = try container.decode(String.self, forKey: .cardId)
+        let baseRevision = try container.decode(String.self, forKey: .baseRevision)
+        let patch = try container.decode(CardPatch.self, forKey: .patch)
+        let status = try container.decode(PendingPatchStatus.self, forKey: .status)
+        let summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        let sourceConversationId = try container.decodeIfPresent(String.self, forKey: .sourceConversationId)
+        let sourceTurnId = try container.decodeIfPresent(String.self, forKey: .sourceTurnId)
+        let createdAt = try container.decode(String.self, forKey: .createdAt)
+        let decidedAt = try container.decodeIfPresent(String.self, forKey: .decidedAt)
+        self.init(
+            patchId: patchId,
+            cardId: cardId,
+            baseRevision: baseRevision,
+            patch: patch,
+            status: status,
+            summary: summary,
+            sourceConversationId: sourceConversationId,
+            sourceTurnId: sourceTurnId,
+            createdAt: createdAt,
+            decidedAt: decidedAt
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(patchId, forKey: .patchId)
+        try container.encode(cardId, forKey: .cardId)
+        try container.encode(baseRevision, forKey: .baseRevision)
+        try container.encode(patch, forKey: .patch)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(summary, forKey: .summary)
+        try container.encodeIfPresent(sourceConversationId, forKey: .sourceConversationId)
+        try container.encodeIfPresent(sourceTurnId, forKey: .sourceTurnId)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(decidedAt, forKey: .decidedAt)
+    }
+}
+
+// MARK: - PendingPatchStatus
+
+public enum PendingPatchStatus: String, Codable, Equatable, Sendable, CaseIterable {
+    case pending = "pending"
+    case accepted = "accepted"
+    case rejected = "rejected"
+}
+
 // MARK: - ProtocolInfo
 
 public struct ProtocolInfo: Codable, Equatable, Sendable {
@@ -7745,6 +9194,12 @@ public enum ServerFrame: Codable, Equatable, Sendable {
     case cardGetResponse(CardGetResponse)
     case cardCreateResponse(CardCreateResponse)
     case cardPatchResponse(CardPatchResponse)
+    case cardPatchesListResponse(CardPatchesListResponse)
+    case cardPatchAcceptResponse(CardPatchAcceptResponse)
+    case cardPatchRejectResponse(CardPatchRejectResponse)
+    case cardVersionsListResponse(CardVersionsListResponse)
+    case cardVersionGetResponse(CardVersionGetResponse)
+    case cardVersionRestoreResponse(CardVersionRestoreResponse)
     case cardDeleteResponse(CardDeleteResponse)
     case cardSearchResponse(CardSearchResponse)
     case cardRefreshResponse(CardRefreshResponse)
@@ -7837,6 +9292,18 @@ public enum ServerFrame: Codable, Equatable, Sendable {
             self = .cardCreateResponse(try CardCreateResponse(from: decoder))
         case (.some("response"), .some("card.patch")):
             self = .cardPatchResponse(try CardPatchResponse(from: decoder))
+        case (.some("response"), .some("card.patches.list")):
+            self = .cardPatchesListResponse(try CardPatchesListResponse(from: decoder))
+        case (.some("response"), .some("card.patch.accept")):
+            self = .cardPatchAcceptResponse(try CardPatchAcceptResponse(from: decoder))
+        case (.some("response"), .some("card.patch.reject")):
+            self = .cardPatchRejectResponse(try CardPatchRejectResponse(from: decoder))
+        case (.some("response"), .some("card.versions.list")):
+            self = .cardVersionsListResponse(try CardVersionsListResponse(from: decoder))
+        case (.some("response"), .some("card.version.get")):
+            self = .cardVersionGetResponse(try CardVersionGetResponse(from: decoder))
+        case (.some("response"), .some("card.version.restore")):
+            self = .cardVersionRestoreResponse(try CardVersionRestoreResponse(from: decoder))
         case (.some("response"), .some("card.delete")):
             self = .cardDeleteResponse(try CardDeleteResponse(from: decoder))
         case (.some("response"), .some("card.search")):
@@ -7967,6 +9434,18 @@ public enum ServerFrame: Codable, Equatable, Sendable {
         case .cardCreateResponse(let value):
             try value.encode(to: encoder)
         case .cardPatchResponse(let value):
+            try value.encode(to: encoder)
+        case .cardPatchesListResponse(let value):
+            try value.encode(to: encoder)
+        case .cardPatchAcceptResponse(let value):
+            try value.encode(to: encoder)
+        case .cardPatchRejectResponse(let value):
+            try value.encode(to: encoder)
+        case .cardVersionsListResponse(let value):
+            try value.encode(to: encoder)
+        case .cardVersionGetResponse(let value):
+            try value.encode(to: encoder)
+        case .cardVersionRestoreResponse(let value):
             try value.encode(to: encoder)
         case .cardDeleteResponse(let value):
             try value.encode(to: encoder)

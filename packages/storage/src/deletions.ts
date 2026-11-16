@@ -299,6 +299,7 @@ export class ConversationDeletionService {
       // 引擎路徑（`purge` → 引擎交易 → `removeIntent`）沒有 storage 的
       // `vacuum`；卡片檔要在這裡補刪。重試時檔案已不在，操作是冪等的。
       this.completeCardDeletion(intent);
+      this.#state.checkpoint();
     }
     this.deleteIntent(rootId);
   }
@@ -338,7 +339,11 @@ export class ConversationDeletionService {
         this.#trace("deletion:card-file-failed");
         continue;
       }
-      this.#state.run("DELETE FROM card_state WHERE card_id = ?", cardId);
+      this.#state.transaction((tx) => {
+        tx.run("DELETE FROM pending_card_patches WHERE card_id = ?", cardId);
+        tx.run("DELETE FROM card_versions WHERE card_id = ?", cardId);
+        tx.run("DELETE FROM card_state WHERE card_id = ?", cardId);
+      });
       deletedCards += 1;
       removed.push(cardId);
       this.#trace("deletion:card-removed");

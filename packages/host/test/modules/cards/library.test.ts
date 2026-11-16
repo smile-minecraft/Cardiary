@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   CardFileStore,
   CardIndexStore,
+  CardVersionsStore,
   LocalAssetStore,
   Storage,
   type Database,
@@ -272,11 +273,65 @@ describe("卡片庫", () => {
     ).rejects.toMatchObject({ code: "conflict", details: { reason: "revision_mismatch" } });
     expect(files.read(created.cardId)?.text).toContain("第一行\n第二行\n第三行");
 
+    await library.proposePatch({
+      cardId: created.cardId,
+      baseRevision: patched.revision,
+      patch: { format: "unified", text: "@@ -1,3 +1,3 @@\n 第一行\n 第二行\n-第三行\n+待決內容" },
+    });
+    expect(
+      fixture.storage.state.get("SELECT 1 FROM card_versions WHERE card_id = ?", created.cardId),
+    ).toBeDefined();
+    expect(
+      fixture.storage.state.get(
+        "SELECT 1 FROM pending_card_patches WHERE card_id = ?",
+        created.cardId,
+      ),
+    ).toBeDefined();
     const deleted = await library.delete(created.cardId);
+    expect(
+      fixture.storage.state.get("SELECT 1 FROM card_versions WHERE card_id = ?", created.cardId),
+    ).toBeUndefined();
+    expect(
+      fixture.storage.state.get(
+        "SELECT 1 FROM pending_card_patches WHERE card_id = ?",
+        created.cardId,
+      ),
+    ).toBeUndefined();
+    for (const suffix of ["", "-wal"]) {
+      const bytes = await readFile(join(fixture.folder, "state", `cardiary.sqlite${suffix}`)).catch(
+        () => Buffer.alloc(0),
+      );
+      expect(bytes.includes(Buffer.from("待決內容"))).toBe(false);
+      expect(bytes.includes(Buffer.from("第一行"))).toBe(false);
+    }
     expect(deleted.deletedAssets).toBe(0);
     expect(files.read(created.cardId)).toBeUndefined();
     expect(fixture.events.at(-1)).toMatchObject({ change: "deleted", cardId: created.cardId });
   }, 20_000);
+
+  it("版本寫入失敗後讀取正本，自動補上可重放的檢查點", async () => {
+    const { library } = await makeFixture();
+    const card = await library.create({ kind: "note", title: "修復", body: "原文\n" });
+    const failure = vi
+      .spyOn(CardVersionsStore.prototype, "appendPatch")
+      .mockImplementationOnce(() => {
+        throw new Error("模擬版本寫入失敗");
+      });
+    try {
+      const changed = await library.patch({
+        cardId: card.cardId,
+        baseRevision: card.revision,
+        patch: { format: "unified", text: "@@ -1 +1 @@\n-原文\n+新文" },
+      });
+      expect(changed.body).toBe("新文\n");
+      expect((await library.get(card.cardId))?.body).toBe("新文\n");
+      const latest = library.listVersions(card.cardId).at(-1)!;
+      expect(latest.kind).toBe("checkpoint");
+      expect(library.versionBody(card.cardId, latest.versionId)).toBe("新文\n");
+    } finally {
+      failure.mockRestore();
+    }
+  });
 
   it("假事件源：外部編輯經去抖後重新索引並送出 card.changed（確定性）", async () => {
     const fixture = await makeFixture();

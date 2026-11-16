@@ -17,6 +17,45 @@ actor PagedCardService: CardService {
     private(set) var refreshedIds: [String] = []
     private(set) var createdTitles: [String] = []
     private var getCardDelays: [String: TimeInterval] = [:]
+    private var pending: [PendingCardPatch] = []
+    private var history: [CardVersion] = []
+
+    func setDocumentState(patches: [PendingCardPatch], versions: [CardVersion]) {
+        pending = patches
+        history = versions
+    }
+
+    func listCardPatches(cardId: String) async throws -> CardPatchesListResponsePayload {
+        CardPatchesListResponsePayload(patches: pending.filter { $0.cardId == cardId })
+    }
+
+    func listCardVersions(cardId: String) async throws -> CardVersionsListResponsePayload {
+        CardVersionsListResponsePayload(versions: history.filter { $0.cardId == cardId })
+    }
+
+    func acceptCardPatch(patchId: String, clientRequestId: String) async throws -> CardPatchAcceptResponsePayload {
+        guard let patch = pending.first(where: { $0.patchId == patchId }), let card = cards[patch.cardId] else { throw TestFailure.notFound }
+        let updated = documentCard(card, body: "新內文", revision: "rev-accepted")
+        cards[card.cardId] = updated
+        pending.removeAll { $0.patchId == patchId }
+        history.append(documentVersion(cardId: card.cardId, seq: history.count + 1, kind: .patch, revision: updated.revision))
+        return CardPatchAcceptResponsePayload(patch: patch, card: updated)
+    }
+
+    func rejectCardPatch(patchId: String, clientRequestId: String) async throws -> CardPatchRejectResponsePayload {
+        guard let patch = pending.first(where: { $0.patchId == patchId }) else { throw TestFailure.notFound }
+        pending.removeAll { $0.patchId == patchId }
+        return CardPatchRejectResponsePayload(patch: patch)
+    }
+
+    func restoreCardVersion(cardId: String, versionId: String, baseRevision: String, clientRequestId: String) async throws -> CardVersionRestoreResponsePayload {
+        guard let card = cards[cardId], history.contains(where: { $0.versionId == versionId }) else { throw TestFailure.notFound }
+        let updated = documentCard(card, body: "舊內文", revision: "rev-restored")
+        let version = documentVersion(cardId: cardId, seq: history.count + 1, kind: .restore, revision: updated.revision)
+        cards[cardId] = updated
+        history.append(version)
+        return CardVersionRestoreResponsePayload(card: updated, version: version)
+    }
 
     init(
         pages: [CardListResponsePayload] = [],
@@ -183,6 +222,17 @@ actor PagedCardService: CardService {
         }
         return CardRefreshResponsePayload(cardId: cardId, freshness: 100)
     }
+}
+
+func documentCard(_ card: Card, body: String, revision: String) -> Card {
+    Card(cardId: card.cardId, kind: card.kind, title: card.title, body: body, tags: card.tags,
+         persona: card.persona, createdAt: card.createdAt, freshness: card.freshness,
+         lifecycle: card.lifecycle, sources: card.sources, links: card.links, revision: revision)
+}
+
+func documentVersion(cardId: String, seq: Int, kind: CardVersionKind, revision: String) -> CardVersion {
+    CardVersion(versionId: "version-\(seq)", cardId: cardId, seq: seq, kind: kind,
+                revision: revision, bodyHash: "hash", createdAt: "2026-01-01T00:00:00Z")
 }
 
 enum TestFailure: Error {

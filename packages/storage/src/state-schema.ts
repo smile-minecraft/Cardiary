@@ -654,6 +654,44 @@ export const M5_MIGRATIONS: readonly Migration[] = [
   { version: 6, name: "m3-document-versions", sql: M6_SCHEMA },
 ];
 
+/**
+ * v7「m3-pending-patches」的待決補丁表。
+ *
+ * - 代理提出的修改只進這張表，正本卡片檔在核准前不動。
+ * - `status` 保留決定結果，讓客戶端能顯示已處理的項目；拒絕不改內文，
+ *   所以不需要額外的還原資料。
+ * - `base_revision` 是提出當下讀到的 revision；接受時會重算比對，過期就拒絕。
+ * - 不設指向 card_state 的外部鍵：卡片檔刪除時要立刻清掉待決補丁。
+ */
+const M7_SCHEMA = `
+CREATE TABLE pending_card_patches (
+  patch_id               TEXT PRIMARY KEY,
+  card_id                TEXT NOT NULL,
+  base_revision          TEXT NOT NULL,
+  patch_format           TEXT NOT NULL CHECK (patch_format IN ('unified','replace')),
+  patch_text             TEXT NOT NULL,
+  status                 TEXT NOT NULL CHECK (status IN ('pending','accepted','rejected')),
+  summary                TEXT,
+  source_conversation_id TEXT,
+  source_turn_id         TEXT,
+  created_at             TEXT NOT NULL,
+  decided_at             TEXT
+) STRICT;
+
+CREATE INDEX pending_card_patches_by_card ON pending_card_patches (card_id, status, created_at);
+`;
+
+/** v7 新增的表名稱。 */
+export const M7_TABLES = ["pending_card_patches"] as const;
+
+/**
+ * v7 的遷移清單：在 v6 之後加待決補丁表。
+ */
+export const M6_MIGRATIONS: readonly Migration[] = [
+  ...M5_MIGRATIONS,
+  { version: 7, name: "m3-pending-patches", sql: M7_SCHEMA },
+];
+
 const SCHEMA_MIGRATIONS_DDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version     INTEGER PRIMARY KEY,
@@ -698,7 +736,7 @@ interface AppliedMigrationRow {
  * - 每個版本在單一交易內完成 SQL、`user_version` 與 `schema_migrations`。
  */
 export function migrate(db: Database, options: MigrateOptions): MigrationOutcome {
-  const migrations = options.migrations ?? M5_MIGRATIONS;
+  const migrations = options.migrations ?? M6_MIGRATIONS;
   const now = options.now ?? (() => new Date());
   db.exec(SCHEMA_MIGRATIONS_DDL);
 

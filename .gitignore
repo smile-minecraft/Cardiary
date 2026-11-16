@@ -35,3 +35,4 @@ apps/macos/build/
 /spikes/
 /AGENTS.md
 /CLAUDE.md
+/.vitest/

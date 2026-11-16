@@ -3,6 +3,31 @@ import XCTest
 import CardiaryKit
 
 final class ProtocolTypesTests: XCTestCase {
+    func testDocumentProtocolExamplesDecodeAndRoundTrip() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent("packages/protocol/examples/protocol-examples.json"))
+        let examples = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: [String: Any]])
+        let names = [
+            "cardPatchesListRequest", "cardPatchesListResponse", "cardPatchAcceptRequest", "cardPatchAcceptResponse",
+            "cardPatchRejectRequest", "cardPatchRejectResponse", "cardVersionsListRequest", "cardVersionsListResponse",
+            "cardVersionGetRequest", "cardVersionGetResponse", "cardVersionRestoreRequest", "cardVersionRestoreResponse",
+        ]
+        for name in names {
+            let example = try XCTUnwrap(examples[name], name)
+            let input = try JSONSerialization.data(withJSONObject: example, options: [.sortedKeys])
+            let output: Data
+            if example["kind"] as? String == "request" {
+                output = try JSONEncoder().encode(JSONDecoder().decode(ClientFrame.self, from: input))
+            } else {
+                output = try JSONEncoder().encode(JSONDecoder().decode(ServerFrame.self, from: input))
+            }
+            let actual = try XCTUnwrap(JSONSerialization.jsonObject(with: output) as? NSDictionary)
+            XCTAssertEqual(actual, example as NSDictionary, name)
+        }
+    }
+
     func testDecodesHelloRequest() throws {
         let json = """
         {
