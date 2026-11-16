@@ -9,7 +9,6 @@
  */
 
 import type {
-  Card,
   CardService,
   DistillationCandidateCard,
   DistillationSourceCard,
@@ -18,9 +17,7 @@ import type {
   MemoryMatchCandidate,
 } from "@cardiary/domain";
 import {
-  DISTILLATION_EXCLUDED_KINDS,
   buildDistillationSummary,
-  comparisonCandidates,
   coreChangeAllowed,
   coreDayKey,
   estimateCoreMemoryTokens,
@@ -34,12 +31,11 @@ import {
   selectDistillationCandidates,
   validateDistillationOutput,
   CORE_TOKEN_BUDGET_DEFAULT,
-  type CoreCardTokens,
   type DistillationSummaryItem,
   type MemoryJudge,
   type MemoryMergeVerdict,
 } from "@cardiary/domain";
-import type { ModelInvoker, ModuleLogger } from "@cardiary/module-api";
+import type { ModelInvoker, ModuleLogger, NotificationService } from "@cardiary/module-api";
 import type { JsonValue } from "@cardiary/engine-adapter";
 
 import {
@@ -48,27 +44,23 @@ import {
   DistillationStore,
   INTERRUPTION_THRESHOLD_MS,
 } from "@cardiary/storage";
-import type {
-  DistillationItemRecord,
-  DistillationRunRecord,
-} from "@cardiary/storage";
+import type { DistillationRunRecord } from "@cardiary/storage";
 
 import { createModelAdapters, titleAndSummaryFromModel } from "./models.js";
-import type { NotificationService } from "./notifications.js";
 import { hashText, type MemoryCardWriter } from "./card-writer.js";
 
 /** 一次蒸餾的統計；落在 run.stats_json 並放進通知標題。 */
 export interface DistillationStats {
-  readonly picked: number;
-  readonly extracted: number;
-  readonly created: number;
-  readonly merged: number;
-  readonly superseded: number;
-  readonly cold: number;
-  readonly coreAdded: number;
-  readonly coreRemoved: number;
-  readonly failed: number;
-  readonly conflicts: number;
+  picked: number;
+  extracted: number;
+  created: number;
+  merged: number;
+  superseded: number;
+  cold: number;
+  coreAdded: number;
+  coreRemoved: number;
+  failed: number;
+  conflicts: number;
 }
 
 const EMPTY_STATS: DistillationStats = {
@@ -124,7 +116,11 @@ export class DistillationService {
    * 處理某個人格的一天蒸餾。同一天已有 completed/partial/failed 的 run 直接回傳；
    * running 且中斷（>30 分鐘）則續跑；running 但未中斷則跳過（避免併行）。
    */
-  async runForDay(persona: string, day: string, injected: InjectedModels = {}): Promise<DistillationRunRecord | null> {
+  async runForDay(
+    persona: string,
+    day: string,
+    injected: InjectedModels = {},
+  ): Promise<DistillationRunRecord | null> {
     const { runs, now } = this.#options;
     const existing = runs.findRunByDay(persona, day);
     if (existing !== null) {
@@ -146,7 +142,9 @@ export class DistillationService {
 
   /** 启动时續跑所有中斷的 run（錯過多次也只補每次中斷的 run）。 */
   async resumeInterrupted(injected: InjectedModels = {}): Promise<void> {
-    const cutoff = new Date(this.#options.now().getTime() - INTERRUPTION_THRESHOLD_MS).toISOString();
+    const cutoff = new Date(
+      this.#options.now().getTime() - INTERRUPTION_THRESHOLD_MS,
+    ).toISOString();
     for (const interrupted of this.#options.runs.findInterruptedRuns(cutoff)) {
       try {
         await this.#execute(interrupted, injected);
@@ -156,13 +154,17 @@ export class DistillationService {
     }
   }
 
-  async #execute(run: DistillationRunRecord, injected: InjectedModels): Promise<DistillationRunRecord> {
+  async #execute(
+    run: DistillationRunRecord,
+    injected: InjectedModels,
+  ): Promise<DistillationRunRecord> {
     const stats: DistillationStats = { ...EMPTY_STATS };
     const items: DistillationSummaryItem[] = [];
     const adapters = injected.distiller ?? createModelAdapters(this.#options.models).distiller;
     const judge = injected.judge ?? createModelAdapters(this.#options.models).judge;
     const titler =
-      injected.titler ?? ((item: ExtractedMemoryItem) => titleAndSummaryFromModel(this.#options.models, item));
+      injected.titler ??
+      ((item: ExtractedMemoryItem) => titleAndSummaryFromModel(this.#options.models, item));
 
     const candidates = await this.#pick(run, stats);
     for (const candidate of candidates) {
@@ -170,7 +172,9 @@ export class DistillationService {
     }
 
     // 步驟 5：冷封存所有成功處理的歸零卡。
-    const coldIds = candidates.filter((card) => this.#processed(run, card.cardId)).map((card) => card.cardId);
+    const coldIds = candidates
+      .filter((card) => this.#processed(run, card.cardId))
+      .map((card) => card.cardId);
     const coldChanged = this.#options.lifecycle.cold(coldIds);
     stats.cold = coldChanged;
     // 新寫的記憶卡要進索引，之後才搜得到、復原時才删得掉。
@@ -203,7 +207,10 @@ export class DistillationService {
   }
 
   /** 步驟 1＋2：挑選候選並逐卡提煉（提煉結果先落地）。 */
-  async #pick(run: DistillationRunRecord, stats: DistillationStats): Promise<readonly DistillationCandidateCard[]> {
+  async #pick(
+    run: DistillationRunRecord,
+    stats: DistillationStats,
+  ): Promise<readonly DistillationCandidateCard[]> {
     const persona = run.persona;
     const coreIds = new Set(this.#options.core.list(persona).map((entry) => entry.cardId));
     const freshness = this.#options.lifecycle.listFreshnessZeroCandidates(persona);
@@ -408,7 +415,9 @@ export class DistillationService {
     const existing = this.#options.writer.existing(outputCardId, bodyHash);
     const intent = resumeIntentDecision({
       done: priorIntent?.status === "done" && priorIntent.undone !== true,
-      undone: priorIntent?.undone === true || this.#options.runs.listUndoneOutputs(run.persona).includes(outputCardId),
+      undone:
+        priorIntent?.undone === true ||
+        this.#options.runs.listUndoneOutputs(run.persona).includes(outputCardId),
       existingFile: existing === null ? null : { contentHash: existing.contentHash },
       contentHash: bodyHash,
     });
@@ -524,7 +533,10 @@ export class DistillationService {
   }
 
   /** 搜尋比對候選：search 模式、kind=memory、含冷封存（lifecycle=all）。 */
-  async #searchMemoryCandidates(text: string, persona: string): Promise<readonly MemoryMatchCandidate[]> {
+  async #searchMemoryCandidates(
+    text: string,
+    persona: string,
+  ): Promise<readonly MemoryMatchCandidate[]> {
     const page = await this.#options.cards.search({
       kinds: ["memory"],
       persona,
@@ -561,7 +573,11 @@ export class DistillationService {
   }
 
   /** 步驟 6：為新記憶卡提議加入核心組（組未滿、當日未變動、預算內）。 */
-  #proposeCore(run: DistillationRunRecord, items: DistillationSummaryItem[], stats: DistillationStats): void {
+  #proposeCore(
+    run: DistillationRunRecord,
+    items: DistillationSummaryItem[],
+    stats: DistillationStats,
+  ): void {
     const persona = run.persona;
     const day = coreDayKey(this.#options.now().toISOString()) ?? run.day;
     const daily = this.#options.core.getDaily(persona, day);
@@ -573,12 +589,19 @@ export class DistillationService {
     const budget = this.#options.tokenBudget() || CORE_TOKEN_BUDGET_DEFAULT;
     const currentTokens = this.#coreTokens(entries);
     for (const output of this.#options.runs.listItems(run.runId)) {
-      if (output.phase !== "core" || output.status !== "done" || output.outputCardId === null) continue;
+      if (output.phase !== "core" || output.status !== "done" || output.outputCardId === null)
+        continue;
       const candidateId = output.outputCardId;
       if (entries.some((entry) => entry.cardId === candidateId)) continue;
-      const detail = safeParse(output.detailJson ?? "{}") as { title?: string; summary?: string | null };
+      const detail = safeParse(output.detailJson ?? "{}") as {
+        title?: string;
+        summary?: string | null;
+      };
       const tokens = estimateCoreMemoryTokens([
-        { title: detail.title ?? candidateId, ...(detail.summary ? { summary: detail.summary } : {}) },
+        {
+          title: detail.title ?? candidateId,
+          ...(detail.summary ? { summary: detail.summary } : {}),
+        },
       ]);
       const decision = planCoreChange({
         entries,
@@ -588,7 +611,15 @@ export class DistillationService {
         request: { kind: "add", cardId: candidateId, tokens },
       });
       if (decision.kind === "apply") {
-        if (this.#options.core.change({ persona, day, op: "add", cardId: candidateId, source: "distillation" })) {
+        if (
+          this.#options.core.change({
+            persona,
+            day,
+            op: "add",
+            cardId: candidateId,
+            source: "distillation",
+          })
+        ) {
           stats.coreAdded += 1;
           items.push({
             id: `core_${run.runId}_${candidateId}`,
@@ -613,7 +644,11 @@ export class DistillationService {
   }
 
   /** 步驟 7：產生一則摘要通知；重複呼叫同一 run 以 runId 去重（notification 內容冪等）。 */
-  async #notify(run: DistillationRunRecord, stats: DistillationStats, items: DistillationSummaryItem[]): Promise<void> {
+  async #notify(
+    run: DistillationRunRecord,
+    stats: DistillationStats,
+    items: DistillationSummaryItem[],
+  ): Promise<void> {
     const day = coreDayKey(this.#options.now().toISOString()) ?? run.day;
     const summary = buildDistillationSummary({ day, runId: run.runId, items });
     const title = `蒸餾 ${day}：新增 ${stats.created}、合併 ${stats.merged}、取代 ${stats.superseded}、冷封存 ${stats.cold}、核心組 +${stats.coreAdded}/-${stats.coreRemoved}`;

@@ -30,6 +30,8 @@ import {
   type SystemSection,
 } from "@cardiary/domain";
 
+import type { ContextSectionContribution } from "@cardiary/module-api";
+
 import type { ContextRecord, ContextStore } from "./store.js";
 
 /** 預算來源；由服務依主模型與設定提供。 */
@@ -63,6 +65,11 @@ export interface ContextAssemblerOptions {
   readonly store: ContextStore;
   readonly cards: CardService;
   readonly budget: () => ContextBudget;
+  /**
+   * 模組註冊的上下文區段；每次組裝都重新取得，模組啟停不需要重建組裝器。
+   * 這段是第 3 層（核心記憶）的來源。
+   */
+  readonly sections?: () => readonly ContextSectionContribution[];
   readonly now?: () => Date;
   readonly timeZone?: string;
 }
@@ -72,6 +79,7 @@ export class ContextAssembler {
   readonly #store: ContextStore;
   readonly #cards: CardService;
   readonly #budget: () => ContextBudget;
+  readonly #sections: () => readonly ContextSectionContribution[];
   readonly #now: () => Date;
   readonly #timeZone: string;
 
@@ -79,6 +87,7 @@ export class ContextAssembler {
     this.#store = options.store;
     this.#cards = options.cards;
     this.#budget = options.budget;
+    this.#sections = options.sections ?? (() => []);
     this.#now = options.now ?? (() => new Date());
     this.#timeZone = options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
   }
@@ -145,6 +154,8 @@ export class ContextAssembler {
     await this.#syncFixedCards(conversationId);
     const stored = this.#store.entries(conversationId);
     const contributions = await this.#renderCards(stored);
+    const budget = this.#budget();
+    const moduleSections = await this.#renderModuleSections(conversationId, budget);
 
     const now = this.#now();
     const working = this.#workingEntry(conversationId, stored, record, options.workingTokens);
@@ -156,8 +167,10 @@ export class ContextAssembler {
     const compactedAfterLastUsage =
       record.lastCompactedAt !== undefined &&
       (usage === null || usage.recordedAt <= record.lastCompactedAt);
+    const moduleTokens = moduleSections.reduce((sum, item) => sum + item.rawTokens, 0);
     const estimatedPrefix =
       cardRaw.reduce((sum, value) => sum + value, 0) +
+      moduleTokens +
       Math.max(0, working.rawTokens) +
       Math.max(0, volatile.rawTokens);
     const factor = compactedAfterLastUsage
@@ -166,7 +179,7 @@ export class ContextAssembler {
     const corrected = correctEstimates(cardRaw, factor);
     const workingTokens = Math.max(0, Math.round(working.rawTokens));
     const volatileTokens = Math.max(0, Math.round(volatile.rawTokens));
-    const usedTokens = corrected.total + workingTokens + volatileTokens;
+    const usedTokens = corrected.total + moduleTokens + workingTokens + volatileTokens;
 
     contributions.forEach((contribution, index) => {
       this.#store.updateEntry(contribution.entry.entryId, {
@@ -176,7 +189,6 @@ export class ContextAssembler {
     this.#store.updateEntry(working.entry.entryId, { tokenEstimate: workingTokens });
     this.#store.updateEntry(volatile.entry.entryId, { tokenEstimate: volatileTokens });
 
-    const budget = this.#budget();
     const entries = this.#store.entries(conversationId);
     const version = record.version + (options.bumpVersion === true ? 1 : 0);
     this.#store.updateMetrics(conversationId, {
@@ -198,15 +210,52 @@ export class ContextAssembler {
       ...(record.lastCompactedAt === undefined ? {} : { lastCompactedAt: record.lastCompactedAt }),
     });
 
+    const sections = [
+      ...contributions.map((contribution) => contribution.section),
+      ...moduleSections.map((item) => item.section),
+    ];
     return {
-      systemContext: assembleSystemContext(
-        contributions.map((contribution) => contribution.section),
-      ),
+      systemContext: assembleSystemContext(sections),
       view,
-      sections: contributions.map((contribution) => contribution.section),
+      sections,
       cardIds: contributions.map((contribution) => contribution.cardId),
       due: isCompactionDue(view),
     };
+  }
+
+  /**
+   * 模組註冊的區段：目前是核心記憶（第 3 層），由記憶模組提供。
+   *
+   * 每次組裝都重新呼叫，內容與預算都在 render 內決定；空內容不佔位置。
+   * 這裡不把結果寫進 `context_entries`，因為它是每場對話都相同的固定前綴，
+   * 不隨對話增刪。
+   */
+  async #renderModuleSections(
+    conversationId: string,
+    budget: ContextBudget,
+  ): Promise<readonly { readonly section: SystemSection; readonly rawTokens: number }[]> {
+    const now = this.#now().toISOString();
+    const ordered = [...this.#sections()].sort(
+      (left, right) =>
+        (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER),
+    );
+    const rendered: { section: SystemSection; rawTokens: number }[] = [];
+    for (const contribution of ordered) {
+      if (!SYSTEM_LAYERS.includes(contribution.layer)) continue;
+      const content = await contribution.render({
+        conversationId,
+        trigger: "turn",
+        tokenBudget: budgetTokensOf(budget.contextWindow, budget.reserveTokens),
+        now,
+      });
+      if (content === null || content.text.trim().length === 0) continue;
+      rendered.push({
+        section: { layer: contribution.layer, title: contribution.title, text: content.text },
+        rawTokens:
+          content.tokenEstimate ?? estimateTokens(`${contribution.title}\n${content.text}`),
+      });
+    }
+    return rendered;
   }
 
   /** 卡片層的預設內容：基岩與人格只有第一次組裝時補上。 */

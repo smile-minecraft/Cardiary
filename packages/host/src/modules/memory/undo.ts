@@ -7,12 +7,7 @@
  */
 
 import type { CardService, DistillationSummaryItem } from "@cardiary/domain";
-import {
-  assertWellFormedItem,
-  planUndoItem,
-  type UndoPlan,
-  type UndoStep,
-} from "@cardiary/domain";
+import { assertWellFormedItem, planUndoItem, type UndoPlan, type UndoStep } from "@cardiary/domain";
 import type { JsonValue } from "@cardiary/engine-adapter";
 
 import { CardLifecycleStore, CoreMemoryStore, DistillationStore } from "@cardiary/storage";
@@ -109,7 +104,11 @@ async function applyStep(
 }
 
 /** 在該 run 找出對應的 merge／core 單元並標已復原；找不到就略過（冪等）。 */
-function markUndoneForItem(runs: DistillationStore, runId: string, item: DistillationSummaryItem): void {
+function markUndoneForItem(
+  runs: DistillationStore,
+  runId: string,
+  item: DistillationSummaryItem,
+): void {
   const prefix = item.id.startsWith("core_") ? "core" : "merge";
   for (const record of runs.listItems(runId)) {
     if (record.phase !== prefix) continue;
@@ -158,7 +157,11 @@ function safeParseObject(text: string): Record<string, unknown> {
 /** 給協定層：把 UndoOutcome 映射到 data 形狀。 */
 export function undoOutcomeToJson(outcome: UndoOutcome): JsonValue {
   if (outcome.ok) {
-    return { ok: true, action: outcome.action, ...(outcome.deferred ? { deferred: true } : {}) } as JsonValue;
+    return {
+      ok: true,
+      action: outcome.action,
+      ...(outcome.deferred ? { deferred: true } : {}),
+    } as JsonValue;
   }
   return { ok: false, reason: outcome.reason } as JsonValue;
 }

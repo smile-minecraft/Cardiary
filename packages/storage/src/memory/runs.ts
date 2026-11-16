@@ -140,10 +140,7 @@ export class DistillationStore {
   }
 
   getRun(runId: string): DistillationRunRecord | null {
-    const row = this.#db.get<RunRow>(
-      "SELECT * FROM distillation_runs WHERE run_id = ?",
-      runId,
-    );
+    const row = this.#db.get<RunRow>("SELECT * FROM distillation_runs WHERE run_id = ?", runId);
     return row === undefined ? null : toRun(row);
   }
 

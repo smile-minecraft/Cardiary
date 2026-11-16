@@ -5,7 +5,6 @@
  * 必須在同一個資料庫交易裡完成，復原也遵守同一個人格與日期鍵。
  */
 
-import { nowIso } from "../util.js";
 import type { Database, Queryable } from "../db.js";
 
 /** 核心組變更的來源。 */
@@ -81,11 +80,8 @@ export class CoreMemoryStore {
 
   remove(persona: string, cardId: string): boolean {
     return (
-      this.#db.run(
-        "DELETE FROM core_memory WHERE persona = ? AND card_id = ?",
-        persona,
-        cardId,
-      ).changes > 0
+      this.#db.run("DELETE FROM core_memory WHERE persona = ? AND card_id = ?", persona, cardId)
+        .changes > 0
     );
   }
 
@@ -152,8 +148,8 @@ export class CoreMemoryStore {
 
   #removeOn(tx: Queryable, persona: string, cardId: string): boolean {
     return (
-      tx.run("DELETE FROM core_memory WHERE persona = ? AND card_id = ?", persona, cardId)
-        .changes > 0
+      tx.run("DELETE FROM core_memory WHERE persona = ? AND card_id = ?", persona, cardId).changes >
+      0
     );
   }
 

@@ -11,7 +11,13 @@ export const manifest: ModuleManifest = {
     { moduleId: "cards", versionRange: "^1.0.0" },
     { moduleId: "context", versionRange: "^1.0.0", optional: true },
   ],
-  permissions: ["cards:read", "cards:write", "model:invoke", "notifications:emit", "storage:maintain"],
+  permissions: [
+    "cards:read",
+    "cards:write",
+    "model:invoke",
+    "notifications:emit",
+    "storage:maintain",
+  ],
   settings: [
     {
       key: "distillation.time",

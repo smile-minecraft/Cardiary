@@ -45,8 +45,8 @@ function distillPrompt(cards: readonly DistillationSourceCard[]): string {
   });
   return [
     "你是記憶蒸餾助理。從下面的卡片提取值得長期保留的事實、偏好與決定。",
-    "只回傳 JSON：{ \"items\": [ { \"type\": \"fact\"|\"preference\"|\"decision\", \"text\": \"...\" } ] }。",
-    "規則：一行一條；text 自含（脫離原卡也能讀懂）；沒有值得保留的內容時回 { \"items\": [] }。",
+    '只回傳 JSON：{ "items": [ { "type": "fact"|"preference"|"decision", "text": "..." } ] }。',
+    '規則：一行一條；text 自含（脫離原卡也能讀懂）；沒有值得保留的內容時回 { "items": [] }。',
     "不要加任何說明文字或 markdown 包裹。",
     "",
     ...lines,
@@ -85,18 +85,14 @@ export function createModelAdapters(models: ModelInvoker): ModelAdapters {
       async sameAs(candidate: string, item: string): Promise<boolean> {
         const text = await invoke(
           "記憶蒸餾重複判定",
-          yesNoPrompt(
-            `這兩條陳述是同一回事嗎？\n既有記憶：${candidate}\n新記憶：${item}`,
-          ),
+          yesNoPrompt(`這兩條陳述是同一回事嗎？\n既有記憶：${candidate}\n新記憶：${item}`),
         );
         return isYes(text);
       },
       async contradicts(candidate: string, item: string): Promise<boolean> {
         const text = await invoke(
           "記憶蒸餾矛盾判定",
-          yesNoPrompt(
-            `這兩條陳述矛盾嗎？\n既有記憶：${candidate}\n新記憶：${item}`,
-          ),
+          yesNoPrompt(`這兩條陳述矛盾嗎？\n既有記憶：${candidate}\n新記憶：${item}`),
         );
         return isYes(text);
       },
@@ -127,7 +123,7 @@ export async function titleAndSummaryFromModel(
   item: ExtractedMemoryItem,
 ): Promise<{ title?: string; summary?: string }> {
   try {
-    const text = await models.invoke({
+    const result = await models.invoke({
       role: "small",
       purpose: "記憶蒸餾標題",
       prompt: [
@@ -137,7 +133,7 @@ export async function titleAndSummaryFromModel(
       ].join("\n"),
       maxOutputTokens: 512,
     });
-    const parsed = extractJson(text) as { title?: unknown; summary?: unknown } | null;
+    const parsed = extractJson(result.text) as { title?: unknown; summary?: unknown } | null;
     if (parsed === null || typeof parsed !== "object") return {};
     return {
       ...(typeof parsed.title === "string" ? { title: parsed.title } : {}),

@@ -12,6 +12,7 @@ import { ContextCompactor } from "../../context/compactor.js";
 import { ContextServiceImpl, type ContextCompactedPayload } from "../../context/service.js";
 import { ContextStore } from "../../context/store.js";
 import { HOST_SERVICE_NAMES, type CardEnvironment } from "../contract.js";
+import { CONTRIBUTIONS_SERVICE_NAME, type ModuleContributions } from "../registry.js";
 import { manifest } from "./manifest.js";
 import { registerContextProtocol } from "./protocol.js";
 
@@ -40,10 +41,13 @@ async function activate(context: ModuleActivationContext): Promise<void> {
 
   const store = new ContextStore(cabinet.state, { now });
   let service: ContextServiceImpl | null = null;
+  // 模組貢獻（核心記憶第 3 層）：每次組裝時重新取得，記憶模組晚於此啟用也看得到。
+  const contributions = context.services.host.get<ModuleContributions>(CONTRIBUTIONS_SERVICE_NAME);
   const assembler = new ContextAssembler({
     store,
     cards,
     now,
+    sections: () => contributions?.sections() ?? [],
     budget: () =>
       service?.budget() ?? {
         contextWindow: 131_072,

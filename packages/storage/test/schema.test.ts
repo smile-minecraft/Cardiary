@@ -430,7 +430,11 @@ describe("遷移", () => {
       v3.close();
     }
 
-    const upgraded = openStateDatabase({ filePath, appVersion: "test", backupDirectory: directory });
+    const upgraded = openStateDatabase({
+      filePath,
+      appVersion: "test",
+      backupDirectory: directory,
+    });
     try {
       expect(upgraded.migration.fromVersion).toBe(3);
       expect(upgraded.migration.toVersion).toBe(4);

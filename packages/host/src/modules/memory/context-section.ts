@@ -23,7 +23,9 @@ export interface CoreMemorySectionOptions {
 }
 
 /** 建立核心記憶的上下文區段貢獻（掛在 `core-memory` 層）。 */
-export function createCoreMemorySection(options: CoreMemorySectionOptions): ContextSectionContribution {
+export function createCoreMemorySection(
+  options: CoreMemorySectionOptions,
+): ContextSectionContribution {
   return {
     sectionId: "memory.core",
     layer: "core-memory",
@@ -46,7 +48,9 @@ export function createCoreMemorySection(options: CoreMemorySectionOptions): Cont
         const tokensForCard = estimateCoreMemoryTokens([
           {
             title: card.frontmatter.title,
-            ...(card.frontmatter.summary === undefined ? {} : { summary: card.frontmatter.summary }),
+            ...(card.frontmatter.summary === undefined
+              ? {}
+              : { summary: card.frontmatter.summary }),
             body: card.body,
           },
         ]);
@@ -58,7 +62,9 @@ export function createCoreMemorySection(options: CoreMemorySectionOptions): Cont
           body: card.body,
         });
         sourceCards.push(entry.cardId);
-        lines.push(`- ${card.frontmatter.title}${card.frontmatter.summary ? `：${card.frontmatter.summary}` : ""}`);
+        lines.push(
+          `- ${card.frontmatter.title}${card.frontmatter.summary ? `：${card.frontmatter.summary}` : ""}`,
+        );
       }
       if (lines.length === 0) return null;
       return {

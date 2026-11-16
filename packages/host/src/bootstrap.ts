@@ -297,6 +297,11 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   hostServices.provide(HOST_SERVICE_NAMES.engine, engine);
   hostServices.provide(HOST_SERVICE_NAMES.storage, storage);
   hostServices.provide(HOST_SERVICE_NAMES.paths, paths);
+  // 蒸餾後的每日維護：掃描、容量淘汰、日誌輪替與兩個資料庫的完整 VACUUM。
+  // 記憶體組裝沒有檔案登記簿與引擎庫，不提供這個服務。
+  if (persistent !== null) {
+    hostServices.provide("storage.maintenance", persistent.storage.maintenance);
+  }
   if (options.broker !== undefined) {
     hostServices.provide(HOST_SERVICE_NAMES.broker, options.broker);
   }

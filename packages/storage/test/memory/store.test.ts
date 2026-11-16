@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  CardLifecycleStore,
-  CoreMemoryStore,
-  DistillationStore,
-} from "../../src/index.js";
+import { CardLifecycleStore, CoreMemoryStore, DistillationStore } from "../../src/index.js";
 import { createTempRoot, openTestStorage, type TempRoot } from "../helpers/temp.js";
 
 const cleanups: Array<() => void> = [];
@@ -68,10 +64,7 @@ describe("DistillationStore：run 與單元", () => {
   });
 
   it("中斷判斷：running 且早於門檻時間才回傳", () => {
-    const times = [
-      new Date("2026-11-16T03:00:00.000Z"),
-      new Date("2026-11-16T05:00:00.000Z"),
-    ];
+    const times = [new Date("2026-11-16T03:00:00.000Z"), new Date("2026-11-16T05:00:00.000Z")];
     let index = 0;
     const { store } = setup(() => times[index++ % times.length] as Date);
     const old = store.createRun({ persona: "default", day: "2026-11-16" });
@@ -104,16 +97,28 @@ describe("DistillationStore：run 與單元", () => {
     });
     // 同批次不列入。
     expect(
-      store.findCrossBatchMatch({ persona: "default", contentHash: "same", excludeBatchId: "batch_old" }),
+      store.findCrossBatchMatch({
+        persona: "default",
+        contentHash: "same",
+        excludeBatchId: "batch_old",
+      }),
     ).toBeNull();
     // 不同批次命中。
     expect(
-      store.findCrossBatchMatch({ persona: "default", contentHash: "same", excludeBatchId: "batch_new" })?.outputCardId,
+      store.findCrossBatchMatch({
+        persona: "default",
+        contentHash: "same",
+        excludeBatchId: "batch_new",
+      })?.outputCardId,
     ).toBe("card_1");
     // undone 不列入。
     store.markUndone(run.runId, "a");
     expect(
-      store.findCrossBatchMatch({ persona: "default", contentHash: "same", excludeBatchId: "batch_new" }),
+      store.findCrossBatchMatch({
+        persona: "default",
+        contentHash: "same",
+        excludeBatchId: "batch_new",
+      }),
     ).toBeNull();
   });
 });
@@ -122,15 +127,21 @@ describe("CoreMemoryStore", () => {
   it("增刪與每日計數在同一交易；一天只標記一次", () => {
     const { core, storage } = setup();
     expect(core.list("default")).toEqual([]);
-    expect(core.change({ persona: "default", day: "2026-11-16", op: "add", cardId: "card_a" })).toBe(true);
+    expect(
+      core.change({ persona: "default", day: "2026-11-16", op: "add", cardId: "card_a" }),
+    ).toBe(true);
     expect(core.list("default").map((e) => e.cardId)).toEqual(["card_a"]);
     expect(core.getDaily("default", "2026-11-16")?.changed).toBe(true);
     // 重複加入不變動，也不再標記。
-    expect(core.change({ persona: "default", day: "2026-11-16", op: "add", cardId: "card_a" })).toBe(false);
+    expect(
+      core.change({ persona: "default", day: "2026-11-16", op: "add", cardId: "card_a" }),
+    ).toBe(false);
     expect(core.getDaily("default", "2026-11-16")?.changed).toBe(true);
     // 一天只寫一列。
     expect(storage.state.countRows("core_memory_daily")).toBe(1);
-    expect(core.change({ persona: "default", day: "2026-11-17", op: "remove", cardId: "card_a" })).toBe(true);
+    expect(
+      core.change({ persona: "default", day: "2026-11-17", op: "remove", cardId: "card_a" }),
+    ).toBe(true);
     expect(core.list("default")).toEqual([]);
     expect(core.getDaily("default", "2026-11-17")?.changed).toBe(true);
   });
@@ -138,7 +149,12 @@ describe("CoreMemoryStore", () => {
   it("固定順序 added_day, card_id 升冪", () => {
     const { core } = setup();
     core.add({ persona: "default", cardId: "card_z", addedDay: "2026-11-15", source: "import" });
-    core.add({ persona: "default", cardId: "card_a", addedDay: "2026-11-16", source: "distillation" });
+    core.add({
+      persona: "default",
+      cardId: "card_a",
+      addedDay: "2026-11-16",
+      source: "distillation",
+    });
     core.add({ persona: "default", cardId: "card_b", addedDay: "2026-11-15", source: "user" });
     expect(core.list("default").map((e) => e.cardId)).toEqual(["card_b", "card_z", "card_a"]);
   });
@@ -172,9 +188,7 @@ describe("CardLifecycleStore", () => {
               ('cold', 'default', 0, 'now', 'cold', 'now'),
               ('replaced', 'default', 0, 'now', 'live', 'now')`,
     );
-    storage.state.run(
-      "UPDATE card_state SET superseded_by = 'other' WHERE card_id = 'replaced'",
-    );
+    storage.state.run("UPDATE card_state SET superseded_by = 'other' WHERE card_id = 'replaced'");
     const picked = lifecycle.listFreshnessZeroCandidates("default");
     expect(picked.map((c) => c.cardId)).toEqual(["zero"]);
   });

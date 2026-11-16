@@ -64,7 +64,10 @@ export class MemoryCardWriter {
         return { cardId, contentHash: `__broken__${hashText(text)}` };
       }
       const bodyHash = hashText(parsed.body);
-      return { cardId, contentHash: bodyHash === expectedBodyHash ? expectedBodyHash : `__mismatch__${bodyHash}` };
+      return {
+        cardId,
+        contentHash: bodyHash === expectedBodyHash ? expectedBodyHash : `__mismatch__${bodyHash}`,
+      };
     } catch {
       return { cardId, contentHash: "__unreadable__" };
     }

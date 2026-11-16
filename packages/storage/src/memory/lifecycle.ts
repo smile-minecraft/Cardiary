@@ -43,7 +43,12 @@ export class CardLifecycleStore {
     return changed;
   }
 
-  #setLifecycle(tx: Queryable, cardIds: readonly string[], lifecycle: "cold" | "live", now: string): number {
+  #setLifecycle(
+    tx: Queryable,
+    cardIds: readonly string[],
+    lifecycle: "cold" | "live",
+    now: string,
+  ): number {
     let changed = 0;
     for (const cardId of cardIds) {
       changed += tx.run(
