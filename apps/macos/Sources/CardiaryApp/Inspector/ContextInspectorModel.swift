@@ -76,8 +76,17 @@ public final class ContextInspectorModel: ObservableObject {
 
     /// 跟著目前選取的對話換內容；同一場對話再次出現時仍向主機重讀一次。
     public func open(sessionId: String) async {
+        if self.sessionId != sessionId {
+            loadGeneration += 1
+            compactGeneration += 1
+            context = nil
+            selectedEntryId = nil
+            isCompacting = false
+            lastCompaction = nil
+            errorMessage = nil
+            noticeMessage = nil
+        }
         self.sessionId = sessionId
-        selectedEntryId = nil
         await reload()
     }
 
@@ -93,7 +102,9 @@ public final class ContextInspectorModel: ObservableObject {
         noticeMessage = nil
     }
 
-    public func reload() async {
+    /// 向主機重讀目前對話；內容過期後的重整要保留已更新提示。
+    public func reload(preservingNotice: Bool = false) async {
+        if !preservingNotice { noticeMessage = nil }
         guard let service, let sessionId else { return }
         loadGeneration += 1
         compactGeneration += 1
@@ -116,7 +127,11 @@ public final class ContextInspectorModel: ObservableObject {
     }
 
     private func apply(_ view: ContextView) {
-        if let current = context, view.version < current.version { return }
+        // 畫面只顯示目前對話的內容；切換對話後晚到的舊回應一律丟棄。
+        guard view.sessionId == sessionId else { return }
+        if let current = context, view.version < current.version {
+            return
+        }
         context = view
         if let selectedEntryId, !view.entries.contains(where: { $0.entryId == selectedEntryId }) {
             self.selectedEntryId = nil
@@ -144,11 +159,13 @@ public final class ContextInspectorModel: ObservableObject {
         }
         do {
             let response = try await service.addCardToContext(sessionId: sessionId, cardId: cardId)
+            guard self.sessionId == sessionId else { return false }
             apply(response.context)
             selectedEntryId = response.context.entries.last { $0.cardId == cardId }?.entryId
             errorMessage = nil
             return true
         } catch {
+            guard self.sessionId == sessionId else { return false }
             errorMessage = CardL10n.format(.inspectorAddFailed, value: errorText(error))
             return false
         }
@@ -160,11 +177,23 @@ public final class ContextInspectorModel: ObservableObject {
         }
         do {
             let response = try await service.removeCardFromContext(sessionId: sessionId, cardId: cardId)
+            guard self.sessionId == sessionId else { return }
             apply(response.context)
             errorMessage = nil
         } catch {
+            guard self.sessionId == sessionId else { return }
+            if isContextNotFound(error) {
+                await markContextStaleAndReload()
+                return
+            }
             errorMessage = CardL10n.format(.inspectorRemoveFailed, value: errorText(error))
         }
+    }
+
+    private func markContextStaleAndReload() async {
+        noticeMessage = CardL10n.text(.inspectorRemoveStale)
+        errorMessage = nil
+        await reload(preservingNotice: true)
     }
 
     public func compact() async {
@@ -176,6 +205,7 @@ public final class ContextInspectorModel: ObservableObject {
         let current = compactGeneration
         do {
             let response = try await service.compactContext(sessionId: sessionId, instructions: nil)
+            guard self.sessionId == sessionId else { return }
             if !response.scheduled {
                 isCompacting = false
                 noticeMessage = CardL10n.text(.inspectorNothingToCompact)
@@ -183,6 +213,7 @@ public final class ContextInspectorModel: ObservableObject {
             }
             errorMessage = nil
         } catch {
+            guard self.sessionId == sessionId else { return }
             isCompacting = false
             errorMessage = CardL10n.format(.inspectorCompactFailed, value: errorText(error))
             return
@@ -200,6 +231,12 @@ public final class ContextInspectorModel: ObservableObject {
         guard generation == compactGeneration, isCompacting else { return }
         isCompacting = false
         noticeMessage = CardL10n.text(.inspectorCompactTimedOut)
+    }
+
+    /// 只有「主機找不到這個上下文項目」才當成畫面過期；協定錯誤與連線錯誤仍視為真正的失敗。
+    private func isContextNotFound(_ error: any Error) -> Bool {
+        guard case .server(let frame) = error as? CardiaryClientError else { return false }
+        return frame.code == .notFound
     }
 
     // MARK: - 事件
@@ -242,7 +279,7 @@ public final class ContextInspectorModel: ObservableObject {
     }
 
     public func layerTitle(_ layer: ContextLayer) -> String {
-        CardL10n.text(layer.inspectorKey)
+        CardL10n.text(layer.semanticKey)
     }
 
     private func errorText(_ error: any Error) -> String {
@@ -251,16 +288,13 @@ public final class ContextInspectorModel: ObservableObject {
 }
 
 extension ContextLayer {
-    var inspectorKey: InspectorString {
+    /// 檢視欄和主機共用的四種可見語意；第 2/3/5、6、7/8 層分別歸併。
+    var semanticKey: InspectorString {
         switch self {
-        case .bedrock: return .inspectorLayerBedrock
-        case .persona: return .inspectorLayerPersona
-        case .coreMemory: return .inspectorLayerCoreMemory
-        case .openingMemory: return .inspectorLayerOpeningMemory
-        case .shortTermMemory: return .inspectorLayerShortTermMemory
+        case .bedrock, .persona: return .inspectorLayerBedrock
+        case .coreMemory, .openingMemory, .shortTermMemory: return .inspectorLayerCoreMemory
         case .otherCards: return .inspectorLayerOtherCards
-        case .workingContext: return .inspectorLayerWorkingContext
-        case .volatileState: return .inspectorLayerVolatileState
+        case .workingContext, .volatileState: return .inspectorLayerWorkingContext
         }
     }
 }

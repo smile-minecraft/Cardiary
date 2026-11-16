@@ -92,12 +92,9 @@ public enum InspectorString: String, CaseIterable, CardLocalizedKey {
     case inspectorHeatGrid
     case inspectorLayerBedrock
     case inspectorLayerCoreMemory
-    case inspectorLayerOpeningMemory
     case inspectorLayerOtherCards
-    case inspectorLayerPersona
-    case inspectorLayerShortTermMemory
-    case inspectorLayerVolatileState
     case inspectorLayerWorkingContext
+    case inspectorRemoveStale
     case inspectorLegendFresh
     case inspectorLegendStale
     case inspectorLegendStatic
@@ -285,12 +282,9 @@ enum CardStringTables {
             "inspectorHeatGrid": "比例熱力格",
             "inspectorLayerBedrock": "基岩",
             "inspectorLayerCoreMemory": "核心記憶",
-            "inspectorLayerOpeningMemory": "開局記憶",
             "inspectorLayerOtherCards": "其他卡片",
-            "inspectorLayerPersona": "人格",
-            "inspectorLayerShortTermMemory": "短期記憶",
-            "inspectorLayerVolatileState": "變動狀態",
             "inspectorLayerWorkingContext": "對話內容",
+            "inspectorRemoveStale": "這個區塊已不在上下文，已重新整理",
             "inspectorLegendFresh": "新鮮",
             "inspectorLegendStale": "陳舊",
             "inspectorLegendStatic": "靜態層",
@@ -324,12 +318,9 @@ enum CardStringTables {
             "inspectorHeatGrid": "Heat Grid",
             "inspectorLayerBedrock": "Bedrock",
             "inspectorLayerCoreMemory": "Core Memory",
-            "inspectorLayerOpeningMemory": "Opening Memory",
             "inspectorLayerOtherCards": "Other Cards",
-            "inspectorLayerPersona": "Persona",
-            "inspectorLayerShortTermMemory": "Short-Term Memory",
-            "inspectorLayerVolatileState": "Volatile State",
             "inspectorLayerWorkingContext": "Conversation",
+            "inspectorRemoveStale": "This block is no longer in context and has been refreshed",
             "inspectorLegendFresh": "Fresh",
             "inspectorLegendStale": "Stale",
             "inspectorLegendStatic": "Static Layers",
