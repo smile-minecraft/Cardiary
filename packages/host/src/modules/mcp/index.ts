@@ -28,7 +28,12 @@ import {
 import { HOST_SERVICE_NAMES, ProtocolHandlerError, type CardEnvironment } from "../contract.js";
 import type { HostEngine } from "../../engine/types.js";
 import type { SpawnRegistry } from "../../spawn/wrapper.js";
-import { createMcpClient, McpClientError, type McpClientFactory } from "./client.js";
+import {
+  createMcpClient,
+  McpClientError,
+  type McpClient,
+  type McpClientFactory,
+} from "./client.js";
 import { manifest } from "./manifest.js";
 import { registerMcpProtocol, toServerInfo, type McpController } from "./protocol.js";
 import { McpToolCache } from "./tool-cache.js";
@@ -57,6 +62,17 @@ export interface McpModuleOptions {
 interface ActiveServer {
   runtime: McpServerRuntime;
   registration: ProtocolRegistrationHandle;
+}
+
+/**
+ * 一次進行中的啟動。`cancelled` 就是這次啟動的 token：停用、移除、改設定
+ * 或關閉模組時會把它翻成 true，晚回來的結果一律丟棄。
+ */
+interface Launch {
+  readonly client: McpClient;
+  cancelled: boolean;
+  /** 啟動工作本身；`settled()` 與 `stopServer()` 都要等它結束。 */
+  task: Promise<void>;
 }
 
 /** 模組對外提供的把手；`settled` 只給測試等待背景啟動完成。 */
@@ -94,7 +110,11 @@ export async function activateMcpModule(
 
   const active = new Map<string, ActiveServer>();
   const failures = new Map<string, string>();
-  const starting = new Map<string, Promise<void>>();
+  /**
+   * 進行中的啟動。作廢的啟動留到工作自己結束才移除，`settled()` 才等得到；
+   * 舊啟動不能在新的設定生效後才把工具組掛回去。
+   */
+  const launches = new Map<string, Launch>();
   const pendingAdds = new Map<string, Promise<void>>();
   let disposed = false;
   /** 啟動時載入設定的背景工作；`settled` 要等它跑完，測試才不會跟著競速。 */
@@ -132,6 +152,10 @@ export async function activateMcpModule(
     logger.warn("MCP 伺服器啟動失敗", { serverId, message });
   };
 
+  /** 這次啟動是否還是有效的那一次；作廢或已被後續啟動取代就回 false。 */
+  const isCurrentLaunch = (serverId: string, launch: Launch): boolean =>
+    !disposed && !launch.cancelled && launches.get(serverId) === launch;
+
   const startServer = async (record: McpServerRecord): Promise<void> => {
     if (disposed || !record.enabled || active.has(record.serverId)) {
       return;
@@ -143,38 +167,58 @@ export async function activateMcpModule(
       emitChanged(infoOf(record));
       return;
     }
-    const existing = starting.get(record.serverId);
-    if (existing !== undefined) {
-      return existing;
+    const existing = launches.get(record.serverId);
+    if (existing !== undefined && !existing.cancelled) {
+      return existing.task;
     }
-    const task = (async () => {
-      const client = clientFactory(record, clientContext);
+
+    let client: McpClient;
+    try {
+      client = clientFactory(record, clientContext);
+    } catch (error) {
+      reportFailure(record.serverId, describeError(error));
+      emitChanged(infoOf(record));
+      return;
+    }
+
+    const launch: Launch = { client, cancelled: false, task: Promise.resolve() };
+    launches.set(record.serverId, launch);
+    launch.task = (async () => {
       try {
         // 先做一次 tools/list：連不上、協定不合或網域被擋都在這裡失敗。
         // 失敗時不註冊工具，模型看不到一個永遠壞掉的伺服器。
         const tools = await client.listTools();
-        if (disposed) {
-          await client.close();
+        // 連線期間設定可能被移除、停用、換網域，或整個模組關閉。回來後
+        // 重新讀正本，只要不是當初核准並連線的那一筆，這次啟動就作廢。
+        const current = await store.get(record.serverId);
+        if (
+          !isCurrentLaunch(record.serverId, launch) ||
+          current === null ||
+          !current.enabled ||
+          !sameConnection(record, current) ||
+          !isApprovedForLaunch(current)
+        ) {
+          await client.close().catch(() => undefined);
           return;
         }
         // 開機時抓到的清單是目前的真相，順手更新快取；重啟後 list_tools
         // 可以直接用快取，不必再連一次。快取寫不進去不影響伺服器運作。
         if (toolCache !== null) {
           try {
-            toolCache.save(record.serverId, tools);
+            toolCache.save(current.serverId, tools);
           } catch (error) {
             logger.warn("MCP 工具快取寫入失敗", {
-              serverId: record.serverId,
+              serverId: current.serverId,
               message: describeError(error),
             });
           }
         }
         const runtime: McpServerRuntime = {
-          record,
+          record: current,
           client,
-          cache: toolCache?.portFor(record.serverId) ?? null,
+          cache: toolCache?.portFor(current.serverId) ?? null,
           refresh: () => {
-            if (!disposed && active.get(record.serverId)?.runtime === runtime) {
+            if (!disposed && active.get(current.serverId)?.runtime === runtime) {
               // 同一個 bundleId+generation 重新註冊會換掉引擎裡的定義。
               // 不要先 dispose 舊手把：retire 以 bundleId+generation 為鍵，
               // 會把剛換上的新定義一起退掉。
@@ -187,25 +231,39 @@ export async function activateMcpModule(
           tools: null,
         };
         registerBundle(runtime);
-        failures.delete(record.serverId);
+        failures.delete(current.serverId);
         logger.info("MCP 伺服器已啟動", {
-          serverId: record.serverId,
+          serverId: current.serverId,
           tools: tools.length,
         });
-        emitChanged(infoOf(record));
+        emitChanged(infoOf(current));
       } catch (error) {
         await client.close().catch(() => undefined);
-        reportFailure(record.serverId, describeError(error));
-        emitChanged(infoOf(record));
-      } finally {
-        starting.delete(record.serverId);
+        // 作廢的啟動不是失敗，不要蓋掉停用或移除的結果。
+        if (isCurrentLaunch(record.serverId, launch)) {
+          reportFailure(record.serverId, describeError(error));
+          emitChanged(infoOf(record));
+        }
       }
-    })();
-    starting.set(record.serverId, task);
-    return task;
+    })().finally(() => {
+      if (launches.get(record.serverId) === launch) {
+        launches.delete(record.serverId);
+      }
+    });
+    return launch.task;
   };
 
+  /**
+   * 停掉伺服器，也讓進行中的啟動失效。先關閉 client 讓 `listTools()` 解脫，
+   * 再等啟動工作結束；否則舊啟動會在新的設定生效後才完成，把工具掛回去。
+   */
   const stopServer = async (serverId: string): Promise<void> => {
+    const launch = launches.get(serverId);
+    if (launch !== undefined) {
+      launch.cancelled = true;
+      await launch.client.close().catch(() => undefined);
+      await launch.task;
+    }
     const entry = active.get(serverId);
     if (entry === undefined) {
       return;
@@ -443,7 +501,8 @@ export async function activateMcpModule(
       // 通過綁定比對後才是使用者這次要求的變更，重新綁定新的內容。
       bindings.approve(record);
       if (record.enabled && record.transport === "http") {
-        // 網域白名單改變後重新連線；舊連線不能沿用先前的判斷。
+        // 網域白名單改變後重新連線；舊連線不能沿用先前的判斷。`stopServer`
+        // 也會讓進行中的啟動失效，避免用舊白名單完成啟動。
         await stopServer(serverId);
         await startServer(record);
       }
@@ -461,17 +520,19 @@ export async function activateMcpModule(
     controller,
     async settled(): Promise<void> {
       await startupTask;
-      while (starting.size > 0 || pendingAdds.size > 0) {
-        await Promise.all([...starting.values(), ...pendingAdds.values()]);
+      while (launches.size > 0 || pendingAdds.size > 0) {
+        await Promise.allSettled([
+          ...[...launches.values()].map((launch) => launch.task),
+          ...pendingAdds.values(),
+        ]);
       }
     },
     async dispose(): Promise<void> {
       disposed = true;
       protocolRegistration.dispose();
-      for (const [serverId] of [...active]) {
-        await stopServer(serverId);
-      }
-      starting.clear();
+      // 進行中的啟動也要收掉；只停 active 會把晚回來的 client 留在行程裡。
+      const serverIds = new Set([...active.keys(), ...launches.keys()]);
+      await Promise.all([...serverIds].map((serverId) => stopServer(serverId)));
       pendingAdds.clear();
     },
   };
@@ -515,6 +576,25 @@ function resolveBindings(
     cabinet.state,
     options.now === undefined ? {} : { now: options.now },
   );
+}
+
+/**
+ * 啟動後重新讀到的設定是否仍是當初連線的那一筆。連線參數只要有一項不同，
+ * 這條連線就不能沿用；名稱之類不影響連線的欄位不列入。
+ */
+function sameConnection(started: McpServerRecord, current: McpServerRecord): boolean {
+  return (
+    started.serverId === current.serverId &&
+    started.transport === current.transport &&
+    started.command === current.command &&
+    started.url === current.url &&
+    sameList(started.args ?? [], current.args ?? []) &&
+    sameList(started.allowedHosts, current.allowedHosts)
+  );
+}
+
+function sameList(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function describeTarget(input: McpServerInput): { label: string; value: string }[] {
