@@ -290,23 +290,6 @@
         }
       }
     },
-    "inspectorLayerOpeningMemory": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Opening Memory"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "開局記憶"
-          }
-        }
-      }
-    },
     "inspectorLayerOtherCards": {
       "extractionState": "manual",
       "localizations": {
@@ -324,57 +307,6 @@
         }
       }
     },
-    "inspectorLayerPersona": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Persona"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "人格"
-          }
-        }
-      }
-    },
-    "inspectorLayerShortTermMemory": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Short-Term Memory"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "短期記憶"
-          }
-        }
-      }
-    },
-    "inspectorLayerVolatileState": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Volatile State"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "變動狀態"
-          }
-        }
-      }
-    },
     "inspectorLayerWorkingContext": {
       "extractionState": "manual",
       "localizations": {
@@ -388,6 +320,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "對話內容"
+          }
+        }
+      }
+    },
+    "inspectorRemoveStale": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This block is no longer in context and has been refreshed"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這個區塊已不在上下文，已重新整理"
           }
         }
       }

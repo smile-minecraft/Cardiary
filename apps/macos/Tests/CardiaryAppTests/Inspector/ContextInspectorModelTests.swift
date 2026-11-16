@@ -6,14 +6,16 @@ import XCTest
 
 /// 檢視欄測試用的上下文服務：加入、移除與壓縮都會改手上的 `ContextView`，
 /// 讓模型收到跟真主機形狀相同的回應。
-actor MutableContextService: ContextService {
+private actor MutableContextService: ContextService {
     private var view: ContextView
+    private var removeError: (any Error)?
     private(set) var addedCards: [(sessionId: String, cardId: String)] = []
     private(set) var removedCards: [(sessionId: String, cardId: String)] = []
     private(set) var compactCalls: [String] = []
 
-    init(view: ContextView) {
+    init(view: ContextView, removeError: (any Error)? = nil) {
         self.view = view
+        self.removeError = removeError
     }
 
     func getContext(sessionId: String) async throws -> ContextGetResponsePayload {
@@ -57,6 +59,7 @@ actor MutableContextService: ContextService {
         cardId: String
     ) async throws -> ContextRemoveCardResponsePayload {
         removedCards.append((sessionId, cardId))
+        if let removeError { throw removeError }
         let entries = view.entries.map { entry in
             guard entry.cardId == cardId else { return entry }
             return ContextEntry(
@@ -113,6 +116,58 @@ actor MutableContextService: ContextService {
             lastCompactedAt: "2026-01-01T00:10:00Z"
         )
         return view
+    }
+}
+
+private actor StatefulReloadContextService: ContextService {
+    private var view: ContextView
+    private var removeAttempted = false
+    let reloadAfterRemoval: ContextView
+    let removeError: any Error
+
+    init(view: ContextView, reloadAfterRemoval: ContextView, removeError: any Error) {
+        self.view = view
+        self.reloadAfterRemoval = reloadAfterRemoval
+        self.removeError = removeError
+    }
+
+    func getContext(sessionId: String) async throws -> ContextGetResponsePayload {
+        ContextGetResponsePayload(context: removeAttempted ? reloadAfterRemoval : view)
+    }
+
+    func addCardToContext(sessionId: String, cardId: String) async throws -> ContextAddCardResponsePayload {
+        ContextAddCardResponsePayload(context: view)
+    }
+
+    func removeCardFromContext(sessionId: String, cardId: String) async throws -> ContextRemoveCardResponsePayload {
+        removeAttempted = true
+        throw removeError
+    }
+
+    func compactContext(sessionId: String, instructions: String?) async throws -> ContextCompactResponsePayload {
+        ContextCompactResponsePayload(sessionId: sessionId, scheduled: false)
+    }
+}
+
+private actor SessionContextService: ContextService {
+    let views: [String: ContextView]
+
+    init(views: [String: ContextView]) { self.views = views }
+
+    func getContext(sessionId: String) async throws -> ContextGetResponsePayload {
+        ContextGetResponsePayload(context: views[sessionId]!)
+    }
+
+    func addCardToContext(sessionId: String, cardId: String) async throws -> ContextAddCardResponsePayload {
+        fatalError("測試不支援加入")
+    }
+
+    func removeCardFromContext(sessionId: String, cardId: String) async throws -> ContextRemoveCardResponsePayload {
+        fatalError("測試不支援移除")
+    }
+
+    func compactContext(sessionId: String, instructions: String?) async throws -> ContextCompactResponsePayload {
+        fatalError("測試不支援壓縮")
     }
 }
 
@@ -310,6 +365,126 @@ final class ContextInspectorModelTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 150_000_000)
         XCTAssertTrue(model.isCompacting, "第一次壓縮的逾時不能解除後來的壓縮")
+    }
+
+    func testRemoveStaleEntryReloadsInsteadOfShowingError() async {
+        let base = view([
+            entry("entry-a", layer: .openingMemory, cardId: "card-a", tokens: 14, position: 0),
+        ])
+        let stale = view([
+            entry("entry-working", layer: .workingContext, tokens: 300, position: 1),
+        ], version: 2)
+        let notInContext = CardiaryClientError.server(ErrorFrame(
+            code: .notFound,
+            message: "卡片 card-a 不在這場對話的上下文裡。",
+            retryable: false
+        ))
+        let contextService = StatefulReloadContextService(view: base, reloadAfterRemoval: stale, removeError: notInContext)
+        let model = ContextInspectorModel(freshness: CardFreshnessStore())
+        model.attach(service: contextService, cardService: PagedCardService())
+        await model.open(sessionId: "s1")
+        model.selectedEntryId = "entry-a"
+
+        await model.removeSelected()
+
+        XCTAssertEqual(model.noticeMessage, CardL10n.text(.inspectorRemoveStale))
+        XCTAssertNil(model.errorMessage)
+        XCTAssertEqual(model.entries.map(\.entryId), ["entry-working"])
+        XCTAssertNil(model.selectedEntryId, "重載後不存在的選取項目要被清掉")
+    }
+
+    func testRemoveFailureOtherThanNotFoundStillShowsError() async {
+        let base = view([
+            entry("entry-a", layer: .otherCards, cardId: "card-a", tokens: 120, position: 0),
+        ])
+        let model = ContextInspectorModel(freshness: CardFreshnessStore())
+        model.attach(
+            service: MutableContextService(view: base, removeError: CardiaryClientError.timeout),
+            cardService: nil
+        )
+        await model.open(sessionId: "s1")
+        model.selectedEntryId = "entry-a"
+
+        await model.removeSelected()
+
+        XCTAssertNil(model.noticeMessage, "逾時不是內容過期，不顯示已重新整理")
+        XCTAssertEqual(
+            model.errorMessage,
+            CardL10n.format(.inspectorRemoveFailed, value: "主機服務沒有在期限內回應。")
+        )
+        XCTAssertEqual(model.entries.map(\.entryId), ["entry-a"], "失敗時保留原畫面")
+    }
+
+    func testRestartLoadsExistingContextBeforeShowingIt() async {
+        let persisted = view([
+            entry("entry-persisted", layer: .openingMemory, cardId: "card-persisted", tokens: 14, position: 0),
+            entry("entry-working", layer: .workingContext, tokens: 300, position: 1),
+        ], version: 7)
+        let model = ContextInspectorModel(freshness: CardFreshnessStore())
+        model.attach(service: MutableContextService(view: persisted), cardService: PagedCardService())
+
+        await model.open(sessionId: "s1")
+
+        XCTAssertEqual(model.context?.version, 7)
+        XCTAssertEqual(model.entries.map(\.entryId), ["entry-persisted", "entry-working"])
+        XCTAssertFalse(model.isLoading)
+    }
+
+    func testSemanticMappingUsesHostLayers() {
+        XCTAssertEqual(ContextBlockColor.legendLayers, [.bedrock, .coreMemory, .otherCards, .workingContext])
+        XCTAssertEqual(ContextBlockColor.tone(for: .openingMemory), .orange)
+        XCTAssertEqual(ContextBlockColor.tone(for: .shortTermMemory), .orange)
+        XCTAssertEqual(ContextLayer.openingMemory.semanticKey, .inspectorLayerCoreMemory)
+        XCTAssertEqual(CardL10n.text(ContextLayer.openingMemory.semanticKey, language: .zhHant), "核心記憶")
+    }
+
+    func testSwitchToConversationWithLowerVersionShowsItsOwnContext() async {
+        let first = view([
+            entry("entry-a", layer: .openingMemory, cardId: "card-a", tokens: 14, position: 0),
+        ], version: 5)
+        let second = ContextView(
+            sessionId: "s2", version: 1, entries: [], usedTokens: 0,
+            budgetTokens: 200_000, contextWindow: 220_000, compactionThreshold: 0.75,
+            lastCompactedAt: nil
+        )
+        let model = ContextInspectorModel(freshness: CardFreshnessStore())
+        model.attach(service: SessionContextService(views: ["s1": first, "s2": second]), cardService: nil)
+
+        await model.open(sessionId: "s1")
+        await model.open(sessionId: "s2")
+
+        XCTAssertEqual(model.sessionId, "s2")
+        XCTAssertEqual(model.context?.sessionId, "s2")
+        XCTAssertTrue(model.entries.isEmpty, "不可顯示上一場對話的卡片")
+    }
+
+    func testSwitchToConversationClearsCompactionSummary() async {
+        let first = view([], version: 5)
+        let second = ContextView(
+            sessionId: "s2", version: 1, entries: [], usedTokens: 0,
+            budgetTokens: 200_000, contextWindow: 220_000, compactionThreshold: 0.75,
+            lastCompactedAt: nil
+        )
+        let model = ContextInspectorModel(freshness: CardFreshnessStore())
+        model.attach(service: SessionContextService(views: ["s1": first, "s2": second]), cardService: nil)
+        await model.open(sessionId: "s1")
+        model.handle(frame: .contextCompactedEvent(ContextCompactedEvent(
+            stream: "session:s1",
+            seq: 2,
+            emittedAt: "2026-01-01T00:10:01Z",
+            payload: ContextCompactedEventPayload(
+                sessionId: "s1",
+                summaryCardId: "card-summary",
+                beforeTokens: 600,
+                afterTokens: 80,
+                compactedAt: "2026-01-01T00:10:00Z"
+            )
+        )))
+        XCTAssertNotNil(model.lastCompaction)
+
+        await model.open(sessionId: "s2")
+
+        XCTAssertNil(model.lastCompaction, "上一場對話的壓縮摘要不能留在畫面")
     }
 
     func testStaleContextVersionIsIgnored() async {
