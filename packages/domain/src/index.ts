@@ -14,6 +14,7 @@ export * from "./distillation/index.js";
 export * from "./documents/index.js";
 export * from "./freshness/index.js";
 export * from "./media/index.js";
+export * from "./mcp/index.js";
 export * from "./pairing/index.js";
 export * from "./schedules/index.js";
 export * from "./permissions/index.js";

@@ -16,6 +16,7 @@ export * from "./json.js";
 export * from "./lifecycle.js";
 export * from "./logs.js";
 export * from "./maintenance.js";
+export * from "./mcp/index.js";
 export * from "./memory/index.js";
 export * from "./paths.js";
 export * from "./registry.js";
