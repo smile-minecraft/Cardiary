@@ -12,10 +12,12 @@ import type { SettingsRecord, SettingsStoreLike, StoreSettingInput } from "./ser
 export class TransactionalSettingsStore implements SettingsStoreLike {
   readonly #db: Database;
   readonly #store: SettingsStore;
+  readonly notificationKey: object;
 
   constructor(db: Database, store: SettingsStore) {
     this.#db = db;
     this.#store = store;
+    this.notificationKey = store;
   }
 
   get(key: string): SettingsRecord | null {

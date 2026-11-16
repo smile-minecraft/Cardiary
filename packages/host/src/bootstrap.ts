@@ -49,6 +49,9 @@ import {
   persistentCardEnvironment,
 } from "./modules/cards/environment.js";
 import { SpawnRegistry } from "./spawn/wrapper.js";
+import { SettingsService } from "./settings/service.js";
+import { TransactionalSettingsStore } from "./settings/store.js";
+import { settingLevel } from "./settings/catalog.js";
 import { readFolderIdentity } from "./storage/folder.js";
 import type { StorageBundle } from "./storage/interfaces.js";
 import {
@@ -199,6 +202,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
           ...(trace === undefined ? {} : { trace }),
         });
   hostServices.provide(HOST_SERVICE_NAMES.cardStorage, cardEnvironment);
+  hostServices.provide(HOST_SERVICE_NAMES.spawn, spawn);
   // 權限閘道在呼叫當下才取：本機工具提供服務之後就生效，不必重啟主機。
   const permissionGate: ToolPermissionGate = {
     evaluate(request) {
@@ -358,6 +362,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
       hostServices,
       paths,
       folderPath: folder.path,
+      cardEnvironment,
       logger,
       clock,
     }),
@@ -436,6 +441,7 @@ function moduleRuntimeServices(input: {
   readonly hostServices: HostServiceRegistryImpl;
   readonly paths: CardiaryPaths;
   readonly folderPath: string;
+  readonly cardEnvironment: CardEnvironment;
   readonly logger: EngineLogger;
   readonly clock: Clock;
 }): ModuleRuntimeServices {
@@ -453,10 +459,32 @@ function moduleRuntimeServices(input: {
       throw new Error("M1 尚未實作背景任務。");
     },
   };
+  let settingsService: SettingsService | undefined;
+  const service = (): SettingsService => {
+    settingsService ??= new SettingsService(
+      new TransactionalSettingsStore(input.cardEnvironment.state, input.cardEnvironment.settings),
+    );
+    return settingsService;
+  };
   const settings: ModuleSettingsReader = {
-    get: () => undefined,
-    getLevel: () => "human-only",
-    onChange: () => () => {},
+    get: (key) => service().get(key),
+    getLevel: (key) => settingLevel(key, service().record(key)?.level ?? "human-only"),
+    onChange: (listener) =>
+      service().onChange((change) => {
+        const actor = change.changedBy;
+        listener({
+          key: change.item.key,
+          previousValue: change.previous,
+          nextValue: change.item.value,
+          level: change.item.level,
+          changedBy: actor.startsWith("user:")
+            ? { kind: "human", clientId: actor.slice(5) }
+            : actor.startsWith("agent:")
+              ? { kind: "agent", agentId: actor.slice(6) }
+              : { kind: "system", component: actor },
+          changedAt: change.changedAt,
+        });
+      }),
   };
   const secrets: SecretAccess = {
     async withSecret() {

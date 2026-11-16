@@ -15,6 +15,7 @@ import { manifest } from "./manifest.js";
 import { registerCardsProtocol } from "./protocol.js";
 import { CardStateStore } from "./state.js";
 import { createCardToolBundle } from "./tools.js";
+import type { RetrievalService } from "../retrieval/service.js";
 import { CardWatcher, parseCardRescanIntervalMs } from "./watcher.js";
 
 /**
@@ -90,8 +91,14 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   });
   watcher.start();
 
-  registerCardsProtocol({ library, protocol: context.services.protocol });
-  context.registerToolBundle(createCardToolBundle({ library }));
+  const search: CardLibrary["search"] = (query) => {
+    const retrieval = context.services.host.get<RetrievalService>("retrieval");
+    return retrieval === undefined
+      ? library.search({ ...query, includeSuperseded: false })
+      : retrieval.search(query, "search");
+  };
+  registerCardsProtocol({ library, protocol: context.services.protocol, search });
+  context.registerToolBundle(createCardToolBundle({ library, search }));
 
   const cardService: CardService = library;
   const cardIndex: CardIndex = {

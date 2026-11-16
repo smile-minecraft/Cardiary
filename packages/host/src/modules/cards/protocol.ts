@@ -54,6 +54,7 @@ interface DedupeEntry {
 export interface CardsProtocolOptions {
   readonly library: CardLibrary;
   readonly protocol: ProtocolEventEmitter;
+  readonly search?: CardLibrary["search"];
 }
 
 export function registerCardsProtocol(options: CardsProtocolOptions): void {
@@ -83,7 +84,7 @@ export function registerCardsProtocol(options: CardsProtocolOptions): void {
           case "card.delete":
             return asJson(await deleteCard(library, request.payload, dedupe, remember));
           case "card.search":
-            return asJson(await searchCards(library, request.payload));
+            return asJson(await searchCards(library, request.payload, options.search));
           case "card.refresh":
             return asJson(await refreshCard(library, request.payload));
           default:
@@ -247,6 +248,7 @@ async function deleteCard(
 async function searchCards(
   library: CardLibrary,
   payload: JsonValue,
+  search?: CardLibrary["search"],
 ): Promise<CardSearchResponsePayload> {
   const input = objectOf(payload);
   const kinds = optionalKinds(input);
@@ -260,7 +262,7 @@ async function searchCards(
     ...(includeSuperseded === undefined ? {} : { includeSuperseded }),
     ...(limit === undefined ? {} : { limit }),
   };
-  const page = await library.search(query);
+  const page = await (search === undefined ? library.search(query) : search(query));
   return {
     hits: page.items.map((hit) => ({
       card: wireSummary(library, hit.card.cardId),
