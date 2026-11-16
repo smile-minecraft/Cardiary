@@ -22,9 +22,7 @@
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
-	<!-- 只留選單列，不佔 Dock。關閉視窗後服務仍在執行。 -->
-	<key>LSUIElement</key>
-	<true/>
+	<!-- 一般 App 會顯示在 Dock；關閉視窗後由生命週期處理保持服務執行。 -->
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
