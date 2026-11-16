@@ -7,7 +7,7 @@ import Foundation
 actor FakeCardiaryService:
     ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService,
     CardService, ContextService, SessionManagementService, MediaImportService, NotificationService,
-    StorageService, McpService
+    StorageService, McpService, AgentService
 {
     enum Failure: Error, Equatable {
         case send
@@ -38,6 +38,7 @@ actor FakeCardiaryService:
     private var storageUsageRows: [StorageCategoryUsage]
     private let storagePreviewPayload: StorageCleanupPreviewResponsePayload?
     private let storageApplyPayload: StorageCleanupApplyResponsePayload?
+    private var agentSessions: [AgentSessionInfo]
 
     private(set) var historyCursors: [String?] = []
     private(set) var listCalls = 0
@@ -90,6 +91,7 @@ actor FakeCardiaryService:
         storageUsage: [StorageCategoryUsage] = [],
         storagePreview: StorageCleanupPreviewResponsePayload? = nil,
         storageApply: StorageCleanupApplyResponsePayload? = nil,
+        agentSessions: [AgentSessionInfo] = [],
         failure: Failure? = nil
     ) {
         self.fallbackSessions = sessions
@@ -108,6 +110,7 @@ actor FakeCardiaryService:
         self.storageUsageRows = storageUsage
         self.storagePreviewPayload = storagePreview
         self.storageApplyPayload = storageApply
+        self.agentSessions = agentSessions
         self.failure = failure
     }
 
@@ -259,7 +262,7 @@ actor FakeCardiaryService:
         if failure == .approval { throw Failure.approval }
         let effect: ApprovalEffect
         switch optionId {
-        case "reject": effect = .reject
+        case "reject", "deny": effect = .reject
         case "always": effect = .approveAlways
         default: effect = .approve
         }
@@ -365,6 +368,12 @@ actor FakeCardiaryService:
     /// 從測試模擬事件到達；模型的事件處理應該更新資料。
     func emitMcpServersChanged(_ payload: McpServersChangedEventPayload) {
         mcpServerHandler?(payload)
+    }
+
+    // MARK: - AgentService
+
+    func listAgents() async throws -> AgentListResponsePayload {
+        AgentListResponsePayload(agents: agentSessions)
     }
 
     // MARK: - CardService
@@ -836,6 +845,43 @@ enum Fixtures {
             createdAt: "2026-01-01T00:00:00Z",
             updatedAt: updatedAt,
             messageCount: messageCount
+        )
+    }
+
+    /// 外部代理會話；`startedAt` 可排序，方便測試快照順序。
+    static func agentInfo(
+        id: String = "agent-1",
+        kind: AgentKind = .opencode,
+        status: AgentStatus = .running,
+        workingDirectory: String = "/work",
+        progress: AgentProgress? = nil,
+        message: String? = nil,
+        resultUnknown: Bool? = nil,
+        pendingPermission: AgentPendingPermission? = nil,
+        startedAt: String = "2026-01-01T00:00:00Z"
+    ) -> AgentSessionInfo {
+        AgentSessionInfo(
+            agentSessionId: id,
+            agentKind: kind,
+            status: status,
+            workingDirectory: workingDirectory,
+            progress: progress,
+            message: message,
+            resultUnknown: resultUnknown,
+            pendingPermission: pendingPermission,
+            startedAt: startedAt
+        )
+    }
+
+    static func agentPermission(
+        approvalId: String = "approval-1",
+        toolName: String = "shell",
+        description: String? = "執行指令"
+    ) -> AgentPendingPermission {
+        AgentPendingPermission(
+            approvalId: approvalId,
+            toolName: toolName,
+            description: description
         )
     }
 

@@ -1292,6 +1292,24 @@ public actor CardiaryConnection {
         return response.payload
     }
 
+    // MARK: - 外部代理
+
+    public func listAgents(
+        options: RequestOptions = .default
+    ) async throws -> AgentListResponsePayload {
+        let request = AgentListRequest(
+            id: RequestID.next(),
+            payload: AgentListRequestPayload()
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .agentListResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "agent.list 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
     // MARK: - 收送
 
     private func perform<T: Encodable>(
@@ -1476,6 +1494,12 @@ public actor CardiaryConnection {
         case .mcpServerSetEnabledResponse(let response):
             resume(response.replyTo, with: frame)
         case .mcpServerAllowHostsResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .agentListResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .agentStartResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .agentStopResponse(let response):
             resume(response.replyTo, with: frame)
         default:
             eventContinuation.yield(frame)

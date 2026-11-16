@@ -621,6 +621,14 @@ public actor CardiaryClient {
         return try await connection.getBoard(boardId: boardId)
     }
 
+    // MARK: - 外部代理
+
+    /// 列出主機目前追蹤的外部代理會話；`agent.state_changed` 會持續更新內容。
+    public func listAgents() async throws -> AgentListResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.listAgents()
+    }
+
     public func createBoard(
         boardId: String,
         title: String,

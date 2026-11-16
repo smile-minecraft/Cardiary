@@ -1,0 +1,249 @@
+import CardiaryKit
+import Combine
+import Foundation
+
+/// 一場外部代理會話在檢視欄裡的樣子。
+///
+/// 資料來自 `agent.list` 的快照與 `agent.state_changed` 事件；事件沒有工作目錄與
+/// 開始時間，更新既有會話時保留快照的值。
+public struct AgentSessionPresentation: Identifiable, Equatable, Sendable {
+    public let agentSessionId: String
+    public let agentKind: AgentKind
+    public let status: AgentStatus
+    public let workingDirectory: String
+    public let progress: AgentProgress?
+    public let message: String?
+    /// 代理在回報結果前結束；介面要明說結果無法確認，不能當成成功。
+    public let resultUnknown: Bool
+    public let pendingPermission: AgentPendingPermission?
+    public let startedAt: String
+
+    public var id: String { agentSessionId }
+
+    public init(info: AgentSessionInfo) {
+        self.agentSessionId = info.agentSessionId
+        self.agentKind = info.agentKind
+        self.status = info.status
+        self.workingDirectory = info.workingDirectory
+        self.progress = info.progress
+        self.message = info.message
+        self.resultUnknown = info.resultUnknown ?? false
+        self.pendingPermission = info.pendingPermission
+        self.startedAt = info.startedAt
+    }
+
+    public init(payload: AgentStateChangedEventPayload, startedAt: String, previous: Self?) {
+        self.agentSessionId = payload.agentSessionId
+        self.agentKind = payload.agentKind
+        self.status = payload.status
+        self.workingDirectory = previous?.workingDirectory ?? ""
+        self.progress = payload.progress
+        self.message = payload.message
+        self.resultUnknown = payload.resultUnknown ?? false
+        self.pendingPermission = payload.pendingPermission
+        self.startedAt = previous?.startedAt ?? startedAt
+    }
+
+    /// 完整欄位的初始化；本機更新（例如清掉待核准）用得到。
+    public init(
+        agentSessionId: String,
+        agentKind: AgentKind,
+        status: AgentStatus,
+        workingDirectory: String,
+        progress: AgentProgress?,
+        message: String?,
+        resultUnknown: Bool,
+        pendingPermission: AgentPendingPermission?,
+        startedAt: String
+    ) {
+        self.agentSessionId = agentSessionId
+        self.agentKind = agentKind
+        self.status = status
+        self.workingDirectory = workingDirectory
+        self.progress = progress
+        self.message = message
+        self.resultUnknown = resultUnknown
+        self.pendingPermission = pendingPermission
+        self.startedAt = startedAt
+    }
+
+    /// 決定送給 `approval.decide`，成功後本機先清掉待核准，等事件再確認。
+    public func clearingPermission() -> Self {
+        Self(
+            agentSessionId: agentSessionId,
+            agentKind: agentKind,
+            status: status,
+            workingDirectory: workingDirectory,
+            progress: progress,
+            message: message,
+            resultUnknown: resultUnknown,
+            pendingPermission: nil,
+            startedAt: startedAt
+        )
+    }
+
+    public func kindText(language: AppLanguage? = nil) -> String {
+        switch agentKind {
+        case .opencode: return AppL10n.text(.agentKindOpencode, language: language)
+        case .claudeCode: return AppL10n.text(.agentKindClaudeCode, language: language)
+        }
+    }
+
+    public func statusText(language: AppLanguage? = nil) -> String {
+        switch status {
+        case .starting: return AppL10n.text(.agentStatusStarting, language: language)
+        case .running: return AppL10n.text(.agentStatusRunning, language: language)
+        case .waitingApproval: return AppL10n.text(.agentStatusWaitingApproval, language: language)
+        case .stopped: return AppL10n.text(.agentStatusStopped, language: language)
+        case .failed: return AppL10n.text(.agentStatusFailed, language: language)
+        }
+    }
+
+    /// 主機的完成步數除以總步數；總步數不是正數時沒有比例可畫。
+    public var progressFraction: Double? {
+        guard let progress, progress.total > 0 else { return nil }
+        let value = Double(progress.completed) / Double(progress.total)
+        return min(max(value, 0), 1)
+    }
+
+    public func progressText(language: AppLanguage? = nil) -> String? {
+        guard let progress else { return nil }
+        return AppL10n.format(
+            .agentProgressStep,
+            value: "\(progress.completed)/\(progress.total)",
+            language: language
+        )
+    }
+}
+
+/// 檢視欄的外部代理清單：快照、事件更新、待核准的決定。
+@MainActor
+public final class AgentModel: ObservableObject {
+    @Published public private(set) var sessions: [AgentSessionPresentation] = []
+    /// 是否拿過主機的完整清單。事件可能先到，但沒有快照就不知道還有哪些會話。
+    @Published public private(set) var isKnown = false
+    @Published public private(set) var decidingIds: Set<String> = []
+    @Published public private(set) var errorMessage: String?
+    @Published public private(set) var noticeMessage: String?
+
+    private var agents: (any AgentService)?
+    private var approvals: (any ApprovalService)?
+    private let language: AppLanguage
+
+    /// - Parameter language: 這個模型產生訊息時用的介面語言；測試可以指定。
+    public init(language: AppLanguage = AppL10n.language) {
+        self.language = language
+    }
+
+    public func attach(service: any AgentService, approvals: any ApprovalService) {
+        self.agents = service
+        self.approvals = approvals
+    }
+
+    /// 從主機重新載入完整清單；事件更新過的內容以這份快照為準。
+    public func reload() async {
+        guard let agents else { return }
+        do {
+            let payload = try await agents.listAgents()
+            update(sessions: payload.agents)
+            errorMessage = nil
+        } catch {
+            errorMessage = AppL10n.format(
+                .conversationError,
+                value: errorText(error),
+                language: language
+            )
+        }
+    }
+
+    /// 主機送來的完整清單。`nil` 代表還沒連上服務。
+    public func update(sessions: [AgentSessionInfo]?) {
+        isKnown = sessions != nil
+        self.sessions = (sessions ?? [])
+            .map(AgentSessionPresentation.init)
+            .sorted { ($0.startedAt, $0.agentSessionId) < ($1.startedAt, $1.agentSessionId) }
+        if self.sessions.isEmpty {
+            decidingIds = []
+        } else {
+            decidingIds.formIntersection(Set(self.sessions.map(\.agentSessionId)))
+        }
+    }
+
+    public func handle(frame: ServerFrame) {
+        guard case .agentStateChangedEvent(let event) = frame else { return }
+        apply(event.payload, startedAt: event.emittedAt)
+    }
+
+    /// 套用一筆狀態變更；沒有對應的會話就新增。
+    public func apply(_ payload: AgentStateChangedEventPayload, startedAt: String) {
+        let existing = sessions.first { $0.agentSessionId == payload.agentSessionId }
+        let updated = AgentSessionPresentation(
+            payload: payload,
+            startedAt: startedAt,
+            previous: existing
+        )
+        if let index = sessions.firstIndex(where: { $0.agentSessionId == payload.agentSessionId }) {
+            sessions[index] = updated
+        } else {
+            sessions.append(updated)
+        }
+        sessions.sort { ($0.startedAt, $0.agentSessionId) < ($1.startedAt, $1.agentSessionId) }
+    }
+
+    public func markDisconnected() {
+        update(sessions: nil)
+        errorMessage = nil
+        noticeMessage = nil
+    }
+
+    public func approve(_ session: AgentSessionPresentation) async {
+        await decide(session, optionId: "approve")
+    }
+
+    public func reject(_ session: AgentSessionPresentation) async {
+        await decide(session, optionId: "deny")
+    }
+
+    /// 送出待核准的決定。成功後先在本機清掉，主機的 `agent.state_changed` 再確認一次。
+    public func decide(_ session: AgentSessionPresentation, optionId: String) async {
+        guard let permission = session.pendingPermission else { return }
+        guard !decidingIds.contains(session.agentSessionId) else { return }
+        guard let approvals else {
+            errorMessage = AppL10n.text(.agentServiceUnavailable, language: language)
+            return
+        }
+
+        decidingIds.insert(session.agentSessionId)
+        defer { decidingIds.remove(session.agentSessionId) }
+        do {
+            _ = try await approvals.decideApproval(
+                approvalId: permission.approvalId,
+                optionId: optionId,
+                note: nil
+            )
+            if let index = sessions.firstIndex(where: { $0.agentSessionId == session.agentSessionId }) {
+                sessions[index] = sessions[index].clearingPermission()
+            }
+            errorMessage = nil
+            noticeMessage = AppL10n.text(
+                optionId == "approve" ? .approvalApproved : .approvalRejected,
+                language: language
+            )
+        } catch {
+            errorMessage = AppL10n.format(
+                .conversationError,
+                value: errorText(error),
+                language: language
+            )
+        }
+    }
+
+    public func dismissMessages() {
+        errorMessage = nil
+        noticeMessage = nil
+    }
+
+    private func errorText(_ error: any Error) -> String {
+        (error as? CardiaryClientError)?.errorDescription ?? "\(error)"
+    }
+}

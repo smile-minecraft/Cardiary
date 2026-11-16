@@ -60,8 +60,9 @@ enum AppRegistry {
             systemImage: "gearshape.fill"
         ))
 
-        // 檢視欄：審批面板是真的實作；上下文面板由卡片介面提供。
+        // 檢視欄：審批與外部代理是真的實作；上下文面板由卡片介面提供。
         app.inspector.register(ApprovalInspectorPanel(model: app.approvals))
+        app.inspector.register(AgentsInspectorPanel(model: app.agents))
         app.inspector.register(PlaceholderInspectorPanel(
             id: contextInspectorId,
             titleKey: .inspectorTitle,

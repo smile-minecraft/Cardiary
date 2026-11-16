@@ -79,6 +79,22 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case approvalRejected
     case approvalServiceUnavailable
     case approvalTool
+    case inspectorAgentsTitle
+    case inspectorAgentsEmpty
+    case agentsUnavailable
+    case agentKindOpencode
+    case agentKindClaudeCode
+    case agentStatusStarting
+    case agentStatusRunning
+    case agentStatusWaitingApproval
+    case agentStatusStopped
+    case agentStatusFailed
+    case agentResultUnknown
+    case agentResultUnknownHelp
+    case agentWorkingDirectory
+    case agentPermissionTitle
+    case agentProgressStep
+    case agentServiceUnavailable
     case connectionConnecting
     case connectionDisconnected
     case connectionRetry
