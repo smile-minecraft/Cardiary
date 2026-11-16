@@ -23,6 +23,10 @@ export class ClientConnection {
   authFailures = 0;
   /** heartbeat：上一輪 ping 之後有沒有收到 pong。 */
   alive = true;
+  /** 以裝置 Token 認證時的裝置識別碼；本機 client Token 連線是 `null`。 */
+  deviceId: string | null = null;
+  /** 裝置 Token 的 SHA-256 雜湊；逐請求重新驗證用，不記錄明文。 */
+  deviceTokenHash: string | null = null;
 
   constructor(options: {
     readonly id: string;
