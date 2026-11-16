@@ -28,11 +28,20 @@ public struct McpAppWebView: NSViewRepresentable {
     public let html: String
     public let allowedHosts: [String]
     public let context: McpAppHostContext
+    /// 串流是否完成。回去之前不載入 HTML，只留空容器當占位；完成後才掛載內容。
+    /// 預設 `true` 讓既有呼叫端行為不變。
+    public let isReady: Bool
 
-    public init(html: String, allowedHosts: [String], context: McpAppHostContext) {
+    public init(
+        html: String,
+        allowedHosts: [String],
+        context: McpAppHostContext,
+        isReady: Bool = true
+    ) {
         self.html = html
         self.allowedHosts = allowedHosts
         self.context = context
+        self.isReady = isReady
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -47,15 +56,20 @@ public struct McpAppWebView: NSViewRepresentable {
         let container = McpAppContainerView(configuration: configuration)
         container.webView.navigationDelegate = swiftContext.coordinator
         container.webView.uiDelegate = swiftContext.coordinator
-        swiftContext.coordinator.load(html: html, in: container.webView)
+        swiftContext.coordinator.loadIfReady(html: html, isReady: isReady, in: container.webView)
         return container
     }
 
     public func updateNSView(_ container: McpAppContainerView, context swiftContext: Context) {
         swiftContext.coordinator.updateContext(context)
-        if swiftContext.coordinator.loadedHTML != html {
-            swiftContext.coordinator.load(html: html, in: container.webView)
-        }
+        // 與 makeNSView 走同一個入口：串流中不載入，完成後且 HTML 不同才載入。
+        swiftContext.coordinator.loadIfReady(html: html, isReady: isReady, in: container.webView)
+    }
+
+    /// 掛載決策：串流完成，而且這份 HTML 和已載入的不同才載入。
+    /// 抽成純函式讓「串流完成才掛載」可以直接被測試。
+    static func shouldLoad(isReady: Bool, loadedHTML: String?, html: String) -> Bool {
+        isReady && loadedHTML != html
     }
 
     public static func dismantleNSView(_ container: McpAppContainerView, coordinator: Coordinator) {
@@ -107,6 +121,14 @@ public struct McpAppWebView: NSViewRepresentable {
         init(policy: McpAppNavigationPolicy, context: McpAppHostContext) {
             self.policy = policy
             self.context = context
+        }
+
+        /// 只有串流完成、且這份 HTML 還沒載入過才載入。`makeNSView` 和
+        /// `updateNSView` 都走這裡，測試也直接呼叫它，測到的就是產品的掛載時機。
+        func loadIfReady(html: String, isReady: Bool, in webView: WKWebView) {
+            guard McpAppWebView.shouldLoad(isReady: isReady, loadedHTML: loadedHTML, html: html)
+            else { return }
+            load(html: html, in: webView)
         }
 
         func load(html: String, in webView: WKWebView) {
