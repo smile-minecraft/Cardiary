@@ -1,12 +1,4 @@
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -14,7 +6,6 @@ import { DatabaseSync } from "node:sqlite";
 
 import { StorageError } from "../errors.js";
 import {
-  assertNotSymbolicLink,
   clearDirectorySafely,
   removeFileSafely,
   writeFileAtomic,
