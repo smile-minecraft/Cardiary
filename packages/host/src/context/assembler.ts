@@ -27,6 +27,7 @@ import {
   type ContextEntry,
   type ContextLayer,
   type ContextView,
+  type DealtCard,
   type SystemSection,
 } from "@cardiary/domain";
 
@@ -112,6 +113,7 @@ export class ContextAssembler {
       tokenEstimate: estimateTokens(`${card.frontmatter.title}\n${card.body}`),
       state: "active",
       position: nextPosition(entries, layer),
+      dealSource: "manual",
     };
     this.#store.addEntry(conversationId, entry);
     await this.#cards.noteConversationLoad({ conversationId, cardId });
@@ -129,6 +131,49 @@ export class ContextAssembler {
       this.#store.markPendingRemoval(entry.entryId, this.#now().toISOString());
     }
     return (await this.assemble(conversationId, { bumpVersion: true })).view;
+  }
+
+  /**
+   * 開局寫入第 4 層（`opening-memory`）。
+   *
+   * 只應在對話的第一則訊息之前呼叫一次；重複呼叫是安全的 no-op。0 張被發時
+   * 寫一個無卡片的 `opening-deal` 標記項，讓之後的回合不會再走一遍檢索與
+   * 判斷。標記項沒有 `cardId`，不進前綴，只用來標記「這場對話開過局」。
+   */
+  async appendOpeningMemory(
+    conversationId: string,
+    cards: readonly DealtCard[],
+  ): Promise<ContextView> {
+    this.ensure(conversationId);
+    const openingDealt = this.#store
+      .entries(conversationId)
+      .some((entry) => entry.layer === "opening-memory");
+    if (!openingDealt) {
+      for (const card of cards) {
+        this.#store.addEntry(conversationId, {
+          entryId: entryIdOf(conversationId, `deal:${card.cardId}`),
+          layer: "opening-memory",
+          cardId: card.cardId,
+          title: card.title,
+          tokenEstimate: card.tokenEstimate,
+          state: "active",
+          position: card.position,
+          ...(card.dealProbability === undefined ? {} : { dealProbability: card.dealProbability }),
+          dealSource: card.dealSource,
+        });
+      }
+      if (cards.length === 0) {
+        this.#store.addEntry(conversationId, {
+          entryId: entryIdOf(conversationId, "opening-deal"),
+          layer: "opening-memory",
+          title: "開局發牌",
+          tokenEstimate: 0,
+          state: "active",
+          position: 0,
+        });
+      }
+    }
+    return (await this.assemble(conversationId, { bumpVersion: !openingDealt })).view;
   }
 
   /** 目前視圖；不會加版本。 */

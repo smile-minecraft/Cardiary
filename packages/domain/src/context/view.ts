@@ -8,6 +8,9 @@
 
 import { CONTEXT_LAYERS, layerIndex, type ContextEntryState, type ContextLayer } from "./layers.js";
 
+/** 這張卡是怎麼被發進上下文的；與 `@cardiary/protocol` 的 `ContextDealSource` 對齊。 */
+export type ContextDealSource = "system-one" | "retrieval" | "manual";
+
 /** 上下文中的一個項目。 */
 export interface ContextEntry {
   readonly entryId: string;
@@ -17,6 +20,10 @@ export interface ContextEntry {
   readonly tokenEstimate: number;
   readonly state: ContextEntryState;
   readonly position: number;
+  /** 發牌機率（第 4 層的開局卡才有；退路與手動加入的卡省略）。 */
+  readonly dealProbability?: number;
+  /** 這張卡是怎麼發進來的；手動加入的卡是 `manual`。 */
+  readonly dealSource?: ContextDealSource;
 }
 
 /** 目前上下文的視圖。 */

@@ -4,6 +4,7 @@
  * 協定的線路形狀在 `@cardiary/protocol`；這裡是主機內部用的領域模型。
  */
 
+import type { DealtCard } from "../dealing/index.js";
 import type { ContextView } from "./view.js";
 
 export {
@@ -37,6 +38,7 @@ export {
   layerTotals,
   nextPosition,
   sortEntries,
+  type ContextDealSource,
   type ContextEntry,
   type ContextView,
   type ContextViewInput,
@@ -70,9 +72,10 @@ export interface CompactionResult {
 }
 
 /**
- * 上下文服務：加入、移除、壓縮與讀取視圖。
+ * 上下文服務：加入、移除、壓縮、讀取視圖與開局發牌。
  *
- * 加入只追加在後段；移除只標記，下次壓縮才生效。
+ * 加入只追加在後段；移除只標記，下次壓縮才生效。開局發牌只在第一則
+ * 訊息之前呼叫一次；重複呼叫是安全的 no-op。
  */
 export interface ContextService {
   view(sessionId: string): Promise<ContextView>;
@@ -82,4 +85,9 @@ export interface ContextService {
     readonly sessionId: string;
     readonly instructions?: string;
   }): Promise<{ readonly scheduled: boolean }>;
+  /** 把開局挑好的卡裝進第 4 層並推給引擎；已開過局時不做任何事。 */
+  applyOpeningDeal(input: {
+    readonly sessionId: string;
+    readonly cards: readonly DealtCard[];
+  }): Promise<ContextView>;
 }
