@@ -1058,6 +1058,36 @@ function isOriginZonePath(resolved: ResolvedPath, folderRoot: string): boolean {
   return same || originZoneOf(folderRoot, resolved.resolved) !== null;
 }
 
+/**
+ * 是不是一條單純的唯讀 git 查詢。
+ *
+ * 委派判斷用的嚴格版本：只接受單一 `git` 段、沒有變數指派、沒有串接、
+ * 子殼層或重導向，而且 git 子命令與參數都在唯讀白名單內。`ls`、`cat`
+ * 這類檔案查詢不算 git，走 `read-only-files`。
+ */
+export function isReadonlyGitCommand(command: string, context: ShellContext): boolean {
+  const parsed = parseCommandLine(command);
+  if (
+    parsed.parseError !== null ||
+    parsed.operators.length > 0 ||
+    parsed.redirects.length > 0 ||
+    parsed.substitutions.length > 0 ||
+    parsed.segments.length !== 1
+  ) {
+    return false;
+  }
+  const segment = parsed.segments[0];
+  if (
+    segment === undefined ||
+    segment.command !== "git" ||
+    segment.assignments.length > 0 ||
+    segment.args.length === 0
+  ) {
+    return false;
+  }
+  return evaluateGit(segment.args, context).kind === "allow";
+}
+
 function evaluateGit(args: readonly string[], context: ShellContext): PermissionVerdict {
   let index = 0;
   while (index < args.length) {

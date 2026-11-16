@@ -73,6 +73,14 @@ export interface HostServiceOptions {
    * 在引擎與儲存關閉之前呼叫；失敗只記日誌，不阻擋關機。
    */
   readonly onShutdown?: () => Promise<void>;
+  /** 啟動恢復刪除時，從自動放行的稽核紀錄移除已刪除的對話。 */
+  readonly audit?: { removeConversations(ids: readonly string[]): void };
+  /**
+   * 待刪除對話根的完整子樹 id（含支線）。
+   *
+   * 刪除意圖裡本來就記了完整清單；省略時只清根對話的稽核紀錄。
+   */
+  readonly pendingDeletionIds?: (rootId: string) => readonly string[] | Promise<readonly string[]>;
 }
 
 /**
@@ -167,10 +175,23 @@ export class HostService {
     const engineOpened = state !== "starting" && state !== "stopped";
     if (engineOpened) await this.#options.engine.suspend();
     for (const conversationId of pending) {
+      const ids = (await this.#options.pendingDeletionIds?.(conversationId)) ?? [conversationId];
       await this.#options.engine.deleteConversation(conversationId, { includeBranches: true });
       await this.#options.storage.deletions.remove(conversationId);
+      this.#forgetAudit(ids);
     }
     if (engineOpened) await this.#options.engine.resume();
+  }
+
+  /** 稽核清除失敗只記日誌：刪除已經成立，不能因此讓恢復中斷。 */
+  #forgetAudit(ids: readonly string[]): void {
+    try {
+      this.#options.audit?.removeConversations(ids);
+    } catch (error) {
+      this.#options.logger.warn("恢復刪除時移除稽核紀錄失敗", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   async #withLifecycle<T>(lifecycle: Lifecycle, work: () => Promise<T>): Promise<T> {

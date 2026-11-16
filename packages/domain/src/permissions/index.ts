@@ -15,3 +15,5 @@ export * from "./getopt.js";
 export * from "./capabilities.js";
 export * from "./commands.js";
 export * from "./evaluate.js";
+export * from "./delegation.js";
+export * from "./domains.js";

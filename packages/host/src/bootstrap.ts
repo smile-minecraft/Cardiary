@@ -21,6 +21,7 @@ import type {
 } from "@cardiary/module-api";
 import type { ToolPermissionGate } from "@cardiary/engine-adapter";
 import { FolderLayout } from "@cardiary/storage";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { BrokerCredentialSource, type BrokerClient } from "./control/broker.js";
@@ -33,6 +34,14 @@ import { StoredConversationTitles } from "./gateway/titles.js";
 import { systemClock } from "./ids.js";
 import { SilentLogger } from "./logging.js";
 import { HostService } from "./service.js";
+import { AgentAudit } from "./permissions/agent-audit.js";
+import { AgentPermissions } from "./permissions/agent-permissions.js";
+import {
+  DelegatedApproval,
+  createDelegatingGate,
+  createModelReviewer,
+  type DelegationModels,
+} from "./permissions/delegation.js";
 import {
   HOST_SERVICE_NAMES,
   type CardEnvironment,
@@ -150,6 +159,8 @@ export interface RunningHost {
   readonly modules: LoadedModules;
   /** 模組之間共用的服務註冊表。 */
   readonly hostServices: HostServiceRegistryImpl;
+  /** 人的代理權限設定：委派類別、網域清單與限時的全部允許。 */
+  readonly agentPermissions: AgentPermissions;
 }
 
 const DEMO_BUNDLE_ID = "demo";
@@ -204,11 +215,43 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
         });
   hostServices.provide(HOST_SERVICE_NAMES.cardStorage, cardEnvironment);
   hostServices.provide(HOST_SERVICE_NAMES.spawn, spawn);
+  // 代理委派：限時的全部允許與 System One 審核，每次判定時都重新讀人的設定，
+  // 不讀引擎釘選的 `permissionMode`；人開關類別立即生效。
+  const agentPermissions = new AgentPermissions(paths.state, {
+    diagnostic: (message) => {
+      logger.warn(message);
+    },
+  });
+  const agentAudit = new AgentAudit(paths.state);
+  const lazyModels = (): DelegationModels | undefined =>
+    hostServices.get(HOST_SERVICE_NAMES.models) as unknown as DelegationModels | undefined;
+  const lazyInvoker: ModelInvoker = {
+    invoke(request, invokeOptions) {
+      const models = hostServices.get(HOST_SERVICE_NAMES.models) as unknown as
+        ModelInvoker | undefined;
+      if (models === undefined) {
+        return Promise.reject(new Error("模型服務尚未就緒"));
+      }
+      return models.invoke(request, invokeOptions);
+    },
+  };
+  const delegation = new DelegatedApproval({
+    permissions: agentPermissions,
+    audit: agentAudit,
+    roots: { workingDir: paths.root, folderRoot: paths.root },
+    homeDir: homedir(),
+    now: () => clock.now().getTime(),
+    reviewer: createModelReviewer({
+      models: lazyModels,
+      invoker: lazyInvoker,
+    }),
+  });
   // 權限閘道在呼叫當下才取：本機工具提供服務之後就生效，不必重啟主機。
   const permissionGate: ToolPermissionGate = {
     evaluate(request) {
       const gate = hostServices.get(HOST_SERVICE_NAMES.toolPermissionGate);
-      return gate === undefined ? m0PermissionGate.evaluate(request) : gate.evaluate(request);
+      const base = gate === undefined ? m0PermissionGate : gate;
+      return createDelegatingGate(base, delegation).evaluate(request);
     },
   };
   const runtime =
@@ -409,6 +452,15 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
       ? {}
       : { onMaintenance: options.maintenanceNotifier }),
     ...(options.fatalNotifier === undefined ? {} : { onFatal: options.fatalNotifier }),
+    audit: agentAudit,
+    ...(persistent === null
+      ? {}
+      : {
+          pendingDeletionIds: (rootId: string) =>
+            persistent.storage.deletions
+              .listPendingDeletions()
+              .find((intent) => intent.rootId === rootId)?.conversationIds ?? [rootId],
+        }),
     onShutdown: async () => {
       await modules.deactivateAll("shutdown");
       if (cardEnvironment.ownsConnections) cardEnvironment.close();
@@ -439,6 +491,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
     spawn,
     modules,
     hostServices,
+    agentPermissions,
   };
 }
 
