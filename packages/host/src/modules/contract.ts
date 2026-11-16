@@ -1,4 +1,4 @@
-import type { AssetStore, CardIndex, CardService } from "@cardiary/domain";
+import type { AssetStore, CardIndex, CardService, EmotionState } from "@cardiary/domain";
 import type {
   ApprovalDecision,
   HumanActor,
@@ -61,6 +61,7 @@ export const HOST_SERVICE_NAMES = {
   notifications: "notifications",
   /** 每日蒸餾服務；由記憶模組提供，排程器在 distillation 任務到點時呼叫。 */
   memory: "memory",
+  emotion: "emotion",
 } as const;
 
 /** 服務名稱的聯集；`modules.md` 第 5 節那張表。 */
@@ -143,6 +144,15 @@ export interface HostServiceTypeMap {
   spawn: SpawnRegistry;
   /** 蒸餾入口；排程器只依賴這一個方法，不匯入記憶模組的實作。 */
   memory: DistillationTrigger;
+  emotion: EmotionServiceContract;
+}
+
+export interface EmotionServiceContract {
+  get(): EmotionState;
+  applyTurn(turn: {
+    readonly userText: string;
+    readonly previousAssistantText: string;
+  }): EmotionState;
 }
 
 /**

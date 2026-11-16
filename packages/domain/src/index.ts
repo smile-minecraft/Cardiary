@@ -10,6 +10,7 @@ export * from "./cards/index.js";
 export * from "./boards/index.js";
 export * from "./context/index.js";
 export * from "./dealing/index.js";
+export * from "./emotion/index.js";
 export * from "./distillation/index.js";
 export * from "./documents/index.js";
 export * from "./freshness/index.js";

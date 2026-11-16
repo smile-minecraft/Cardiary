@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { Message } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import type { Message, ToolCall } from "@earendil-works/pi-ai";
 
-import { waitFor } from "../support.js";
+import { approvalTool, bundleOf, waitFor } from "../support.js";
 import {
   createContextFixture,
   isBytePrefix,
@@ -52,6 +53,111 @@ function foldTrailingSystem(messages: readonly Message[]): Message[] {
   const merged = trailing.map((message) => messageText(message)).join("\n");
   return [{ role: "system", content: merged, timestamp: 0 } as Message, ...rest];
 }
+
+describe("每則訊息的情緒快照", () => {
+  it("排隊訊息不會改變正在執行的回合，輪到它時才使用自己的快照", async () => {
+    const context = await createContextFixture();
+    try {
+      const { adapter, faux } = context.fixture;
+      await adapter.tools.register(bundleOf("test.hold", [approvalTool({ name: "hold" })], 1));
+      const conversation = await adapter.createConversation({
+        model: MODEL,
+        systemContext: "前綴",
+        toolBundles: [{ bundleId: "test.hold", generation: 1 }],
+      });
+      const requests: Message[][] = [];
+      faux.setResponses([
+        (request) => {
+          requests.push([...request.messages]);
+          return fauxAssistantMessage([fauxToolCall("hold", {}) as ToolCall], {
+            stopReason: "toolUse",
+          });
+        },
+        (request) => {
+          requests.push([...request.messages]);
+          return fauxAssistantMessage("第一輪完成");
+        },
+        (request) => {
+          requests.push([...request.messages]);
+          return fauxAssistantMessage("第二輪完成");
+        },
+      ]);
+      const base = {
+        conversationId: conversation.id,
+        delivery: "queue" as const,
+        sender: { kind: "human" as const, clientId: "test" },
+      };
+      await adapter.sendMessage({
+        ...base,
+        content: [{ type: "text", text: "第一則" }],
+        trailingContext: "情緒快照 A",
+      });
+      const pending = await waitFor(
+        async () => (await adapter.approvals.listPending())[0],
+        "等待審批",
+      );
+      const queued = await adapter.sendMessage({
+        ...base,
+        content: [{ type: "text", text: "第二則" }],
+        trailingContext: "情緒快照 B",
+      });
+      expect(queued.delivery).toBe("queued");
+      await adapter.approvals.decide({
+        requestId: pending.id,
+        verdict: "approve",
+        decidedBy: { kind: "human", clientId: "test" },
+      });
+      await waitFor(() => (requests.length >= 3 ? true : undefined), "排隊訊息的模型請求");
+      expect(requests.map((request) => messageText(request.at(-1) as Message))).toEqual([
+        expect.stringMatching(/^目前時間：.*\n情緒快照 A$/),
+        expect.stringMatching(/^目前時間：.*\n情緒快照 A$/),
+        expect.stringMatching(/^目前時間：.*\n情緒快照 B$/),
+      ]);
+      const history = await adapter.readConversationHistory({ conversationId: conversation.id });
+      expect(
+        history.messages
+          .filter((message) => message.role === "user")
+          .map((message) => message.content[0]),
+      ).toEqual([
+        { type: "text", text: "第一則" },
+        { type: "text", text: "第二則" },
+      ]);
+    } finally {
+      await context.fixture.cleanup();
+    }
+  });
+
+  it("不同對話的快照各自附在模型請求尾端", async () => {
+    const context = await createContextFixture();
+    try {
+      const a = await startConversation(context, "前綴 A");
+      const b = await startConversation(context, "前綴 B");
+      context.recorder.answer("A 完成");
+      await context.fixture.adapter.sendMessage({
+        conversationId: a,
+        content: [{ type: "text", text: "A" }],
+        delivery: "queue",
+        sender: { kind: "human", clientId: "test" },
+        trailingContext: "情緒 A",
+      });
+      await waitUntilIdle(context.fixture, a);
+      context.recorder.answer("B 完成");
+      await context.fixture.adapter.sendMessage({
+        conversationId: b,
+        content: [{ type: "text", text: "B" }],
+        delivery: "queue",
+        sender: { kind: "human", clientId: "test" },
+        trailingContext: "情緒 B",
+      });
+      await waitUntilIdle(context.fixture, b);
+      expect(
+        context.recorder.requests.map((request) => messageText(request.at(-1) as Message)),
+      ).toEqual([expect.stringMatching(/\n情緒 A$/), expect.stringMatching(/\n情緒 B$/)]);
+    } finally {
+      await context.fixture.cleanup();
+    }
+  });
+});
 
 describe("第 8 層的尾端訊息", () => {
   it("是 user 角色的尾端訊息，內容是目前時間", async () => {

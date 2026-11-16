@@ -58,6 +58,7 @@ import {
   HOST_SERVICE_NAMES,
   ProtocolHandlerError,
   type AlwaysAllowService,
+  type EmotionServiceContract,
   type ModuleHostBridge,
 } from "../modules/contract.js";
 import { lifecycleErrorCode } from "../modules/registry.js";
@@ -80,7 +81,12 @@ import {
   type RemoteStack,
 } from "../remote/index.js";
 import { createStaticHandler, type StaticHandler } from "../remote/static.js";
-import { hashDeviceToken, isDeviceTokenShape, verifyDeviceToken } from "@cardiary/domain";
+import {
+  formatEmotionLine,
+  hashDeviceToken,
+  isDeviceTokenShape,
+  verifyDeviceToken,
+} from "@cardiary/domain";
 import { settingLevel } from "../settings/catalog.js";
 import { mapEventIntent, validateEventPayload } from "./events.js";
 import { DEFAULT_LIMITS, type GatewayLimits } from "./limits.js";
@@ -1900,6 +1906,39 @@ export class Gateway {
   }
 
   /**
+   * 這一則訊息要帶的尾端上下文：目前情緒狀態的一行快照。
+   *
+   * 由情緒模組服務在送出當下計算並寫回狀態檔；模組停用或載入失敗時
+   * 回 `undefined`，訊息照常送出，上下文就沒有這一層。上一則助理回覆
+   * 只用來判斷上一輪的結果，讀不到時視為沒有結果。
+   */
+  async #emotionTrailingContext(sessionId: string, text: string): Promise<string | undefined> {
+    const modules = this.#modules as ModuleHostWithServices | null;
+    const emotion = modules?.hostServices?.get<EmotionServiceContract>(HOST_SERVICE_NAMES.emotion);
+    if (emotion === undefined) return undefined;
+    const previousAssistantText = await this.#previousAssistantText(sessionId);
+    const state = emotion.applyTurn({ userText: text, previousAssistantText });
+    return formatEmotionLine(state);
+  }
+
+  async #previousAssistantText(sessionId: string): Promise<string> {
+    try {
+      const page = await this.#options.engine.readConversationHistory({
+        conversationId: sessionId,
+        limit: 8,
+      });
+      const last = [...page.messages].reverse().find((message) => message.role === "assistant");
+      return last === undefined ? "" : textOf(last.content);
+    } catch (error) {
+      this.#logger.warn("讀取上一則助理回覆失敗；情緒只依使用者訊息調整", {
+        sessionId,
+        message: errorMessage(error),
+      });
+      return "";
+    }
+  }
+
+  /**
    * 新對話釘選的工具組：啟用中的模組提供的版本，加上示範工具。
    *
    * 模組主機在載入完成後才接到閘道，所以每次建立對話都重新取，不快取。
@@ -2085,6 +2124,9 @@ export class Gateway {
     if (state.messageCount === 0) {
       await this.#dealOpeningIfNeeded(sessionId, text, state.messageCount);
     }
+    // 情緒狀態跟著這一則訊息走：在送出當下算好快照，交給引擎保存在
+    // 這一則訊息自己的 entry 上，排隊時不會被後面的訊息覆寫。
+    const trailingContext = await this.#emotionTrailingContext(sessionId, text);
     const sendRequest = {
       conversationId: sessionId,
       content: [{ type: "text" as const, text }],
@@ -2092,6 +2134,7 @@ export class Gateway {
       delivery: deliveryRaw === "steer" ? ("steer" as const) : ("queue" as const),
       sender: { kind: "human" as const, clientId: connection.clientInstanceId || connection.id },
       ...(clientMessageId === undefined ? {} : { clientMessageId }),
+      ...(trailingContext === undefined ? {} : { trailingContext }),
     };
     const receipt = this.#options.engine.sendMessageWithClientId
       ? await this.#options.engine.sendMessageWithClientId(sendRequest)

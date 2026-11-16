@@ -110,6 +110,11 @@ export interface SendMessageRequest {
    * 對應引擎的 `SubmissionDraft.requestId`。
    */
   readonly clientMessageId?: string;
+  /**
+   * 只給這一則訊息對應的模型請求使用的尾端上下文。
+   * 它隨排隊的訊息一起保存，不影響其他訊息，也不寫入逐字稿。
+   */
+  readonly trailingContext?: string;
 }
 
 /** 送訊息被接受的方式。 */
