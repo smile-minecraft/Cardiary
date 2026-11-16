@@ -6,6 +6,7 @@
 #   CODESIGN_IDENTITY="Developer ID Application: …" ./Scripts/build-app.sh
 #   CARDIARY_SERVICE_SCRIPT=/path/to/service.mjs ./Scripts/build-app.sh
 #   CONFIGURATION=debug ./Scripts/build-app.sh
+#   CODESIGN_TIMESTAMP=1 ./Scripts/build-app.sh   # 簽章加安全時間戳（發行用）
 #
 # App Sandbox 一律關閉：官網直下載、不上 App Store。隔離由 Hardened Runtime、
 # Developer ID 簽章、公證與權限規則承擔。
@@ -14,6 +15,12 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-release}"
 IDENTITY="${CODESIGN_IDENTITY:--}"
+# 預設不連時間戳伺服器，本機驗證離線可跑；發行時設 CODESIGN_TIMESTAMP=1。
+if [[ "${CODESIGN_TIMESTAMP:-0}" == "1" ]]; then
+  TIMESTAMP_ARGS=(--timestamp)
+else
+  TIMESTAMP_ARGS=(--timestamp=none)
+fi
 BUNDLE_NAME="Cardiary"
 EXECUTABLE_NAME="CardiaryShell"
 DIST_DIR="$APP_DIR/dist"
@@ -85,15 +92,14 @@ fi
 sign() {
   local target="$1"
   local entitlements="$2"
-  # --timestamp=none：本機驗證不連網路；對外發行要加 --timestamp 後再公證。
-  /usr/bin/codesign --force --timestamp=none --options runtime \
+  /usr/bin/codesign --force "${TIMESTAMP_ARGS[@]}" --options runtime \
     --entitlements "$entitlements" --sign "$IDENTITY" "$target"
 }
 
 echo "簽章（身分：${IDENTITY}）…"
 # 內嵌的原生函式庫與 Node 先簽，外層 bundle 才封得起來。
 while IFS= read -r -d '' native_library; do
-  /usr/bin/codesign --force --timestamp=none --sign "$IDENTITY" "$native_library"
+  /usr/bin/codesign --force "${TIMESTAMP_ARGS[@]}" --sign "$IDENTITY" "$native_library"
 done < <(find "$APP_BUNDLE/Contents/Resources/Service" -type f \( -name '*.node' -o -name '*.dylib' -o -name '*.so' \) -print0)
 sign "$APP_BUNDLE/Contents/Helpers/Node/node" "$APP_DIR/Resources/node.entitlements"
 sign "$APP_BUNDLE" "$APP_DIR/Resources/cardiary-shell.entitlements"
@@ -118,6 +124,7 @@ cat <<SUMMARY
   服務腳本      $SERVICE_SCRIPT
   沙盒          關閉
   簽章身分      $IDENTITY
+  時間戳        ${TIMESTAMP_ARGS[0]}
 
 手動啟動：open "$APP_BUNDLE"
 TCC 手動驗收步驟見 apps/macos/README.md。
