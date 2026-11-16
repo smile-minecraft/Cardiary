@@ -19,10 +19,23 @@ actor PagedCardService: CardService {
     private var getCardDelays: [String: TimeInterval] = [:]
     private var pending: [PendingCardPatch] = []
     private var history: [CardVersion] = []
+    private var restoreBody: String = "舊內文"
+
+    private(set) var acceptCalls: [String] = []
+    private(set) var rejectCalls: [String] = []
 
     func setDocumentState(patches: [PendingCardPatch], versions: [CardVersion]) {
         pending = patches
         history = versions
+    }
+
+    func setPendingPatches(_ patches: [PendingCardPatch]) {
+        pending = patches
+    }
+
+    /// 測試大字串還原用：指定 restoreCardVersion 回傳的內文，其餘測試維持預設的「舊內文」。
+    func setRestoreBody(_ body: String) {
+        restoreBody = body
     }
 
     func listCardPatches(cardId: String) async throws -> CardPatchesListResponsePayload {
@@ -34,6 +47,7 @@ actor PagedCardService: CardService {
     }
 
     func acceptCardPatch(patchId: String, clientRequestId: String) async throws -> CardPatchAcceptResponsePayload {
+        acceptCalls.append(patchId)
         guard let patch = pending.first(where: { $0.patchId == patchId }), let card = cards[patch.cardId] else { throw TestFailure.notFound }
         let updated = documentCard(card, body: "新內文", revision: "rev-accepted")
         cards[card.cardId] = updated
@@ -43,6 +57,7 @@ actor PagedCardService: CardService {
     }
 
     func rejectCardPatch(patchId: String, clientRequestId: String) async throws -> CardPatchRejectResponsePayload {
+        rejectCalls.append(patchId)
         guard let patch = pending.first(where: { $0.patchId == patchId }) else { throw TestFailure.notFound }
         pending.removeAll { $0.patchId == patchId }
         return CardPatchRejectResponsePayload(patch: patch)
@@ -50,7 +65,7 @@ actor PagedCardService: CardService {
 
     func restoreCardVersion(cardId: String, versionId: String, baseRevision: String, clientRequestId: String) async throws -> CardVersionRestoreResponsePayload {
         guard let card = cards[cardId], history.contains(where: { $0.versionId == versionId }) else { throw TestFailure.notFound }
-        let updated = documentCard(card, body: "舊內文", revision: "rev-restored")
+        let updated = documentCard(card, body: restoreBody, revision: "rev-restored")
         let version = documentVersion(cardId: cardId, seq: history.count + 1, kind: .restore, revision: updated.revision)
         cards[cardId] = updated
         history.append(version)
