@@ -71,7 +71,7 @@ describe("設定分級治理", () => {
     });
     expect(applied.status).toBe("applied");
     expect(store.get("models.providers")?.value).toBe('[{"providerId":"local"}]');
-    expect(store.get("models.providers")?.updatedBy).toBe("human:device-1");
+    expect(store.get("models.providers")?.updatedBy).toBe("user:device-1");
   });
 
   it("拒絕提議後值不變，且不能重複決定", async () => {
