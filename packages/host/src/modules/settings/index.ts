@@ -10,6 +10,7 @@ import { BrokerCredentialSource, type BrokerClient } from "../../control/broker.
 import { HOST_SERVICE_NAMES, type CardEnvironment } from "../contract.js";
 import type { HostEngine } from "../../engine/types.js";
 import { ModelRuntime } from "../../models/runtime.js";
+import { SettingsGovernance } from "../../settings/governance.js";
 import { SettingsService } from "../../settings/service.js";
 import { TransactionalSettingsStore } from "../../settings/store.js";
 import { manifest } from "./manifest.js";
@@ -48,8 +49,14 @@ async function activate(context: ModuleActivationContext): Promise<void> {
     warn: (message, fields) => context.services.logger.warn(message, fields),
   });
   await runtime.initialize();
+  const governance = new SettingsGovernance({
+    settings,
+    layout: cabinet.layout,
+    now,
+  });
 
   context.services.host.provide(HOST_SERVICE_NAMES.models, runtime);
+  context.services.host.provide(HOST_SERVICE_NAMES.settings, governance);
   runtime.onChange((state) => {
     context.services.protocol.emit({
       kind: "models-changed",
@@ -61,6 +68,7 @@ async function activate(context: ModuleActivationContext): Promise<void> {
     settings,
     protocol: context.services.protocol,
     now,
+    governance,
   });
 }
 

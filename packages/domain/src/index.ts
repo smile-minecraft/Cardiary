@@ -16,6 +16,7 @@ export * from "./freshness/index.js";
 export * from "./media/index.js";
 export * from "./pairing/index.js";
 export * from "./schedules/index.js";
+export * from "./settings/index.js";
 export * from "./permissions/index.js";
 export * from "./retrieval/index.js";
 export * from "./system-one/index.js";

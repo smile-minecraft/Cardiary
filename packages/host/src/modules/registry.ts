@@ -758,7 +758,8 @@ export class HostModuleRegistry implements ModuleHost {
     const services: ModuleServices = {
       ...this.#options.services,
       settings: {
-        get: (key) => (keys.has(key) ? source.get(key) : undefined),
+        get: (key) =>
+          keys.has(key) && source.getLevel(key) !== "human-only" ? source.get(key) : undefined,
         getLevel: (key) => (keys.has(key) ? source.getLevel(key) : "human-only"),
         onChange: (listener) => {
           const unsubscribe = source.onChange((change) => {

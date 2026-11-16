@@ -562,7 +562,10 @@ function moduleRuntimeServices(input: {
     return settingsService;
   };
   const settings: ModuleSettingsReader = {
-    get: (key) => service().get(key),
+    get: (key) =>
+      settingLevel(key, service().record(key)?.level ?? "human-only") === "human-only"
+        ? undefined
+        : service().get(key),
     getLevel: (key) => settingLevel(key, service().record(key)?.level ?? "human-only"),
     onChange: (listener) =>
       service().onChange((change) => {

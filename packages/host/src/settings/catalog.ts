@@ -17,7 +17,36 @@ export interface SettingDefinition {
   readonly defaultValue?: unknown;
 }
 
+export const HUMAN_ONLY_SETTING_KEYS = [
+  "permissions.mode",
+  "permissions.hardRules",
+  "permissions.allowlist",
+  "boards.agentMode",
+  "boards.operationPermissions",
+  "folder.location",
+  "secrets.keys",
+  "network.allowedHosts",
+] as const;
+
+const HUMAN_ONLY_TITLES: Record<(typeof HUMAN_ONLY_SETTING_KEYS)[number], string> = {
+  "permissions.mode": "權限模式",
+  "permissions.hardRules": "硬規則",
+  "permissions.allowlist": "白名單",
+  "boards.agentMode": "白板與代理模式",
+  "boards.operationPermissions": "白板操作權",
+  "folder.location": "資料夾位置",
+  "secrets.keys": "API 金鑰",
+  "network.allowedHosts": "網域 allowlist",
+};
+
 export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
+  ...HUMAN_ONLY_SETTING_KEYS.map((key) => ({
+    key,
+    level: "human-only" as const,
+    title: HUMAN_ONLY_TITLES[key],
+    description: "僅限人類；代理讀不到，也不能修改或提議。",
+    defaultValue: null,
+  })),
   {
     key: "retrieval.allowModelDownload",
     level: "human-only",
