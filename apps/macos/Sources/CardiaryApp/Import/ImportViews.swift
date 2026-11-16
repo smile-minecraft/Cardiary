@@ -213,6 +213,11 @@ public struct ImportView: View {
     private var conversationSection: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
             Toggle(ImportL10n.text(.importIncludeConversations), isOn: $model.includeConversations)
+                .onChange(of: model.includeConversations) { _, value in
+                    if value {
+                        model.setRange(start: startDate, end: endDate)
+                    }
+                }
             if model.includeConversations {
                 HStack(spacing: DesignTokens.spacingM) {
                     DatePicker(
