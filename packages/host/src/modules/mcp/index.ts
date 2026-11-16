@@ -18,14 +18,15 @@ import type {
   ProtocolRegistrationHandle,
 } from "@cardiary/module-api";
 import type { McpServerInfo } from "@cardiary/protocol";
-import { FolderLayout, McpServerStore } from "@cardiary/storage";
+import { FileRegistry, FolderLayout, McpServerStore } from "@cardiary/storage";
 
-import { ProtocolHandlerError } from "../contract.js";
+import { HOST_SERVICE_NAMES, ProtocolHandlerError, type CardEnvironment } from "../contract.js";
 import type { HostEngine } from "../../engine/types.js";
 import type { SpawnRegistry } from "../../spawn/wrapper.js";
 import { createMcpClient, McpClientError, type McpClientFactory } from "./client.js";
 import { manifest } from "./manifest.js";
 import { registerMcpProtocol, toServerInfo, type McpController } from "./protocol.js";
+import { McpToolCache } from "./tool-cache.js";
 import { buildBundleDraft, type McpServerRuntime } from "./tools.js";
 
 export { manifest };
@@ -38,6 +39,7 @@ export interface McpModuleOptions {
   readonly clientFactory?: McpClientFactory;
   readonly folderRoot?: string;
   readonly homeDir?: string;
+  readonly registry?: FileRegistry;
   readonly now?: () => Date;
 }
 
@@ -68,6 +70,14 @@ export async function activateMcpModule(
   const clientFactory = options.clientFactory ?? createMcpClient;
   const logger = context.services.logger;
   const protocol = context.services.protocol;
+
+  // 工具快取要登記到檔案登記簿才不會被每日掃描當成孤兒。模組主機有提供
+  // 卡片儲存服務時才拿得到登記簿；沒有時模組照常運作，只是每次都要問伺服器。
+  const registry = resolveRegistry(context, options, layout);
+  const toolCache =
+    registry === null
+      ? null
+      : new McpToolCache(layout, registry, options.now === undefined ? {} : { now: options.now });
 
   const active = new Map<string, ActiveServer>();
   const failures = new Map<string, string>();
@@ -121,9 +131,22 @@ export async function activateMcpModule(
           await client.close();
           return;
         }
+        // 開機時抓到的清單是目前的真相，順手更新快取；重啟後 list_tools
+        // 可以直接用快取，不必再連一次。快取寫不進去不影響伺服器運作。
+        if (toolCache !== null) {
+          try {
+            toolCache.save(record.serverId, tools);
+          } catch (error) {
+            logger.warn("MCP 工具快取寫入失敗", {
+              serverId: record.serverId,
+              message: describeError(error),
+            });
+          }
+        }
         const runtime: McpServerRuntime = {
           record,
           client,
+          cache: toolCache?.portFor(record.serverId) ?? null,
           refresh: () => {
             if (!disposed && active.get(record.serverId)?.runtime === runtime) {
               // 同一個 bundleId+generation 重新註冊會換掉引擎裡的定義。
@@ -133,8 +156,8 @@ export async function activateMcpModule(
             }
           },
           state: "ready",
-          // 啟動時的 tools/list 只用來確認連線；工具定義要等模型呼叫
-          // list_tools 之後才註冊，讓對話開場只看到兩個入口工具。
+          // 啟動時的 tools/list 只用來確認連線與更新快取；工具定義要等模型
+          // 呼叫 list_tools 之後才註冊，讓對話開場只看到兩個入口工具。
           tools: null,
         };
         registerBundle(runtime);
@@ -194,6 +217,7 @@ export async function activateMcpModule(
       logger.warn("MCP 伺服器清單載入失敗", { message: describeError(error) });
     });
   };
+
   const serverInfo = async (serverId: string): Promise<McpServerInfo> => {
     const record = await store.get(serverId);
     if (record === null) {
@@ -284,6 +308,15 @@ export async function activateMcpModule(
       if (!removed) {
         throw new ProtocolHandlerError("not_found", `找不到 MCP 伺服器：${serverId}`);
       }
+      // 快取屬於這個伺服器；同名伺服器重新建立時不該繼承舊工具。
+      try {
+        toolCache?.remove(serverId);
+      } catch (error) {
+        logger.warn("MCP 工具快取清除失敗", {
+          serverId,
+          message: describeError(error),
+        });
+      }
       emitChanged(last, true);
       return true;
     },
@@ -339,6 +372,25 @@ export async function activateMcpModule(
       pendingAdds.clear();
     },
   };
+}
+
+function resolveRegistry(
+  context: ModuleActivationContext,
+  options: McpModuleOptions,
+  layout: FolderLayout,
+): FileRegistry | null {
+  if (options.registry !== undefined) {
+    return options.registry;
+  }
+  const cabinet = context.services.host.get<CardEnvironment>(HOST_SERVICE_NAMES.cardStorage);
+  if (cabinet === undefined) {
+    return null;
+  }
+  return new FileRegistry(
+    cabinet.state,
+    layout,
+    options.now === undefined ? {} : { now: options.now },
+  );
 }
 
 function describeTarget(input: McpServerInput): { label: string; value: string }[] {

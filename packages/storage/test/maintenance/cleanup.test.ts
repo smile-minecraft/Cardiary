@@ -154,6 +154,19 @@ describe("清理白名單", () => {
     expect(existsSync(layout.absolute("cache/thumb.bin"))).toBe(false);
     expect(existsSync(layout.absolute("cache/index.sqlite"))).toBe(true);
   });
+
+  it("MCP 工具快取算進 cache 類別，清掉之後可以重建", () => {
+    const { layout, cleanup } = fixture();
+    const content = JSON.stringify({ version: 1, serverId: "local", tools: [] });
+    put(layout, "cache/mcp/local/tools.json", content);
+    expect(cleanup.preview(["cache"]).targets[0]).toEqual({
+      category: "cache",
+      items: 1,
+      bytes: Buffer.byteLength(content),
+    });
+    cleanup.apply(["cache"]);
+    expect(existsSync(layout.absolute("cache/mcp/local/tools.json"))).toBe(false);
+  });
 });
 
 describe("符號連結與執行中的暫存", () => {

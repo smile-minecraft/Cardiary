@@ -25,6 +25,7 @@ import {
 import type { McpServerState } from "@cardiary/protocol";
 
 import type { McpCallResult, McpClient, McpToolDescriptor } from "./client.js";
+import type { McpToolCachePort } from "./tool-cache.js";
 
 /** 一個已核准伺服器的執行狀態。 */
 export interface McpServerRuntime {
@@ -32,6 +33,8 @@ export interface McpServerRuntime {
   readonly client: McpClient;
   /** 重新註冊這個伺服器的工具組；首次載入工具後由模組換上完整定義。 */
   readonly refresh: () => void;
+  /** 工具清單的快取；沒有檔案登記簿時為 null，照樣直接向伺服器要。 */
+  readonly cache: McpToolCachePort | null;
   state: McpServerState;
   failure?: string;
   tools: McpToolDescriptor[] | null;
@@ -182,8 +185,15 @@ async function loadTools(runtime: McpServerRuntime): Promise<McpToolDescriptor[]
   if (runtime.tools !== null) {
     return runtime.tools;
   }
+  // 重啟後先看快取：伺服器開機時已經驗證過連線，工具清單不必再問一次。
+  const cached = runtime.cache?.load() ?? null;
+  if (cached !== null) {
+    runtime.tools = cached;
+    return cached;
+  }
   const tools = await runtime.client.listTools();
   runtime.tools = tools;
+  runtime.cache?.save(tools);
   return tools;
 }
 
