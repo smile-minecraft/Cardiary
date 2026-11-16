@@ -150,8 +150,10 @@ function walkRegularFiles(
  * 連結。state 不存在代表沒有保護檔案；任何讀取失敗都丟
  * `ProtectedAliasScanError`，讓呼叫端 fail-closed，不要假裝掃描通過。
  *
- * 這是啟動前的快照，掃描後到子行程啟動前仍可能被換成別名；殘留的競爭危害
- * 由核准綁定吸收（見 docs/design/mcp-stdio-hardlink.md）。
+ * 這是啟動前的快照：SBPL 只比對路徑，硬連結從可寫入的別名寫入可以繞過寫入
+ * 保護，所以先掃掉已存在的別名。掃描完成到 `sandbox-exec` 啟動子行程之間仍有
+ * 競爭危害，這段空窗攔不住新建立的別名；後果由核准綁定吸收：正本一旦被別名
+ * 改寫，啟動前與核准紀錄的內容比對就會失敗，伺服器照樣不啟動。
  */
 export function findProtectedAliases(options: {
   readonly workingDir: string;

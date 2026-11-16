@@ -45,6 +45,10 @@ export class ProtectedAliasError extends Error {
  *
  * 建立 profile 前先檢查硬連結別名與掃描是否成功；兩者都屬於 fail-closed，
  * 擋下時丟 `ProtectedAliasError`，不會退回沒有沙盒的執行。
+ *
+ * 別名掃描是啟動前的快照，而 SBPL 只比對路徑：掃描後到 `sandbox-exec` 啟動
+ * 之間就算冒出新的別名，正本被改寫仍會讓啟動前與核准紀錄的內容比對失敗，
+ * 伺服器不會啟動，殘留的競爭危害因此由核准綁定吸收。
  */
 export function createMcpStdioSandbox(options: McpStdioSandboxOptions): CommandSandbox | null {
   const workingDir = path.join(options.folderRoot, "tmp", "mcp", options.serverId);
