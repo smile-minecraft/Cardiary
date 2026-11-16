@@ -55,6 +55,11 @@ export class ManagedChild {
     this.exited = exited.finally(() => {
       this.#settled = true;
     });
+    // 代理自行關閉 stdin 後仍存活時，write 會對已斷的管線觸發 EPIPE error event。
+    // 沒有 listener 的 error event 會變成 uncaught exception，讓整個主機服務崩潰。
+    // 對端已關閉代表寫入不可能成功，這裡當成安全 no-op 吞掉；呼叫端仍然可以
+    // 從 write 的 callback 或 writeThenCloseInput 的結果知道寫入沒有送出去。
+    child.stdin?.on("error", () => undefined);
   }
 
   get running(): boolean {
@@ -94,11 +99,26 @@ export class ManagedChild {
     if (!stdin || stdin.destroyed) return;
     if (data !== null) {
       await Promise.race([
-        new Promise<void>((resolve) => stdin.write(data, () => resolve())),
+        new Promise<void>((resolve) => {
+          // 對端可能在上一個檢查之後才關閉 stdin：write 在已毀損的串流上
+          // 可能同步丟 ERR_STREAM_DESTROYED，也可能帶錯誤呼叫 callback。
+          // 兩種都當成寫入沒送出去，照樣結束，不讓收尾卡住或拋出去。
+          try {
+            stdin.write(data, () => resolve());
+          } catch {
+            resolve();
+          }
+        }),
         this.exited.then(() => undefined),
       ]);
     }
-    if (!stdin.destroyed) stdin.end();
+    if (!stdin.destroyed) {
+      try {
+        stdin.end();
+      } catch {
+        // 對端已關閉；stdin 已經不需要再 end。
+      }
+    }
   }
 }
 

@@ -136,6 +136,14 @@ export interface ExternalAgentsDeps {
   readonly homeDir?: string;
   /** OpenCode 的預設模型；spike 實測的免費模型，代理沒登入也能跑。 */
   readonly openCodeModel?: string;
+  /** 以下為測試可調的等待上限；正式環境用預設值。 */
+  readonly timeouts?: {
+    readonly cancelGraceMs?: number;
+    readonly termGraceMs?: number;
+    readonly killGraceMs?: number;
+    readonly exitTaskTimeoutMs?: number;
+    readonly startupCleanupBudgetMs?: number;
+  };
 }
 
 interface TrackedPermission {
@@ -169,24 +177,55 @@ interface LiveSession {
 /** 預設用不帶登入的免費模型；環境變數可覆寫。 */
 const DEFAULT_OPENCODE_MODEL = "opencode/iceman-free";
 
+/** 等 `exitTask` 收尾的預設上限；真正殺不掉的行程不能讓 stop/shutdown 無限期卡住。 */
+const DEFAULT_EXIT_TASK_TIMEOUT_MS = 5_000;
+/** startupCleanup 收拾舊行程的預設總預算，避免逐筆等待無界累加拖慢啟動。 */
+const DEFAULT_STARTUP_CLEANUP_BUDGET_MS = 10_000;
+/** 終止行程各階段的預設寬限時間。 */
+const DEFAULT_CANCEL_GRACE_MS = 1_000;
+const DEFAULT_TERM_GRACE_MS = 2_000;
+const DEFAULT_KILL_GRACE_MS = 2_000;
+
 export class ExternalAgentsService {
   readonly #deps: ExternalAgentsDeps;
   readonly #storage: AgentStoragePaths;
   readonly #approvals: AgentApprovalsService;
   readonly #live = new Map<string, LiveSession>();
+  readonly #cancelGraceMs: number;
+  readonly #termGraceMs: number;
+  readonly #killGraceMs: number;
+  readonly #exitTaskTimeoutMs: number;
+  readonly #startupCleanupBudgetMs: number;
 
   constructor(deps: ExternalAgentsDeps) {
     this.#deps = deps;
     this.#storage = agentStoragePaths(deps.paths);
     this.#approvals = deps.approvals;
+    const timeouts = deps.timeouts ?? {};
+    this.#cancelGraceMs = timeouts.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS;
+    this.#termGraceMs = timeouts.termGraceMs ?? DEFAULT_TERM_GRACE_MS;
+    this.#killGraceMs = timeouts.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
+    this.#exitTaskTimeoutMs = timeouts.exitTaskTimeoutMs ?? DEFAULT_EXIT_TASK_TIMEOUT_MS;
+    this.#startupCleanupBudgetMs =
+      timeouts.startupCleanupBudgetMs ?? DEFAULT_STARTUP_CLEANUP_BUDGET_MS;
   }
 
   /** 服務啟動時：清暫存、清掉舊行程、把懸空 session 標結果未知、清 30 天快取。 */
   async startupCleanup(): Promise<{ orphaned: number; purged: number }> {
     const records = await listRecords(this.#storage);
     // 先處理上次強制結束留下的行程；PID 重用時身分對不上就不動它。
+    // 有總預算：萬一某一筆行程殺不掉，也不能讓每台的主機啟動無界累加等待。
+    const budgetDeadline = Date.now() + this.#startupCleanupBudgetMs;
     for (const record of records) {
-      if (record.child) await this.#terminateRecordedChild(record.child);
+      if (!record.child) continue;
+      if (Date.now() >= budgetDeadline) {
+        this.#deps.logger?.warn(
+          `啟動清理超過 ${this.#startupCleanupBudgetMs}ms，略過剩餘舊行程的終止`,
+        );
+        break;
+      }
+      const remaining = budgetDeadline - Date.now();
+      await this.#terminateRecordedChild(record.child, remaining);
     }
     await clearScratch(this.#storage);
     for (const record of records) {
@@ -855,15 +894,9 @@ export class ExternalAgentsService {
     const task = (async () => {
       await this.#withdrawPending(agentSessionId, live.record, "代理已結束");
       await this.#terminateChild(live);
-      if (live.exitTask) {
-        try {
-          await live.exitTask;
-        } catch (error) {
-          this.#deps.logger?.warn(
-            `等待代理行程結束時發生錯誤：${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-      }
+      // #terminateChild 已經等過（且有上限）；這裡再等是為了 child 一開始就是
+      // null 的邊際情況。用同一個有上限的 helper，避免無界卡住收尾。
+      await this.#awaitExitTask(live);
       await removeScratch(this.#storage, agentSessionId);
       // 行程已經結束，安全地套用完成／失敗事件。
       const current = live.record;
@@ -900,19 +933,19 @@ export class ExternalAgentsService {
       cancel = encodeClaudeInterrupt(`interrupt-${Date.now()}`);
     }
     await child.writeThenCloseInput(cancel);
-    if (await this.#waitForExit(child, 1_000)) {
+    if (await this.#waitForExit(child, this.#cancelGraceMs)) {
       await this.#awaitExitTask(live);
       return;
     }
 
     child.signal("SIGTERM");
-    if (await this.#waitForExit(child, 2_000)) {
+    if (await this.#waitForExit(child, this.#termGraceMs)) {
       await this.#awaitExitTask(live);
       return;
     }
 
     child.signal("SIGKILL");
-    if (!(await this.#waitForExit(child, 2_000))) {
+    if (!(await this.#waitForExit(child, this.#killGraceMs))) {
       this.#deps.logger?.warn(
         `代理 ${live.record.agentSessionId} 的行程 ${child.pid} SIGKILL 後仍未結束`,
       );
@@ -920,15 +953,42 @@ export class ExternalAgentsService {
     await this.#awaitExitTask(live);
   }
 
+  /**
+   * 等 `#onExit` 的收尾完成，但有上限。
+   *
+   * `live.exitTask` 是 `child.exited.then(#onExit)`；行程若真的殺不掉，
+   * `child.exited` 永遠不 resolve，這裡就會無限期卡住 stop/shutdown。
+   * 逾時時記診斷後放棄等待，讓收尾繼續往下走。
+   */
   async #awaitExitTask(live: LiveSession): Promise<void> {
-    if (!live.exitTask) return;
+    const task = live.exitTask;
+    if (!task) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), this.#exitTaskTimeoutMs);
+      timer.unref?.();
+    });
     try {
-      await live.exitTask;
-    } catch (error) {
-      this.#deps.logger?.warn(
-        `等待代理行程結束時發生錯誤：${error instanceof Error ? error.message : String(error)}`,
-      );
+      const result = await Promise.race([
+        task.then(
+          () => "done" as const,
+          (error: unknown) => {
+            this.#deps.logger?.warn(
+              `等待代理行程結束時發生錯誤：${error instanceof Error ? error.message : String(error)}`,
+            );
+            return "error" as const;
+          },
+        ),
+        timeout,
+      ]);
+      if (result === "timeout") {
+        this.#deps.logger?.warn(
+          `等待代理 ${live.record.agentSessionId} 的行程結束超過 ${this.#exitTaskTimeoutMs}ms，繼續收尾`,
+        );
+      }
     } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      // 不再等待這個 promise；就算它還沒完成，也不該讓後面的收尾卡住。
       live.exitTask = null;
     }
   }
@@ -959,14 +1019,20 @@ export class ExternalAgentsService {
    * 先比對 PID、行程群組和啟動時間；任一個對不上就是 PID 重用或已經不存在，
    * 這時不動它，只把耐久紀錄上的 child 欄位清掉。
    */
-  async #terminateRecordedChild(child: ExternalAgentChildProcess): Promise<void> {
+  async #terminateRecordedChild(
+    child: ExternalAgentChildProcess,
+    budgetMs = this.#startupCleanupBudgetMs,
+  ): Promise<void> {
     if ((await this.#recordedChildState(child)) !== "same") return;
 
+    const deadline = Date.now() + budgetMs;
+    const remaining = () => Math.max(0, deadline - Date.now());
+
     this.#signalGroup(child.processGroupId, "SIGTERM");
-    if (await this.#waitForRecordedChild(child, 2_000)) return;
+    if (await this.#waitForRecordedChild(child, remaining())) return;
 
     this.#signalGroup(child.processGroupId, "SIGKILL");
-    if (!(await this.#waitForRecordedChild(child, 3_000))) {
+    if (!(await this.#waitForRecordedChild(child, remaining()))) {
       this.#deps.logger?.warn(`無法結束舊行程 ${child.pid}`);
     }
   }
@@ -1059,6 +1125,15 @@ export class ExternalAgentsService {
   }
 
   #emit(record: ExternalAgentSessionRecord): void {
+    // 進入終態的 session 不必再留在 #live：耐久紀錄已寫入，list()、stop()
+    // 都會讀磁碟。刪掉避免長時間執行時 map 一直累積。emit 是所有終態寫入的
+    // 共同出口，在這裡清理不會漏掉任何一條路徑。
+    if (
+      isTerminalAgentStatus(record.status) &&
+      this.#live.get(record.agentSessionId)?.record.status === record.status
+    ) {
+      this.#live.delete(record.agentSessionId);
+    }
     this.#deps.emitState({
       agentSessionId: record.agentSessionId,
       agentKind: record.agentKind,
