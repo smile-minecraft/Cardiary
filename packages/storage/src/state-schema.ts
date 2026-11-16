@@ -692,6 +692,33 @@ export const M6_MIGRATIONS: readonly Migration[] = [
   { version: 7, name: "m3-pending-patches", sql: M7_SCHEMA },
 ];
 
+/**
+ * v8「MCP 伺服器核准綁定」：保存通過核准的設定雜湊。
+ *
+ * 設定正本可以被核准流程以外的路徑寫入，所以啟動時必須拿目前的內容與
+ * 這張表比對，雜湊不符就不啟動。`config_json` 保存核准當下的正規化快照，
+ * 方便除錯與稽核；核准動作只由 MCP 模組在協定核准後寫入。
+ */
+const M8_SCHEMA = `
+CREATE TABLE mcp_server_approvals (
+  server_id     TEXT PRIMARY KEY,
+  config_digest TEXT NOT NULL,
+  config_json   TEXT NOT NULL,
+  approved_at   TEXT NOT NULL
+) STRICT;
+`;
+
+/** v8 新增的表名稱。 */
+export const M8_TABLES = ["mcp_server_approvals"] as const;
+
+/**
+ * v8 的遷移清單：在 v7 之後加 MCP 核准綁定表。
+ */
+export const M7_MIGRATIONS: readonly Migration[] = [
+  ...M6_MIGRATIONS,
+  { version: 8, name: "mcp-server-approvals", sql: M8_SCHEMA },
+];
+
 const SCHEMA_MIGRATIONS_DDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version     INTEGER PRIMARY KEY,
@@ -736,7 +763,7 @@ interface AppliedMigrationRow {
  * - 每個版本在單一交易內完成 SQL、`user_version` 與 `schema_migrations`。
  */
 export function migrate(db: Database, options: MigrateOptions): MigrationOutcome {
-  const migrations = options.migrations ?? M6_MIGRATIONS;
+  const migrations = options.migrations ?? M7_MIGRATIONS;
   const now = options.now ?? (() => new Date());
   db.exec(SCHEMA_MIGRATIONS_DDL);
 

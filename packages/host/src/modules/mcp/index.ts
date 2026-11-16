@@ -18,7 +18,12 @@ import type {
   ProtocolRegistrationHandle,
 } from "@cardiary/module-api";
 import type { McpServerInfo } from "@cardiary/protocol";
-import { FileRegistry, FolderLayout, McpServerStore } from "@cardiary/storage";
+import {
+  FileRegistry,
+  FolderLayout,
+  McpServerApprovalStore,
+  McpServerStore,
+} from "@cardiary/storage";
 
 import { HOST_SERVICE_NAMES, ProtocolHandlerError, type CardEnvironment } from "../contract.js";
 import type { HostEngine } from "../../engine/types.js";
@@ -40,6 +45,11 @@ export interface McpModuleOptions {
   readonly folderRoot?: string;
   readonly homeDir?: string;
   readonly registry?: FileRegistry;
+  /**
+   * 核准綁定的儲存。沒有傳入時從 `cardStorage` 服務的狀態庫建立；沒有狀態庫
+   * 就啟用不了任何伺服器（fail closed），因為無法證明任何設定通過核准。
+   */
+  readonly bindings?: McpServerApprovalStore;
   readonly now?: () => Date;
 }
 
@@ -78,6 +88,9 @@ export async function activateMcpModule(
     registry === null
       ? null
       : new McpToolCache(layout, registry, options.now === undefined ? {} : { now: options.now });
+  // 核准綁定比正本處於更受保護的狀態庫內；只有協定核准後的寫入會異動它。
+  // 正本可以被核准流程以外的路徑改寫，所以啟動前一定要拿兩邊比對。
+  const bindings = resolveBindings(context, options);
 
   const active = new Map<string, ActiveServer>();
   const failures = new Map<string, string>();
@@ -101,6 +114,12 @@ export async function activateMcpModule(
     return registration;
   };
 
+  /** 正本內容與核准綁定一致時才能啟動；沒有綁定維護能力就視為未核准。 */
+  const isApprovedForLaunch = (record: McpServerRecord): boolean =>
+    bindings !== null && bindings.isApproved(record);
+
+  const unapprovedMessage = "設定內容與核准紀錄不符，可能被修改過；不會啟動，請移除後重新新增。";
+
   const emitChanged = (server: McpServerInfo, removed = false): void => {
     protocol.emit({
       kind: "mcp-servers-changed",
@@ -115,6 +134,13 @@ export async function activateMcpModule(
 
   const startServer = async (record: McpServerRecord): Promise<void> => {
     if (disposed || !record.enabled || active.has(record.serverId)) {
+      return;
+    }
+    if (!isApprovedForLaunch(record)) {
+      // 正本被核准流程以外的路徑改過就算竄改：不啟動，也不註冊工具。
+      failures.set(record.serverId, unapprovedMessage);
+      logger.warn("MCP 伺服器的設定與核准紀錄不符，不會啟動", { serverId: record.serverId });
+      emitChanged(infoOf(record));
       return;
     }
     const existing = starting.get(record.serverId);
@@ -208,10 +234,38 @@ export async function activateMcpModule(
         });
         return;
       }
+      if (bindings === null) {
+        // 沒有核准綁定的儲存時，任何紀錄都無法證明通過核准，不能啟動。
+        logger.error("沒有可用的核准狀態庫，沒有啟動任何伺服器");
+        protocol.emit({
+          kind: "notification",
+          title: "MCP 設定無法核准",
+          body: "找不到受保護的核准狀態，這次啟動沒有啟動任何 MCP 伺服器。",
+          level: "error",
+        });
+        return;
+      }
+      const pending: McpServerRecord[] = [];
       for (const record of records) {
         if (record.enabled) {
-          await startServer(record);
+          if (isApprovedForLaunch(record)) {
+            await startServer(record);
+          } else {
+            pending.push(record);
+            await startServer(record);
+          }
         }
+      }
+      if (pending.length > 0) {
+        logger.warn("MCP 伺服器的設定與核准紀錄不符，沒有啟動", {
+          serverIds: pending.map((record) => record.serverId),
+        });
+        protocol.emit({
+          kind: "notification",
+          title: "MCP 設定待核准",
+          body: `${pending.length} 個 MCP 伺服器的設定內容與核准紀錄不符，沒有啟動：${pending.map((record) => record.name).join("、")}。請到設定移除後重新新增。`,
+          level: "warning",
+        });
       }
     })().catch((error: unknown) => {
       logger.warn("MCP 伺服器清單載入失敗", { message: describeError(error) });
@@ -255,6 +309,23 @@ export async function activateMcpModule(
         return;
       }
       const record = await store.add(input);
+      if (bindings === null) {
+        // 沒有綁定儲存就無法證明這筆設定通過核准；不能放任一個永遠不會
+        // 啟動、不綁定的紀錄留在正本。
+        logger.error("沒有可用的核准狀態庫，無法綁定核准紀錄", {
+          serverId: record.serverId,
+        });
+        protocol.emit({
+          kind: "notification",
+          title: "MCP 核准無法登記",
+          body: `「${record.name}」已寫入正本，但找不到受保護的核准狀態，不會啟動；請移除後重新新增。`,
+          level: "error",
+        });
+        emitChanged(infoOf(record));
+        return;
+      }
+      // 只有走過核准的寫入會把設定內容綁定進受保護的狀態庫。
+      bindings.approve(record);
       protocol.emit({
         kind: "notification",
         title: "MCP 伺服器已新增",
@@ -317,12 +388,31 @@ export async function activateMcpModule(
           message: describeError(error),
         });
       }
+      bindings?.revoke(serverId);
       emitChanged(last, true);
       return true;
     },
 
     async setEnabled(serverId: string, enabled: boolean): Promise<McpServerInfo> {
+      const current = await store.get(serverId);
+      if (current === null) {
+        throw new ProtocolHandlerError("not_found", `找不到 MCP 伺服器：${serverId}`);
+      }
+      const approvedBefore = bindings !== null && bindings.isApproved(current);
+      if (enabled && !approvedBefore) {
+        // 啟動前一定要先證明設定與核准綁定一致；沒有就不能把 enabled 改成
+        // true，否則手改正本的人就能零審批啟動。
+        throw new ProtocolHandlerError(
+          "conflict",
+          "設定內容與核准紀錄不符，不能啟用；請移除後重新新增。",
+        );
+      }
       const record = await store.setEnabled(serverId, enabled);
+      // 只有改動前就已經通過綁定比對的紀錄才重新綁定；不能用停用順手替
+      // 手改過的內容背書。
+      if (approvedBefore && bindings !== null) {
+        bindings.approve(record);
+      }
       if (enabled) {
         await startServer(record);
       } else {
@@ -338,7 +428,20 @@ export async function activateMcpModule(
       serverId: string,
       allowedHosts: readonly string[],
     ): Promise<McpServerInfo> {
+      const current = await store.get(serverId);
+      if (current === null) {
+        throw new ProtocolHandlerError("not_found", `找不到 MCP 伺服器：${serverId}`);
+      }
+      // 修改設定內容也是一種寫入；手改過的正本不能靠這個請求重新背書。
+      if (bindings === null || !bindings.isApproved(current)) {
+        throw new ProtocolHandlerError(
+          "conflict",
+          "設定內容與核准紀錄不符，不能修改；請移除後重新新增。",
+        );
+      }
       const record = await store.setAllowedHosts(serverId, allowedHosts);
+      // 通過綁定比對後才是使用者這次要求的變更，重新綁定新的內容。
+      bindings.approve(record);
       if (record.enabled && record.transport === "http") {
         // 網域白名單改變後重新連線；舊連線不能沿用先前的判斷。
         await stopServer(serverId);
@@ -389,6 +492,27 @@ function resolveRegistry(
   return new FileRegistry(
     cabinet.state,
     layout,
+    options.now === undefined ? {} : { now: options.now },
+  );
+}
+
+/**
+ * 核准綁定優先使用呼叫端提供的實例；沒有時從 `cardStorage` 取狀態庫建立。
+ * 兩者都拿不到就回 `null`，啟動時一律不信任任何紀錄。
+ */
+function resolveBindings(
+  context: ModuleActivationContext,
+  options: McpModuleOptions,
+): McpServerApprovalStore | null {
+  if (options.bindings !== undefined) {
+    return options.bindings;
+  }
+  const cabinet = context.services.host.get<CardEnvironment>(HOST_SERVICE_NAMES.cardStorage);
+  if (cabinet === undefined) {
+    return null;
+  }
+  return new McpServerApprovalStore(
+    cabinet.state,
     options.now === undefined ? {} : { now: options.now },
   );
 }

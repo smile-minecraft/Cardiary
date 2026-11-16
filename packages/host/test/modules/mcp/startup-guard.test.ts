@@ -15,6 +15,7 @@ import { FolderLayout, McpServerStore } from "@cardiary/storage";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { activateMcpModule } from "../../../src/modules/mcp/index.js";
+import { openMcpApprovals } from "./helpers.js";
 import type { McpClient, McpClientFactory } from "../../../src/modules/mcp/client.js";
 
 let root = "";
@@ -108,6 +109,7 @@ describe("手改或損毀的 MCP 設定不會啟動任何伺服器", () => {
       store: new McpServerStore(new FolderLayout(root)),
       folderRoot: root,
       clientFactory: spyingClient(created),
+      bindings: openMcpApprovals(),
     });
     await handle.settled();
 
@@ -132,6 +134,11 @@ describe("手改或損毀的 MCP 設定不會啟動任何伺服器", () => {
     });
     await store.setEnabled(record.serverId, true);
 
+    const bindings = openMcpApprovals();
+    const current = await store.get(record.serverId);
+    expect(current).not.toBeNull();
+    bindings.approve(current!);
+
     const notifications: ProtocolEventIntent[] = [];
     const bundles: ToolBundleDraft[] = [];
     const created: string[] = [];
@@ -139,11 +146,12 @@ describe("手改或損毀的 MCP 設定不會啟動任何伺服器", () => {
       store: new McpServerStore(new FolderLayout(root)),
       folderRoot: root,
       clientFactory: spyingClient(created),
+      bindings,
     });
     await handle.settled();
 
     expect(created).toEqual([record.serverId]);
-    expect(notifications).toEqual([]);
+    expect(notifications.filter((event) => event.kind === "notification")).toEqual([]);
     await handle.dispose();
   });
 });

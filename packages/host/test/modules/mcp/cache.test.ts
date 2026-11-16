@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ToolBundleDraft, ToolDefinition } from "@cardiary/engine-adapter";
 import type { ModuleActivationContext } from "@cardiary/module-api";
-import { McpServerStore, Storage } from "@cardiary/storage";
+import { McpServerApprovalStore, McpServerStore, Storage } from "@cardiary/storage";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { HostEngine } from "../../../src/engine/types.js";
@@ -46,7 +46,7 @@ afterEach(() => {
   }
 });
 
-function openStorage(): { root: string; storage: Storage } {
+function openStorage(): { root: string; storage: Storage; bindings: McpServerApprovalStore } {
   const root = join(
     tmpdir(),
     `cardiary-mcp-cache-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
@@ -55,7 +55,7 @@ function openStorage(): { root: string; storage: Storage } {
   const storage = Storage.open({ path: root, initialize: true, appVersion: "test" });
   roots.push(root);
   storages.push(storage);
-  return { root, storage };
+  return { root, storage, bindings: new McpServerApprovalStore(storage.state) };
 }
 
 class CountingClient {
@@ -127,9 +127,10 @@ function toolIn(draft: ToolBundleDraft, name: string): ToolDefinition {
 
 describe("MCP 工具快取", () => {
   it("啟動後把工具清單寫進 cache 並登記到檔案登記簿", async () => {
-    const { root, storage } = openStorage();
+    const { root, storage, bindings } = openStorage();
     const store = new McpServerStore(storage.layout);
     const record = await store.add(INPUT);
+    bindings.approve(record);
     const bundles: ToolBundleDraft[] = [];
     const handle = await activateMcpModule(makeContext(root, bundles), {
       store,
@@ -137,6 +138,7 @@ describe("MCP 工具快取", () => {
       clientFactory: new CountingClient(TOOLS).factory,
       folderRoot: root,
       registry: storage.registry,
+      bindings,
     });
     await handle.settled();
 
@@ -162,9 +164,10 @@ describe("MCP 工具快取", () => {
   });
 
   it("重啟後 list_tools 直接使用快取，不再向伺服器要工具清單", async () => {
-    const { root, storage } = openStorage();
+    const { root, storage, bindings } = openStorage();
     const store = new McpServerStore(storage.layout);
-    await store.add(INPUT);
+    const record = await store.add(INPUT);
+    bindings.approve(record);
 
     const first = new CountingClient(TOOLS);
     const firstBundles: ToolBundleDraft[] = [];
@@ -174,6 +177,7 @@ describe("MCP 工具快取", () => {
       clientFactory: first.factory,
       folderRoot: root,
       registry: storage.registry,
+      bindings,
     });
     await firstHandle.settled();
     expect(first.listCalls).toBe(1);
@@ -192,6 +196,7 @@ describe("MCP 工具快取", () => {
       clientFactory: second.factory,
       folderRoot: root,
       registry: storage.registry,
+      bindings,
     });
     await secondHandle.settled();
     expect(second.listCalls).toBe(1);
@@ -207,9 +212,10 @@ describe("MCP 工具快取", () => {
   });
 
   it("快取遺失時重新向伺服器要清單並重建檔案", async () => {
-    const { root, storage } = openStorage();
+    const { root, storage, bindings } = openStorage();
     const store = new McpServerStore(storage.layout);
     const record = await store.add(INPUT);
+    bindings.approve(record);
     const client = new CountingClient(TOOLS);
     const bundles: ToolBundleDraft[] = [];
     const handle = await activateMcpModule(makeContext(root, bundles), {
@@ -218,6 +224,7 @@ describe("MCP 工具快取", () => {
       clientFactory: client.factory,
       folderRoot: root,
       registry: storage.registry,
+      bindings,
     });
     await handle.settled();
 
@@ -244,9 +251,10 @@ describe("MCP 工具快取", () => {
   });
 
   it("移除伺服器會清掉快取檔與登記列", async () => {
-    const { root, storage } = openStorage();
+    const { root, storage, bindings } = openStorage();
     const store = new McpServerStore(storage.layout);
     const record = await store.add(INPUT);
+    bindings.approve(record);
     const bundles: ToolBundleDraft[] = [];
     const handle = await activateMcpModule(makeContext(root, bundles), {
       store,
@@ -254,6 +262,7 @@ describe("MCP 工具快取", () => {
       clientFactory: new CountingClient(TOOLS).factory,
       folderRoot: root,
       registry: storage.registry,
+      bindings,
     });
     await handle.settled();
     const filePath = toolCacheFilePath(storage.layout, record.serverId);

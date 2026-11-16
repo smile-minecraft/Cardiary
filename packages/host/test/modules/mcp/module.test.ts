@@ -15,6 +15,7 @@ import type {
   McpToolDescriptor,
 } from "../../../src/modules/mcp/client.js";
 import { toolNamesOf } from "../../../src/modules/mcp/tools.js";
+import { openMcpApprovals } from "./helpers.js";
 
 const INPUT = {
   name: "Local",
@@ -149,6 +150,7 @@ describe("MCP 模組的審批與工具註冊", () => {
       engine: makeEngine(approvals),
       clientFactory: fakeClient(calls),
       folderRoot: root,
+      bindings: openMcpApprovals(),
     });
     const { approvalId } = await handle.controller.requestAdd(INPUT);
 
@@ -176,6 +178,7 @@ describe("MCP 模組的審批與工具註冊", () => {
       engine: makeEngine(approvals),
       clientFactory: fakeClient([]),
       folderRoot: root,
+      bindings: openMcpApprovals(),
     });
     const { approvalId } = await handle.controller.requestAdd(INPUT);
     approvals.decide(approvalId, "denied");
@@ -193,11 +196,17 @@ describe("MCP 模組的審批與工具註冊", () => {
     await store.setEnabled(record.serverId, false);
     const bundles: ToolBundleDraft[] = [];
     const calls: string[] = [];
+    const bindings = openMcpApprovals();
+    const approved = await store.get(record.serverId);
+    if (approved !== null) {
+      bindings.approve(approved);
+    }
     const handle = await activateMcpModule(makeContext(bundles), {
       store,
       engine: makeEngine(new FakeApprovals()),
       clientFactory: fakeClient(calls),
       folderRoot: root,
+      bindings,
     });
     await handle.settled();
     expect(bundles).toEqual([]);
@@ -209,13 +218,16 @@ describe("MCP 模組的審批與工具註冊", () => {
     const root = makeFolder();
     const store = new McpServerStore(new FolderLayout(root));
     const events: ProtocolEventIntent[] = [];
+    const bindings = openMcpApprovals();
     const handle = await activateMcpModule(makeContext([], events), {
       store,
       engine: makeEngine(new FakeApprovals()),
       clientFactory: fakeClient([]),
       folderRoot: root,
+      bindings,
     });
     const record = await store.add(INPUT);
+    bindings.approve(record);
     await handle.settled();
 
     await handle.controller.setEnabled(record.serverId, false);
@@ -242,11 +254,13 @@ describe("MCP 模組的審批與工具註冊", () => {
     const root = makeFolder();
     const store = new McpServerStore(new FolderLayout(root));
     const events: ProtocolEventIntent[] = [];
+    const bindings = openMcpApprovals();
     const handle = await activateMcpModule(makeContext([], events), {
       store,
       engine: makeEngine(new FakeApprovals()),
       clientFactory: fakeClient([]),
       folderRoot: root,
+      bindings,
     });
     const record = await store.add({
       name: "Remote",
@@ -254,6 +268,7 @@ describe("MCP 模組的審批與工具註冊", () => {
       url: "https://example.test/mcp",
       allowedHosts: ["example.test"],
     });
+    bindings.approve(record);
     await handle.settled();
 
     const info = await handle.controller.setAllowedHosts(record.serverId, [
@@ -284,6 +299,7 @@ describe("MCP 模組的審批與工具註冊", () => {
       engine: makeEngine(approvals),
       clientFactory: fakeClient(calls),
       folderRoot: root,
+      bindings: openMcpApprovals(),
     });
     const { approvalId } = await handle.controller.requestAdd(INPUT);
     approvals.decide(approvalId, "approved");
