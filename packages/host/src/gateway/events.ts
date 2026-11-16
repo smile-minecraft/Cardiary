@@ -265,10 +265,7 @@ export function validateEventPayload(type: string, payload: unknown): string | n
         new Map([
           ["agentSessionId", string],
           ["agentKind", enumeration("opencode", "claude-code")],
-          [
-            "status",
-            enumeration("starting", "running", "waiting-approval", "stopped", "failed"),
-          ],
+          ["status", enumeration("starting", "running", "waiting-approval", "stopped", "failed")],
           ["progress", optional(agentProgress)],
           ["message", optional(string)],
         ]),

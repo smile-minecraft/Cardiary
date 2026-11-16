@@ -48,8 +48,7 @@ async function deactivate(): Promise<void> {
 
 /** 領域狀態轉成協定 `agent.state_changed` 的 payload。 */
 function emitState(context: ModuleActivationContext, data: ExternalAgentStateData): void {
-  const status =
-    data.status === "completed" || data.status === "stopped" ? "stopped" : data.status;
+  const status = data.status === "completed" || data.status === "stopped" ? "stopped" : data.status;
   context.services.protocol.emit({
     kind: "external-agent-status",
     agentSessionId: data.agentSessionId,

@@ -77,9 +77,7 @@ export async function readRecord(
 }
 
 /** 目前存在的所有紀錄；讀不到或壞掉的目錄跳過。 */
-export async function listRecords(
-  paths: AgentStoragePaths,
-): Promise<ExternalAgentSessionRecord[]> {
+export async function listRecords(paths: AgentStoragePaths): Promise<ExternalAgentSessionRecord[]> {
   const entries = await readdir(paths.cacheRoot, { withFileTypes: true }).catch(() => []);
   const out: ExternalAgentSessionRecord[] = [];
   for (const entry of entries) {
@@ -180,7 +178,11 @@ export async function markOrphansAfterRestart(
   const records = await listRecords(paths);
   const marked: ExternalAgentSessionRecord[] = [];
   for (const record of records) {
-    if (record.status === "completed" || record.status === "stopped" || record.status === "failed") {
+    if (
+      record.status === "completed" ||
+      record.status === "stopped" ||
+      record.status === "failed"
+    ) {
       continue;
     }
     const updated = markUnknownAfterRestart(record, now);

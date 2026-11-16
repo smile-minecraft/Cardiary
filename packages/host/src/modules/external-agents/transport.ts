@@ -185,5 +185,3 @@ export function encodeClaudeInterrupt(requestId: string): string {
     request: { subtype: "interrupt" },
   })}\n`;
 }
-
-

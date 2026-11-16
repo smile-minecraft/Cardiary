@@ -10,12 +10,15 @@ import {
 
 describe("fake line normalization", () => {
   it("把進度與完成訊息解析成正規化事件", () => {
-    expect(normalizeFakeLine('{"type":"progress","completed":1,"total":3,"label":"讀檔"}'))
-      .toEqual([{ kind: "progress", completed: 1, total: 3, label: "讀檔" }]);
-    expect(normalizeFakeLine('{"type":"completed","message":"做完了"}'))
-      .toEqual([{ kind: "completed", message: "做完了" }]);
-    expect(normalizeFakeLine('{"type":"failed","message":"找不到指令"}'))
-      .toEqual([{ kind: "failed", message: "找不到指令" }]);
+    expect(normalizeFakeLine('{"type":"progress","completed":1,"total":3,"label":"讀檔"}')).toEqual(
+      [{ kind: "progress", completed: 1, total: 3, label: "讀檔" }],
+    );
+    expect(normalizeFakeLine('{"type":"completed","message":"做完了"}')).toEqual([
+      { kind: "completed", message: "做完了" },
+    ]);
+    expect(normalizeFakeLine('{"type":"failed","message":"找不到指令"}')).toEqual([
+      { kind: "failed", message: "找不到指令" },
+    ]);
     expect(normalizeFakeLine("not-json")).toEqual([]);
   });
 
@@ -38,12 +41,13 @@ describe("fake line normalization", () => {
 
 describe("opencode acp normalization", () => {
   it("分類 request / notification / response", () => {
-    expect(classifyAcpLine('{"jsonrpc":"2.0","method":"session/new","id":1}').kind)
-      .toBe("request");
-    expect(classifyAcpLine('{"jsonrpc":"2.0","method":"session/update","params":{}}').kind)
-      .toBe("notification");
-    expect(classifyAcpLine('{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}').kind)
-      .toBe("response");
+    expect(classifyAcpLine('{"jsonrpc":"2.0","method":"session/new","id":1}').kind).toBe("request");
+    expect(classifyAcpLine('{"jsonrpc":"2.0","method":"session/update","params":{}}').kind).toBe(
+      "notification",
+    );
+    expect(classifyAcpLine('{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}').kind).toBe(
+      "response",
+    );
     expect(classifyAcpLine("bun warning: hello").kind).toBe("ignored");
   });
 
@@ -95,7 +99,12 @@ describe("opencode acp normalization", () => {
     const line = JSON.stringify({
       jsonrpc: "2.0",
       method: "session/update",
-      params: { update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "完成一半" } } },
+      params: {
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "完成一半" },
+        },
+      },
     });
     expect(normalizeAcpLine(line)).toEqual([{ kind: "output", text: "完成一半" }]);
   });
@@ -128,10 +137,14 @@ describe("claude stream-json normalization", () => {
 
   it("result success / 失敗對應 completed / failed", () => {
     expect(
-      normalizeStreamJsonLine(JSON.stringify({ type: "result", subtype: "success", result: "做完" })),
+      normalizeStreamJsonLine(
+        JSON.stringify({ type: "result", subtype: "success", result: "做完" }),
+      ),
     ).toEqual([{ kind: "completed", message: "完成：做完" }]);
     expect(
-      normalizeStreamJsonLine(JSON.stringify({ type: "result", subtype: "error_max_turns", result: "卡住" }))[0],
+      normalizeStreamJsonLine(
+        JSON.stringify({ type: "result", subtype: "error_max_turns", result: "卡住" }),
+      )[0],
     ).toMatchObject({ kind: "failed" });
   });
 });

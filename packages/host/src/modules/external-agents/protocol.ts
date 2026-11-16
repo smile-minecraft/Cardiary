@@ -31,7 +31,7 @@ export function registerExternalAgentsProtocol(options: ExternalAgentsProtocolOp
           return asJson(await service.stop(agentSessionId));
         }
         case "agent.list":
-          return asJson({ agents: [...await service.list()] } satisfies AgentListResponsePayload);
+          return asJson({ agents: [...(await service.list())] } satisfies AgentListResponsePayload);
         default:
           throw new ProtocolHandlerError("not_found", `沒有這個代理訊息：${request.type}`);
       }
@@ -112,5 +112,8 @@ function asProtocolError(error: unknown): ProtocolHandlerError {
       error.message,
     );
   }
-  return new ProtocolHandlerError("internal", error instanceof Error ? error.message : String(error));
+  return new ProtocolHandlerError(
+    "internal",
+    error instanceof Error ? error.message : String(error),
+  );
 }

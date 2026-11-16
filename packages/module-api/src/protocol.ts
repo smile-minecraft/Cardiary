@@ -10,7 +10,8 @@ export type CardChangeKind = "created" | "updated" | "deleted" | "refreshed" | "
  * 對齊協定 `AgentStatus`；領域層的 `completed` 在協定層以 `stopped` 表示，
  * 結果寫在 `message`。模組內部的完整狀態不經這個型別。
  */
-export type ExternalAgentStatus = "starting" | "running" | "waiting-approval" | "stopped" | "failed";
+export type ExternalAgentStatus =
+  "starting" | "running" | "waiting-approval" | "stopped" | "failed";
 
 /**
  * 模組想送給客戶端的協定事件。

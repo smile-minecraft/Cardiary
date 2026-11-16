@@ -531,7 +531,10 @@ export class ExternalAgentsService {
     if (id === ACP_IDS.sessionNew) {
       const sessionId = result.sessionId;
       live.acpSessionId = typeof sessionId === "string" ? sessionId : null;
-      const model = this.#deps.openCodeModel ?? process.env.CARDIARY_AGENT_OPENCODE_MODEL ?? DEFAULT_OPENCODE_MODEL;
+      const model =
+        this.#deps.openCodeModel ??
+        process.env.CARDIARY_AGENT_OPENCODE_MODEL ??
+        DEFAULT_OPENCODE_MODEL;
       if (model.length > 0) child.write(encodeAcpSetModel(model));
       if (live.record.prompt && live.acpSessionId) {
         child.write(encodeAcpPrompt(live.acpSessionId, live.record.prompt));
@@ -555,7 +558,8 @@ export class ExternalAgentsService {
       }
       void this.#applyEvent(live, {
         kind: "completed",
-        message: stopReason === "end_turn" ? "代理完成任務" : `代理結束（${stopReason ?? "unknown"}）`,
+        message:
+          stopReason === "end_turn" ? "代理完成任務" : `代理結束（${stopReason ?? "unknown"}）`,
       });
       return;
     }

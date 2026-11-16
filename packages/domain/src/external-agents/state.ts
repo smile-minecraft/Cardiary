@@ -128,9 +128,7 @@ export function attachPermissionApproval(
   };
 }
 
-export function clearPermission(
-  record: ExternalAgentSessionRecord,
-): ExternalAgentSessionRecord {
+export function clearPermission(record: ExternalAgentSessionRecord): ExternalAgentSessionRecord {
   if (!record.pendingPermission) return record;
   return { ...record, pendingPermission: null, status: "running" };
 }

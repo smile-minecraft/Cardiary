@@ -123,8 +123,7 @@ export function normalizeAcpFrame(frame: AcpFrame): NormalizedAgentEvent[] {
   if (frame.kind !== "notification") return out;
   if (frame.frame.method !== "session/update") return out;
   const params = asObject(frame.frame.params) ?? {};
-  const update =
-    asObject(params.update) ?? asObject(params.event) ?? asObject(params.notification);
+  const update = asObject(params.update) ?? asObject(params.event) ?? asObject(params.notification);
   if (!update) return out;
   const sessionUpdate = asString(update.sessionUpdate) ?? asString(update.type);
   if (sessionUpdate === "plan") {
@@ -185,16 +184,16 @@ export function normalizeStreamJsonLine(line: string): NormalizedAgentEvent[] {
     return [
       {
         kind: "failed",
-        message: result ? `Claude Code 結束：${subtype ?? "error"} — ${truncate(result, 80)}` : `Claude Code 結束：${subtype ?? "error"}`,
+        message: result
+          ? `Claude Code 結束：${subtype ?? "error"} — ${truncate(result, 80)}`
+          : `Claude Code 結束：${subtype ?? "error"}`,
       },
     ];
   }
   return [];
 }
 
-function normalizeClaudePermissionRequest(
-  obj: ExternalAgentJson,
-): NormalizedAgentEvent[] {
+function normalizeClaudePermissionRequest(obj: ExternalAgentJson): NormalizedAgentEvent[] {
   const request = asObject(obj.request);
   const requestId = asString(obj.request_id) ?? asString(request?.request_id);
   if (!request || !requestId) return [];

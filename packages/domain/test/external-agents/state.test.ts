@@ -27,18 +27,38 @@ function baseRecord(): ExternalAgentSessionRecord {
 describe("applyAgentEvent", () => {
   it("進度累加並可重複套用同一個序號而不會往前跳", () => {
     let record = baseRecord();
-    record = applyAgentEvent(record, { kind: "progress", completed: 2, total: 4, label: "步驟 2" }, 1, start).record;
+    record = applyAgentEvent(
+      record,
+      { kind: "progress", completed: 2, total: 4, label: "步驟 2" },
+      1,
+      start,
+    ).record;
     expect(record.progress).toEqual({ step: 2, label: "步驟 2", completed: 2, total: 4 });
     expect(record.completedSteps).toBe(2);
-    const again = applyAgentEvent(record, { kind: "progress", completed: 3, total: 4, label: "步驟 3" }, 1, start);
+    const again = applyAgentEvent(
+      record,
+      { kind: "progress", completed: 3, total: 4, label: "步驟 3" },
+      1,
+      start,
+    );
     expect(again.applied).toBe(false);
     expect(again.record.progress?.completed).toBe(2);
   });
 
   it("進度不會讓已完成的步數倒退", () => {
     let record = baseRecord();
-    record = applyAgentEvent(record, { kind: "progress", completed: 3, total: 4, label: "a" }, 1, start).record;
-    record = applyAgentEvent(record, { kind: "progress", completed: 1, total: 4, label: "b" }, 2, start).record;
+    record = applyAgentEvent(
+      record,
+      { kind: "progress", completed: 3, total: 4, label: "a" },
+      1,
+      start,
+    ).record;
+    record = applyAgentEvent(
+      record,
+      { kind: "progress", completed: 1, total: 4, label: "b" },
+      2,
+      start,
+    ).record;
     expect(record.completedSteps).toBe(3);
     expect(record.progress?.label).toBe("b");
   });
@@ -47,7 +67,14 @@ describe("applyAgentEvent", () => {
     let record = baseRecord();
     record = applyAgentEvent(
       record,
-      { kind: "permission", toolName: "Bash", input: { command: "ls" }, requestKey: "fake:r1", replyToken: "r1", description: "列出檔案" },
+      {
+        kind: "permission",
+        toolName: "Bash",
+        input: { command: "ls" },
+        requestKey: "fake:r1",
+        replyToken: "r1",
+        description: "列出檔案",
+      },
       nextEventSeq(record),
       start,
     ).record;
@@ -73,10 +100,23 @@ describe("applyAgentEvent", () => {
 
   it("等待審批時進度不會讓狀態跑掉", () => {
     let record = baseRecord();
-    record = { ...record, status: "waiting-approval" as const, pendingPermission: {
-      requestKey: "fake:r1", approvalId: "", toolName: "Bash", input: {}, replyToken: "r1",
-    } };
-    record = applyAgentEvent(record, { kind: "progress", completed: 1, total: 2, label: "x" }, 5, start).record;
+    record = {
+      ...record,
+      status: "waiting-approval" as const,
+      pendingPermission: {
+        requestKey: "fake:r1",
+        approvalId: "",
+        toolName: "Bash",
+        input: {},
+        replyToken: "r1",
+      },
+    };
+    record = applyAgentEvent(
+      record,
+      { kind: "progress", completed: 1, total: 2, label: "x" },
+      5,
+      start,
+    ).record;
     expect(record.status).toBe("waiting-approval");
   });
 
