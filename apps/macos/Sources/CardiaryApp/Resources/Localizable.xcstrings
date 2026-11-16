@@ -1854,6 +1854,23 @@
         }
       }
     },
+    "settingsMcpTab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MCP"
+          }
+        }
+      }
+    },
     "settingsModulesTab": {
       "extractionState": "manual",
       "localizations": {
