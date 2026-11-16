@@ -165,8 +165,15 @@ async function cardText(folder: TestFolder, cardId: string): Promise<string> {
 }
 
 async function memoryCardCount(folder: TestFolder): Promise<number> {
-  const names = await readdir(join(folder.path, "cards")).catch(() => [] as string[]);
-  return names.filter((name) => name.startsWith("mem_") && name.endsWith(".md")).length;
+  const directory = join(folder.path, "cards");
+  const names = await readdir(directory).catch(() => [] as string[]);
+  let count = 0;
+  for (const name of names) {
+    if (!name.endsWith(".md")) continue;
+    const text = await readFile(join(directory, name), "utf8").catch(() => "");
+    if (/^kind: memory$/m.test(text)) count += 1;
+  }
+  return count;
 }
 
 async function createSession(client: ProtocolClient): Promise<string> {
@@ -174,14 +181,6 @@ async function createSession(client: ProtocolClient): Promise<string> {
     clientRequestId: `cr-${Math.random().toString(36).slice(2)}`,
   });
   return payload.session.id;
-}
-
-interface ContextEntry {
-  readonly entryId: string;
-  readonly layer: string;
-  readonly cardId?: string;
-  readonly tokenEstimate: number;
-  readonly state: string;
 }
 
 afterEach(async () => {
@@ -204,6 +203,19 @@ const EXTRACT = JSON.stringify({
 const TITLE = JSON.stringify({ title: "週末整理偏好", summary: "使用者傾向週末整理儲藏室" });
 
 describe("每日蒸餾的協定契約", () => {
+  it("module.memory.undo 的回應包在 data 欄位（模組協定 schema）", async () => {
+    const { client } = await boot([]);
+    const id = client.request("module.memory.undo", {
+      data: { notificationId: "", itemId: "" },
+    });
+    const reply = await client.waitForReply(id, 10_000);
+    expect(reply.kind).toBe("response");
+    expect((reply.payload as { data?: unknown }).data).toEqual({
+      ok: false,
+      reason: "invalid-input",
+    });
+  }, 20_000);
+
   it("新鮮度歸零的卡被蒸餾後轉冷封存，記憶卡 sources 指回原卡", async () => {
     const sourceId = newUlid();
     setSeam(
@@ -327,13 +339,18 @@ describe("每日蒸餾的協定契約", () => {
       { cardId: memoryId },
     );
     expect(old.card.cardId).toBe(memoryId);
+
+    // 逐項復原 superseded：新卡被刪除，取代關係消失，舊卡一個字都沒變。
+    const undone = await moduleRequest<{ ok: boolean }>(client, "module.memory.undo", {
+      notificationId: digest.notification.notificationId,
+      itemId: superseded?.id ?? "",
+    });
+    expect(undone.ok).toBe(true);
+    await expect(cardText(service.folder, newCardId)).rejects.toThrow();
+    expect(await cardText(service.folder, memoryId)).toBe(oldMemory);
   }, 40_000);
 
-  // 已知缺口：蒸餾記憶卡 id 是 `mem_<run>...`，不是 ULID。卡片的
-  // normalizeCardId 會拒絕它，所以 undo 的 delete-card 步驟回
-  // 「卡片識別碼必須是 ULID。」，記憶卡刪不掉。這是要修產品格式規則的決定，
-  // 不是測試接縫能解決的；先標未完成，留给派遣方裁決。
-  it.skip("每日摘要的每一項可個別復原，卡片、取代與冷封存回到蒸餾前", async () => {
+  it("每日摘要的每一項可個別復原，卡片、取代與冷封存回到蒸餾前", async () => {
     const sourceId = newUlid();
     setSeam(
       {
@@ -413,11 +430,7 @@ describe("每日蒸餾的協定契約", () => {
     expect(await cardText(folder, sourceId)).toBe(source);
   }, 50_000);
 
-  // 已知缺口（同一個 mem_ id 問題）：記憶卡的 id 不是 ULID，核心記憶區段
-  // render 時呼叫 cards.get(mem_ id) 會被 normalizeCardId 擋下，context.get 回
-  // 「卡片識別碼必須是 ULID。」。這需要產品決定記憶卡的 id 格式或讓核心讀取
-  // 走不驗證的路徑；先標未完成，留給派遣方裁決。
-  it.skip("核心記憶在第 3 層載入且不超過 token 預算", async () => {
+  it("核心記憶在第 3 層載入且不超過 token 預算", async () => {
     const sourceId = newUlid();
     setSeam(
       {
@@ -428,7 +441,7 @@ describe("每日蒸餾的協定契約", () => {
       },
       [sourceId],
     );
-    const { service, client } = await boot([
+    const { client } = await boot([
       [sourceId, cardFile({ id: sourceId, title: "日常筆記", body: "週末想整理儲藏室。" })],
     ]);
 
@@ -440,13 +453,21 @@ describe("每日蒸餾的協定契約", () => {
     expect(coreAdded?.cardId).toBeTypeOf("string");
 
     const sessionId = await createSession(client);
+    // 核心記憶進的是第 3 層固定前綴 systemContext，不是 context.get 的 entries。
+    const assembled = await moduleRequest<{
+      systemContext: string;
+      sections: readonly { layer: string; title: string; text: string }[];
+    }>(client, "module.context.test.system-context", { sessionId });
+
+    const coreSection = assembled.sections.find((section) => section.layer === "core-memory");
+    expect(coreSection).toBeDefined();
+    expect(assembled.systemContext).toContain(coreSection?.text ?? "");
+    expect(assembled.systemContext).toContain("週末整理偏好");
+    expect(assembled.systemContext).toContain("使用者傾向週末整理儲藏室");
+
     const view = await requestPayload<{
-      context: { entries: readonly ContextEntry[]; usedTokens: number; budgetTokens: number };
+      context: { usedTokens: number; budgetTokens: number };
     }>(client, "context.get", { sessionId });
-    const coreEntries = view.context.entries.filter((entry) => entry.layer === "core-memory");
-    expect(coreEntries.length).toBeGreaterThan(0);
-    expect(coreEntries.some((entry) => entry.cardId === coreAdded?.cardId)).toBe(true);
     expect(view.context.usedTokens).toBeLessThanOrEqual(view.context.budgetTokens);
-    void service;
   }, 40_000);
 });
