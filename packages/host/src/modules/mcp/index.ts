@@ -74,6 +74,8 @@ export async function activateMcpModule(
   const starting = new Map<string, Promise<void>>();
   const pendingAdds = new Map<string, Promise<void>>();
   let disposed = false;
+  /** 啟動時載入設定的背景工作；`settled` 要等它跑完，測試才不會跟著競速。 */
+  let startupTask: Promise<void> = Promise.resolve();
 
   const clientContext = {
     folderRoot,
@@ -156,8 +158,24 @@ export async function activateMcpModule(
   };
 
   const startAll = (): void => {
-    void (async () => {
-      const records = await store.list();
+    startupTask = (async () => {
+      let records: McpServerRecord[];
+      try {
+        records = await store.list();
+      } catch (error) {
+        // 設定檔被手改、損毀或被整份換掉時，一律不啟動任何伺服器。這個
+        // 檔案只有核准流程會寫（代理的寫入一律被硬規則拒絕），讀不出來就
+        // 當成不信任；要讓人看得到，不能只在日誌裡留一行。
+        const message = describeError(error);
+        logger.error("MCP 伺服器清單載入失敗，沒有啟動任何伺服器", { message });
+        protocol.emit({
+          kind: "notification",
+          title: "MCP 設定無法讀取",
+          body: `state/mcp-servers.json 讀不出來，這次啟動沒有啟動任何 MCP 伺服器：${message}`,
+          level: "error",
+        });
+        return;
+      }
       for (const record of records) {
         if (record.enabled) {
           await startServer(record);
@@ -167,7 +185,6 @@ export async function activateMcpModule(
       logger.warn("MCP 伺服器清單載入失敗", { message: describeError(error) });
     });
   };
-
   const serverInfo = async (serverId: string): Promise<McpServerInfo> => {
     const record = await store.get(serverId);
     if (record === null) {
@@ -291,6 +308,7 @@ export async function activateMcpModule(
   return {
     controller,
     async settled(): Promise<void> {
+      await startupTask;
       while (starting.size > 0 || pendingAdds.size > 0) {
         await Promise.all([...starting.values(), ...pendingAdds.values()]);
       }
