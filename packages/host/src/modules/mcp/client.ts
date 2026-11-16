@@ -599,9 +599,12 @@ async function responseResult(response: Response, expectedId?: number): Promise<
     throw new McpClientError("http_error", `MCP 伺服器回應 HTTP ${String(response.status)}`);
   }
   // 通知（沒有 expectedId）不需要回應內容：JSON-RPC notification 依法沒有 id，
-  // 伺服器常回 202/204 且 body 是空的。只要是 2xx 就當成功，不解析 JSON，
-  // 也不要消費 body（尤其 text/event-stream 的長連線可能永遠不結束）。
+  // 伺服器常回 202/204 且 body 是空的。只要是 2xx 就當成功，不解析 JSON；
+  // body 仍要取消，避免 200 帶 body 或 text/event-stream 的長連線留到逾時。
   if (expectedId === undefined) {
+    // 通知的 2xx 回應可能帶 body 或串流；不解析內容，但要取消，
+    // 避免 200 帶 body 或 text/event-stream 的連線留到逾時才釋放。
+    await response.body?.cancel().catch(() => undefined);
     return undefined;
   }
   const contentType = response.headers.get("content-type") ?? "";
