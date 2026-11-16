@@ -6,6 +6,7 @@ import type {
   ProviderCredentialSource,
   ProviderCredential,
   CredentialRef,
+  ToolBundlePin,
 } from "@cardiary/engine-adapter";
 import { createEngineAdapter } from "@cardiary/engine-adapter";
 import type { JSONObject, JSONValue } from "@cardiary/protocol";
@@ -356,6 +357,10 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   for (const script of options.scripts ?? []) {
     if (engine instanceof FakeEngine) engine.enqueueScript(script);
   }
+  // 背景任務建立對話時需要釘選的工具組；模組載入完成後才有值。
+  const loadedModules: { current: { activeToolBundles(): readonly ToolBundlePin[] } | null } = {
+    current: null,
+  };
   const modules = await loadFirstPartyModules({
     tools: engine.tools,
     services: moduleRuntimeServices({
@@ -365,6 +370,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
       cardEnvironment,
       logger,
       clock,
+      pinnedToolBundles: () => loadedModules.current?.activeToolBundles() ?? [],
     }),
     events: {
       emit: (intent: ProtocolEventIntent): void => {
@@ -382,6 +388,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
     },
   });
   gateway.setModuleHost(modules);
+  loadedModules.current = modules;
   const port = await gateway.listen(options.port ?? 0);
   const service = new HostService({
     storage,
@@ -444,6 +451,8 @@ function moduleRuntimeServices(input: {
   readonly cardEnvironment: CardEnvironment;
   readonly logger: EngineLogger;
   readonly clock: Clock;
+  /** 模組載入完成的工具組；背景任務建立對話時釘選。 */
+  readonly pinnedToolBundles: () => readonly ToolBundlePin[];
 }): ModuleRuntimeServices {
   const models: ModelInvoker = {
     async invoke(request, options) {
@@ -455,8 +464,89 @@ function moduleRuntimeServices(input: {
     },
   };
   const backgroundTasks: BackgroundTaskRunner = {
-    async run() {
-      throw new Error("M1 尚未實作背景任務。");
+    async run(request, runOptions) {
+      const engine = input.hostServices.get<HostEngine>(HOST_SERVICE_NAMES.engine);
+      if (engine === undefined) {
+        throw new Error("背景任務需要 engine 服務；主機還沒啟動引擎。");
+      }
+      const settings = await engine.getModelSettings();
+      const conversation = await engine.createConversation({
+        title: request.title,
+        purpose: "background-task",
+        model: settings.roles.main,
+        systemContext: request.systemContext,
+        toolBundles: request.toolBundles ?? input.pinnedToolBundles(),
+        permissionMode: "hard-rules",
+      });
+      const conversationId = conversation.id;
+      try {
+        input.cardEnvironment.state.run(
+          "UPDATE conversations SET origin = 'schedule' WHERE conversation_id = ?",
+          conversationId,
+        );
+      } catch {
+        // 對話本身已建立；標記來源失敗只影響側欄是否列出，不擋執行。
+        input.logger.warn("背景對話標記 origin 失敗", { conversationId });
+      }
+      const subscription = engine.subscribe({ conversationId });
+      const outcome = (async () => {
+        let turnId: string | null = null;
+        const onAbort = (): void => {
+          if (turnId !== null) {
+            void engine
+              .cancelTurn({ conversationId, turnId, reason: "背景任務被取消" })
+              .catch(() => undefined);
+          }
+        };
+        runOptions?.signal?.addEventListener("abort", onAbort, { once: true });
+        try {
+          for await (const event of subscription.events) {
+            if (event.kind === "turn.started" && turnId === null) {
+              turnId = event.turnId;
+              continue;
+            }
+            if (event.kind === "turn.completed") {
+              subscription.close();
+              const summary = await readAssistantSummary(engine, conversationId);
+              return {
+                conversationId,
+                status:
+                  event.status === "completed"
+                    ? ("completed" as const)
+                    : event.status === "failed"
+                      ? ("failed" as const)
+                      : ("cancelled" as const),
+                summary,
+              };
+            }
+          }
+          return { conversationId, status: "cancelled" as const, summary: null };
+        } finally {
+          runOptions?.signal?.removeEventListener("abort", onAbort);
+        }
+      })();
+      try {
+        if (engine.sendMessageWithClientId !== undefined) {
+          await engine.sendMessageWithClientId({
+            conversationId,
+            content: [{ type: "text", text: request.prompt }],
+            delivery: "queue",
+            sender: { kind: "system", component: "background-task" },
+            clientMessageId: `background-${conversationId}`,
+          });
+        } else {
+          await engine.sendMessage({
+            conversationId,
+            content: [{ type: "text", text: request.prompt }],
+            delivery: "queue",
+            sender: { kind: "system", component: "background-task" },
+          });
+        }
+      } catch (error) {
+        subscription.close();
+        throw error;
+      }
+      return outcome;
     },
   };
   let settingsService: SettingsService | undefined;
@@ -506,6 +596,29 @@ function moduleRuntimeServices(input: {
     logger,
     clock: input.clock,
   };
+}
+
+/** 讀回助理最後一則文字訊息的純文字部分；沒有就回 `null`。 */
+async function readAssistantSummary(
+  engine: HostEngine,
+  conversationId: string,
+): Promise<string | null> {
+  try {
+    const page = await engine.readConversationHistory({ conversationId, limit: 10 });
+    for (let index = page.messages.length - 1; index >= 0; index -= 1) {
+      const message = page.messages[index];
+      if (message?.role !== "assistant") continue;
+      const text = message.content
+        .filter((block) => block.type === "text")
+        .map((block) => (block as { readonly text: string }).text)
+        .join("\n")
+        .trim();
+      return text.length === 0 ? null : text;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /** 示範工具：讓契約測試能走完審批、串流與介面資料，不需要真模型。 */

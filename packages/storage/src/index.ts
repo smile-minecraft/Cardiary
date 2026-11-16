@@ -17,6 +17,7 @@ export * from "./maintenance.js";
 export * from "./paths.js";
 export * from "./registry.js";
 export * from "./runtime-state.js";
+export * from "./schedules/index.js";
 export * from "./settings.js";
 export * from "./state-schema.js";
 export * from "./storage.js";
