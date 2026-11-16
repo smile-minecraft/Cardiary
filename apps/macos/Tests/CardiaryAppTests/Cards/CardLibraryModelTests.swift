@@ -38,6 +38,80 @@ final class CardLibraryModelTests: XCTestCase {
         XCTAssertEqual(model.versions.last?.kind, .restore)
     }
 
+    func testCardChangedWhileEditingKeepsTypedBodyAndShowsPendingPatch() async {
+        let card = makeCard("card-edit", body: "原始內文")
+        let patch = PendingCardPatch(patchId: "patch-1", cardId: card.cardId, baseRevision: "rev-new",
+                                     patch: CardPatch(format: .unified, text: "diff"), status: .pending,
+                                     createdAt: "2026-01-01T00:00:00Z")
+        let service = PagedCardService(cards: [card])
+        let model = CardLibraryModel(freshness: CardFreshnessStore())
+        model.attach(service: service)
+        await model.select(cardId: card.cardId)
+        model.beginEditing()
+
+        let typedBody = "使用者正在輸入的內容，不能被卡片變更事件覆蓋"
+        model.editingBody = typedBody
+
+        await service.setCard(documentCard(card, body: "新的內文", revision: "rev-new"))
+        await service.setPendingPatches([patch])
+        await model.handleCardChanged(CardChangedEventPayload(
+            cardId: card.cardId,
+            change: .refreshed,
+            revision: "rev-new",
+            freshness: 100
+        ))
+
+        XCTAssertEqual(model.editingBody, typedBody, "編輯中的輸入要逐字保留")
+        XCTAssertTrue(model.isEditing, "補丁到達不能結束編輯")
+        XCTAssertTrue(model.pendingPatches.contains { $0.patchId == patch.patchId }, "事件後要讀到新的待審補丁")
+    }
+
+    func testPatchDecisionIsRefusedWhileEditing() async {
+        let card = makeCard("card-edit", body: "原始內文")
+        let patch = PendingCardPatch(patchId: "patch-1", cardId: card.cardId, baseRevision: card.revision,
+                                     patch: CardPatch(format: .unified, text: "diff"), status: .pending,
+                                     createdAt: "2026-01-01T00:00:00Z")
+        let service = PagedCardService(cards: [card])
+        await service.setPendingPatches([patch])
+        let model = CardLibraryModel(freshness: CardFreshnessStore())
+        model.attach(service: service)
+        await model.select(cardId: card.cardId)
+        model.beginEditing()
+
+        let typedBody = "正在輸入，補丁決定必須被拒絕"
+        model.editingBody = typedBody
+
+        await model.decidePatch(patch, accept: true)
+        await model.decidePatch(patch, accept: false)
+
+        let acceptCalls = await service.acceptCalls
+        let rejectCalls = await service.rejectCalls
+        XCTAssertTrue(acceptCalls.isEmpty, "編輯中不能送出接受請求")
+        XCTAssertTrue(rejectCalls.isEmpty, "編輯中不能送出拒絕請求")
+        XCTAssertEqual(model.editingBody, typedBody)
+        XCTAssertTrue(model.isEditing)
+    }
+
+    func testRestoreLargeDocumentKeepsExactBody() async {
+        let oldBody = (1...200)
+            .map { "L\(String(format: "%03d", $0)):" + String(repeating: "x", count: 46) }
+            .joined(separator: "\n")
+        XCTAssertGreaterThanOrEqual(oldBody.count, 10_000)
+        let card = makeCard("card-large", body: "現行內文")
+        let version = documentVersion(cardId: card.cardId, seq: 1, kind: .create, revision: card.revision)
+        let service = PagedCardService(cards: [card])
+        await service.setDocumentState(patches: [], versions: [version])
+        await service.setRestoreBody(oldBody)
+        let model = CardLibraryModel(freshness: CardFreshnessStore())
+        model.attach(service: service)
+        await model.select(cardId: card.cardId)
+
+        await model.restoreVersion(version)
+
+        XCTAssertEqual(model.editingBody, oldBody, "還原一萬字文件要逐字相等")
+        XCTAssertEqual(model.selectedCard?.body, oldBody)
+    }
+
     func testLoadsOnlyTheFirstPageUntilTheVisibleEnd() async {
         var pages: [CardListResponsePayload] = []
         let pageSize = 100
