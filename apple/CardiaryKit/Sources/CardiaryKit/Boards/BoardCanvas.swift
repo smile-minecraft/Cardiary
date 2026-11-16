@@ -322,6 +322,19 @@ public struct BoardCanvas: Equatable, Sendable {
         return changed
     }
 
+    /// 切換釘選；釘選是白板投影的屬性，呼叫端負責存回主機。
+    @discardableResult
+    public mutating func togglePinned(_ id: String) -> Bool {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return false }
+        recordUndo()
+        items[index].pinned.toggle()
+        return true
+    }
+
+    public func item(_ id: String) -> BoardCanvasItem? {
+        items.first { $0.id == id }
+    }
+
     // MARK: - 復原重做
 
     public var canUndo: Bool { !undoStack.isEmpty }

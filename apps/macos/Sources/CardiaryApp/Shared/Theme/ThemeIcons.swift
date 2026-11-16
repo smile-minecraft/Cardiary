@@ -75,9 +75,9 @@ enum ThemeIcon: String, CaseIterable, Identifiable {
              .unpin, .collapse, .drag, .undo, .sort, .stack:
             return .gray
         case .cards, .memory, .warning, .approval, .importItem, .export, .folder, .key, .lightbulb,
-             .chart, .gift, .sparkle, .deal, .waiting:
+             .chart, .gift, .sparkle, .deal, .waiting, .whiteboard:
             return .orange
-        case .whiteboard, .note, .image, .audio, .tag, .edit, .add, .link, .bookmark, .mail,
+        case .note, .image, .audio, .tag, .edit, .add, .link, .bookmark, .mail,
              .notifications, .profile, .share, .bow, .checker, .fresh:
             return .pink
         case .documents, .modules, .inspector, .compact, .distill, .running, .sync, .shuffle,
@@ -97,7 +97,7 @@ enum ThemeIcon: String, CaseIterable, Identifiable {
         case .home: return "house.fill"
         case .conversation: return "bubble.left.and.bubble.right.fill"
         case .cards: return "rectangle.stack.fill"
-        case .whiteboard: return "paintbrush.pointed.fill"
+        case .whiteboard: return "square.grid.2x2.fill"
         case .schedule: return "calendar.badge.clock"
         case .documents: return "doc.text.fill"
         case .search: return "magnifyingglass"

@@ -148,7 +148,7 @@ struct SidebarView: View {
     static func tone(forSlot id: String) -> Tone {
         switch id {
         case AppRegistry.cardsSlotId: return .orange
-        case "whiteboard": return .pink
+        case "whiteboard": return .orange
         case "notifications": return .purple
         case "documents": return .purple
         default: return .gray

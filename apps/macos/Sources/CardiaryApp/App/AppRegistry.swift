@@ -10,6 +10,8 @@ enum AppRegistry {
     /// 卡片庫與封存區的位置；內容由卡片介面提供。
     static let cardsSlotId = "cards"
     static let archiveSlotId = "archive"
+    /// 白板的位置；圖示用方塊花色。
+    static let boardsSlotId = "whiteboard"
     /// 檢視欄的上下文面板；卡片介面提供實作。
     static let contextInspectorId = "context"
     /// 選單群組：卡片與匯入。
@@ -43,9 +45,9 @@ enum AppRegistry {
             systemImage: "bell.fill"
         ))
         app.sidebar.register(SidebarSlot(
-            id: "whiteboard",
+            id: boardsSlotId,
             titleKey: .destinationWhiteboard,
-            systemImage: "paintbrush.pointed.fill"
+            systemImage: "square.grid.2x2.fill"
         ))
         app.sidebar.register(SidebarSlot(
             id: "documents",
@@ -93,6 +95,7 @@ enum AppRegistry {
         // 卡片庫、封存區、檢視欄、卡片設定與匯入：一次掛上。
         CardUIModule.install(app)
         ImportUIModule.install(app)
+        BoardsUIModule.install(app)
 
         // 通知流接到既有的側欄入口；配對核准與裝置清單放到設定頁。
         app.sidebar.installContent(for: "notifications") {

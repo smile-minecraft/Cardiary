@@ -2,6 +2,7 @@ import CardiaryKit
 import CardiaryShellCore
 import Combine
 import Foundation
+import SwiftUI
 
 /// 介面選了哪裡。左側欄的對話與其他入口共用同一個選取狀態。
 public enum AppSelection: Equatable, Hashable, Sendable {
@@ -270,6 +271,19 @@ public final class AppModel: ObservableObject {
         }
         for command in screens.cardCommands {
             commands.upsert(command, in: AppRegistry.cardCommandsGroupId)
+        }
+    }
+
+    /// 把白板的模型與畫面掛上；由 `BoardsUIModule.install` 呼叫。
+    /// 和卡片介面不同，白板只佔一個位置，不影響既有的內容模型。
+    public func installBoardsUI(_ model: BoardModel) {
+        contentModels.removeAll { $0 === model }
+        contentModels.append(model)
+        if let service {
+            model.attach(service: service)
+        }
+        sidebar.installContent(for: AppRegistry.boardsSlotId) {
+            AnyView(BoardsView(model: model))
         }
     }
 
