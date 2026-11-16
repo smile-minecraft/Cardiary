@@ -230,7 +230,94 @@ final class ContextInspectorModelTests: XCTestCase {
             model.appearance(for: model.entries[0]),
             CardFreshnessStyle.appearance(for: 50)
         )
-        XCTAssertFalse(model.showsDealProbability, "M1 不顯示發牌機率")
+        XCTAssertTrue(model.showsDealProbability, "M2 起檢視欄顯示發牌機率")
+    }
+
+    func testDealProbabilityBoundariesAndSourceLabels() async {
+        func deal(
+            _ id: String,
+            probability: Double,
+            source: ContextDealSource,
+            position: Int
+        ) -> ContextEntry {
+            ContextEntry(
+                entryId: id,
+                layer: .openingMemory,
+                cardId: "card-\(id)",
+                title: "卡 \(id)",
+                tokenEstimate: 12,
+                state: .active,
+                position: position,
+                dealProbability: probability,
+                dealSource: source
+            )
+        }
+        let low = deal("low", probability: 0.4, source: .systemOne, position: 0)
+        let edge = deal("edge", probability: 0.6, source: .systemOne, position: 1)
+        let clear = deal("clear", probability: 0.61, source: .systemOne, position: 2)
+        let fallback = deal("fallback", probability: 0.95, source: .retrieval, position: 3)
+        let model = ContextInspectorModel(freshness: CardFreshnessStore())
+        model.attach(
+            service: MutableContextService(view: view([low, edge, clear, fallback])),
+            cardService: nil
+        )
+        await model.open(sessionId: "s1")
+
+        XCTAssertEqual(
+            model.dealProbabilityText(for: low),
+            "\(CardL10n.text(.inspectorDealProbability)) 0.40"
+        )
+        XCTAssertTrue(model.isPossiblyRelated(low), "0.4 是可能相關的下界")
+        XCTAssertTrue(model.isPossiblyRelated(edge), "0.6 是可能相關的上界")
+        XCTAssertFalse(model.isPossiblyRelated(clear), "0.61 不標可能相關")
+        XCTAssertTrue(model.isDealtByRetrieval(fallback), "退路卡顯示由檢索排名發出")
+        XCTAssertFalse(model.isDealtByRetrieval(low))
+    }
+
+    func testOpeningDealMarkerIsHiddenButDealtCardsRemain() async {
+        let marker = ContextEntry(
+            entryId: "s1:opening-deal",
+            layer: .openingMemory,
+            cardId: nil,
+            title: "開局發牌",
+            tokenEstimate: 0,
+            state: .active,
+            position: 0
+        )
+        let dealt = ContextEntry(
+            entryId: "s1:deal:card-a",
+            layer: .openingMemory,
+            cardId: "card-a",
+            title: "被發的卡",
+            tokenEstimate: 12,
+            state: .active,
+            position: 1,
+            dealProbability: 0.9,
+            dealSource: .systemOne
+        )
+        let model = ContextInspectorModel(freshness: CardFreshnessStore())
+        model.attach(
+            service: MutableContextService(view: view([marker, dealt])),
+            cardService: nil
+        )
+        await model.open(sessionId: "s1")
+
+        XCTAssertEqual(model.context?.entries.count, 2, "模型保留協定回傳的完整內容")
+        XCTAssertEqual(
+            model.entries.map(\.entryId),
+            ["s1:deal:card-a"],
+            "沒有卡片的開局標記不顯示，有卡片的發牌項目仍在"
+        )
+    }
+
+    func testSmallModelQualityHintOnlyWhenEnabled() {
+        let model = ContextInspectorModel(freshness: CardFreshnessStore())
+        XCTAssertNil(model.smallModelQualityHint)
+        model.usesSmallModelSystemOne = true
+        XCTAssertEqual(
+            model.smallModelQualityHint,
+            CardL10n.text(.inspectorDealSmallModelQuality)
+        )
     }
 
     func testAddCardAppearsBeforeWorkingContextAndIsSelected() async {

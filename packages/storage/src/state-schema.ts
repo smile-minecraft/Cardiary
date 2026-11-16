@@ -592,6 +592,28 @@ export const M3_MIGRATIONS: readonly Migration[] = [
   { version: 4, name: "m2-distillation", sql: M4_SCHEMA },
 ];
 
+/**
+ * v5「m2-dealing-probability」：把開局卡的發牌欄位寫進正本。
+ *
+ * v4 之前的 `context_entries` 沒有這兩欄，早期實作用行程內 Map 暫存，重啟
+ * 就消失。這一版直接加欄，從 v4 升級時舊列的兩欄是 NULL，視圖讀成「省略」。
+ * 舊 migration 的 checksum 不變。
+ */
+const M5_SCHEMA = `
+ALTER TABLE context_entries ADD COLUMN deal_probability REAL;
+ALTER TABLE context_entries ADD COLUMN deal_source TEXT
+  CHECK (deal_source IN ('system-one','retrieval','manual'));
+`;
+
+/** v5 在 `context_entries` 新增的欄位。 */
+export const M4_CONTEXT_ENTRY_DEAL_COLUMNS = ["deal_probability", "deal_source"] as const;
+
+/** v5 的遷移清單：在 v4 之後補上發牌欄位。 */
+export const M4_MIGRATIONS: readonly Migration[] = [
+  ...M3_MIGRATIONS,
+  { version: 5, name: "m2-dealing-probability", sql: M5_SCHEMA },
+];
+
 const SCHEMA_MIGRATIONS_DDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version     INTEGER PRIMARY KEY,
@@ -636,7 +658,7 @@ interface AppliedMigrationRow {
  * - 每個版本在單一交易內完成 SQL、`user_version` 與 `schema_migrations`。
  */
 export function migrate(db: Database, options: MigrateOptions): MigrationOutcome {
-  const migrations = options.migrations ?? M3_MIGRATIONS;
+  const migrations = options.migrations ?? M4_MIGRATIONS;
   const now = options.now ?? (() => new Date());
   db.exec(SCHEMA_MIGRATIONS_DDL);
 

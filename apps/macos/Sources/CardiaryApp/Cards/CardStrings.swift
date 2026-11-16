@@ -85,8 +85,10 @@ public enum InspectorString: String, CaseIterable, CardLocalizedKey {
     case inspectorCompactTimedOut
     case inspectorContextTitle
     case inspectorContextWindow
+    case inspectorDealByRetrieval
+    case inspectorDealPossiblyRelated
     case inspectorDealProbability
-    case inspectorDealProbabilityM2
+    case inspectorDealSmallModelQuality
     case inspectorDropHint
     case inspectorDropping
     case inspectorEmpty
@@ -280,8 +282,10 @@ enum CardStringTables {
             "inspectorCompactTimedOut": "壓縮逾時，已解除等待；主機完成後畫面仍會更新。",
             "inspectorContextTitle": "上下文",
             "inspectorContextWindow": "模型上限 {count}",
+            "inspectorDealByRetrieval": "由檢索排名發出",
+            "inspectorDealPossiblyRelated": "可能相關",
             "inspectorDealProbability": "發牌機率",
-            "inspectorDealProbabilityM2": "M2 才有發牌",
+            "inspectorDealSmallModelQuality": "System One 使用的是小模型，判斷品質有限",
             "inspectorDropHint": "把卡片拖進來加入上下文",
             "inspectorDropping": "放開以加入上下文",
             "inspectorEmpty": "這場對話的上下文還是空的。",
@@ -317,8 +321,10 @@ enum CardStringTables {
             "inspectorCompactTimedOut": "Compaction timed out; the wait was lifted. The view will update when the host finishes.",
             "inspectorContextTitle": "Context",
             "inspectorContextWindow": "Model window {count}",
+            "inspectorDealByRetrieval": "Dealt by retrieval ranking",
+            "inspectorDealPossiblyRelated": "Possibly relevant",
             "inspectorDealProbability": "Deal Probability",
-            "inspectorDealProbabilityM2": "Deals arrive in M2",
+            "inspectorDealSmallModelQuality": "System One is using a small model; judgment quality is limited",
             "inspectorDropHint": "Drag a card here to add it",
             "inspectorDropping": "Release to add to context",
             "inspectorEmpty": "This conversation has no context yet.",

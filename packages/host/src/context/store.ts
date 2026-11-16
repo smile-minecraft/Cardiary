@@ -14,11 +14,6 @@ import type {
 } from "@cardiary/domain";
 import type { Database } from "@cardiary/storage";
 
-interface DealFields {
-  readonly dealProbability?: number;
-  readonly dealSource?: ContextDealSource;
-}
-
 /** `conversation_context` 的一列。 */
 export interface ContextRecord {
   readonly conversationId: string;
@@ -74,6 +69,8 @@ interface EntryRow {
   readonly state: string;
   readonly position: number;
   readonly added_at: string;
+  readonly deal_probability: number | null;
+  readonly deal_source: string | null;
 }
 
 interface UsageRow {
@@ -91,13 +88,6 @@ interface UsageRow {
 export class ContextStore {
   readonly #db: Database;
   readonly #now: () => Date;
-  /**
-   * 發牌欄位的行程內覆蓋層。v3 遷移（已合併）沒有加這兩欄，所以真實的
-   * `context_entries` 還沒有 deal_probability / deal_source。在遷移補上之前，
-   * 用這層讓同一個行程內的視圖（含開局當下與後續 assemble）帶得到機率；
-   * 重開行程後這層消失，所以在 PR 標明「機率不跨重啟」。
-   */
-  readonly #dealOverlay = new Map<string, DealFields>();
 
   constructor(db: Database, options: { readonly now?: () => Date } = {}) {
     this.#db = db;
@@ -197,31 +187,25 @@ export class ContextStore {
         "SELECT * FROM context_entries WHERE conversation_id = ? ORDER BY position",
         conversationId,
       )
-      .map((row) => this.#withDeal(entryOf(row)));
+      .map((row) => entryOf(row));
   }
 
   /** 加入一個項目；重複的 `entryId` 直接覆蓋。 */
   addEntry(conversationId: string, entry: ContextEntry): void {
-    const deal: DealFields = {
-      ...(entry.dealProbability === undefined ? {} : { dealProbability: entry.dealProbability }),
-      ...(entry.dealSource === undefined ? {} : { dealSource: entry.dealSource }),
-    };
-    if (deal.dealProbability !== undefined || deal.dealSource !== undefined) {
-      this.#dealOverlay.set(entry.entryId, deal);
-    } else {
-      this.#dealOverlay.delete(entry.entryId);
-    }
     this.#db.run(
       `INSERT INTO context_entries (
-         entry_id, conversation_id, layer, card_id, title, token_estimate, state, position, added_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         entry_id, conversation_id, layer, card_id, title, token_estimate, state, position,
+         added_at, deal_probability, deal_source
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (entry_id) DO UPDATE SET
          layer = excluded.layer,
          card_id = excluded.card_id,
          title = excluded.title,
          token_estimate = excluded.token_estimate,
          state = excluded.state,
-         position = excluded.position`,
+         position = excluded.position,
+         deal_probability = excluded.deal_probability,
+         deal_source = excluded.deal_source`,
       entry.entryId,
       conversationId,
       entry.layer,
@@ -231,6 +215,8 @@ export class ContextStore {
       entry.state,
       entry.position,
       this.#now().toISOString(),
+      entry.dealProbability ?? null,
+      entry.dealSource ?? null,
     );
   }
 
@@ -276,7 +262,6 @@ export class ContextStore {
 
   /** 刪掉一個項目；卡片被刪除時使用。 */
   deleteEntry(entryId: string): void {
-    this.#dealOverlay.delete(entryId);
     this.#db.run("DELETE FROM context_entries WHERE entry_id = ?", entryId);
   }
 
@@ -287,7 +272,7 @@ export class ContextStore {
       conversationId,
       cardId,
     );
-    return row === undefined ? null : this.#withDeal(entryOf(row));
+    return row === undefined ? null : entryOf(row);
   }
 
   /** 某一層的項目。 */
@@ -339,17 +324,6 @@ export class ContextStore {
       recordedAt: row.recorded_at,
     };
   }
-
-  /** 讀取時補上進程內的發牌欄位；pagination 的每一列都走這裡。 */
-  #withDeal(entry: ContextEntry): ContextEntry {
-    const deal = this.#dealOverlay.get(entry.entryId);
-    if (deal === undefined) return entry;
-    return {
-      ...entry,
-      ...(deal.dealProbability === undefined ? {} : { dealProbability: deal.dealProbability }),
-      ...(deal.dealSource === undefined ? {} : { dealSource: deal.dealSource }),
-    };
-  }
 }
 
 function recordOf(row: ContextRow): ContextRecord {
@@ -375,5 +349,7 @@ function entryOf(row: EntryRow): ContextEntry {
     tokenEstimate: row.token_estimate,
     state: row.state as ContextEntryState,
     position: row.position,
+    ...(row.deal_probability === null ? {} : { dealProbability: row.deal_probability }),
+    ...(row.deal_source === null ? {} : { dealSource: row.deal_source as ContextDealSource }),
   };
 }

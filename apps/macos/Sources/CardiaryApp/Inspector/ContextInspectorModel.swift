@@ -26,8 +26,11 @@ public final class ContextInspectorModel: ObservableObject {
     public var compactionTimeout: TimeInterval = 120
 
     public let freshness: CardFreshnessStore
-    /// M1 沒有發牌；介面保留欄位但不顯示機率。
-    public let showsDealProbability = false
+    /// M2 起發牌機率寫進 `context_entries` 並隨 `context.get` 回來，檢視欄直接顯示。
+    public let showsDealProbability = true
+    /// System One 的小型語言模型判斷品質有限，需在檢視欄提示。協定還沒帶來源種類，
+    /// 由組裝這層設定；預設 false 表示用的是 Jev 或沒有 System One。
+    public var usesSmallModelSystemOne = false
 
     private var service: (any ContextService)?
     private var cardService: (any CardService)?
@@ -43,7 +46,12 @@ public final class ContextInspectorModel: ObservableObject {
         self.cardService = cardService
     }
 
-    public var entries: [ContextEntry] { context?.entries ?? [] }
+    /// 第 4 層的項目；過濾掉「0 張卡」時寫入的開局標記（沒有 cardId，不該顯示）。
+    public var entries: [ContextEntry] {
+        context?.entries.filter { entry in
+            !(entry.cardId == nil && entry.entryId.hasSuffix(":opening-deal"))
+        } ?? []
+    }
     public var usedTokens: Int { context?.usedTokens ?? 0 }
     public var budgetTokens: Int { context?.budgetTokens ?? 0 }
     public var contextWindow: Int { context?.contextWindow ?? 0 }
@@ -280,6 +288,29 @@ public final class ContextInspectorModel: ObservableObject {
 
     public func layerTitle(_ layer: ContextLayer) -> String {
         CardL10n.text(layer.semanticKey)
+    }
+
+    /// 發牌機率的呈現字串，例如「發牌機率 0.90」；沒有機率時回 nil。
+    public func dealProbabilityText(for entry: ContextEntry) -> String? {
+        guard showsDealProbability, let probability = entry.dealProbability else { return nil }
+        return "\(CardL10n.text(.inspectorDealProbability)) \(String(format: "%.2f", probability))"
+    }
+
+    /// 0.4–0.6（含端點）是「可能相關」區間，不自動發牌但要讓使用者看得出來。
+    public func isPossiblyRelated(_ entry: ContextEntry) -> Bool {
+        guard let probability = entry.dealProbability else { return false }
+        return probability >= 0.4 && probability <= 0.6
+    }
+
+    /// 退路發牌沒有 System One 判斷，只依檢索排名發出。
+    public func isDealtByRetrieval(_ entry: ContextEntry) -> Bool {
+        entry.dealSource == .retrieval
+    }
+
+    /// 小模型品質提示；只有協定指出 System One 用小模型時才顯示。
+    public var smallModelQualityHint: String? {
+        guard usesSmallModelSystemOne else { return nil }
+        return CardL10n.text(.inspectorDealSmallModelQuality)
     }
 
     private func errorText(_ error: any Error) -> String {

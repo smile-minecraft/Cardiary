@@ -370,7 +370,7 @@ struct ContextInspectorView: View {
                     .controlSize(.small)
                 }
 
-                dealProbabilityPlaceholder
+                dealProbability(for: entry)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .themeBlock(tone.soft, radius: DesignTokens.cardRadius)
@@ -381,21 +381,34 @@ struct ContextInspectorView: View {
         }
     }
 
-    /// M1 只保留位置；`model.showsDealProbability` 永遠是 false。
-    private var dealProbabilityPlaceholder: some View {
-        HStack(spacing: DesignTokens.spacingXS) {
-            Text(CardL10n.text(.inspectorDealProbability))
-                .font(.cardiary(.caption2))
-                .foregroundStyle(Palette.inkSecondary)
-            Text("—")
-                .font(.cardiary(.caption2))
-                .foregroundStyle(Palette.inkTertiary)
-            Text(CardL10n.text(.inspectorDealProbabilityM2))
-                .font(.cardiary(.caption2))
-                .foregroundStyle(Palette.inkTertiary)
+    /// 發牌機率、相關標記與來源；退路與手動加入的卡沒有機率，不顯示。
+    @ViewBuilder
+    private func dealProbability(for entry: ContextEntry) -> some View {
+        if let text = model.dealProbabilityText(for: entry) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: DesignTokens.spacingXS) {
+                    Text(text)
+                        .font(.cardiary(.caption2, weight: .semibold, monospacedDigits: true))
+                        .foregroundStyle(Palette.inkSecondary)
+                    if model.isPossiblyRelated(entry) {
+                        ThemeChip(
+                            text: CardL10n.text(.inspectorDealPossiblyRelated),
+                            tone: .orange
+                        )
+                    }
+                    if model.isDealtByRetrieval(entry) {
+                        Text(CardL10n.text(.inspectorDealByRetrieval))
+                            .font(.cardiary(.caption2))
+                            .foregroundStyle(Palette.inkTertiary)
+                    }
+                }
+                if let hint = model.smallModelQualityHint {
+                    Text(hint)
+                        .font(.cardiary(.caption2))
+                        .foregroundStyle(Palette.orangeInk)
+                }
+            }
         }
-        .help(CardL10n.text(.inspectorDealProbabilityM2))
-        .opacity(model.showsDealProbability ? 1 : 0.65)
     }
 
     @ViewBuilder

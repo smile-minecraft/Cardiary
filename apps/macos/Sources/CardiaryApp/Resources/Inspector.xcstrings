@@ -137,6 +137,40 @@
         }
       }
     },
+    "inspectorDealByRetrieval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dealt by retrieval ranking"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "由檢索排名發出"
+          }
+        }
+      }
+    },
+    "inspectorDealPossiblyRelated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Possibly relevant"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可能相關"
+          }
+        }
+      }
+    },
     "inspectorDealProbability": {
       "extractionState": "manual",
       "localizations": {
@@ -154,19 +188,19 @@
         }
       }
     },
-    "inspectorDealProbabilityM2": {
+    "inspectorDealSmallModelQuality": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Deals arrive in M2"
+            "value": "System One is using a small model; judgment quality is limited"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "M2 才有發牌"
+            "value": "System One 使用的是小模型，判斷品質有限"
           }
         }
       }
