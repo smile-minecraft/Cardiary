@@ -93,6 +93,12 @@ extension ServerFrame {
         case .systemModulesChangedEvent(let frame): return frame.stream
         case .systemModelsChangedEvent(let frame): return frame.stream
         case .moduleEvent(let frame): return frame.stream
+        // 通知目前尚無客戶端處理；不要當成既有會話事件。
+        case .notificationChangedEvent: return nil
+        case .notificationListResponse, .notificationMarkReadResponse,
+             .notificationCreateCardResponse, .pairingBeginResponse, .pairingCompleteResponse:
+            return nil
+        // 回應與其他非事件沒有串流。
         default: return nil
         }
     }
@@ -120,6 +126,12 @@ extension ServerFrame {
         case .systemModulesChangedEvent(let frame): return frame.seq
         case .systemModelsChangedEvent(let frame): return frame.seq
         case .moduleEvent(let frame): return frame.seq
+        // 通知尚未由此客戶端處理，不推進既有事件的游標。
+        case .notificationChangedEvent: return nil
+        case .notificationListResponse, .notificationMarkReadResponse,
+             .notificationCreateCardResponse, .pairingBeginResponse, .pairingCompleteResponse:
+            return nil
+        // 回應與其他非耐久事件沒有序號。
         default: return nil
         }
     }
@@ -171,6 +183,12 @@ extension ServerFrame {
         case .approvalDecideResponse: return "approval.decide"
         case .approvalDecidedEvent: return "approval.decided"
         case .approvalPauseAllResponse: return "approval.pause_all"
+        case .notificationListResponse: return "notification.list"
+        case .notificationMarkReadResponse: return "notification.mark_read"
+        case .notificationCreateCardResponse: return "notification.create_card"
+        case .notificationChangedEvent: return "notification.changed"
+        case .pairingBeginResponse: return "pairing.begin"
+        case .pairingCompleteResponse: return "pairing.complete"
         case .cardChangedEvent: return "card.changed"
         case .contextChangedEvent: return "context.changed"
         case .contextCompactedEvent: return "context.compacted"

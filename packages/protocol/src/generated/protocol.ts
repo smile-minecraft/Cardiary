@@ -46,7 +46,12 @@ export type ClientFrame =
   | SystemModelsSetRequest
   | ApprovalDecideRequest
   | ApprovalPauseAllRequest
-  | ModuleRequest;
+  | ModuleRequest
+  | NotificationListRequest
+  | NotificationMarkReadRequest
+  | NotificationCreateCardRequest
+  | PairingBeginRequest
+  | PairingCompleteRequest;
 /**
  * 客戶端平台。
  */
@@ -95,6 +100,10 @@ export type ModelRole = "main" | "small" | "writing" | "system-one";
  * 角色的設定方式：model 指定模型、unset 走退回、none 明確關閉（只有 system-one 可用）。
  */
 export type ModelRoleMode = "model" | "unset" | "none";
+/**
+ * 裝置的種類。
+ */
+export type DeviceKind = "web" | "ios";
 /**
  * 主機送給客戶端的所有訊息。
  */
@@ -152,6 +161,12 @@ export type ServerFrame =
   | ApprovalDecideResponse
   | ApprovalDecidedEvent
   | ApprovalPauseAllResponse
+  | NotificationListResponse
+  | NotificationMarkReadResponse
+  | NotificationCreateCardResponse
+  | NotificationChangedEvent
+  | PairingBeginResponse
+  | PairingCompleteResponse
   | ErrorFrame
   | ModuleResponse
   | ModuleEvent;
@@ -225,6 +240,10 @@ export type ContextLayer =
  */
 export type ContextEntryState = "active" | "pending-removal";
 /**
+ * 發牌來源：System One 判斷，或沒有 System One 時用檢索排名發出；手動加入的卡是 manual。
+ */
+export type ContextDealSource = "system-one" | "retrieval" | "manual";
+/**
  * 設定分級；未標明一律視為 human-only。
  */
 export type SettingLevel = "free" | "approval" | "human-only";
@@ -253,6 +272,10 @@ export type CardChange = "created" | "updated" | "deleted" | "refreshed" | "rein
  * 做出決定的來源。
  */
 export type DeciderKind = "client" | "system";
+/**
+ * 通知的來源種類。
+ */
+export type NotificationKind = "schedule" | "heartbeat" | "distillation";
 /**
  * 協定層級的錯誤碼。
  */
@@ -1261,6 +1284,118 @@ export interface ModuleRequestPayload {
  */
 export interface JSONObject {
   [k: string]: JSONValue;
+}
+/**
+ * 列出通知。
+ */
+export interface NotificationListRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "notification.list";
+  payload: NotificationListRequestPayload;
+}
+export interface NotificationListRequestPayload {
+  /**
+   * 最多回傳幾筆，預設 50。
+   */
+  limit?: number;
+  /**
+   * 回傳 createdAt 早於此游標的通知；用上一頁的 nextCursor。
+   */
+  before?: string;
+  /**
+   * 只要未讀。
+   */
+  unreadOnly?: boolean;
+}
+/**
+ * 標記通知已讀。
+ */
+export interface NotificationMarkReadRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "notification.mark_read";
+  payload: NotificationMarkReadRequestPayload;
+}
+export interface NotificationMarkReadRequestPayload {
+  /**
+   * 要標記已讀的通知；最多 500 筆。
+   *
+   * @maxItems 500
+   *
+   * Items: 通知識別碼。
+   */
+  ids?: string[];
+  /**
+   * 一次清空全部未讀；ids 與 all 至少給一個。
+   */
+  all?: boolean;
+}
+/**
+ * 把通知轉成一張卡片。
+ */
+export interface NotificationCreateCardRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "notification.create_card";
+  payload: NotificationCreateCardRequestPayload;
+}
+export interface NotificationCreateCardRequestPayload {
+  /**
+   * 要轉成卡片的通知；同一則重送回同一張卡。
+   */
+  notificationId: string;
+}
+/**
+ * 未認證裝置建立配對請求。
+ */
+export interface PairingBeginRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "pairing.begin";
+  payload: PairingBeginRequestPayload;
+}
+export interface PairingBeginRequestPayload {
+  /**
+   * 裝置想在 Mac 上顯示的名稱。
+   */
+  deviceName: string;
+  kind: DeviceKind;
+}
+/**
+ * 在提出配對請求的同一連線領取核准結果。
+ */
+export interface PairingCompleteRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "pairing.complete";
+  payload: PairingCompleteRequestPayload;
+}
+export interface PairingCompleteRequestPayload {
+  /**
+   * 只能由提出配對請求的同一條連線領取結果。
+   */
+  pairingRequestId: string;
 }
 /**
  * 驗證與版本協商的結果。
@@ -2408,6 +2543,9 @@ export interface ContextView {
    */
   lastCompactedAt?: string;
 }
+/**
+ * 上下文裡的一個項目。dealProbability／dealSource 只有第 4 層的開局卡會帶。
+ */
 export interface ContextEntry {
   /**
    * 項目識別碼；工作上下文也可以有代表項。
@@ -2431,6 +2569,11 @@ export interface ContextEntry {
    * 在上下文中的位置，從 0 開始。
    */
   position: number;
+  /**
+   * 開局發牌時 System One 給的相關機率；刻意不發牌的卡省略。0.4–0.6 是『可能相關』區間，不自動發。
+   */
+  dealProbability?: number;
+  dealSource?: ContextDealSource;
 }
 /**
  * 加入後的上下文視圖。
@@ -3347,6 +3490,199 @@ export interface ApprovalPauseAllResponsePayload {
    * Items: 被中止的會話識別碼。
    */
   interruptedSessionIds: string[];
+}
+/**
+ * 通知清單。
+ */
+export interface NotificationListResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "notification.list";
+  payload: NotificationListResponsePayload;
+}
+export interface NotificationListResponsePayload {
+  /**
+   * 依 createdAt 由新到舊。
+   *
+   * @maxItems 200
+   */
+  notifications: CardiaryNotification[];
+  /**
+   * 目前未讀總數。
+   */
+  totalUnread: number;
+  /**
+   * 下一頁的游標；沒有更多時省略。
+   */
+  nextCursor?: string;
+}
+/**
+ * 一則通知。kind 各自的結構化資料在 payload，例如蒸餾的逐項變更清單與復原資訊。
+ */
+export interface CardiaryNotification {
+  /**
+   * 通知識別碼。
+   */
+  notificationId: string;
+  kind: NotificationKind;
+  /**
+   * 給人看的標題，例如「蒸餾 2026-11-16：新增 3」。
+   */
+  title: string;
+  /**
+   * Markdown 內文；客戶端不渲染原始 HTML。
+   */
+  body: string;
+  /**
+   * 建立時間，RFC 3339。
+   */
+  createdAt: string;
+  /**
+   * 已讀時間，RFC 3339；未讀省略。
+   */
+  readAt?: string;
+  /**
+   * 來源排程；不是排程產生的通知省略。
+   */
+  sourceScheduleId?: string;
+  /**
+   * 來源背景對話；沒有省略。
+   */
+  sourceConversationId?: string;
+  payload: {
+    [k: string]: JSONValue;
+  };
+}
+/**
+ * 標記結果與剩餘未讀數。
+ */
+export interface NotificationMarkReadResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "notification.mark_read";
+  payload: NotificationMarkReadResponsePayload;
+}
+export interface NotificationMarkReadResponsePayload {
+  /**
+   * 這次標記了幾則。
+   */
+  updated: number;
+  /**
+   * 標記後的未讀總數。
+   */
+  totalUnread: number;
+}
+/**
+ * 轉出的卡片。
+ */
+export interface NotificationCreateCardResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "notification.create_card";
+  payload: NotificationCreateCardResponsePayload;
+}
+export interface NotificationCreateCardResponsePayload {
+  card: CardSummary;
+  /**
+   * 這則通知已經轉過，回同一張卡。
+   */
+  deduped: boolean;
+}
+/**
+ * 通知變了；掛在 system 串流。
+ */
+export interface NotificationChangedEvent {
+  v: 1;
+  kind: "event";
+  type: "notification.changed";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: NotificationChangedEventPayload;
+}
+/**
+ * 通知變了（新增或已讀狀態改變）；upsert 語意，掛在 system 串流。
+ */
+export interface NotificationChangedEventPayload {
+  notification: CardiaryNotification;
+}
+/**
+ * 配對短碼與期限，短碼只供人核對。
+ */
+export interface PairingBeginResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "pairing.begin";
+  payload: PairingBeginResponsePayload;
+}
+export interface PairingBeginResponsePayload {
+  /**
+   * 待處理配對請求。
+   */
+  pairingRequestId: string;
+  /**
+   * 顯示給使用者與 Mac 核對的短碼；不得作為授權憑證。
+   */
+  code: string;
+  /**
+   * 請求過期時間。
+   */
+  expiresAt: string;
+}
+/**
+ * 配對結果；成功時帶一次 deviceToken。
+ */
+export interface PairingCompleteResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "pairing.complete";
+  payload: PairingCompleteResponsePayload;
+}
+/**
+ * 配對成功；連線隨即關閉，客戶端以 deviceToken 重連。
+ */
+export interface PairingCompleteResponsePayload {
+  /**
+   * 配對成功的裝置識別碼。
+   */
+  deviceId: string;
+  /**
+   * 裝置想在 Mac 上顯示的名稱。
+   */
+  deviceName: string;
+  /**
+   * 裝置專屬的存取 Token；只在這個回應回一次，主機只存 SHA-256。之後每次連線在 system.hello 的 payload 帶它。
+   */
+  deviceToken: string;
 }
 /**
  * 錯誤信封。HTTP 端點使用同一個結構作為錯誤回應內容。

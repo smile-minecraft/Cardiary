@@ -999,13 +999,24 @@
             "position": 1
           },
           {
+            "entryId": "ctx_dealt",
+            "layer": "opening-memory",
+            "cardId": "01JDEAL7K9Q2W8E4R6T0Y3U5I",
+            "title": "厚底競賽鞋的里程紀錄",
+            "tokenEstimate": 240,
+            "state": "active",
+            "position": 2,
+            "dealProbability": 0.83,
+            "dealSource": "system-one"
+          },
+          {
             "entryId": "ctx_card_1",
             "layer": "other-cards",
             "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
             "title": "協定設計討論",
             "tokenEstimate": 760,
             "state": "active",
-            "position": 2
+            "position": 3
           },
           {
             "entryId": "ctx_working",
@@ -1013,7 +1024,7 @@
             "title": "對話內容",
             "tokenEstimate": 12400,
             "state": "active",
-            "position": 3
+            "position": 4
           },
           {
             "entryId": "ctx_volatile",
@@ -1021,10 +1032,10 @@
             "title": "目前時間",
             "tokenEstimate": 24,
             "state": "active",
-            "position": 4
+            "position": 5
           }
         ],
-        "usedTokens": 14584,
+        "usedTokens": 14824,
         "budgetTokens": 254000,
         "contextWindow": 262144,
         "compactionThreshold": 0.75,
@@ -1864,6 +1875,175 @@
           "source": "none"
         }
       ]
+    }
+  },
+  "notificationListRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_notification_list",
+    "type": "notification.list",
+    "payload": {
+      "limit": 50,
+      "unreadOnly": true
+    }
+  },
+  "notificationListResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_notification_list",
+    "type": "notification.list",
+    "payload": {
+      "notifications": [
+        {
+          "notificationId": "ntf_01JEX5Q8W2E6R4T7Y9U3I6O0A",
+          "kind": "distillation",
+          "title": "蒸餾 2026-11-16：新增 3、合併 2、取代 1、核心組 +1",
+          "body": "- 新增：[厚底競賽鞋的里程紀錄](card:01JDEAL7K9Q2W8E4R6T0Y3U5I)\n- …",
+          "createdAt": "2026-11-16T04:02:11.000Z",
+          "payload": {
+            "version": 1,
+            "day": "2026-11-16",
+            "items": [
+              {
+                "id": "itm_1",
+                "action": "created",
+                "cardId": "01JDEAL7K9Q2W8E4R6T0Y3U5I",
+                "sources": ["01JCX8Q3W7Z9K5V2N4M6P8R0T1"]
+              },
+              {
+                "id": "itm_2",
+                "action": "merged",
+                "mergedInto": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+                "sources": ["01JBG3F6D8S2A1X4C7V9N0M5L"]
+              }
+            ]
+          }
+        }
+      ],
+      "totalUnread": 1,
+      "nextCursor": "ntf_01JEX5Q8W2E6R4T7Y9U3I6O0A"
+    }
+  },
+  "notificationMarkReadRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_notification_mark_read",
+    "type": "notification.mark_read",
+    "payload": {
+      "ids": ["ntf_01JEX5Q8W2E6R4T7Y9U3I6O0A"]
+    }
+  },
+  "notificationMarkReadResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_notification_mark_read",
+    "type": "notification.mark_read",
+    "payload": {
+      "updated": 1,
+      "totalUnread": 0
+    }
+  },
+  "notificationCreateCardRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_notification_create_card",
+    "type": "notification.create_card",
+    "payload": {
+      "notificationId": "ntf_01JEX5Q8W2E6R4T7Y9U3I6O0A"
+    }
+  },
+  "notificationCreateCardResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_notification_create_card",
+    "type": "notification.create_card",
+    "payload": {
+      "card": {
+        "cardId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+        "kind": "note",
+        "title": "協定設計討論",
+        "summary": "M1 協定的卡片、上下文與模型訊息。",
+        "tags": ["cardiary", "協定"],
+        "persona": "default",
+        "createdAt": "2026-11-15T02:00:00.000Z",
+        "updatedAt": "2026-11-15T02:05:00.000Z",
+        "freshness": 87,
+        "lifecycle": "live"
+      },
+      "deduped": false
+    }
+  },
+  "notificationChangedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "notification.changed",
+    "stream": "system",
+    "seq": 42,
+    "emittedAt": "2026-11-16T04:02:11.000Z",
+    "payload": {
+      "notification": {
+        "notificationId": "ntf_01JEX5Q8W2E6R4T7Y9U3I6O0A",
+        "kind": "distillation",
+        "title": "蒸餾 2026-11-16：新增 3、合併 2、取代 1、核心組 +1",
+        "body": "- 新增：[厚底競賽鞋的里程紀錄](card:01JDEAL7K9Q2W8E4R6T0Y3U5I)\n- …",
+        "createdAt": "2026-11-16T04:02:11.000Z",
+        "payload": {
+          "version": 1,
+          "day": "2026-11-16",
+          "items": [
+            {
+              "id": "itm_1",
+              "action": "created",
+              "cardId": "01JDEAL7K9Q2W8E4R6T0Y3U5I",
+              "sources": ["01JCX8Q3W7Z9K5V2N4M6P8R0T1"]
+            },
+            {
+              "id": "itm_2",
+              "action": "merged",
+              "mergedInto": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+              "sources": ["01JBG3F6D8S2A1X4C7V9N0M5L"]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "pairingBeginRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_pairing_begin",
+    "type": "pairing.begin",
+    "payload": { "deviceName": "我的 iPhone", "kind": "web" }
+  },
+  "pairingBeginResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_pairing_begin",
+    "type": "pairing.begin",
+    "payload": {
+      "pairingRequestId": "pair_01JEX8Q3W7Z9K5V2N4M6P8R0T1",
+      "code": "482913",
+      "expiresAt": "2026-11-16T03:40:00.000Z"
+    }
+  },
+  "pairingCompleteRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_pairing_complete",
+    "type": "pairing.complete",
+    "payload": {
+      "pairingRequestId": "pair_01JEX8Q3W7Z9K5V2N4M6P8R0T1"
+    }
+  },
+  "pairingCompleteResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_pairing_complete",
+    "type": "pairing.complete",
+    "payload": {
+      "deviceId": "dev_01JEX9V2B4N6M8L0K3J5H7G9F",
+      "deviceName": "我的 iPhone",
+      "deviceToken": "cvd_x8k2m9q4w7e1r3t6y0u5i2o9a1s4d7f6g3h5j8k"
     }
   }
 }

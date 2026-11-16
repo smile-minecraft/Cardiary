@@ -1198,16 +1198,37 @@ add(
 add("ContextEntryState", stringEnum(["active", "pending-removal"], "項目在上下文中的狀態。"));
 
 add(
+  "ContextDealSource",
+  stringEnum(
+    ["system-one", "retrieval", "manual"],
+    "發牌來源：System One 判斷，或沒有 System One 時用檢索排名發出；手動加入的卡是 manual。",
+  ),
+);
+
+add(
   "ContextEntry",
-  objectOf("ContextEntry", ["entryId", "layer", "title", "tokenEstimate", "state", "position"], {
-    entryId: str("項目識別碼；工作上下文也可以有代表項。"),
-    layer: ref("ContextLayer"),
-    cardId: str("對應的卡片；工作上下文與高速變動層沒有。"),
-    title: str("給人看的標題。"),
-    tokenEstimate: int("token 估算。", { minimum: 0 }),
-    state: ref("ContextEntryState"),
-    position: int("在上下文中的位置，從 0 開始。", { minimum: 0 }),
-  }),
+  objectOf(
+    "ContextEntry",
+    ["entryId", "layer", "title", "tokenEstimate", "state", "position"],
+    {
+      entryId: str("項目識別碼；工作上下文也可以有代表項。"),
+      layer: ref("ContextLayer"),
+      cardId: str("對應的卡片；工作上下文與高速變動層沒有。"),
+      title: str("給人看的標題。"),
+      tokenEstimate: int("token 估算。", { minimum: 0 }),
+      state: ref("ContextEntryState"),
+      position: int("在上下文中的位置，從 0 開始。", { minimum: 0 }),
+      dealProbability: {
+        type: "number",
+        minimum: 0,
+        maximum: 1,
+        description:
+          "開局發牌時 System One 給的相關機率；刻意不發牌的卡省略。0.4–0.6 是『可能相關』區間，不自動發。",
+      },
+      dealSource: ref("ContextDealSource"),
+    },
+    "上下文裡的一個項目。dealProbability／dealSource 只有第 4 層的開局卡會帶。",
+  ),
 );
 
 add(
@@ -2252,6 +2273,314 @@ eventFrame(
 // 影格聯集
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// M2：通知、發牌機率與裝置配對
+// ---------------------------------------------------------------------------
+
+add("NotificationKind", stringEnum(["schedule", "heartbeat", "distillation"], "通知的來源種類。"));
+
+add(
+  "CardiaryNotification",
+  objectOf(
+    "CardiaryNotification",
+    ["notificationId", "kind", "title", "body", "createdAt", "payload"],
+    {
+      notificationId: str("通知識別碼。"),
+      kind: ref("NotificationKind"),
+      title: str("給人看的標題，例如「蒸餾 2026-11-16：新增 3」。"),
+      body: str("Markdown 內文；客戶端不渲染原始 HTML。"),
+      createdAt: str("建立時間，RFC 3339。", { format: "date-time" }),
+      readAt: str("已讀時間，RFC 3339；未讀省略。", { format: "date-time" }),
+      sourceScheduleId: str("來源排程；不是排程產生的通知省略。"),
+      sourceConversationId: str("來源背景對話；沒有省略。"),
+      payload: jsonObject(),
+    },
+    "一則通知。kind 各自的結構化資料在 payload，例如蒸餾的逐項變更清單與復原資訊。",
+  ),
+);
+
+add(
+  "NotificationListRequestPayload",
+  objectOf("NotificationListRequestPayload", [], {
+    limit: int("最多回傳幾筆，預設 50。", { minimum: 1, maximum: 200 }),
+    before: str("回傳 createdAt 早於此游標的通知；用上一頁的 nextCursor。"),
+    unreadOnly: bool("只要未讀。"),
+  }),
+);
+
+add(
+  "NotificationListResponsePayload",
+  objectOf("NotificationListResponsePayload", ["notifications", "totalUnread"], {
+    notifications: arrayOf(ref("CardiaryNotification"), "依 createdAt 由新到舊。", {
+      maxItems: 200,
+    }),
+    totalUnread: int("目前未讀總數。", { minimum: 0 }),
+    nextCursor: str("下一頁的游標；沒有更多時省略。"),
+  }),
+);
+
+add(
+  "NotificationMarkReadRequestPayload",
+  objectOf("NotificationMarkReadRequestPayload", [], {
+    ids: arrayOf(str("通知識別碼。"), "要標記已讀的通知；最多 500 筆。", {
+      maxItems: 500,
+    }),
+    all: bool("一次清空全部未讀；ids 與 all 至少給一個。"),
+  }),
+);
+
+add(
+  "NotificationMarkReadResponsePayload",
+  objectOf("NotificationMarkReadResponsePayload", ["updated", "totalUnread"], {
+    updated: int("這次標記了幾則。", { minimum: 0 }),
+    totalUnread: int("標記後的未讀總數。", { minimum: 0 }),
+  }),
+);
+
+add(
+  "NotificationCreateCardRequestPayload",
+  objectOf("NotificationCreateCardRequestPayload", ["notificationId"], {
+    notificationId: str("要轉成卡片的通知；同一則重送回同一張卡。"),
+  }),
+);
+
+add(
+  "NotificationCreateCardResponsePayload",
+  objectOf("NotificationCreateCardResponsePayload", ["card", "deduped"], {
+    card: ref("CardSummary"),
+    deduped: bool("這則通知已經轉過，回同一張卡。"),
+  }),
+);
+
+add(
+  "NotificationChangedEventPayload",
+  objectOf(
+    "NotificationChangedEventPayload",
+    ["notification"],
+    {
+      notification: ref("CardiaryNotification"),
+    },
+    "通知變了（新增或已讀狀態改變）；upsert 語意，掛在 system 串流。",
+  ),
+);
+
+add("DeviceKind", stringEnum(["web", "ios"], "裝置的種類。"));
+
+add(
+  "PairedDevice",
+  objectOf(
+    "PairedDevice",
+    ["deviceId", "name", "kind", "createdAt"],
+    {
+      deviceId: str("裝置識別碼。"),
+      name: str("使用者看到的裝置名稱，由配對時輸入。"),
+      kind: ref("DeviceKind"),
+      createdAt: str("配對時間，RFC 3339。", { format: "date-time" }),
+      lastUsedAt: str("最後使用時間，RFC 3339；從未使用省略。", { format: "date-time" }),
+      revokedAt: str("撤銷時間，RFC 3339；未撤銷省略。", { format: "date-time" }),
+    },
+    "一個已配對的裝置。Token 不在這個物件裡，也從不從主機回傳明文。",
+  ),
+);
+
+add(
+  "DeviceListResponsePayload",
+  objectOf("DeviceListResponsePayload", ["devices"], {
+    devices: arrayOf(ref("PairedDevice"), "已配對的裝置，含已撤銷的。"),
+  }),
+);
+
+add(
+  "DeviceRevokeRequestPayload",
+  objectOf("DeviceRevokeRequestPayload", ["deviceId"], {
+    deviceId: str("殼經私有控制通道要求撤銷的裝置。"),
+  }),
+);
+
+add(
+  "DeviceRevokeResponsePayload",
+  objectOf("DeviceRevokeResponsePayload", ["revoked", "deviceId"], {
+    revoked: bool("已標記撤銷；既有連線隨即被關閉。"),
+    deviceId: str("撤銷的裝置。"),
+  }),
+);
+
+add(
+  "DeviceListChangedEventPayload",
+  objectOf(
+    "DeviceListChangedEventPayload",
+    ["devices"],
+    {
+      devices: arrayOf(ref("PairedDevice"), "目前全部裝置的完整清單。"),
+    },
+    "裝置清單變了（配對、撤銷）；掛在 system 串流。",
+  ),
+);
+
+add(
+  "PairingRequestedEventPayload",
+  objectOf(
+    "PairingRequestedEventPayload",
+    ["pairingRequestId", "deviceName", "code", "requestedAt", "expiresAt"],
+    {
+      pairingRequestId: str("配對請求識別碼。"),
+      deviceName: str("裝置送出配對時自稱的名稱。"),
+      code: str("短碼供使用者核對，不可用於授權。"),
+      remoteAddress: str("裝置的連線位址；只用於核對，不當授權依據。"),
+      requestedAt: str("請求時間，RFC 3339。", { format: "date-time" }),
+      expiresAt: str("過期時間，RFC 3339；之後配對請求作廢。", { format: "date-time" }),
+    },
+    "配對通知只經殼的私有控制通道傳遞；核准或拒絕也只能走控制通道。",
+  ),
+);
+
+add(
+  "PairingBeginRequestPayload",
+  objectOf("PairingBeginRequestPayload", ["deviceName", "kind"], {
+    deviceName: str("裝置想在 Mac 上顯示的名稱。"),
+    kind: ref("DeviceKind"),
+  }),
+);
+
+add(
+  "PairingBeginResponsePayload",
+  objectOf("PairingBeginResponsePayload", ["pairingRequestId", "code", "expiresAt"], {
+    pairingRequestId: str("待處理配對請求。"),
+    code: str("顯示給使用者與 Mac 核對的短碼；不得作為授權憑證。"),
+    expiresAt: str("請求過期時間。", { format: "date-time" }),
+  }),
+);
+
+add(
+  "PairingCompleteRequestPayload",
+  objectOf("PairingCompleteRequestPayload", ["pairingRequestId"], {
+    pairingRequestId: str("只能由提出配對請求的同一條連線領取結果。"),
+  }),
+);
+
+add(
+  "PairingCompleteResponsePayload",
+  objectOf(
+    "PairingCompleteResponsePayload",
+    ["deviceId", "deviceName", "deviceToken"],
+    {
+      deviceId: str("配對成功的裝置識別碼。"),
+      deviceName: str("裝置想在 Mac 上顯示的名稱。"),
+      deviceToken: str(
+        "裝置專屬的存取 Token；只在這個回應回一次，主機只存 SHA-256。之後每次連線在 system.hello 的 payload 帶它。",
+      ),
+    },
+    "配對成功；連線隨即關閉，客戶端以 deviceToken 重連。",
+  ),
+);
+
+add(
+  "PairingApproveRequestPayload",
+  objectOf(
+    "PairingApproveRequestPayload",
+    ["pairingRequestId"],
+    {
+      pairingRequestId: str("要核准的配對請求；重送同一請求回 conflict。"),
+    },
+    "僅供殼的私有控制通道使用，不接受公開客戶端連線。",
+  ),
+);
+
+add(
+  "PairingApproveResponsePayload",
+  objectOf("PairingApproveResponsePayload", ["approved", "deviceId"], {
+    approved: bool("已核准並簽發裝置 Token。"),
+    deviceId: str("新配對的裝置識別碼。"),
+  }),
+);
+
+add(
+  "PairingDenyRequestPayload",
+  objectOf(
+    "PairingDenyRequestPayload",
+    ["pairingRequestId"],
+    {
+      pairingRequestId: str("要拒絕的配對請求；重送同一請求回 conflict。"),
+    },
+    "僅供殼的私有控制通道使用，不接受公開客戶端連線。",
+  ),
+);
+
+add(
+  "PairingDenyResponsePayload",
+  objectOf("PairingDenyResponsePayload", ["denied"], {
+    denied: bool("已拒絕；裝置拿不到 Token。"),
+  }),
+);
+
+requestFrame(
+  "NotificationListRequest",
+  "notification.list",
+  "NotificationListRequestPayload",
+  "列出通知。",
+);
+responseFrame(
+  "NotificationListResponse",
+  "notification.list",
+  "NotificationListResponsePayload",
+  "通知清單。",
+);
+requestFrame(
+  "NotificationMarkReadRequest",
+  "notification.mark_read",
+  "NotificationMarkReadRequestPayload",
+  "標記通知已讀。",
+);
+responseFrame(
+  "NotificationMarkReadResponse",
+  "notification.mark_read",
+  "NotificationMarkReadResponsePayload",
+  "標記結果與剩餘未讀數。",
+);
+requestFrame(
+  "NotificationCreateCardRequest",
+  "notification.create_card",
+  "NotificationCreateCardRequestPayload",
+  "把通知轉成一張卡片。",
+);
+responseFrame(
+  "NotificationCreateCardResponse",
+  "notification.create_card",
+  "NotificationCreateCardResponsePayload",
+  "轉出的卡片。",
+);
+eventFrame(
+  "NotificationChangedEvent",
+  "notification.changed",
+  "NotificationChangedEventPayload",
+  "通知變了；掛在 system 串流。",
+);
+
+requestFrame(
+  "PairingBeginRequest",
+  "pairing.begin",
+  "PairingBeginRequestPayload",
+  "未認證裝置建立配對請求。",
+);
+responseFrame(
+  "PairingBeginResponse",
+  "pairing.begin",
+  "PairingBeginResponsePayload",
+  "配對短碼與期限，短碼只供人核對。",
+);
+requestFrame(
+  "PairingCompleteRequest",
+  "pairing.complete",
+  "PairingCompleteRequestPayload",
+  "在提出配對請求的同一連線領取核准結果。",
+);
+responseFrame(
+  "PairingCompleteResponse",
+  "pairing.complete",
+  "PairingCompleteResponsePayload",
+  "配對結果；成功時帶一次 deviceToken。",
+);
+
 add("ClientFrame", {
   description: "客戶端送給主機的所有訊息。",
   oneOf: [
@@ -2290,6 +2619,11 @@ add("ClientFrame", {
     ref("ApprovalDecideRequest"),
     ref("ApprovalPauseAllRequest"),
     ref("ModuleRequest"),
+    ref("NotificationListRequest"),
+    ref("NotificationMarkReadRequest"),
+    ref("NotificationCreateCardRequest"),
+    ref("PairingBeginRequest"),
+    ref("PairingCompleteRequest"),
   ],
 });
 
@@ -2349,6 +2683,12 @@ add("ServerFrame", {
     ref("ApprovalDecideResponse"),
     ref("ApprovalDecidedEvent"),
     ref("ApprovalPauseAllResponse"),
+    ref("NotificationListResponse"),
+    ref("NotificationMarkReadResponse"),
+    ref("NotificationCreateCardResponse"),
+    ref("NotificationChangedEvent"),
+    ref("PairingBeginResponse"),
+    ref("PairingCompleteResponse"),
     ref("ErrorFrame"),
     ref("ModuleResponse"),
     ref("ModuleEvent"),
