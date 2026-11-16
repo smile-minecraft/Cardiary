@@ -180,9 +180,9 @@ final class McpAppWebViewTests: XCTestCase {
         XCTAssertEqual(result, "BLOCKED")
     }
 
-    /// 2. 連線 Token：頁面拿不到 Cardiary 的連線 Token。
-    ///    同時確認 host context 的 JSON 沒有任何 token 欄位，且訊息處理器只收 ready。
-    func testWebViewCannotReachConnectionToken() {
+    /// 2. 連線 Token：host context 不提供 Cardiary 的連線 Token，訊息處理器
+    ///    也只接受 ready，不接受 token。
+    func testHostContextDoesNotExposeConnectionToken() {
         let token = "fake-connection-token-for-test-only"
         let context = McpAppHostContext(theme: .light, language: .zhHant)
         XCTAssertFalse(context.jsonText().localizedCaseInsensitiveContains("token"))
@@ -222,11 +222,13 @@ final class McpAppWebViewTests: XCTestCase {
         XCTAssertTrue(messageResult == "posted" || messageResult == "no-handler")
     }
 
-    /// 3. 主機協定請求：頁面直接 fetch loopback 的主機協定端點時拿不到回應。
+    /// 3. 主機協定請求：頁面讀不到 loopback 主機協定端點的回應。
     ///    用本機伺服器模擬主機端點，確定測的是「讀不到」而不是「剛好沒東西在聽」。
-    ///    頁面的來源是 null（loadHTMLString），跨來源讀取會被擋下；搭配第 2 項
-    ///    證明頁面也沒有任何連線 Token 可用。
-    func testWebViewCannotReachHostProtocol() {
+    ///    注意：fetch 請求可能已經送出，伺服器也可能回應；本測試只證明頁面
+    ///    跨來源讀不到回應內容，不是證明網路層完全沒有送出請求。BLOCKED
+    ///    斷言不能放寬，它是目前 WebKit 在 null origin 下的實際結果。
+    ///    搭配第 2 項證明頁面也沒有任何連線 Token 可用。
+    func testWebViewCannotReadHostProtocolResponse() {
         guard let server = RedirectServer() else {
             XCTFail("無法啟動測試用的本機 HTTP 伺服器")
             return
@@ -422,34 +424,43 @@ final class McpAppWebViewTests: XCTestCase {
         XCTAssertNil(weakWebView, "容器釋放時，WKWebView 也應被釋放")
     }
 
-    /// 量測行程記憶體足跡：建立並拆除 5 個 WebView、等 WebKit 釋放內部資源後，
-    /// 穩態足跡不該無上限成長。門檻刻意寬鬆（500 MB），只攔真的洩漏。
+    /// 量測行程記憶體足跡：先暖機一次抹掉 WebKit 冷啟動成本，再建立並拆除 5 個
+    /// WebView，等 WebKit 釋放內部資源後量穩態。
+    ///
+    /// 主要回收證據是每次掛載的容器與 WebView 的 weak ref 全部變 nil。footprint
+    /// 是輔助上界：macOS 的 resident size 不保證回到基準線（WebKit 會保留快取），
+    /// 所以門檻刻意寬鬆，只攔「每次掛載都留下一個 WebView」這種等級的洩漏。
     /// 實際數字由 FOOTPRINT 訊息印出，可重複執行本測試觀察。
     func testFootprintDoesNotGrowUnboundedAfterRepeatedMounts() {
-        let before = ProcessFootprint.bytes()
-        XCTAssertGreaterThan(before, 0, "應能讀到行程記憶體足跡")
+        // 暖機：第一次 WKWebView 會拉起 WebContent 行程，不能算進重複掛載的成本。
+        _ = mountAndTearDownContainer()
+        _ = mountAndTearDownContainer()
+
+        let baseline = ProcessFootprint.bytes()
+        XCTAssertGreaterThan(baseline, 0, "應能讀到行程記憶體足跡")
+
+        var mounted: [(WeakBox<McpAppContainerView>, WeakBox<WKWebView>)] = []
         for _ in 0..<5 {
-            autoreleasepool {
-                let container = makeBareContainer()
-                let superview = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
-                superview.addSubview(container)
-                let window = makeWindow()
-                window.contentView = superview
-                window.makeKeyAndOrderFront(nil)
-                container.webView.loadHTMLString("<html><body>mcp</body></html>", baseURL: nil)
-                container.removeFromSuperview()
-            }
+            mounted.append(mountAndTearDownContainer())
         }
+
         // 等 WebKit 在 RunLoop 後續回合釋放 WebContent 快取，再量穩態。
         let settled = expectation(description: "footprint settled")
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { settled.fulfill() }
         wait(for: [settled], timeout: 5)
 
-        let after = ProcessFootprint.bytes()
-        let growth = after - before
-        print("FOOTPRINT before=\(before) after=\(after) growth=\(growth)")
-        // WKWebView 的 WebContent 行程會保留快取，不要求回到基準線。
-        XCTAssertLessThan(growth, 500 * 1024 * 1024, "拆除後記憶體不該無上限成長")
+        // 主要回收證據：沒有外部強參考時，每一次的容器與 WebView 都該被釋放。
+        for (index, pair) in mounted.enumerated() {
+            XCTAssertNil(pair.0.value, "第 \(index + 1) 次掛載的容器應被釋放")
+            XCTAssertNil(pair.1.value, "第 \(index + 1) 次掛載的 WebView 應被釋放")
+        }
+
+        let final = ProcessFootprint.bytes()
+        let delta = final > baseline ? final - baseline : 0
+        print("FOOTPRINT baseline=\(baseline) final=\(final) delta=\(delta)")
+        // 這裡量到的是上界，不是精確回收量：WebKit 的 WebContent 快取不保證回到
+        // 基準線。門檻取「5 個 WebView 全部留下」的量級以下，抓的是線性洩漏。
+        XCTAssertLessThan(delta, 60 * 1024 * 1024, "拆除後足跡成長不該到每次掛載都留下 WebView 的量級")
     }
 
     // MARK: - 連線與拆除（原有的結構測試）
@@ -530,6 +541,29 @@ final class McpAppWebViewTests: XCTestCase {
 
     private func makeBareContainer() -> McpAppContainerView {
         McpAppContainerView(configuration: McpAppWebView.makeConfiguration(handler: MessageHandlerSpy()))
+    }
+
+    /// 掛載一個 WebView、拆掉它，回傳容器與 WebView 的弱參考供回收檢查。
+    /// 用一層 superview 當 contentView，removeFromSuperview 才會切掉最後一個強參考。
+    private func mountAndTearDownContainer() -> (WeakBox<McpAppContainerView>, WeakBox<WKWebView>) {
+        var containerBox: WeakBox<McpAppContainerView>!
+        var webViewBox: WeakBox<WKWebView>!
+        // 容器必須在 autoreleasepool 裡建立，才能在離開時一併排掉 WKWebView
+        // 初始化過程留下的 autorelease 物件；否則快取會一直留到測試結束。
+        autoreleasepool {
+            let container = makeBareContainer()
+            let webView = container.webView
+            containerBox = WeakBox(container)
+            webViewBox = WeakBox(webView)
+            let superview = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
+            superview.addSubview(container)
+            let window = makeWindow()
+            window.contentView = superview
+            window.makeKeyAndOrderFront(nil)
+            webView.loadHTMLString("<html><body>mcp</body></html>", baseURL: nil)
+            container.removeFromSuperview()
+        }
+        return (containerBox, webViewBox)
     }
 
     private func makeWindow() -> NSWindow {
@@ -809,6 +843,14 @@ private final class RedirectServer {
                 offset += written
             }
         }
+    }
+}
+
+/// 持有弱參考的小盒子；用來檢查拆除後物件是否真的被釋放。
+private final class WeakBox<T: AnyObject> {
+    weak var value: T?
+    init(_ value: T) {
+        self.value = value
     }
 }
 
