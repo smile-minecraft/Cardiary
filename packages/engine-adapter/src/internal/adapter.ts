@@ -613,6 +613,16 @@ export class PiEngineAdapter implements EngineAdapter {
       }
     }
 
+    // 權限判定（含模型覆核與人工審批）可能等了一段時間。呼叫工具前再確認
+    // 緊急暫停與取消訊號，暫停期間核准回來的工具也不能執行。
+    if (
+      this.#pause !== null ||
+      this.#interruptedTurns.has(turnId) ||
+      input.context.abortSignal?.aborted === true
+    ) {
+      return toolError("緊急暫停中，工具沒有執行", "cancelled");
+    }
+
     const callTempDir = join(resolve(this.#options.environment.tempDir), `tool-${input.callId}`);
     await mkdir(callTempDir, { recursive: true });
     const workingDir = resolve(this.#options.environment.defaultWorkingDir);

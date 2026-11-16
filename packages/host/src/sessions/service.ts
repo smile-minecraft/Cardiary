@@ -14,6 +14,7 @@ import {
 } from "@cardiary/storage";
 
 import type { HostEngine } from "../engine/types.js";
+import { AgentAudit } from "../permissions/agent-audit.js";
 
 /**
  * 對話生命週期：封存、取消封存、倒數結束的摘要與刪除。
@@ -96,6 +97,7 @@ export class SessionLifecycleService {
   readonly #now: () => Date;
   readonly #conversations: ConversationStore;
   readonly #freshness: FreshnessStore;
+  readonly #audit: AgentAudit;
   /** 同一時間只跑一組到期封存；30 秒計時器與手動呼叫不重複摘要。 */
   #processDueArchivesRunning = false;
   /** 封存狀態的變更相互排除：摘要完成後的清除與取消封存不能交錯。 */
@@ -115,6 +117,7 @@ export class SessionLifecycleService {
     this.#logger = options.logger;
     this.#now = options.now;
     this.#conversations = new ConversationStore({ db: this.#state, now: this.#now });
+    this.#audit = new AgentAudit(this.#layout.subfolderPath("state"));
     this.#freshness = new FreshnessStore({
       db: this.#state,
       now: this.#now,
@@ -229,6 +232,7 @@ export class SessionLifecycleService {
     // 卡片全部刪除成功才移除。
     this.#putCardDeletionIntent(sessionId, subtree, exclusive, assetIds);
     this.#conversations.deleteConversations(subtree);
+    this.#forgetAudit(subtree);
     const deletedCards = await this.#deleteCards(exclusive, subtree);
 
     await this.#releaseAssets(assetIds);
@@ -347,6 +351,7 @@ export class SessionLifecycleService {
 
       await this.#engine.deleteConversation(conversationId as never, { includeBranches: true });
       this.#conversations.deleteConversations(subtree);
+      this.#forgetAudit(subtree);
       this.#removeDeletionIntent(conversationId);
       this.#emitLifecycle("deleted", conversationId, {
         sessionId: conversationId,
@@ -564,6 +569,21 @@ export class SessionLifecycleService {
 
   #removeDeletionIntent(sessionId: string): void {
     this.#state.run("DELETE FROM conversation_deletions WHERE root_id = ?", sessionId);
+  }
+
+  /**
+   * 把刪掉的對話從稽核紀錄移掉（目前檔案與輪替檔）。
+   *
+   * 稽核是正本區的附屬紀錄，清不掉不影響刪除結果；壞掉的行由清除端略過。
+   */
+  #forgetAudit(ids: readonly string[]): void {
+    try {
+      this.#audit.removeConversations(ids);
+    } catch (error) {
+      this.#logger.warn("移除對話稽核紀錄失敗", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /** 收掉狀態庫與快取的 WAL，再回收 free pages；快取失敗不影響刪除結果。 */

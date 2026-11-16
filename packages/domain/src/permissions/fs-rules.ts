@@ -49,6 +49,9 @@ const PROTECTED_STATE_FILES = [
   "cardiary.sqlite-wal",
   "cardiary.sqlite-shm",
   "folder.json",
+  "agent-permissions.json",
+  "agent-audit.jsonl",
+  "agent-audit.jsonl.1",
 ] as const;
 
 /**
