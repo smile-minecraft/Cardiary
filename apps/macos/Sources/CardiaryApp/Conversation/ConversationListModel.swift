@@ -50,6 +50,7 @@ public final class ConversationListModel: ObservableObject {
     public let pageLimit: Int
 
     private var service: (any ConversationService)?
+    private var archivedIds: Set<String> = []
 
     public init(pageSize: Int = 50, pageLimit: Int = 20) {
         self.pageSize = pageSize
@@ -91,7 +92,11 @@ public final class ConversationListModel: ObservableObject {
         }
 
         errorMessage = nil
-        sessions = collected.sorted { $0.updatedAt > $1.updatedAt }
+        sessions = collected.map { item in
+            var item = item
+            if archivedIds.contains(item.id) { item.status = .archived }
+            return item
+        }
         if let selectedId, sessions.contains(where: { $0.id == selectedId }) {
             self.selectedId = selectedId
         } else {
@@ -108,7 +113,10 @@ public final class ConversationListModel: ObservableObject {
                 title: title
             )
             let item = Item(summary: response.session)
-            sessions.insert(item, at: 0)
+            await reload()
+            if !sessions.contains(where: { $0.id == item.id }) {
+                sessions.insert(item, at: 0)
+            }
             selectedId = item.id
             errorMessage = nil
             return item.id
@@ -127,6 +135,28 @@ public final class ConversationListModel: ObservableObject {
             sessions.insert(item, at: 0)
         }
         sessions.sort { $0.updatedAt > $1.updatedAt }
+    }
+
+    public func handle(frame: ServerFrame) {
+        switch frame {
+        case .sessionArchivedEvent(let event):
+            archivedIds.insert(event.payload.sessionId)
+            if let index = sessions.firstIndex(where: { $0.id == event.payload.sessionId }) {
+                sessions[index].status = .archived
+            }
+        case .sessionUnarchivedEvent(let event):
+            archivedIds.remove(event.payload.sessionId)
+            if let index = sessions.firstIndex(where: { $0.id == event.payload.sessionId }) {
+                sessions[index].status = .idle
+            }
+        case .sessionDeletedEvent(let event):
+            for id in event.payload.deletedSessionIds {
+                archivedIds.remove(id)
+                remove(id: id)
+            }
+        default:
+            break
+        }
     }
 
     public func remove(id: String) {

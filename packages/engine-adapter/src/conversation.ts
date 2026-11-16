@@ -57,7 +57,8 @@ export interface ConversationSummary {
   readonly origin: ConversationOrigin | null;
   readonly toolBundles: readonly ToolBundlePin[];
   readonly createdAt: IsoInstant;
-  readonly updatedAt: IsoInstant;
+  readonly updatedAt?: IsoInstant;
+  readonly messageCount?: number;
   readonly latestCursor: ConversationCursor | null;
 }
 

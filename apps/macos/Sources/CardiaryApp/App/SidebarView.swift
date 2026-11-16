@@ -27,6 +27,13 @@ struct SidebarView: View {
                 }
                 .buttonStyle(.themePrimary)
                 .disabled(!model.isServiceAvailable)
+                Button {
+                    model.openImport()
+                } label: {
+                    Label(AppL10n.text(.commandGroupImport), systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
             }
             .padding(.horizontal, DesignTokens.spacingM)
             .padding(.bottom, DesignTokens.spacingM)

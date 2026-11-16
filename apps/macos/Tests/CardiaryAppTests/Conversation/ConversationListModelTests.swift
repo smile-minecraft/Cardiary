@@ -6,7 +6,7 @@ import XCTest
 /// 對話清單：列出、排序、選取、建立與分頁。
 @MainActor
 final class ConversationListModelTests: XCTestCase {
-    func testReloadSortsNewestFirst() async {
+    func testReloadPreservesHostOrder() async {
         let fake = FakeCardiaryService(
             listPages: [
                 SessionListResponsePayload(
@@ -21,7 +21,7 @@ final class ConversationListModelTests: XCTestCase {
         list.attach(service: fake)
         await list.reload()
 
-        XCTAssertEqual(list.sessions.map(\.id), ["new", "old"])
+        XCTAssertEqual(list.sessions.map(\.id), ["old", "new"])
     }
 
     func testReloadKeepsExistingSelection() async {

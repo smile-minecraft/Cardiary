@@ -87,7 +87,7 @@ enum AppRegistry {
         ))
         app.commands.register(CommandGroup(
             id: importCommandsGroupId,
-            titleKey: .commandGroupImport
+            titleKey: .sidebarSectionTools
         ))
 
         // 卡片庫、封存區、檢視欄、卡片設定與匯入：一次掛上。

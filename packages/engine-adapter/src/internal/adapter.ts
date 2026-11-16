@@ -716,6 +716,58 @@ export class PiEngineAdapter implements EngineAdapter {
 
   // ── 對話 ───────────────────────────────────────────────────────────────
 
+  async listConversations(): Promise<readonly ConversationSummary[]> {
+    const catalog = await this.#catalog();
+    const summaries: ConversationSummary[] = [];
+    for (const meta of Object.values(catalog.conversations)) {
+      const conversation = await this.#session.harness.conversation(
+        engineConversationId(meta.conversationId),
+        BACKGROUND_CONTEXT,
+      );
+      if (conversation === undefined) continue;
+      const summary = await this.#summary(meta, conversation);
+      let cursor: Awaited<ReturnType<Conversation["entries"]>>["next"];
+      let messageCount = 0;
+      let updatedAt: string | undefined;
+      do {
+        const page = await conversation.entries(
+          { order: "descending" },
+          200,
+          cursor,
+          BACKGROUND_CONTEXT,
+        );
+        for (const entry of page.items) {
+          if (entry.kind !== "pi.user" && entry.kind !== "pi.assistant") continue;
+          const message = entry.model?.[0] as { timestamp?: unknown } | undefined;
+          if (message === undefined) continue;
+          messageCount += 1;
+          if (
+            typeof message.timestamp === "number" &&
+            Number.isFinite(message.timestamp) &&
+            message.timestamp > 0
+          ) {
+            const date = new Date(message.timestamp);
+            if (!Number.isNaN(date.getTime())) {
+              const timestamp = date.toISOString();
+              if (updatedAt === undefined || timestamp > updatedAt) updatedAt = timestamp;
+            }
+          }
+        }
+        cursor = page.next;
+      } while (cursor !== undefined);
+      summaries.push({
+        ...summary,
+        ...(updatedAt === undefined ? {} : { updatedAt }),
+        messageCount,
+      });
+    }
+    return summaries.sort((a, b) => {
+      if (a.updatedAt === undefined) return b.updatedAt === undefined ? 0 : 1;
+      if (b.updatedAt === undefined) return -1;
+      return b.updatedAt.localeCompare(a.updatedAt);
+    });
+  }
+
   async getConversation(conversationId: ConversationId): Promise<ConversationSummary | null> {
     const catalog = await this.#catalog();
     const meta = catalog.conversations[conversationId];
@@ -2194,7 +2246,6 @@ export class PiEngineAdapter implements EngineAdapter {
       origin: meta.origin,
       toolBundles: meta.toolBundles,
       createdAt: meta.createdAt,
-      updatedAt: this.#clock.now().toISOString(),
       latestCursor: latest === undefined ? null : String(latest.id),
     };
   }

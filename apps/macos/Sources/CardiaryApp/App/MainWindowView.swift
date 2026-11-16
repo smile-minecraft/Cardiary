@@ -3,6 +3,12 @@ import SwiftUI
 /// 三欄主視窗：左側欄、主內容、可收合的檢視欄。三欄用底色區分，不畫分隔線。
 struct MainWindowView: View {
     @ObservedObject var model: AppModel
+    @ObservedObject var approvals: ApprovalModel
+
+    init(model: AppModel) {
+        self.model = model
+        self.approvals = model.approvals
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -39,6 +45,18 @@ struct MainWindowView: View {
         }
         .toolbarBackground(Palette.canvas, for: .windowToolbar)
         .toolbar {
+            if !model.isInspectorVisible && approvals.count > 0 {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        model.showApprovals()
+                    } label: {
+                        Label("\(approvals.count)", systemImage: "hand.raised.fill")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .help(AppL10n.text(.inspectorApprovalsTitle))
+                    .accessibilityLabel("\(AppL10n.text(.inspectorApprovalsTitle)) \(approvals.count)")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     model.toggleInspector()

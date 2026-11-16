@@ -397,6 +397,9 @@ export class FakeEngine implements EngineAdapter {
       toolBundles: conversation.toolBundles,
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
+      messageCount: conversation.messages.filter(
+        ({ message }) => message.role === "user" || message.role === "assistant",
+      ).length,
       latestCursor: conversation.messages.length ? cursorAt(conversation.messages.length) : null,
     };
   }
