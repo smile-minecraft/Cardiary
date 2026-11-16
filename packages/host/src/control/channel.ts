@@ -35,10 +35,15 @@ export interface ControlChannelOptions {
 }
 
 interface PendingBrokerRequest {
+  readonly id: string;
   readonly route: string;
+  readonly payload: JSONObject;
+  readonly timeoutMs: number;
   readonly resolve: (payload: JSONObject) => void;
   readonly reject: (error: Error) => void;
-  readonly timer: ReturnType<typeof setTimeout>;
+  readonly signal?: AbortSignal;
+  onAbort?: () => void;
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 /**
@@ -52,6 +57,8 @@ export class ControlChannel {
   readonly #options: ControlChannelOptions;
   readonly #handlers = new Map<string, (payload: JSONObject) => Promise<JSONObject>>();
   readonly #pending = new Map<string, PendingBrokerRequest>();
+  readonly #brokerQueues = new Map<string, PendingBrokerRequest[]>();
+  readonly #retiredBrokerIds = new Set<string>();
   readonly #inFlightRoutes = new Set<string>();
   #reader: LineReader | null = null;
   #closed = false;
@@ -120,35 +127,89 @@ export class ControlChannel {
   async requestBroker(
     route: string,
     payload: JSONObject,
-    options?: { readonly timeoutMs?: number },
+    options?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
   ): Promise<JSONObject> {
     if (this.#closed) throw new ControlError("unavailable", "控制通道已關閉");
     if (!this.#handshakeDone) throw new ControlError("unavailable", "尚未完成 hello 交握");
     if (!BROKER_ROUTES.has(route)) {
       throw new ControlError("unsupported_route", `不在代理白名單：${route}`);
     }
-    if ([...this.#pending.values()].some((pending) => pending.route === route)) {
-      throw new ControlError("busy", `代理路由已有在途請求：${route}`);
-    }
+    if (options?.signal?.aborted) throw new ControlError("cancelled", "代理請求已取消");
     const id = `brk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    const timeoutMs = options?.timeoutMs ?? this.#options.brokerTimeoutMs ?? 5000;
-    const promise = new Promise<JSONObject>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#pending.delete(id);
-        reject(new ControlError("timeout", `代理路由逾時：${route}`));
-      }, timeoutMs);
-      timer.unref?.();
-      this.#pending.set(id, { route, resolve, reject, timer });
+    return new Promise<JSONObject>((resolve, reject) => {
+      const request: PendingBrokerRequest = {
+        id,
+        route,
+        payload,
+        timeoutMs: options?.timeoutMs ?? this.#options.brokerTimeoutMs ?? 5000,
+        resolve,
+        reject,
+        ...(options?.signal === undefined ? {} : { signal: options.signal }),
+      };
+      const queue = this.#brokerQueues.get(route) ?? [];
+      queue.push(request);
+      this.#brokerQueues.set(route, queue);
+      if (request.signal) {
+        request.onAbort = () => this.#cancelBroker(request);
+        request.signal.addEventListener("abort", request.onAbort, { once: true });
+      }
+      if (queue.length === 1) this.#sendBroker(request);
     });
-    await this.#send({
+  }
+
+  #sendBroker(request: PendingBrokerRequest): void {
+    this.#pending.set(request.id, request);
+    request.timer = setTimeout(() => {
+      this.#rememberRetiredBroker(request.id);
+      const queue = this.#brokerQueues.get(request.route) ?? [];
+      this.#brokerQueues.delete(request.route);
+      for (const entry of queue) {
+        this.#cleanupBroker(entry);
+        entry.reject(new ControlError("timeout", `代理路由逾時：${request.route}`));
+      }
+    }, request.timeoutMs);
+    request.timer.unref?.();
+    void this.#send({
       v: CONTROL_PROTOCOL,
       kind: "request",
-      id,
-      route,
+      id: request.id,
+      route: request.route,
       auth: { token: this.#options.brokerToken },
-      payload,
+      payload: request.payload,
     });
-    return promise;
+  }
+
+  #rememberRetiredBroker(id: string): void {
+    this.#retiredBrokerIds.add(id);
+    if (this.#retiredBrokerIds.size > 64) {
+      this.#retiredBrokerIds.delete(this.#retiredBrokerIds.values().next().value!);
+    }
+  }
+
+  #cleanupBroker(request: PendingBrokerRequest): void {
+    this.#pending.delete(request.id);
+    if (request.timer) clearTimeout(request.timer);
+    if (request.signal && request.onAbort) {
+      request.signal.removeEventListener("abort", request.onAbort);
+    }
+  }
+
+  #finishBroker(request: PendingBrokerRequest): void {
+    this.#cleanupBroker(request);
+    const queue = this.#brokerQueues.get(request.route);
+    if (!queue) return;
+    const index = queue.indexOf(request);
+    if (index < 0) return;
+    queue.splice(index, 1);
+    if (queue.length === 0) this.#brokerQueues.delete(request.route);
+    else if (index === 0) this.#sendBroker(queue[0]!);
+  }
+
+  #cancelBroker(request: PendingBrokerRequest): void {
+    // 取消只停止等待；沒有取消 frame，殼端的辨識可能仍在執行。
+    if (this.#pending.has(request.id)) this.#rememberRetiredBroker(request.id);
+    this.#finishBroker(request);
+    request.reject(new ControlError("cancelled", "代理請求已取消"));
   }
 
   async notify(route: string, payload: JSONObject): Promise<void> {
@@ -220,12 +281,12 @@ export class ControlChannel {
     if (frame.kind === "response") {
       const pending = this.#pending.get(frame.replyTo);
       if (!pending) {
+        if (this.#retiredBrokerIds.has(frame.replyTo)) return;
         this.#options.logger.warn("控制面收到對不上在途請求的回應", { replyTo: frame.replyTo });
         this.#close("invalid_message");
         return;
       }
-      clearTimeout(pending.timer);
-      this.#pending.delete(frame.replyTo);
+      this.#finishBroker(pending);
       if (frame.ok) {
         pending.resolve(frame.payload ?? {});
       } else {
@@ -316,11 +377,13 @@ export class ControlChannel {
     this.#closed = true;
     this.#closeReason = reason;
     this.#reader?.stop();
-    for (const [id, pending] of this.#pending) {
-      clearTimeout(pending.timer);
-      pending.reject(new ControlError("unavailable", "控制通道已關閉"));
-      this.#pending.delete(id);
+    for (const queue of this.#brokerQueues.values()) {
+      for (const pending of queue) {
+        this.#cleanupBroker(pending);
+        pending.reject(new ControlError("unavailable", "控制通道已關閉"));
+      }
     }
+    this.#brokerQueues.clear();
     this.#handshake?.reject(new ControlError("unavailable", "控制通道已關閉"));
     this.#handshake = null;
     this.#options.onClose?.(reason);

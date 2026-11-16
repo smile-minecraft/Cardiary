@@ -157,6 +157,7 @@ export type ControlErrorCode =
   | "busy"
   | "unavailable"
   | "timeout"
+  | "cancelled"
   | "internal";
 
 export class ControlError extends Error {

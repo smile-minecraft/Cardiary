@@ -79,7 +79,7 @@ export class BrokerClient {
   async requestBroker(
     route: string,
     payload: JSONObject,
-    options?: { readonly timeoutMs?: number },
+    options?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
   ): Promise<JSONObject> {
     return this.#channel.requestBroker(route, payload, options);
   }
