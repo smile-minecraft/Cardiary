@@ -57,8 +57,9 @@ export class ManagedChild {
     });
     // 代理自行關閉 stdin 後仍存活時，write 會對已斷的管線觸發 EPIPE error event。
     // 沒有 listener 的 error event 會變成 uncaught exception，讓整個主機服務崩潰。
-    // 對端已關閉代表寫入不可能成功，這裡當成安全 no-op 吞掉；呼叫端仍然可以
-    // 從 write 的 callback 或 writeThenCloseInput 的結果知道寫入沒有送出去。
+    // 對端已關閉代表寫入不可能成功，這裡當成安全 no-op 吞掉。writeThenCloseInput
+    // 回傳 Promise<void>，不保證資料送達；它能保證的是收尾不卡住、不拋錯。
+    // 行程是否還活著、是否真的結束，由 running 與 exited 告訴呼叫端。
     child.stdin?.on("error", () => undefined);
   }
 

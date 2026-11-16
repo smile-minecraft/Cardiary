@@ -216,6 +216,8 @@ export class ExternalAgentsService {
     // 先處理上次強制結束留下的行程；PID 重用時身分對不上就不動它。
     // 有總預算：萬一某一筆行程殺不掉，也不能讓每台的主機啟動無界累加等待。
     const budgetDeadline = Date.now() + this.#startupCleanupBudgetMs;
+    // 只記已確認結束的行程。沒確認的保留 child 身分，下次啟動還能認出它再殺。
+    const terminated = new Set<string>();
     for (const record of records) {
       if (!record.child) continue;
       if (Date.now() >= budgetDeadline) {
@@ -225,13 +227,16 @@ export class ExternalAgentsService {
         break;
       }
       const remaining = budgetDeadline - Date.now();
-      await this.#terminateRecordedChild(record.child, remaining);
+      if (await this.#terminateRecordedChild(record.child, remaining)) {
+        terminated.add(record.agentSessionId);
+      }
     }
     await clearScratch(this.#storage);
     for (const record of records) {
       // 撤回這個代理還卡在 pending 的審批；不只是紀錄上記得的那幾筆。
       await this.#approvals.withdrawPendingForAgent(record.agentSessionId, "主機重新啟動");
-      if (record.child) {
+      // 只有確認行程已結束才清 child 身分；沒殺掉的留著，下次啟動再認。
+      if (record.child && terminated.has(record.agentSessionId)) {
         await writeRecord(this.#storage, { ...record, child: undefined });
       }
     }
@@ -1017,24 +1022,37 @@ export class ExternalAgentsService {
    * 終止上次強制結束留下的行程。
    *
    * 先比對 PID、行程群組和啟動時間；任一個對不上就是 PID 重用或已經不存在，
-   * 這時不動它，只把耐久紀錄上的 child 欄位清掉。
+   * 這時視為已結束（身分對不上就不該再動它）。
+   *
+   * @returns true 表示行程已確認結束（或身分已不存在），呼叫端可以清 child 身分；
+   *          false 表示送了訊號但沒能確認結束，應保留 child 身分讓下次再認。
    */
   async #terminateRecordedChild(
     child: ExternalAgentChildProcess,
     budgetMs = this.#startupCleanupBudgetMs,
-  ): Promise<void> {
-    if ((await this.#recordedChildState(child)) !== "same") return;
+  ): Promise<boolean> {
+    if ((await this.#recordedChildState(child)) !== "same") return true;
 
     const deadline = Date.now() + budgetMs;
     const remaining = () => Math.max(0, deadline - Date.now());
+    // SIGTERM 最多用一半預算（且不超過 termGrace），留時間給 SIGKILL。
+    // 不理 SIGTERM 的孤兒不能把全部預算吃掉，導致 SIGKILL 沒機會送。
+    const termWait = Math.min(remaining(), this.#termGraceMs, Math.floor(budgetMs / 2));
 
     this.#signalGroup(child.processGroupId, "SIGTERM");
-    if (await this.#waitForRecordedChild(child, remaining())) return;
+    if (await this.#waitForRecordedChild(child, termWait)) return true;
+
+    // 總預算已經用完：不要再送 SIGKILL 空等，保留身分讓下次啟動再試。
+    if (remaining() <= 0) {
+      this.#deps.logger?.warn(`無法結束舊行程 ${child.pid}：清理預算用盡`);
+      return false;
+    }
 
     this.#signalGroup(child.processGroupId, "SIGKILL");
-    if (!(await this.#waitForRecordedChild(child, remaining()))) {
-      this.#deps.logger?.warn(`無法結束舊行程 ${child.pid}`);
-    }
+    if (await this.#waitForRecordedChild(child, remaining())) return true;
+
+    this.#deps.logger?.warn(`無法結束舊行程 ${child.pid}`);
+    return false;
   }
 
   async #waitForRecordedChild(child: ExternalAgentChildProcess, ms: number): Promise<boolean> {
@@ -1125,12 +1143,20 @@ export class ExternalAgentsService {
   }
 
   #emit(record: ExternalAgentSessionRecord): void {
-    // 進入終態的 session 不必再留在 #live：耐久紀錄已寫入，list()、stop()
-    // 都會讀磁碟。刪掉避免長時間執行時 map 一直累積。emit 是所有終態寫入的
-    // 共同出口，在這裡清理不會漏掉任何一條路徑。
+    // 進入終態的 session 通常不必再留在 #live：耐久紀錄已寫入，list()、stop()
+    // 都會讀磁碟。emit 是所有終態寫入的共同出口，在這裡清理不會漏掉任何路徑。
+    //
+    // 但行程可能還活著（SIGKILL 後沒結束、exitTask 逾時），這時必須保留 live，
+    // 否則 stop()／pauseAll() 找不到 child 就補殺不了。只有 child 不存在或已
+    // 確認結束才刪。卡住的行程會一直留在 #live——這是刻意的：放掉它就等於放棄
+    // 追蹤一條還在跑的行程；下次開機 startupCleanup 會從磁碟重新認出並收拾它，
+    // 所以單一進程生命週期內的累積上限就是「同時殺不掉的行程數」。
+    const live = this.#live.get(record.agentSessionId);
     if (
       isTerminalAgentStatus(record.status) &&
-      this.#live.get(record.agentSessionId)?.record.status === record.status
+      live &&
+      live.record.status === record.status &&
+      (!live.child || !live.child.running)
     ) {
       this.#live.delete(record.agentSessionId);
     }

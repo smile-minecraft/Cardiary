@@ -144,7 +144,7 @@ async function makeService(options?: {
 }
 
 /** 永不結束的行程替身，模擬忽略 SIGKILL、真的殺不掉的行程。 */
-function unkillableChild(): ManagedChild {
+function unkillableChild(signals?: NodeJS.Signals[]): ManagedChild {
   return {
     pid: 999_999_999,
     running: true,
@@ -152,7 +152,7 @@ function unkillableChild(): ManagedChild {
     write: () => undefined,
     writeThenCloseInput: async () => undefined,
     closeInput: () => undefined,
-    signal: () => undefined,
+    signal: (sig: NodeJS.Signals) => signals?.push(sig),
     stdout: null,
     stderr: null,
   } as unknown as ManagedChild;
@@ -223,16 +223,42 @@ describe("外部代理行程生命週期", () => {
   );
 
   it.skipIf(process.platform !== "darwin")(
-    "session 進入終態後從 live 移除，list 與重複 stop 仍從耐久紀錄正確呈現",
+    "行程殺不掉時保留 live，後續 stop 仍能再次嘗試終止",
+    async () => {
+      const signals: NodeJS.Signals[] = [];
+      const child = unkillableChild(signals);
+      const { service, approvals, workingDirectory } = await makeService({
+        spawn: spawnReturning(child),
+      });
+
+      const started = await service.start({ agentKind: "opencode", workingDirectory });
+      approvals.approve(started.approvalId);
+      await eventually(async () => {
+        const listed = await service.list();
+        return listed[0]?.status === "running";
+      });
+
+      await withTimeout(service.stop(started.agentSessionId), 2_000, "第一次 stop 卡住");
+      const afterFirst = signals.filter((s) => s === "SIGKILL").length;
+      expect(afterFirst).toBeGreaterThan(0);
+
+      // 行程還活著，#live 必須保留；再 stop 一次會重新走到終止流程、再送一次 SIGKILL。
+      await withTimeout(service.stop(started.agentSessionId), 2_000, "第二次 stop 卡住");
+      expect(signals.filter((s) => s === "SIGKILL").length).toBeGreaterThan(afterFirst);
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin")(
+    "session 進入終態後，list 與重複 stop 仍從耐久紀錄正確呈現",
     async () => {
       const { service, paths, workingDirectory } = await makeService();
       const storage = agentStoragePaths(paths);
 
       const started = await service.start({ agentKind: "opencode", workingDirectory });
-      // 拒絕啟動審批：#awaitStartApproval 會寫 failed 終態並觸發 #emit 的清理。
-      // 這裡直接用 stop 走終態路徑，確保 #emit 删除 live 後狀態仍一致。
+      // 還沒核准就 stop：走 waiting-approval → stopped 的終態路徑，行程不曾啟動。
       await service.stop(started.agentSessionId);
 
+      // list() 與 stop() 都以磁碟上的耐久紀錄為準，不能有時序或狀態差異。
       const listed = await service.list();
       expect(listed).toHaveLength(1);
       expect(listed[0]).toMatchObject({
@@ -242,7 +268,7 @@ describe("外部代理行程生命週期", () => {
       const stored = await readRecord(storage, started.agentSessionId);
       expect(stored?.status).toBe("stopped");
 
-      // live 已被清掉；再 stop 一次改走讀磁碟的路徑，仍回傳正確結果、不拋錯。
+      // 對已經是終態的 session 再 stop 一次：不重複計入、不拋錯，回 stopped:false。
       const again = await service.stop(started.agentSessionId);
       expect(again).toEqual({ agentSessionId: started.agentSessionId, stopped: false });
       expect((await service.list())[0]?.status).toBe("stopped");
