@@ -91,7 +91,10 @@ sign() {
 }
 
 echo "簽章（身分：${IDENTITY}）…"
-# 內嵌的執行檔先簽，外層 bundle 才封得起來。
+# 內嵌的原生函式庫與 Node 先簽，外層 bundle 才封得起來。
+while IFS= read -r -d '' native_library; do
+  /usr/bin/codesign --force --timestamp=none --sign "$IDENTITY" "$native_library"
+done < <(find "$APP_BUNDLE/Contents/Resources/Service" -type f \( -name '*.node' -o -name '*.dylib' -o -name '*.so' \) -print0)
 sign "$APP_BUNDLE/Contents/Helpers/Node/node" "$APP_DIR/Resources/node.entitlements"
 sign "$APP_BUNDLE" "$APP_DIR/Resources/cardiary-shell.entitlements"
 
@@ -99,8 +102,13 @@ echo "驗證簽章…"
 /usr/bin/codesign --verify --strict --verbose=2 "$APP_BUNDLE" 2>&1 | sed 's/^/  /'
 echo "殼的 entitlements（應為空）："
 /usr/bin/codesign -d --entitlements - "$APP_BUNDLE" 2>&1 | sed 's/^/  /'
-echo "內嵌 Node 的 entitlements（應只有 allow-jit）："
+echo "內嵌 Node 的 entitlements（allow-jit 與 disable-library-validation）："
 /usr/bin/codesign -d --entitlements - "$APP_BUNDLE/Contents/Helpers/Node/node" 2>&1 | sed 's/^/  /'
+
+if [[ -z "${CARDIARY_SERVICE_SCRIPT:-}" ]]; then
+  echo "驗證打包後的原生模組…"
+  (cd "$APP_BUNDLE/Contents/Resources/Service" && "$APP_BUNDLE/Contents/Helpers/Node/node" -e "require('sharp')")
+fi
 
 cat <<SUMMARY
 
