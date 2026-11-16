@@ -598,6 +598,12 @@ async function responseResult(response: Response, expectedId?: number): Promise<
   if (!response.ok) {
     throw new McpClientError("http_error", `MCP 伺服器回應 HTTP ${String(response.status)}`);
   }
+  // 通知（沒有 expectedId）不需要回應內容：JSON-RPC notification 依法沒有 id，
+  // 伺服器常回 202/204 且 body 是空的。只要是 2xx 就當成功，不解析 JSON，
+  // 也不要消費 body（尤其 text/event-stream 的長連線可能永遠不結束）。
+  if (expectedId === undefined) {
+    return undefined;
+  }
   const contentType = response.headers.get("content-type") ?? "";
   const body = await response.text();
   if (contentType.includes("text/event-stream")) {
@@ -627,9 +633,6 @@ async function responseResult(response: Response, expectedId?: number): Promise<
     parsed = JSON.parse(body) as unknown;
   } catch {
     throw new McpClientError("invalid_response", "MCP 回應不是合法 JSON");
-  }
-  if (expectedId === undefined) {
-    return parsed;
   }
   const matched = matchResponse(parsed, expectedId);
   if (matched === undefined) {
