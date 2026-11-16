@@ -4,7 +4,7 @@
  * 當成錯誤，必須照樣完成初始化並列出工具。
  *
  * 這裡用真的 `HttpMcpClient`（走 `createMcpClient`）連真的 `http.createServer`，
- * 不注入假 client，逐一驗證通知回 202、204 與空 200 三種常見回法。
+ * 逐一驗證通知回 202、204、空 200，以及 200 帶非空 JSON body 時都能完成初始化。
  */
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -30,11 +30,14 @@ async function closeServer(server: Server): Promise<void> {
 /**
  * 一個最小的 HTTP MCP server：
  * - initialize 回標協定版本的 JSON-RPC result；
- * - notifications/initialized 依傳入的 status 回空 body；
+ * - notifications/initialized 依傳入的 status 與 body 回應；
  * - tools/list 回一個工具。
  * 同時記錄收到的 method，方便斷言通知確實送出。
  */
-async function startMcpServer(notificationStatus: number): Promise<{
+async function startMcpServer(
+  notificationStatus: number,
+  notificationBody = "",
+): Promise<{
   url: string;
   methods: string[];
 }> {
@@ -58,7 +61,12 @@ async function startMcpServer(notificationStatus: number): Promise<{
       }
       methods.push(method);
       if (method === "notifications/initialized") {
-        res.writeHead(notificationStatus).end();
+        if (notificationBody !== "") {
+          res.writeHead(notificationStatus, { "content-type": "application/json" });
+          res.end(notificationBody);
+        } else {
+          res.writeHead(notificationStatus).end();
+        }
         return;
       }
       res.writeHead(200, { "content-type": "application/json" });
@@ -106,24 +114,33 @@ function httpRecord(url: string): McpServerRecord {
   };
 }
 
+/** 驗證一組 server 能完成初始化並列出工具，且三種 method 都確實送出。 */
+async function expectInitAndListTools(started: { url: string; methods: string[] }): Promise<void> {
+  const { url, methods } = started;
+  const client = createMcpClient(httpRecord(url), {
+    folderRoot: "",
+    spawn: {} as never,
+    logger: { debug: () => undefined, warn: () => undefined },
+  });
+
+  const tools = await client.listTools();
+  expect(tools).toEqual([{ name: "echo", description: "回聲", inputSchema: { type: "object" } }]);
+  expect(methods).toContain("initialize");
+  expect(methods).toContain("notifications/initialized");
+  expect(methods).toContain("tools/list");
+  await client.close();
+}
+
 describe("HTTP MCP 初始化接受空 body 的通知回應", () => {
   for (const status of [202, 204, 200]) {
     it(`notifications/initialized 回 ${status} 空 body 時仍完成初始化並列出工具`, async () => {
-      const { url, methods } = await startMcpServer(status);
-      const client = createMcpClient(httpRecord(url), {
-        folderRoot: "",
-        spawn: {} as never,
-        logger: { debug: () => undefined, warn: () => undefined },
-      });
-
-      const tools = await client.listTools();
-      expect(tools).toEqual([
-        { name: "echo", description: "回聲", inputSchema: { type: "object" } },
-      ]);
-      expect(methods).toContain("initialize");
-      expect(methods).toContain("notifications/initialized");
-      expect(methods).toContain("tools/list");
-      await client.close();
+      await expectInitAndListTools(await startMcpServer(status));
     });
   }
+
+  it("notifications/initialized 回 200 帶非空 JSON body 時仍完成初始化並列出工具", async () => {
+    // 通知的 body 不該被解析，也不能因為沒被消費而卡住初始化。
+    const body = JSON.stringify({ accepted: true, echo: "notification-body" });
+    await expectInitAndListTools(await startMcpServer(200, body));
+  });
 });
