@@ -11,7 +11,9 @@ import type {
   HostModule,
   ModuleActivationContext,
   NotificationService,
+  ProtocolRequestContext,
 } from "@cardiary/module-api";
+import type { JsonValue } from "@cardiary/engine-adapter";
 import { clampCoreTokenBudget, CORE_TOKEN_BUDGET_DEFAULT } from "@cardiary/domain";
 import { NotificationStore } from "@cardiary/storage";
 import type { CardService } from "@cardiary/domain";
@@ -22,6 +24,7 @@ import { manifest } from "./manifest.js";
 import { MemoryCardWriter } from "./card-writer.js";
 import { createCoreMemorySection } from "./context-section.js";
 import { registerMemoryProtocol } from "./protocol.js";
+import { scriptedDistiller, scriptedJudge } from "./models.js";
 import { DistillationService } from "./service.js";
 import {
   CardLifecycleStore,
@@ -51,12 +54,13 @@ function activate(context: ModuleActivationContext): void {
   // 記憶體組裝沒有這個服務，退回只回收狀態庫。
   const maintenance = context.services.host.get<StorageMaintenance>("storage.maintenance");
   // 通知一律走排程模組提供的受控服務（持久化、未讀計數、事件、保留都由它負責）。
-  // 排程模組不在時降級成不落地，蒸餾本身照常執行。
-  const notificationService: NotificationService = context.services.host.get<NotificationService>(
-    HOST_SERVICE_NAMES.notifications,
-  ) ?? {
-    async create() {
-      return { notificationId: `ntf_local_${now().getTime()}` };
+  // 模組依目錄順序載入，memory 可能早於 scheduler；所以每次通知當下才解析，
+  // 不能在启用時抓一次就快取，否則永遠拿到降級的空白實作。
+  const notificationService: NotificationService = {
+    create(input) {
+      const live = context.services.host.get<NotificationService>(HOST_SERVICE_NAMES.notifications);
+      if (live !== undefined) return live.create(input);
+      return Promise.resolve({ notificationId: `ntf_local_${now().getTime()}` });
     },
   };
 
@@ -97,6 +101,16 @@ function activate(context: ModuleActivationContext): void {
     now,
   };
   registerMemoryProtocol({ undo, protocol: context.services.protocol });
+  // 整合驗收接縫：只在測試環境（CARDIARY_TEST_FAULTS=1）註冊，讓黑箱契約測試
+  // 能把卡片的新鮮度歸零、用腳本化模型跑一次當日蒸餾。正式組裝看不到這個命名空間。
+  if (process.env.CARDIARY_TEST_FAULTS === "1") {
+    registerMemoryTestProtocol({
+      protocol: context.services.protocol,
+      state: cabinet.state,
+      service,
+      now,
+    });
+  }
 
   // 核心記憶第 3 層區段：由上下文組裝器在每次組裝時呼叫。
   const section = createCoreMemorySection({ core, cards, tokenBudget });
@@ -146,6 +160,55 @@ function runDailyMaintenance(
 
 function readTime(value: unknown): string {
   return typeof value === "string" && /^\d{2}:\d{2}$/.test(value) ? value : "04:00";
+}
+
+/** 整合驗收用的測試命名空間；正式環境不會註冊。 */
+function registerMemoryTestProtocol(options: {
+  readonly protocol: {
+    registerNamespace(
+      namespace: string,
+      handler: (request: ProtocolRequestContext) => Promise<JsonValue>,
+    ): unknown;
+  };
+  readonly state: { run(sql: string, ...params: readonly unknown[]): unknown };
+  readonly service: DistillationService;
+  readonly now: () => Date;
+}): void {
+  options.protocol.registerNamespace("module.memory.test", async (request) => {
+    const raw = request.payload;
+    const payload =
+      raw !== null && typeof raw === "object" && "data" in raw
+        ? (raw as { data: Record<string, unknown> }).data
+        : {};
+    if (request.type === "module.memory.test.zero-freshness") {
+      options.state.run(
+        "UPDATE card_state SET freshness = 0, freshness_at = ? WHERE lifecycle = 'live'",
+        options.now().toISOString(),
+      );
+      return { data: { zeroed: true } } as JsonValue;
+    }
+    if (request.type === "module.memory.test.run-daily") {
+      const text = typeof payload["itemText"] === "string" ? payload["itemText"] : "整合驗收記憶";
+      const title = typeof payload["title"] === "string" ? payload["title"] : "整合驗收長期記憶";
+      const day = options.now().toISOString().slice(0, 10);
+      const run = await options.service.runForDay("default", day, {
+        distiller: scriptedDistiller(() => ({
+          items: [{ type: "fact", text }],
+        })),
+        judge: scriptedJudge(() => false),
+        titler: async () => ({
+          title,
+          ...(typeof payload["summary"] === "string" ? { summary: payload["summary"] } : {}),
+        }),
+      });
+      return {
+        data: {
+          run: run === null ? null : { runId: run.runId, status: run.status, stats: run.statsJson },
+        },
+      } as JsonValue;
+    }
+    return { data: { ok: false, reason: "not-found" } } as JsonValue;
+  });
 }
 
 function cronFor(time: string): string {

@@ -172,7 +172,7 @@ export {
   type ParseCardOptions,
   type ParsedCardFile,
 } from "./frontmatter.js";
-export { isUlid, newCardId, sha256Hex, ULID_PATTERN } from "./ids.js";
+export { deterministicCardId, isUlid, newCardId, sha256Hex, ULID_PATTERN } from "./ids.js";
 export { extractOutgoingLinks, normalizeLinkText, type OutgoingLink } from "./links.js";
 export { applyPatch, applyUnifiedDiff, CardPatchError, type PatchText } from "./patch.js";
 export { stableStringify } from "./stable-json.js";

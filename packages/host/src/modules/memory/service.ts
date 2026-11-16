@@ -31,6 +31,7 @@ import {
   selectDistillationCandidates,
   validateDistillationOutput,
   CORE_TOKEN_BUDGET_DEFAULT,
+  deterministicCardId,
   type DistillationSummaryItem,
   type MemoryJudge,
   type MemoryMergeVerdict,
@@ -410,7 +411,7 @@ export class DistillationService {
 
     const bodyHash = hashText(draft.body);
     // 固定輸出卡 id：續跑意圖事先分配；同一 item 重跑得到相同 id。
-    const outputCardId = `mem_${run.runId}_${index}_${hash.slice(0, 8)}`;
+    const outputCardId = deterministicCardId(`mem_${run.runId}_${index}_${hash.slice(0, 8)}`);
     const priorIntent = this.#options.runs.findBatchItem(run.persona, batchId, itemKey);
     const existing = this.#options.writer.existing(outputCardId, bodyHash);
     const intent = resumeIntentDecision({
