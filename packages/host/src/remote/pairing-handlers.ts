@@ -5,10 +5,7 @@
  * 觸碰任何其他請求；核准與撤銷永遠只走殼的私有控制通道。
  */
 
-import {
-  completePairing,
-  isDeviceTokenActive,
-} from "@cardiary/domain";
+import { completePairing, isDeviceTokenActive } from "@cardiary/domain";
 
 import { protocolError, type ProtocolErrorInfo } from "../errors.js";
 import type { JSONObject } from "@cardiary/protocol";
@@ -39,9 +36,7 @@ export interface PairingRequestContext {
 function requiredField(payload: JSONObject, field: string): string {
   const value = payload[field];
   if (typeof value !== "string" || value.length === 0) {
-    fail(
-      protocolError("invalid_message", `缺少必填欄位 ${field}。`, { details: { field } }),
-    );
+    fail(protocolError("invalid_message", `缺少必填欄位 ${field}。`, { details: { field } }));
   }
   return value;
 }
@@ -64,14 +59,10 @@ export async function handlePairingBegin(
     session = stack.pairings.create({ deviceName, deviceKind: kind }, connectionId, now);
   } catch (error) {
     if (error instanceof PairingCapacityError) {
-      fail(
-        protocolError("busy", error.message, { details: { reason: error.reason } }),
-      );
+      fail(protocolError("busy", error.message, { details: { reason: error.reason } }));
     }
     if (error instanceof RangeError) {
-      fail(
-        protocolError("invalid_message", error.message, { details: { field: "deviceName" } }),
-      );
+      fail(protocolError("invalid_message", error.message, { details: { field: "deviceName" } }));
     }
     throw error;
   }
@@ -114,9 +105,7 @@ export async function handlePairingComplete(
   const outcome = completePairing(session, { connectionId }, { now });
   stack.pairings.update(outcome.session);
   if (!outcome.ok) {
-    fail(
-      protocolError("conflict", "無法領取配對結果。", { details: { reason: outcome.reason } }),
-    );
+    fail(protocolError("conflict", "無法領取配對結果。", { details: { reason: outcome.reason } }));
   }
   const device = outcome.device;
   await stack.devices.insert({
@@ -140,8 +129,7 @@ export async function handlePairingComplete(
 }
 
 export type DeviceTokenCheck =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly code: "auth_invalid" | "auth_expired" };
+  { readonly ok: true } | { readonly ok: false; readonly code: "auth_invalid" | "auth_expired" };
 
 /**
  * 逐請求重新驗證裝置 Token：撤銷或到期後，下一個請求就失敗。
@@ -157,5 +145,3 @@ export async function checkDeviceTokenActive(
   }
   return { ok: true };
 }
-
-

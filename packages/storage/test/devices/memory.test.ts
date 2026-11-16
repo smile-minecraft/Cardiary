@@ -54,8 +54,20 @@ describe("MemoryDeviceTokenStore", () => {
 
   it("清單依建立時間排序", async () => {
     const store = new MemoryDeviceTokenStore();
-    await store.insert(makeRecord({ deviceId: "dev_b", tokenHash: "b".repeat(64), createdAt: "2026-11-16T02:00:00.000Z" }));
-    await store.insert(makeRecord({ deviceId: "dev_a", tokenHash: "c".repeat(64), createdAt: "2026-11-16T01:00:00.000Z" }));
+    await store.insert(
+      makeRecord({
+        deviceId: "dev_b",
+        tokenHash: "b".repeat(64),
+        createdAt: "2026-11-16T02:00:00.000Z",
+      }),
+    );
+    await store.insert(
+      makeRecord({
+        deviceId: "dev_a",
+        tokenHash: "c".repeat(64),
+        createdAt: "2026-11-16T01:00:00.000Z",
+      }),
+    );
     expect((await store.list()).map((record) => record.deviceId)).toEqual(["dev_a", "dev_b"]);
   });
 });

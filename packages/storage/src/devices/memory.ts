@@ -40,7 +40,11 @@ export class MemoryDeviceTokenStore implements DeviceTokenStore {
   async revoke(deviceId: string, now: string): Promise<StoredDeviceToken | undefined> {
     const record = this.#byId.get(deviceId);
     if (!record) return undefined;
-    const revoked: StoredDeviceToken = { ...revokeDeviceToken(record, now), deviceName: record.deviceName, deviceKind: record.deviceKind };
+    const revoked: StoredDeviceToken = {
+      ...revokeDeviceToken(record, now),
+      deviceName: record.deviceName,
+      deviceKind: record.deviceKind,
+    };
     this.#byHash.set(revoked.tokenHash, revoked);
     this.#byId.set(deviceId, revoked);
     return revoked;

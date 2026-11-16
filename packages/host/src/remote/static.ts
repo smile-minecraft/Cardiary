@@ -69,7 +69,11 @@ export function createStaticHandler(webRoot: string): StaticHandler {
     void (async () => {
       const info = await stat(candidate).catch(() => null);
       const target =
-        info && info.isDirectory() ? join(candidate, "index.html") : info && info.isFile() ? candidate : null;
+        info && info.isDirectory()
+          ? join(candidate, "index.html")
+          : info && info.isFile()
+            ? candidate
+            : null;
       if (target === null) {
         sendPlain(response, 404, "not_found");
         return;
@@ -86,7 +90,8 @@ export function createStaticHandler(webRoot: string): StaticHandler {
         "content-security-policy": CSP,
         "x-content-type-options": "nosniff",
         "referrer-policy": "no-referrer",
-        "cache-control": isHtml || target.endsWith(".map") ? "no-cache" : "public, max-age=31536000, immutable",
+        "cache-control":
+          isHtml || target.endsWith(".map") ? "no-cache" : "public, max-age=31536000, immutable",
       };
       response.writeHead(200, headers);
       if (request.method === "HEAD") {

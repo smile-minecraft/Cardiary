@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
-import { WebSocket } from "ws";
 import type { JSONObject } from "@cardiary/protocol";
 
 import { registerRemoteControlRoutes } from "../../src/remote/control.js";

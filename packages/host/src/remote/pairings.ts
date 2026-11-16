@@ -6,11 +6,7 @@
  * 全域最多 `MAX_PENDING_PAIRINGS` 筆。
  */
 
-import {
-  createPairingSession,
-  disconnectPairing,
-  type PairingSession,
-} from "@cardiary/domain";
+import { createPairingSession, disconnectPairing, type PairingSession } from "@cardiary/domain";
 
 import type { PairingDeviceKind } from "@cardiary/domain";
 
@@ -56,10 +52,7 @@ export class PairingRegistry {
       (session) => session.connectionId === connectionId,
     );
     if (own.length >= MAX_PENDING_PER_CONNECTION) {
-      throw new PairingCapacityError(
-        "connection-pending",
-        "這條連線已有一筆等待中的配對請求。",
-      );
+      throw new PairingCapacityError("connection-pending", "這條連線已有一筆等待中的配對請求。");
     }
     const session = createPairingSession(
       { deviceName: input.deviceName, deviceKind: input.deviceKind, connectionId },
