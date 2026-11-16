@@ -23,6 +23,7 @@ import { MemoryCardWriter } from "./card-writer.js";
 import { createCoreMemorySection } from "./context-section.js";
 import { registerMemoryProtocol } from "./protocol.js";
 import { DistillationService } from "./service.js";
+import { scriptedDistillationModels, zeroFreshnessForTest } from "./test-seam.js";
 import {
   CardLifecycleStore,
   CoreMemoryStore,
@@ -51,11 +52,12 @@ function activate(context: ModuleActivationContext): void {
   // 記憶體組裝沒有這個服務，退回只回收狀態庫。
   const maintenance = context.services.host.get<StorageMaintenance>("storage.maintenance");
   // 通知一律走排程模組提供的受控服務（持久化、未讀計數、事件、保留都由它負責）。
-  // 排程模組不在時降級成不落地，蒸餾本身照常執行。
-  const notificationService: NotificationService = context.services.host.get<NotificationService>(
-    HOST_SERVICE_NAMES.notifications,
-  ) ?? {
-    async create() {
+  // 記憶模組比排程模組早啟用，所以這裡延後到呼叫當下才查找；排程模組不在時
+  // 降級成不落地，蒸餾本身照常執行。
+  const notificationService: NotificationService = {
+    async create(input) {
+      const real = context.services.host.get<NotificationService>(HOST_SERVICE_NAMES.notifications);
+      if (real !== undefined) return real.create(input);
       return { notificationId: `ntf_local_${now().getTime()}` };
     },
   };
@@ -70,7 +72,7 @@ function activate(context: ModuleActivationContext): void {
 
   const service = new DistillationService({
     cards,
-    models: context.services.models,
+    models: scriptedDistillationModels() ?? context.services.models,
     runs,
     core,
     lifecycle,
@@ -81,6 +83,10 @@ function activate(context: ModuleActivationContext): void {
     now,
     tokenBudget,
   });
+
+  // 契約測試接縫：把種子卡的新鮮度歸零（正式產品沒有這個環境變數）。
+  // 卡片模組先啟用，卡已掃進 card_state；這裡只改狀態庫數值，不碰卡檔。
+  zeroFreshnessForTest(cabinet.state, now);
 
   // `module.memory.undo` 處理器。
   const undo: UndoOptions = {
@@ -125,7 +131,7 @@ function activate(context: ModuleActivationContext): void {
     });
   });
 
-  context.services.host.provide("memory", service);
+  context.services.host.provide(HOST_SERVICE_NAMES.memory, service);
 }
 
 /** 蒸餾後的第 13 章每日維護：兩個資料庫的完整 VACUUM。 */

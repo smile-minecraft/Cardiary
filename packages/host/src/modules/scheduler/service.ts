@@ -1,4 +1,5 @@
 import type { BackgroundTaskRunner, ModuleLogger } from "@cardiary/module-api";
+import type { DistillationTrigger } from "../contract.js";
 import type {
   NotificationStore,
   NotificationRecord,
@@ -30,6 +31,8 @@ export interface SchedulerServiceOptions {
   readonly isEngineRunning: () => boolean;
   /** 通知建立後發 `notification.changed`；由模組提供。 */
   readonly emitChanged: (record: NotificationRecord) => void;
+  /** 蒸餾入口；由記憶模組提供。缺席時蒸餾任務記 error 並發通知。 */
+  readonly distillation?: DistillationTrigger;
   readonly logger: ModuleLogger;
   readonly now?: () => Date;
   readonly tickIntervalMs?: number;
@@ -198,18 +201,7 @@ export class SchedulerService {
     const { schedule } = claim;
     const isHeartbeat = schedule.kind === "heartbeat";
     if (claim.task.type === "distillation") {
-      this.#options.logger.warn("蒸餾排程尚未接上，這一筆略過", {
-        scheduleId: schedule.scheduleId,
-      });
-      this.#options.schedules.finishRun({
-        runId: claim.runId,
-        scheduleId: schedule.scheduleId,
-        conversationId: null,
-        startedAt: claim.claimedAt,
-        finishedAt: nowIso(this.#now),
-        status: "error",
-        error: "蒸餾服務尚未接上（M2 之後串接）",
-      });
+      await this.#executeDistillation(claim);
       return;
     }
     const task: ScheduleTask = claim.task;
@@ -304,6 +296,55 @@ export class SchedulerService {
       status: "error",
       error: message,
     });
+  }
+
+  /**
+   * 蒸餾任務：呼叫記憶模組的蒸餾入口。
+   *
+   * 每日摘要通知由蒸餾服務自己發（payload 帶可復原的每一項），所以成功時
+   * 排程這邊只記 run，不重複發通知。丟錯時記 error、發一則失敗通知， run
+   * 也記 error；不讓蒸餾排程靜默略過。
+   */
+  async #executeDistillation(claim: ScheduleClaim): Promise<void> {
+    const { schedule } = claim;
+    const trigger = this.#options.distillation;
+    const base = {
+      runId: claim.runId,
+      scheduleId: schedule.scheduleId,
+      conversationId: null,
+      startedAt: claim.claimedAt,
+    };
+    const finishedAt = nowIso(this.#now);
+    if (trigger === undefined) {
+      const message = "蒸餾服務尚未接上";
+      this.#options.logger.error(message, { scheduleId: schedule.scheduleId });
+      this.#notifyFailure(schedule, false, message, null);
+      this.#options.schedules.finishRun({
+        ...base,
+        finishedAt,
+        status: "error",
+        error: message,
+      });
+      return;
+    }
+    try {
+      const day = this.#now().toISOString().slice(0, 10);
+      await trigger.runForDay("default", day);
+      this.#options.schedules.finishRun({ ...base, finishedAt, status: "ok" });
+    } catch (error) {
+      const message = errorMessage(error);
+      this.#options.logger.error("蒸餾排程執行失敗", {
+        scheduleId: schedule.scheduleId,
+        message,
+      });
+      this.#notifyFailure(schedule, false, message, null);
+      this.#options.schedules.finishRun({
+        ...base,
+        finishedAt,
+        status: "error",
+        error: message,
+      });
+    }
   }
 
   #notifyFailure(

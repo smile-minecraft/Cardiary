@@ -59,6 +59,8 @@ export const HOST_SERVICE_NAMES = {
   spawn: "spawn",
   /** 受控通知服務；由排程模組提供，蒸餾用它建立通知而不自己寫儲存。 */
   notifications: "notifications",
+  /** 每日蒸餾服務；由記憶模組提供，排程器在 distillation 任務到點時呼叫。 */
+  memory: "memory",
 } as const;
 
 /** 服務名稱的聯集；`modules.md` 第 5 節那張表。 */
@@ -139,6 +141,18 @@ export interface HostServiceTypeMap {
   toolPermissionGate: ToolPermissionGate;
   "permission.decision": AlwaysAllowService;
   spawn: SpawnRegistry;
+  /** 蒸餾入口；排程器只依賴這一個方法，不匯入記憶模組的實作。 */
+  memory: DistillationTrigger;
+}
+
+/**
+ * 記憶模組對外提供的蒸餾入口。
+ *
+ * 排程器在 `distillation` 任務到點時呼叫它；回傳的 run 由蒸餾服務自己持久化，
+ * 通知也由蒸餾服務自己發。介面放在契約層，避免兩個模組互相匯入。
+ */
+export interface DistillationTrigger {
+  runForDay(persona: string, day: string): Promise<unknown>;
 }
 
 /**
