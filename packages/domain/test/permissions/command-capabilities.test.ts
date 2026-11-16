@@ -612,6 +612,27 @@ describe("真實 shell 的寫入指令對照", () => {
     }
   });
 
+  it("echo | tee 真的會覆寫 MCP 伺服器設定，判定拒絕", () => {
+    const root = scratchFolder();
+    try {
+      runShell(`echo '{"version":1}' | tee state/mcp-servers.json >/dev/null`, root);
+      expect(readFileSync(join(root, "state", "mcp-servers.json"), "utf8")).toBe('{"version":1}\n');
+      for (const command of [
+        "echo changed | tee state/mcp-servers.json",
+        "echo changed > state/mcp-servers.json",
+      ]) {
+        const verdict = evaluateShellCommand(command, {
+          ...context,
+          workingDir: root,
+          folderRoot: root,
+        });
+        expect(verdict.kind === "deny" && verdict.rule, command).toBe("deny.human-settings");
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("sed -i 真的會改卡片正本，判定拒絕", () => {
     const root = scratchFolder();
     try {
@@ -665,6 +686,8 @@ describe("cp／mv／install 的目的地是既有目錄時，逐檔判定", () =
     ["mv -t", "mv -t state cardiary.sqlite"],
     ["install -t", "install -t state cardiary.sqlite"],
     ["cp -t 直接指狀態庫檔", "cp -t state/cardiary.sqlite notes.md"],
+    ["cp -t 直接指 MCP 伺服器設定", "cp -t state/mcp-servers.json notes.md"],
+    ["mv 到 MCP 伺服器設定", "mv notes.md state/mcp-servers.json"],
   ])("%s 的目的地同樣逐檔判定", (_label, command) => {
     const root = scratchFolder();
     try {

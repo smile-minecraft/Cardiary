@@ -43,7 +43,14 @@ export function isSelfModifyPath(
   return false;
 }
 
-/** 狀態資料庫與白名單的儲存檔；代理不得直接改。 */
+/**
+ * 狀態資料庫、白名單、權限設定與 MCP 伺服器設定的儲存檔；代理不得直接改。
+ *
+ * `mcp-servers.json` 一定要在這裡：檔案裡的紀錄在下次啟動時會被主機直接
+ * 執行（stdio 子行程或 HTTP 連線），寫得進去就等於繞過「新增 MCP 伺服器
+ * 須人工審批」。它和其他受保護檔一樣，連「全部允許」與 System One 都
+ * 不能放行。
+ */
 const PROTECTED_STATE_FILES = [
   "cardiary.sqlite",
   "cardiary.sqlite-wal",
@@ -52,10 +59,12 @@ const PROTECTED_STATE_FILES = [
   "agent-permissions.json",
   "agent-audit.jsonl",
   "agent-audit.jsonl.1",
+  "mcp-servers.json",
 ] as const;
 
 /**
- * `resolved` 是否是狀態資料庫、白名單或 `folder.json`。
+ * `resolved` 是否是狀態資料庫、白名單、權限設定、MCP 伺服器設定或
+ * `folder.json`。
  *
  * 大小寫不敏感的卷上，路徑裡任何一段的大小寫不同都是同一個檔案；這裡一律
  * 折疊比對。大小寫敏感時改用精確比對加上 `dev`＋`ino` 比對，同一個 inode 的
@@ -156,7 +165,7 @@ export function evaluateWritePath(
   }
 
   if (isHumanSettingsPath(resolved.resolved, context.folderRoot)) {
-    return deny(PERMISSION_RULES.humanSettings, "代理不得直接改狀態資料庫或白名單");
+    return deny(PERMISSION_RULES.humanSettings, "代理不得直接改狀態資料庫、白名單或 MCP 設定");
   }
   if (resolved.classification === "system") {
     return deny(PERMISSION_RULES.systemWrite, "路徑在系統目錄");
