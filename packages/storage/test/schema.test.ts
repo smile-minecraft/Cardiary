@@ -21,6 +21,8 @@ import {
   M3_TABLES,
   M4_CONTEXT_ENTRY_DEAL_COLUMNS,
   M4_MIGRATIONS,
+  M5_MIGRATIONS,
+  M6_TABLES,
   RESERVED_M1_TABLES,
   STATE_APPLICATION_ID,
   StorageError,
@@ -63,7 +65,7 @@ describe("資料庫 header 與表結構", () => {
     expect(Number(storage.state.pragma("application_id"))).toBe(STATE_APPLICATION_ID);
     expect(Number(storage.state.pragma("page_size"))).toBe(4096);
     expect(Number(storage.state.pragma("auto_vacuum"))).toBe(2);
-    expect(Number(storage.state.pragma("user_version"))).toBe(5);
+    expect(Number(storage.state.pragma("user_version"))).toBe(6);
     expect(String(storage.state.pragma("journal_mode"))).toBe("wal");
     expect(Number(storage.state.pragma("secure_delete"))).toBe(1);
     expect(Number(storage.state.pragma("foreign_keys"))).toBe(1);
@@ -74,6 +76,7 @@ describe("資料庫 header 與表結構", () => {
       ...M1_TABLES,
       ...M2_TABLES,
       ...M3_TABLES,
+      ...M6_TABLES,
     ]) {
       expect(storage.state.tableExists(table), table).toBe(true);
     }
@@ -92,7 +95,7 @@ describe("資料庫 header 與表結構", () => {
     const migrations = storage.state.all<{ version: number; checksum: string }>(
       "SELECT version, checksum FROM schema_migrations ORDER BY version",
     );
-    expect(migrations).toHaveLength(5);
+    expect(migrations).toHaveLength(6);
     expect(migrations[0]?.version).toBe(1);
     expect(migrations[0]?.checksum).toBe(sha256(M0_MIGRATIONS[0]?.sql ?? ""));
     expect(migrations[1]?.version).toBe(2);
@@ -103,6 +106,8 @@ describe("資料庫 header 與表結構", () => {
     expect(migrations[3]?.checksum).toBe(sha256(M3_MIGRATIONS[3]?.sql ?? ""));
     expect(migrations[4]?.version).toBe(5);
     expect(migrations[4]?.checksum).toBe(sha256(M4_MIGRATIONS[4]?.sql ?? ""));
+    expect(migrations[5]?.version).toBe(6);
+    expect(migrations[5]?.checksum).toBe(sha256(M5_MIGRATIONS[5]?.sql ?? ""));
   });
 
   it("引擎與快取資料庫的 header 正確，三條連線都開 secure_delete", () => {
@@ -143,7 +148,7 @@ describe("資料庫 header 與表結構", () => {
     const second = openTestStorage(tempRoot);
     cleanups.push(() => second.close());
     expect(second.state.countRows("schema_migrations")).toBe(count);
-    expect(Number(second.state.pragma("user_version"))).toBe(5);
+    expect(Number(second.state.pragma("user_version"))).toBe(6);
   });
 
   it("資料庫檔是符號連結時拒絕開啟，不碰外部檔案", () => {
@@ -187,7 +192,7 @@ describe("遷移", () => {
       appVersion: "test",
       backupDirectory: directory,
     });
-    expect(first.migration.appliedVersions).toEqual([1, 2, 3, 4, 5]);
+    expect(first.migration.appliedVersions).toEqual([1, 2, 3, 4, 5, 6]);
     first.db.close();
 
     const second = openStateDatabase({
@@ -249,7 +254,7 @@ describe("遷移", () => {
     }
   });
 
-  it("v1 升 v5：七張新表、蒸餾四表與 context_entries 的發牌欄位都在，成功後刪除備份", () => {
+  it("v1 升 v6：七張新表、蒸餾四表、context_entries 的發牌欄位與版本歷史表都在，成功後刪除備份", () => {
     const directory = scratch();
     const filePath = path.join(directory, "state.sqlite");
     const v1 = Database.open(filePath, {
@@ -285,12 +290,12 @@ describe("遷移", () => {
     });
     try {
       expect(upgraded.migration.fromVersion).toBe(1);
-      expect(upgraded.migration.toVersion).toBe(5);
-      expect(upgraded.migration.appliedVersions).toEqual([2, 3, 4, 5]);
+      expect(upgraded.migration.toVersion).toBe(6);
+      expect(upgraded.migration.appliedVersions).toEqual([2, 3, 4, 5, 6]);
       expect(backupSeen).not.toBeNull();
       expect(existsSync(backupSeen as unknown as string)).toBe(false);
 
-      for (const table of [...M1_TABLES, ...M2_TABLES, ...M3_TABLES]) {
+      for (const table of [...M1_TABLES, ...M2_TABLES, ...M3_TABLES, ...M6_TABLES]) {
         expect(upgraded.db.tableExists(table), table).toBe(true);
       }
       const columns = upgraded.db
@@ -320,7 +325,7 @@ describe("遷移", () => {
     }
   });
 
-  it("v2 升 v5：五張排程新表、蒸餾四表與 context_entries 的發牌欄位都在，舊資料保留", () => {
+  it("v2 升 v6：五張排程新表、蒸餾四表、發牌欄位與版本歷史表都在，舊資料保留", () => {
     const directory = scratch();
     const filePath = path.join(directory, "state.sqlite");
     const v2 = Database.open(filePath, {
@@ -354,8 +359,8 @@ describe("遷移", () => {
     });
     try {
       expect(upgraded.migration.fromVersion).toBe(2);
-      expect(upgraded.migration.toVersion).toBe(5);
-      expect(upgraded.migration.appliedVersions).toEqual([3, 4, 5]);
+      expect(upgraded.migration.toVersion).toBe(6);
+      expect(upgraded.migration.appliedVersions).toEqual([3, 4, 5, 6]);
       expect(backupSeen).not.toBeNull();
 
       for (const table of M2_TABLES) {
@@ -426,7 +431,7 @@ describe("遷移", () => {
     }
   });
 
-  it("v3 升 v5：蒸餾四表與發牌欄位一次到位，既有資料與舊 migration checksum 不變", () => {
+  it("v3 升 v6：蒸餾四表、發牌欄位與版本歷史表一次到位，既有資料與舊 migration checksum 不變", () => {
     const directory = scratch();
     const filePath = path.join(directory, "state.sqlite");
     const v3 = Database.open(filePath, {
@@ -453,9 +458,9 @@ describe("遷移", () => {
     });
     try {
       expect(upgraded.migration.fromVersion).toBe(3);
-      expect(upgraded.migration.toVersion).toBe(5);
-      expect(upgraded.migration.appliedVersions).toEqual([4, 5]);
-      for (const table of M3_TABLES) {
+      expect(upgraded.migration.toVersion).toBe(6);
+      expect(upgraded.migration.appliedVersions).toEqual([4, 5, 6]);
+      for (const table of [...M3_TABLES, ...M6_TABLES]) {
         expect(upgraded.db.tableExists(table), table).toBe(true);
       }
       const entryColumns = upgraded.db
@@ -470,14 +475,15 @@ describe("遷移", () => {
           "SELECT title FROM conversations WHERE conversation_id = 'keep'",
         ),
       ).toEqual({ title: "留住我" });
-      // 前四條 migration 的 checksum 沒變，只是追加第五條。
+      // 前五條 migration 的 checksum 沒變，只是追加第六條。
       const rows = upgraded.db.all<{ version: number; checksum: string }>(
         "SELECT version, checksum FROM schema_migrations ORDER BY version",
       );
-      expect(rows).toHaveLength(5);
+      expect(rows).toHaveLength(6);
       expect(rows[2]?.checksum).toBe(sha256(M2_MIGRATIONS[2]?.sql ?? ""));
       expect(rows[3]?.checksum).toBe(sha256(M3_MIGRATIONS[3]?.sql ?? ""));
       expect(rows[4]?.checksum).toBe(sha256(M4_MIGRATIONS[4]?.sql ?? ""));
+      expect(rows[5]?.checksum).toBe(sha256(M5_MIGRATIONS[5]?.sql ?? ""));
 
       // 四張表的基本約束：run 一天一次、item 的 phase/status CHECK、核心組一天一次。
       upgraded.db.run(
@@ -517,7 +523,7 @@ describe("遷移", () => {
     }
   });
 
-  it("v4 升 v5：context_entries 補上發牌兩欄，舊列保留且新欄是 NULL", () => {
+  it("v4 升 v6：context_entries 補上發牌兩欄與版本歷史表，舊列保留且新欄是 NULL", () => {
     const directory = scratch();
     const filePath = path.join(directory, "state.sqlite");
     const v4 = Database.open(filePath, {
@@ -548,8 +554,8 @@ describe("遷移", () => {
     });
     try {
       expect(upgraded.migration.fromVersion).toBe(4);
-      expect(upgraded.migration.toVersion).toBe(5);
-      expect(upgraded.migration.appliedVersions).toEqual([5]);
+      expect(upgraded.migration.toVersion).toBe(6);
+      expect(upgraded.migration.appliedVersions).toEqual([5, 6]);
       const columns = upgraded.db
         .all<{ name: string }>("PRAGMA table_info(context_entries)")
         .map((column) => column.name);
@@ -566,13 +572,17 @@ describe("遷移", () => {
           "SELECT title, deal_probability, deal_source FROM context_entries WHERE entry_id = 'old-entry'",
         ),
       ).toEqual({ title: "舊開局卡", deal_probability: null, deal_source: null });
-      // 前四條 checksum 不變，只追加第五條。
+      // 前五條 checksum 不變，追加第五與第六條。
       const rows = upgraded.db.all<{ version: number; checksum: string }>(
         "SELECT version, checksum FROM schema_migrations ORDER BY version",
       );
-      expect(rows).toHaveLength(5);
+      expect(rows).toHaveLength(6);
       expect(rows[3]?.checksum).toBe(sha256(M3_MIGRATIONS[3]?.sql ?? ""));
       expect(rows[4]?.checksum).toBe(sha256(M4_MIGRATIONS[4]?.sql ?? ""));
+      expect(rows[5]?.checksum).toBe(sha256(M5_MIGRATIONS[5]?.sql ?? ""));
+      for (const table of M6_TABLES) {
+        expect(upgraded.db.tableExists(table), table).toBe(true);
+      }
 
       // 新欄位可以寫入，來源只接受三種值。
       upgraded.db.run(
