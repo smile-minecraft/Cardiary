@@ -107,6 +107,14 @@ export type CardPatchFormat = "unified" | "replace";
  */
 export type PendingPatchStatus = "pending" | "accepted" | "rejected";
 /**
+ * 投影所在區域。
+ */
+export type BoardItemOrigin = "canvas" | "inbox";
+/**
+ * 投影的建立者。
+ */
+export type BoardProjectedBy = "user" | "agent";
+/**
  * 任意 JSON 值。只用於工具輸出、模組資料與錯誤細節，協定欄位不使用。
  */
 export type JSONValue =
@@ -1252,6 +1260,10 @@ export interface BoardDocument {
    */
   items: BoardItem[];
   /**
+   * 收件區的投影。
+   */
+  inbox: BoardItem[];
+  /**
    * 只屬於這份白板的顯式連線。
    */
   edges: BoardEdge[];
@@ -1275,6 +1287,8 @@ export interface BoardItem {
    * 任一個投影釘選時，該卡片的新鮮度固定 100。
    */
   pinned: boolean;
+  origin: BoardItemOrigin;
+  projectedBy?: BoardProjectedBy;
   /**
    * 所屬分組 id；省略代表在畫布上。
    */

@@ -28,7 +28,7 @@ export function assertValidBoard(input: ValidateBoardInput): void {
 
   const itemIds = new Set<string>();
   const cardIds = new Set<string>();
-  for (const item of board.items) {
+  for (const item of [...board.items, ...board.inbox]) {
     assertId(item.id, "投影 id");
     assertId(item.cardId, "卡片 id");
     if (itemIds.has(item.id)) {
@@ -64,6 +64,7 @@ export function assertValidBoard(input: ValidateBoardInput): void {
   }
   assertNoGroupCycle(board);
 
+  const canvasItemIds = new Set(board.items.map((item) => item.id));
   const edgeIds = new Set<string>();
   for (const edge of board.edges) {
     assertId(edge.id, "連線 id");
@@ -71,10 +72,10 @@ export function assertValidBoard(input: ValidateBoardInput): void {
       throw new BoardDomainError("invalid_id", `連線 id 重複：${edge.id}`);
     }
     edgeIds.add(edge.id);
-    if (!itemIds.has(edge.from)) {
+    if (!canvasItemIds.has(edge.from)) {
       throw new BoardDomainError("unknown_item", `連線起點不是白板上的投影：${edge.from}`);
     }
-    if (!itemIds.has(edge.to)) {
+    if (!canvasItemIds.has(edge.to)) {
       throw new BoardDomainError("unknown_item", `連線終點不是白板上的投影：${edge.to}`);
     }
   }

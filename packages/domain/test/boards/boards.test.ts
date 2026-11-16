@@ -124,6 +124,72 @@ describe("投影不是複本", () => {
   });
 });
 
+describe("收件區", () => {
+  it("代理投影留在收件區，同一張卡不能在畫布重複投影", () => {
+    const cardId = newCardId();
+    const board = projectCard({
+      board: emptyBoard(),
+      itemId: newCardId(),
+      cardId,
+      position: { x: 0, y: 0 },
+      origin: "inbox",
+      projectedBy: "agent",
+      now: T1,
+    });
+    expect(board.items).toEqual([]);
+    expect(board.inbox[0]).toMatchObject({ cardId, origin: "inbox", projectedBy: "agent" });
+    rejectWith("duplicate_projection", () =>
+      projectCard({
+        board,
+        itemId: newCardId(),
+        cardId,
+        position: { x: 1, y: 1 },
+        now: T1,
+      }),
+    );
+  });
+
+  it("收件區的投影也能取消，版本同時前進", () => {
+    const itemId = newCardId();
+    const board = projectCard({
+      board: emptyBoard(),
+      itemId,
+      cardId: newCardId(),
+      position: { x: 0, y: 0 },
+      origin: "inbox",
+      projectedBy: "agent",
+      now: T1,
+    });
+    const next = unprojectCard({ board, itemId, now: T90 });
+    expect(next.inbox).toEqual([]);
+    expect(next.items).toEqual([]);
+    expect(next.updatedAt).toBe(T90);
+  });
+
+  it("取消不存在的投影會拒絕", () => {
+    rejectWith("unknown_item", () =>
+      unprojectCard({ board: emptyBoard(), itemId: newCardId(), now: T1 }),
+    );
+  });
+
+  it("不能用收件區投影作為畫布連線的端點", () => {
+    const itemId = newCardId();
+    const board = projectCard({
+      board: emptyBoard(),
+      itemId,
+      cardId: newCardId(),
+      position: { x: 0, y: 0 },
+      origin: "inbox",
+      now: T1,
+    });
+    rejectWith("unknown_item", () =>
+      assertValidBoard({
+        board: { ...board, edges: [{ id: newCardId(), from: itemId, to: itemId }] },
+      }),
+    );
+  });
+});
+
 describe("驗證", () => {
   it("拒絕小數座標和小數尺寸", () => {
     for (const [position, size] of [

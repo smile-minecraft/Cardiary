@@ -56,6 +56,33 @@ describe("BoardFileStore", () => {
     expect(temp.folder).toBeTruthy();
   });
 
+  it("舊白板預設空收件區與畫布來源", () => {
+    const { store } = setup();
+    const board = sampleBoard();
+    const oldJson = JSON.stringify(board, (key, value: unknown) =>
+      key === "inbox" || key === "origin" ? undefined : value,
+    );
+    writeFileSync(store.absolutePath(board.id), oldJson);
+
+    const loaded = store.read(board.id)?.board;
+    expect(loaded?.inbox).toEqual([]);
+    expect(loaded?.items[0]?.origin).toBe("canvas");
+  });
+
+  it("代理投影保留在收件區並記錄來源", () => {
+    const { store } = setup();
+    const board = sampleBoard();
+    const inboxItem = {
+      ...board.items[0]!,
+      origin: "inbox" as const,
+      projectedBy: "agent" as const,
+    };
+    const updated = { ...board, items: [], inbox: [inboxItem] };
+    store.write(updated);
+
+    expect(store.read(board.id)?.board).toEqual(updated);
+  });
+
   it("不存在的白板回 undefined，刪除後也回 undefined", () => {
     const { store } = setup();
     const board = sampleBoard();

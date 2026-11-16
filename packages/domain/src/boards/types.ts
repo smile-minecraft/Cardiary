@@ -28,6 +28,8 @@ export interface BoardItem {
   readonly size: BoardSize;
   /** 任一個投影被釘選，該卡片就算釘選（新鮮度固定 100）。 */
   readonly pinned: boolean;
+  readonly origin: "canvas" | "inbox";
+  readonly projectedBy?: "user" | "agent" | undefined;
   readonly groupId?: string | undefined;
 }
 
@@ -56,6 +58,7 @@ export interface BoardDocument {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly items: readonly BoardItem[];
+  readonly inbox: readonly BoardItem[];
   readonly edges: readonly BoardEdge[];
   readonly groups: readonly BoardGroup[];
 }
