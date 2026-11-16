@@ -14,6 +14,9 @@ import {
   M1_CONVERSATION_DELETION_COLUMNS,
   M1_MIGRATIONS,
   M1_TABLES,
+  M2_CONVERSATION_COLUMNS,
+  M2_MIGRATIONS,
+  M2_TABLES,
   RESERVED_M1_TABLES,
   STATE_APPLICATION_ID,
   StorageError,
@@ -56,22 +59,30 @@ describe("資料庫 header 與表結構", () => {
     expect(Number(storage.state.pragma("application_id"))).toBe(STATE_APPLICATION_ID);
     expect(Number(storage.state.pragma("page_size"))).toBe(4096);
     expect(Number(storage.state.pragma("auto_vacuum"))).toBe(2);
-    expect(Number(storage.state.pragma("user_version"))).toBe(2);
+    expect(Number(storage.state.pragma("user_version"))).toBe(3);
     expect(String(storage.state.pragma("journal_mode"))).toBe("wal");
     expect(Number(storage.state.pragma("secure_delete"))).toBe(1);
     expect(Number(storage.state.pragma("foreign_keys"))).toBe(1);
     expect(M0_TABLES).toHaveLength(12);
-    for (const table of [...M0_TABLES, ...RESERVED_M1_TABLES, ...M1_TABLES]) {
+    for (const table of [...M0_TABLES, ...RESERVED_M1_TABLES, ...M1_TABLES, ...M2_TABLES]) {
       expect(storage.state.tableExists(table), table).toBe(true);
+    }
+    const conversationColumns = storage.state
+      .all<{ name: string }>("PRAGMA table_info(conversations)")
+      .map((column) => column.name);
+    for (const column of M2_CONVERSATION_COLUMNS) {
+      expect(conversationColumns, column).toContain(column);
     }
     const migrations = storage.state.all<{ version: number; checksum: string }>(
       "SELECT version, checksum FROM schema_migrations ORDER BY version",
     );
-    expect(migrations).toHaveLength(2);
+    expect(migrations).toHaveLength(3);
     expect(migrations[0]?.version).toBe(1);
     expect(migrations[0]?.checksum).toBe(sha256(M0_MIGRATIONS[0]?.sql ?? ""));
     expect(migrations[1]?.version).toBe(2);
     expect(migrations[1]?.checksum).toBe(sha256(M1_MIGRATIONS[1]?.sql ?? ""));
+    expect(migrations[2]?.version).toBe(3);
+    expect(migrations[2]?.checksum).toBe(sha256(M2_MIGRATIONS[2]?.sql ?? ""));
   });
 
   it("引擎與快取資料庫的 header 正確，三條連線都開 secure_delete", () => {
@@ -112,7 +123,7 @@ describe("資料庫 header 與表結構", () => {
     const second = openTestStorage(tempRoot);
     cleanups.push(() => second.close());
     expect(second.state.countRows("schema_migrations")).toBe(count);
-    expect(Number(second.state.pragma("user_version"))).toBe(2);
+    expect(Number(second.state.pragma("user_version"))).toBe(3);
   });
 
   it("資料庫檔是符號連結時拒絕開啟，不碰外部檔案", () => {
@@ -156,7 +167,7 @@ describe("遷移", () => {
       appVersion: "test",
       backupDirectory: directory,
     });
-    expect(first.migration.appliedVersions).toEqual([1, 2]);
+    expect(first.migration.appliedVersions).toEqual([1, 2, 3]);
     first.db.close();
 
     const second = openStateDatabase({
@@ -254,12 +265,12 @@ describe("遷移", () => {
     });
     try {
       expect(upgraded.migration.fromVersion).toBe(1);
-      expect(upgraded.migration.toVersion).toBe(2);
-      expect(upgraded.migration.appliedVersions).toEqual([2]);
+      expect(upgraded.migration.toVersion).toBe(3);
+      expect(upgraded.migration.appliedVersions).toEqual([2, 3]);
       expect(backupSeen).not.toBeNull();
       expect(existsSync(backupSeen as unknown as string)).toBe(false);
 
-      for (const table of M1_TABLES) {
+      for (const table of [...M1_TABLES, ...M2_TABLES]) {
         expect(upgraded.db.tableExists(table), table).toBe(true);
       }
       const columns = upgraded.db
@@ -278,6 +289,109 @@ describe("遷移", () => {
         "INSERT INTO conversations (conversation_id, created_at, updated_at, last_activity_at) VALUES ('c1', 'now', 'now', 'now')",
       );
       expect(upgraded.db.countRows("conversations")).toBe(1);
+    } finally {
+      upgraded.db.close();
+    }
+  });
+
+  it("v2 升 v3：五張新表與 conversations.origin 都在，舊資料保留", () => {
+    const directory = scratch();
+    const filePath = path.join(directory, "state.sqlite");
+    const v2 = Database.open(filePath, {
+      create: { applicationId: STATE_APPLICATION_ID, pageSize: 4096, autoVacuum: "incremental" },
+      expectedApplicationId: STATE_APPLICATION_ID,
+    });
+    try {
+      migrate(v2, { migrations: M1_MIGRATIONS, appVersion: "test" });
+      expect(Number(v2.pragma("user_version"))).toBe(2);
+      for (const table of M2_TABLES) {
+        expect(v2.tableExists(table), table).toBe(false);
+      }
+      v2.run(
+        "INSERT INTO conversations (conversation_id, title, created_at, updated_at, last_activity_at) VALUES ('keep', '保留我', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')",
+      );
+      v2.run(
+        "INSERT INTO conversation_deletions (root_id, conversation_ids, client_request_ids, phase, requested_at, updated_at) VALUES ('del1', '[]', '[]', 'rows', 'now', 'now')",
+      );
+    } finally {
+      v2.close();
+    }
+
+    let backupSeen: string | null = null;
+    const upgraded = openStateDatabase({
+      filePath,
+      appVersion: "test",
+      backupDirectory: directory,
+      onBackup: (backupPath) => {
+        backupSeen = backupPath;
+      },
+    });
+    try {
+      expect(upgraded.migration.fromVersion).toBe(2);
+      expect(upgraded.migration.toVersion).toBe(3);
+      expect(upgraded.migration.appliedVersions).toEqual([3]);
+      expect(backupSeen).not.toBeNull();
+
+      for (const table of M2_TABLES) {
+        expect(upgraded.db.tableExists(table), table).toBe(true);
+      }
+      // 舊對話保留，origin 的預設值是 'user'。
+      expect(
+        upgraded.db.get<{ origin: string; title: string }>(
+          "SELECT origin, title FROM conversations WHERE conversation_id = 'keep'",
+        ),
+      ).toEqual({ origin: "user", title: "保留我" });
+      // origin 只接受 'user' 與 'schedule'。
+      expect(() =>
+        upgraded.db.run(
+          "INSERT INTO conversations (conversation_id, created_at, updated_at, last_activity_at, origin) VALUES ('bad', 'now', 'now', 'now', 'machine')",
+        ),
+      ).toThrowError(/CHECK/);
+      upgraded.db.run(
+        "INSERT INTO conversations (conversation_id, created_at, updated_at, last_activity_at, origin) VALUES ('sched', 'now', 'now', 'now', 'schedule')",
+      );
+      expect(
+        upgraded.db.get<{ origin: string }>(
+          "SELECT origin FROM conversations WHERE conversation_id = 'sched'",
+        ),
+      ).toEqual({ origin: "schedule" });
+
+      upgraded.db.run(
+        `INSERT INTO schedules (schedule_id, name, kind, spec_json, task_json, created_by, next_run_at, created_at, updated_at)
+         VALUES ('sch_test', '每日蒸餾', 'daily', '{"time":"04:00"}', '{"type":"distillation"}', 'user', '2026-11-17T04:00:00.000Z', 'now', 'now')`,
+      );
+      upgraded.db.run(
+        `INSERT INTO schedule_runs (run_id, schedule_id, started_at, status)
+         VALUES ('run_test', 'sch_test', 'now', 'notify')`,
+      );
+      upgraded.db.run(
+        `INSERT INTO notifications (notification_id, kind, title, body_md, created_at)
+         VALUES ('ntf_test', 'heartbeat', '標題', '內文', 'now')`,
+      );
+      expect(upgraded.db.countRows("schedules")).toBe(1);
+      expect(upgraded.db.countRows("schedule_runs")).toBe(1);
+      expect(upgraded.db.countRows("notifications")).toBe(1);
+      // 刪排程時 run 記錄跟著刪掉。
+      upgraded.db.run("DELETE FROM schedules WHERE schedule_id = 'sch_test'");
+      expect(upgraded.db.countRows("schedule_runs")).toBe(0);
+
+      upgraded.db.run(
+        `INSERT INTO pairing_sessions (id, device_name, device_kind, short_code_hash, status, connection_id, created_at, expires_at)
+         VALUES ('pair_test', 'iPhone', 'ios', 'hash', 'requested', 'conn_1', 'now', 'later')`,
+      );
+      upgraded.db.run(
+        `INSERT INTO device_tokens (id, token_hash, prefix, fingerprint, device_name, created_at)
+         VALUES ('dev_test', 'hash', 'cdt_12345678', 'AAAA-BBBB-CCCC-DDDD', 'iPhone', 'now')`,
+      );
+      expect(upgraded.db.countRows("pairing_sessions")).toBe(1);
+      expect(upgraded.db.countRows("device_tokens")).toBe(1);
+      // token_hash 唯一。
+      expect(() =>
+        upgraded.db.run(
+          `INSERT INTO device_tokens (id, token_hash, prefix, fingerprint, device_name, created_at)
+           VALUES ('dev_test2', 'hash', 'cdt_87654321', 'EEEE-FFFF-0000-1111', 'iPad', 'now')`,
+        ),
+      ).toThrowError(/UNIQUE/);
     } finally {
       upgraded.db.close();
     }

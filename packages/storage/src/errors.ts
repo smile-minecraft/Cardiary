@@ -20,7 +20,8 @@ export type StorageErrorCode =
   | "invalid-log-field"
   | "invalid-state-transition"
   | "invalid-cursor"
-  | "not-found";
+  | "not-found"
+  | "invalid-input";
 
 /** 儲存層統一的錯誤型別；`code` 是穩定的機器可讀值。 */
 export class StorageError extends Error {
