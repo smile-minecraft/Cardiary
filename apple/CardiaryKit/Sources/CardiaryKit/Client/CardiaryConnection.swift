@@ -1459,6 +1459,12 @@ public actor CardiaryConnection {
             resume(response.replyTo, with: frame)
         case .systemModulesSetEnabledResponse(let response):
             resume(response.replyTo, with: frame)
+        case .storageUsageResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .storageCleanupPreviewResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .storageCleanupApplyResponse(let response):
+            resume(response.replyTo, with: frame)
         case .moduleResponse(let response):
             resume(response.replyTo, with: frame)
         case .mcpServersListResponse(let response):
