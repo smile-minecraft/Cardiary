@@ -128,6 +128,24 @@ describe("永遠禁止", () => {
       "deny.human-settings",
     ],
     [
+      "寫 MCP 伺服器設定",
+      {
+        kind: "fs.write",
+        path: join(fixture.folder, "state", "mcp-servers.json"),
+        mode: "replace",
+      },
+      "deny.human-settings",
+    ],
+    [
+      "刪 MCP 伺服器設定",
+      {
+        kind: "fs.delete",
+        path: join(fixture.folder, "state", "mcp-servers.json"),
+        recursive: false,
+      },
+      "deny.human-settings",
+    ],
+    [
       "寫 App bundle",
       {
         kind: "fs.write",
@@ -305,6 +323,14 @@ describe("大小寫不敏感卷的保護目標", () => {
       }),
       { kind: "deny", rule: "deny.human-settings" },
     );
+    expectVerdict(
+      evaluate({
+        kind: "fs.write",
+        path: join(fixture.folder, "State", "MCP-Servers.Json"),
+        mode: "replace",
+      }),
+      { kind: "deny", rule: "deny.human-settings" },
+    );
   });
 
   it.runIf(volumeIsCaseInsensitive)("大小寫變體的系統目錄仍然是 deny.system-write", () => {
@@ -372,6 +398,24 @@ describe("大小寫不敏感卷的保護目標", () => {
     const exact = join(fixture.folder, "state", "cardiary.sqlite");
     expect(isHumanSettingsPath(exact, fixture.folder, "case-sensitive")).toBe(true);
     expect(isHumanSettingsPath(exact, fixture.folder, "case-insensitive")).toBe(true);
+    // MCP 伺服器設定也是保護目標：兩種卷、大小寫變體都命中。
+    const mcp = join(fixture.folder, "state", "mcp-servers.json");
+    expect(isHumanSettingsPath(mcp, fixture.folder, "case-sensitive")).toBe(true);
+    expect(isHumanSettingsPath(mcp, fixture.folder, "case-insensitive")).toBe(true);
+    expect(
+      isHumanSettingsPath(
+        join(fixture.folder, "STATE", "MCP-SERVERS.JSON"),
+        fixture.folder,
+        "case-insensitive",
+      ),
+    ).toBe(true);
+    expect(
+      isHumanSettingsPath(
+        join(fixture.folder, "STATE", "MCP-SERVERS.JSON"),
+        fixture.folder,
+        "case-sensitive",
+      ),
+    ).toBe(false);
   });
 });
 
