@@ -545,6 +545,40 @@
         }
       }
     },
+    "conversationResend": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resend"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重送"
+          }
+        }
+      }
+    },
+    "conversationResending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resending…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重送中"
+          }
+        }
+      }
+    },
     "conversationSelectPrompt": {
       "extractionState": "manual",
       "localizations": {

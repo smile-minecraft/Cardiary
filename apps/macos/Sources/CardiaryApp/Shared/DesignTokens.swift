@@ -3,8 +3,8 @@ import SwiftUI
 /// 介面的尺寸與間距。數值只放這裡，畫面不寫魔術數字。顏色與字型在 `Shared/Theme/`。
 public enum DesignTokens {
     // 視窗
-    public static let windowMinWidth: CGFloat = 900
-    public static let windowMinHeight: CGFloat = 560
+    public static let windowMinWidth: CGFloat = 720
+    public static let windowMinHeight: CGFloat = 520
     public static let windowDefaultWidth: CGFloat = 1180
     public static let windowDefaultHeight: CGFloat = 760
 

@@ -88,6 +88,7 @@ public final class ConversationModel: ObservableObject {
     @Published public var composerText: String = ""
     @Published public var delivery: DeliveryMode = .queue
     @Published public private(set) var isSending = false
+    @Published public private(set) var isResending = false
 
     public let pageSize: Int
 
@@ -188,6 +189,53 @@ public final class ConversationModel: ObservableObject {
         isSending = true
         defer { isSending = false }
         let mode = delivery
+        if await deliver(text: text, mode: mode, service: active, sessionId: sessionId) {
+            composerText = ""
+        }
+    }
+
+    /// 重送最後一則使用者訊息：原文、目前選的送達方式、新的 `clientMessageId`。
+    /// 對話忙碌或正在送出時不做任何事。
+    public func resendLastUserMessage(service: (any CardiaryService)? = nil) async {
+        if let service { self.service = service }
+        guard let active = self.service, let sessionId, canResendLastUserMessage else { return }
+        guard let text = lastUserMessageText else { return }
+
+        isResending = true
+        defer { isResending = false }
+        _ = await deliver(text: text, mode: delivery, service: active, sessionId: sessionId)
+    }
+
+    /// 最後一則使用者訊息的內容與列識別碼；重送使用者訊息的按鈕只掛在它旁邊。
+    public var lastUserMessageText: String? {
+        lastUserMessage.flatMap { item in
+            if case .userText(let text) = item.kind {
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            return nil
+        }
+    }
+
+    public var lastUserMessageId: String? {
+        lastUserMessage?.id
+    }
+
+    public var canResendLastUserMessage: Bool {
+        !isBusy && !isSending && !isResending && lastUserMessageText != nil && service != nil && sessionId != nil
+    }
+
+    private var lastUserMessage: ConversationItem? {
+        items.last { if case .userText = $0.kind { return true } else { return false } }
+    }
+
+    /// 送出一則訊息並更新畫面；成功回傳 true，失敗時保留錯誤訊息並回傳 false。
+    private func deliver(
+        text: String,
+        mode: DeliveryMode,
+        service active: any CardiaryService,
+        sessionId: String
+    ) async -> Bool {
         do {
             let response = try await active.sendMessage(
                 sessionId: sessionId,
@@ -195,7 +243,6 @@ public final class ConversationModel: ObservableObject {
                 delivery: mode,
                 clientMessageId: ClientRequestID.next("msg")
             )
-            composerText = ""
             noticeMessage = nil
             upsertUserMessage(id: response.userMessageId, text: text)
             await onMessageSent?()
@@ -207,8 +254,10 @@ public final class ConversationModel: ObservableObject {
             case .started:
                 break
             }
+            return true
         } catch {
             errorMessage = AppL10n.format(.conversationError, value: errorText(error))
+            return false
         }
     }
 
