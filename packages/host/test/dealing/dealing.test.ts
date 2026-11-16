@@ -8,6 +8,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { join } from "node:path";
+
 import type {
   CardPage,
   CardSearchHit,
@@ -15,6 +17,7 @@ import type {
   SystemOneJudgeRequest,
 } from "@cardiary/domain";
 import type { EngineLogger } from "@cardiary/engine-adapter";
+import { openStateDatabase } from "@cardiary/storage";
 import {
   MemoryApprovalLedger,
   MemoryDeletionIntents,
@@ -197,6 +200,44 @@ describe("開局發牌服務", () => {
     expect(opening[0]?.dealSource).toBe("system-one");
     // 送給 System One 的只有標題與摘要，沒有內文。
     expect(JSON.stringify(seen[0]?.state)).not.toContain("與請求直接相關");
+  });
+
+  it("重開狀態庫後仍讀得到發牌機率與來源，不靠行程內狀態", async () => {
+    fixture.cards.add({ kind: "memory", title: "相關卡", body: "與請求直接相關。" });
+    const { contextService, dealing } = buildDealing({
+      retrievalService: retrieval([hit("card_0001")]),
+      judge: judgeInvoker({ card_0001: 0.9 }),
+    });
+    const session = "session-deal-restart";
+    await contextService.attach(session);
+    await dealing.dealIfNeeded({
+      sessionId: session,
+      requestText: "第一部分：訊息",
+      turnIndex: 0,
+    });
+    const before = (await contextService.view(session)).entries.filter(
+      (entry) => entry.layer === "opening-memory",
+    );
+    expect(before[0]?.dealProbability).toBe(0.9);
+    expect(before[0]?.dealSource).toBe("system-one");
+
+    // 模擬行程重啟：關掉原本的連線，重新開一個全新的 ContextStore。
+    fixture.db.close();
+    const reopened = openStateDatabase({
+      filePath: join(fixture.root, "state", "cardiary.sqlite"),
+      appVersion: "0.1.0",
+      backupDirectory: join(fixture.root, "tmp"),
+    });
+    try {
+      const after = new ContextStore(reopened.db)
+        .entries(session)
+        .filter((entry) => entry.layer === "opening-memory");
+      expect(after).toHaveLength(1);
+      expect(after[0]?.dealProbability).toBe(0.9);
+      expect(after[0]?.dealSource).toBe("system-one");
+    } finally {
+      reopened.db.close();
+    }
   });
 
   it("第二則訊息不再發牌，第 4 層位元組不變；沒有 System One 時依檢索名次退路", async () => {
