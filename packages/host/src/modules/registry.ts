@@ -718,8 +718,25 @@ export class HostModuleRegistry implements ModuleHost {
         return handle("http", () => inner.dispose());
       },
     };
+    const keys = new Set(
+      this.#require(identity.id).module.manifest.settings.map((item) => item.key),
+    );
+    const source = this.#options.services.settings;
     const services: ModuleServices = {
       ...this.#options.services,
+      settings: {
+        get: (key) => (keys.has(key) ? source.get(key) : undefined),
+        getLevel: (key) => (keys.has(key) ? source.getLevel(key) : "human-only"),
+        onChange: (listener) => {
+          const unsubscribe = source.onChange((change) => {
+            if (keys.has(change.key)) listener(change);
+          });
+          const registration = handle("settings", unsubscribe);
+          return () => {
+            void registration.dispose();
+          };
+        },
+      },
       protocol,
       host: scoped,
     };

@@ -19,6 +19,14 @@ export interface SettingDefinition {
 
 export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
   {
+    key: "retrieval.allowModelDownload",
+    level: "human-only",
+    title: "允許下載本機嵌入模型",
+    description:
+      "允許下載本機嵌入模型（約 600 MB，存在資料夾的 cache/）。未同意前不啟用向量檢索：檢索狀態為「向量檢索未啟用：尚未同意下載模型」。",
+    defaultValue: false,
+  },
+  {
     key: "models.summary.maxOutputTokens",
     level: "free",
     title: "摘要輸出上限",

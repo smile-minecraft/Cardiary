@@ -107,7 +107,7 @@ echo "內嵌 Node 的 entitlements（allow-jit 與 disable-library-validation）
 
 if [[ -z "${CARDIARY_SERVICE_SCRIPT:-}" ]]; then
   echo "驗證打包後的原生模組…"
-  (cd "$APP_BUNDLE/Contents/Resources/Service" && "$APP_BUNDLE/Contents/Helpers/Node/node" -e "require('sharp')")
+  (cd "$APP_BUNDLE/Contents/Resources/Service" && "$APP_BUNDLE/Contents/Helpers/Node/node" -e "require('sharp'); require('onnxruntime-node')")
 fi
 
 cat <<SUMMARY

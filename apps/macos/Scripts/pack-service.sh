@@ -30,6 +30,65 @@ if [[ ! -f "$TARGET/dist/main.js" ]]; then
   exit 1
 fi
 
+# pnpm 的 deploy 會保留 optional 依賴，但也可能少複製套件內部的連結。
+# 若 sharp 的 libvips 連結沒有出現在 @img 旁邊，載入 .node 時 dlopen 會失敗。
+# 在這裡把 workspace 裡 .pnpm 內的相對連結對應過去：目標套件存在才重建。
+node - "$ROOT" "$TARGET" <<'NODE'
+const {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readlinkSync,
+  realpathSync,
+  symlinkSync,
+  unlinkSync,
+} = require("node:fs");
+const { dirname, join, relative } = require("node:path");
+
+const root = realpathSync(process.argv[2]);
+const target = realpathSync(process.argv[3]);
+const sourceStore = realpathSync(join(root, "node_modules", ".pnpm"));
+const targetStore = join(target, "node_modules", ".pnpm");
+
+const links = [];
+const walk = (directory) => {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const full = join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      links.push(full);
+      continue;
+    }
+    if (entry.isDirectory()) walk(full);
+  }
+};
+walk(sourceStore);
+
+for (const link of links) {
+  const sourceResolved = realpathSync(link);
+  if (!sourceResolved.startsWith(sourceStore)) continue;
+  const resolvedRelative = relative(sourceStore, sourceResolved);
+  if (resolvedRelative.length === 0 || resolvedRelative.startsWith("..")) continue;
+  const targetResolved = join(targetStore, resolvedRelative);
+  if (!existsSync(targetResolved)) continue;
+  const targetRelative = join(targetStore, relative(sourceStore, link));
+  mkdirSync(dirname(targetRelative), { recursive: true });
+  if (lstatExists(targetRelative)) {
+    unlinkSync(targetRelative);
+  }
+  symlinkSync(relative(dirname(targetRelative), targetResolved), targetRelative);
+}
+
+function lstatExists(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+NODE
+
 # pnpm 會在 node_modules/.pnpm/node_modules 放指向工作區的連結；複製到 App
 # bundle 之後那些連結會斷掉，codesign 也會因此失敗。移除所有指向套件外或
 # 不存在的符號連結，再讓啟動測試證明服務仍可執行。

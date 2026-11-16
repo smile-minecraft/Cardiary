@@ -1,4 +1,5 @@
 import { isUlid, normalizeLinkText } from "@cardiary/domain";
+export * from "./vec-store.js";
 
 import type { Database, Queryable } from "../db.js";
 import { StorageError } from "../errors.js";
@@ -79,20 +80,23 @@ CREATE TABLE IF NOT EXISTS card_index_meta (
   value TEXT NOT NULL
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS vec_cards (
+  card_id TEXT PRIMARY KEY, model TEXT NOT NULL, revision TEXT NOT NULL, vector BLOB NOT NULL
+) STRICT;
+
 CREATE VIRTUAL TABLE IF NOT EXISTS fts_cards USING fts5 (
   card_id UNINDEXED,
   title,
   summary,
   body,
-  tags,
-  tokenize = 'trigram'
+  tags
 );
 `;
 
 /** 索引是否追上 `cards/` 的旗標；原檔回收要等它為 true。 */
 const READY_KEY = "cards.ready";
-/** FTS5 trigram 的最短查詢長度；更短的改用 LIKE。 */
-const TRIGRAM_MIN_LENGTH = 3;
+/** 全文索引的斷詞版本；舊快取會從原文重建。 */
+const FTS_VERSION = "cjk-bigram-v1";
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
@@ -232,6 +236,38 @@ export class CardIndexStore {
     this.#db = options.db;
     this.#now = options.now ?? (() => new Date());
     this.#db.exec(CARD_INDEX_DDL);
+    this.#upgradeFullText();
+  }
+
+  #upgradeFullText(): void {
+    if (this.#getMeta("fts.tokenizer") === FTS_VERSION) return;
+    const rows = this.#db.all<{
+      card_id: string;
+      title: string;
+      summary: string;
+      body: string;
+      tags: string;
+    }>("SELECT card_id, title, summary, body, tags FROM fts_cards");
+    this.#db.transaction((tx) => {
+      tx.exec(
+        "DROP TABLE fts_cards; CREATE VIRTUAL TABLE fts_cards USING fts5(card_id UNINDEXED, title, summary, body, tags)",
+      );
+      for (const row of rows) {
+        tx.run(
+          "INSERT INTO fts_cards (card_id, title, summary, body, tags) VALUES (?, ?, ?, ?, ?)",
+          row.card_id,
+          indexText(rawText(row.title)),
+          indexText(rawText(row.summary)),
+          indexText(rawText(row.body)),
+          indexText(rawText(row.tags)),
+        );
+      }
+      tx.run(
+        "INSERT INTO card_index_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value=excluded.value",
+        "fts.tokenizer",
+        FTS_VERSION,
+      );
+    });
   }
 
   /** 索引是否已經追上 `cards/`；重建中或還沒掃描時是 false。 */
@@ -303,7 +339,8 @@ export class CardIndexStore {
          DELETE FROM card_links;
          DELETE FROM card_sources;
          DELETE FROM asset_refs;
-         DELETE FROM fts_cards;`,
+         DELETE FROM fts_cards;
+         DELETE FROM vec_cards;`,
       );
       for (const card of cards) {
         this.#writeCard(tx, card);
@@ -378,10 +415,10 @@ export class CardIndexStore {
     }
     const limit = clampLimit(query.limit);
     const excludeSuperseded = query.includeSuperseded !== true;
-    if ([...text].length >= TRIGRAM_MIN_LENGTH) {
+    if ([...text].length >= 2 && /^[\p{L}\p{N}\s]+$/u.test(text)) {
       const rows = this.#db.all<CardRow & { score: number; snippet: string }>(
         `SELECT card_index.*, -bm25(fts_cards) AS score,
-                snippet(fts_cards, 3, '', '', '…', 24) AS snippet
+                snippet(fts_cards, -1, '', '', '…', 24) AS snippet
          FROM fts_cards JOIN card_index ON card_index.card_id = fts_cards.card_id
          WHERE fts_cards MATCH ? AND card_index.broken = 0
            ${excludeSuperseded ? `AND ${SUPERSEDED_EXCLUSION("card_index")}` : ""}
@@ -393,16 +430,18 @@ export class CardIndexStore {
       return rows.map((row) => ({
         card: rowToCard(row),
         score: Number(row.score),
-        snippet: row.snippet,
+        snippet: row.snippet.split(GRAM_SEPARATOR)[0] ?? "",
       }));
     }
     const pattern = `%${escapeLike(text)}%`;
     const rows = this.#db.all<CardRow>(
-      `SELECT * FROM card_index
-       WHERE broken = 0 AND (title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\')
+      `SELECT card_index.* FROM card_index JOIN fts_cards ON fts_cards.card_id = card_index.card_id
+       WHERE broken = 0 AND (fts_cards.title LIKE ? ESCAPE '\\' OR fts_cards.summary LIKE ? ESCAPE '\\' OR fts_cards.body LIKE ? ESCAPE '\\' OR fts_cards.tags LIKE ? ESCAPE '\\')
          ${excludeSuperseded ? `AND ${SUPERSEDED_EXCLUSION("card_index")}` : ""}
-       ORDER BY created_at DESC, card_id DESC
+       ORDER BY created_at DESC, card_index.card_id DESC
        LIMIT ?`,
+      pattern,
+      pattern,
       pattern,
       pattern,
       limit,
@@ -660,10 +699,10 @@ export class CardIndexStore {
     tx.run(
       `INSERT INTO fts_cards (card_id, title, summary, body, tags) VALUES (?, ?, ?, ?, ?)`,
       id,
-      card.title,
-      card.summary ?? "",
-      card.body,
-      card.tags.join(" "),
+      indexText(card.title),
+      indexText(card.summary ?? ""),
+      indexText(card.body),
+      indexText(card.tags.join(" ")),
     );
   }
 
@@ -674,6 +713,7 @@ export class CardIndexStore {
     tx.run("DELETE FROM card_sources WHERE card_id = ?", cardId);
     tx.run("DELETE FROM asset_refs WHERE card_id = ?", cardId);
     tx.run("DELETE FROM fts_cards WHERE card_id = ?", cardId);
+    tx.run("DELETE FROM vec_cards WHERE card_id = ?", cardId);
   }
 
   #resolveTarget(
@@ -759,9 +799,39 @@ function clampLimit(limit: number | undefined): number {
   return Math.min(Math.floor(limit), MAX_LIMIT);
 }
 
-/** 把使用者輸入包成 FTS5 的字串常值；引號自己再跳脫一次。 */
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+/gu;
+
+function grams(text: string): string[] {
+  const chars = [...text];
+  return chars.length < 2
+    ? chars
+    : chars.slice(0, -1).map((char, index) => char + chars[index + 1]);
+}
+
+/** 原文與詞之間的分隔；snippet 只回分隔之前的人看得懂的文字。 */
+const GRAM_SEPARATOR = "\u0001";
+
+function indexText(text: string): string {
+  const tokens = [...text.matchAll(CJK)].flatMap((match) => grams(match[0]));
+  return tokens.length === 0 ? text : `${text}${GRAM_SEPARATOR}${tokens.join(" ")}`;
+}
+
+function rawText(text: string): string {
+  return text.split(GRAM_SEPARATOR)[0] ?? "";
+}
+
+/** 將查詢切成索引採用的詞，全部詞都要命中。 */
 function ftsQuery(text: string): string {
-  return `"${text.replaceAll('"', '""')}"`;
+  const parts =
+    text.match(
+      /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+|[\p{L}\p{N}]+/gu,
+    ) ?? [];
+  const tokens = parts.flatMap((part) =>
+    /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(part)
+      ? grams(part)
+      : [part],
+  );
+  return tokens.map((part) => `"${part.replaceAll('"', '""')}"`).join(" AND ");
 }
 
 function escapeLike(text: string): string {
