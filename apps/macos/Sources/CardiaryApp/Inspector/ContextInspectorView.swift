@@ -109,28 +109,35 @@ struct ContextInspectorView: View {
     private var usage: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: DesignTokens.spacingXS) {
-                Text(CardL10n.format(
-                    .inspectorUsage,
-                    ["used": "\(model.usedTokens)", "budget": "\(model.budgetTokens)"]
-                ))
-                .font(.cardiary(.callout, weight: .semibold, monospacedDigits: true))
-                Text(CardL10n.text(.inspectorEstimated))
-                    .font(.cardiary(.caption2))
-                    .foregroundStyle(Palette.inkTertiary)
+                if model.budgetTokens > 0 {
+                    Text(CardL10n.format(
+                        .inspectorUsage,
+                        ["used": "\(model.usedTokens)", "budget": "\(model.budgetTokens)"]
+                    ))
+                    .font(.cardiary(.callout, weight: .semibold, monospacedDigits: true))
+                    Text(CardL10n.text(.inspectorEstimated))
+                        .font(.cardiary(.caption2))
+                        .foregroundStyle(Palette.inkTertiary)
+                } else {
+                    Text(CardL10n.format(.inspectorUsageNoBudget, value: "\(model.usedTokens)"))
+                        .font(.cardiary(.callout, weight: .semibold, monospacedDigits: true))
+                }
                 Spacer(minLength: 0)
                 if model.isCompacting {
                     SuitLoader(size: 6)
                 }
             }
-            ThemeProgressBar(
-                value: model.budgetTokens > 0
-                    ? min(1, Double(model.usedTokens) / Double(model.budgetTokens))
-                    : 0,
-                tone: .red
-            )
-            Text(CardL10n.count(.inspectorContextWindow, count: model.contextWindow))
-                .font(.cardiary(.caption2))
-                .foregroundStyle(Palette.inkSecondary)
+            if model.budgetTokens > 0 {
+                ThemeProgressBar(
+                    value: min(1, Double(model.usedTokens) / Double(model.budgetTokens)),
+                    tone: .red
+                )
+            }
+            if model.contextWindow > 0 {
+                Text(CardL10n.count(.inspectorContextWindow, count: model.contextWindow))
+                    .font(.cardiary(.caption2))
+                    .foregroundStyle(Palette.inkSecondary)
+            }
         }
         .themeBlock(Palette.canvas, radius: DesignTokens.cornerRadius, padding: 10)
     }

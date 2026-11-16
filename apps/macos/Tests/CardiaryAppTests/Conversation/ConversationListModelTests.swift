@@ -154,4 +154,15 @@ final class ConversationListModelTests: XCTestCase {
 
         XCTAssertEqual(list.sessions.map(\.id), ["a", "b"])
     }
+
+    func testCreateFailureSetsVisibleError() async {
+        let list = ConversationListModel()
+        list.attach(service: FakeCardiaryService(failure: .create))
+
+        let id = await list.create()
+
+        XCTAssertNil(id)
+        XCTAssertNotNil(list.errorMessage)
+        XCTAssertTrue(list.sessions.isEmpty)
+    }
 }

@@ -119,6 +119,34 @@ final class ApprovalModelTests: XCTestCase {
         XCTAssertEqual(chinese.errorMessage, "還沒連上服務，無法送出審批。")
     }
 
+    func testApproveAlwaysTitleUsesTheHostScope() {
+        let tool = ApprovalPresentation(request: Fixtures.approval(toolName: "write_file"))
+        XCTAssertEqual(tool.approveAlwaysTitle(language: .zhHant), "一律允許「write_file」")
+        XCTAssertEqual(tool.approveAlwaysTitle(language: .en), "Always allow “write_file”")
+
+        let settings = ApprovalPresentation(request: ApprovalRequest(
+            approvalId: "approval-settings",
+            sessionId: "s1",
+            turnId: "turn-1",
+            title: "調整權限模式",
+            scope: ApprovalScope(kind: .settingsChange, target: "permissions.mode"),
+            options: [ApprovalOption(id: "always", label: "一律允許", effect: .approveAlways)],
+            requestedAt: "2026-01-01T00:00:05Z"
+        ))
+        XCTAssertEqual(settings.approveAlwaysTitle(language: .zhHant), "一律允許這項設定變更")
+
+        let schedule = ApprovalPresentation(request: ApprovalRequest(
+            approvalId: "approval-schedule",
+            sessionId: "s1",
+            turnId: "turn-1",
+            title: "新增排程",
+            scope: ApprovalScope(kind: .schedule, target: "morning-digest"),
+            options: [ApprovalOption(id: "always", label: "一律允許", effect: .approveAlways)],
+            requestedAt: "2026-01-01T00:00:05Z"
+        ))
+        XCTAssertEqual(schedule.approveAlwaysTitle(language: .zhHant), "一律允許這個排程")
+    }
+
     func testPauseAllCallsServiceAndMarksPaused() async {
         let fake = FakeCardiaryService()
         let model = makeModel()

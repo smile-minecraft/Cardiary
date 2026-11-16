@@ -36,6 +36,7 @@ public enum CardsString: String, CaseIterable, CardLocalizedKey {
     case cardsDropHint
     case cardsEmpty
     case cardsExpired
+    case cardsFreshnessHelp
     case cardsImageFailed
     case cardsImageLoading
     case cardsImportCreated
@@ -62,6 +63,7 @@ public enum CardsString: String, CaseIterable, CardLocalizedKey {
     case cardsNewTitle
     case cardsNoResults
     case cardsOverviewHint
+    case cardsRefresh
     case cardsSaved
     case cardsSearchAction
     case cardsSearchClear
@@ -109,6 +111,7 @@ public enum InspectorString: String, CaseIterable, CardLocalizedKey {
     case inspectorTokens
     case inspectorTreemap
     case inspectorUsage
+    case inspectorUsageNoBudget
     public static let catalog: CardStringCatalog = .inspector
 }
 
@@ -164,6 +167,7 @@ enum CardStringTables {
             "cardsDetailEmpty": "選一張卡片。",
             "cardsDetailFreshness": "新鮮度 {value}",
             "cardsDetailRefresh": "保鮮",
+            "cardsFreshnessHelp": "新鮮度 {value}：越低越舊，歸零後按「保鮮」回到 100。",
             "cardsDetailSave": "儲存",
             "cardsDropHint": "把圖片或音訊拖進來建立卡片",
             "cardsEmpty": "還沒有卡片。",
@@ -190,10 +194,11 @@ enum CardStringTables {
             "cardsNearZero": "即將歸零",
             "cardsNew": "新卡片",
             "cardsNewBody": "內文",
-            "cardsNewTags": "標籤（以逗號分隔）",
+            "cardsNewTags": "標籤（以逗號或頓號分隔）",
             "cardsNewTitle": "標題",
             "cardsNoResults": "沒有符合的卡片。",
             "cardsOverviewHint": "一格一張卡，顏色越淡代表越舊。",
+            "cardsRefresh": "重新整理",
             "cardsSaved": "已儲存卡片。",
             "cardsSearchAction": "搜尋",
             "cardsSearchClear": "清除搜尋",
@@ -222,6 +227,7 @@ enum CardStringTables {
             "cardsDetailEmpty": "Select a card.",
             "cardsDetailFreshness": "Freshness {value}",
             "cardsDetailRefresh": "Refresh",
+            "cardsFreshnessHelp": "Freshness {value}: lower is older; press Refresh to return to 100.",
             "cardsDetailSave": "Save",
             "cardsDropHint": "Drop images or audio to create cards",
             "cardsEmpty": "No cards yet.",
@@ -252,6 +258,7 @@ enum CardStringTables {
             "cardsNewTitle": "Title",
             "cardsNoResults": "No matching cards.",
             "cardsOverviewHint": "One cell per card; lighter means older.",
+            "cardsRefresh": "Refresh",
             "cardsSaved": "Card saved.",
             "cardsSearchAction": "Search",
             "cardsSearchClear": "Clear Search",
@@ -299,6 +306,7 @@ enum CardStringTables {
             "inspectorTokens": "{count} token",
             "inspectorTreemap": "矩形樹狀圖",
             "inspectorUsage": "{used} / {budget} token",
+            "inspectorUsageNoBudget": "已用 {value} token；模型上限還沒取得。",
         ],
         .en: [
             "inspectorAddFailed": "Could not add to context: {value}",
@@ -335,6 +343,7 @@ enum CardStringTables {
             "inspectorTokens": "{count} tokens",
             "inspectorTreemap": "Treemap",
             "inspectorUsage": "{used} / {budget} tokens",
+            "inspectorUsageNoBudget": "Used {value} tokens; the model limit is not available yet.",
         ],
     ]
     static let archive: [AppLanguage: [String: String]] = [

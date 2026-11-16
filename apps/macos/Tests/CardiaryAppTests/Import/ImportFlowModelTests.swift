@@ -238,6 +238,32 @@ final class ImportFlowModelTests: XCTestCase {
         }
     }
 
+    func testWriteCompletionNotifiesOnlyAfterSuccess() async {
+        let service = FakeImportService()
+        service.previewResult = SamplePreviews.preview
+        service.writeResult = SamplePreviews.writeResult
+        let model = ImportFlowModel(service: service)
+        var completions = 0
+        model.onWriteCompleted = { completions += 1 }
+
+        await model.chooseSource(kind: .alma, path: "/tmp/alma.db")
+        await model.preview()
+        await model.write()
+        XCTAssertEqual(model.phase, .completed)
+        XCTAssertEqual(completions, 1, "寫入成功後要通知卡片庫重讀")
+
+        let failing = FakeImportService()
+        failing.previewResult = SamplePreviews.preview
+        let failingModel = ImportFlowModel(service: failing)
+        var failedCompletions = 0
+        failingModel.onWriteCompleted = { failedCompletions += 1 }
+        await failingModel.chooseSource(kind: .alma, path: "/tmp/alma.db")
+        await failingModel.preview()
+        failing.error = NSError(domain: "test", code: 1)
+        await failingModel.write()
+        XCTAssertEqual(failedCompletions, 0, "寫入失敗不能通知卡片庫重讀")
+    }
+
     func testModuleImportServiceUnwrapsDataAndSendsPayload() async throws {
         let sender = RecordingModuleSender()
         sender.response = .object([

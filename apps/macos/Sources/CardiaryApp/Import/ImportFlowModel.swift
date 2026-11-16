@@ -41,6 +41,9 @@ public final class ImportFlowModel: ObservableObject {
     @Published public var personaText = ""
     @Published public var allowReimport = false
 
+    /// 寫入成功後呼叫；匯入視窗用它通知卡片庫重讀。
+    public var onWriteCompleted: (@MainActor () -> Void)?
+
     private let service: any ImportService
     private let language: AppLanguage
 
@@ -277,6 +280,7 @@ public final class ImportFlowModel: ObservableObject {
             let result = try await service.write(request)
             self.result = result
             phase = .completed
+            onWriteCompleted?()
         } catch {
             fail(error)
         }

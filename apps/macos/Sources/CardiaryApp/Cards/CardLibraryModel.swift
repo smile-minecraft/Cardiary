@@ -524,3 +524,14 @@ extension CardKind {
         }
     }
 }
+
+/// 標籤輸入的解析規則：逗號（半形、全形）與頓號都算分隔，去空白、去重。
+enum CardTagInput {
+    static func parse(_ text: String) -> [String] {
+        var seen = Set<String>()
+        return text
+            .components(separatedBy: CharacterSet(charactersIn: ",，、"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+}

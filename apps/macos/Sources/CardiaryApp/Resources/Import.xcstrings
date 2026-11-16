@@ -256,6 +256,57 @@
         }
       }
     },
+    "importSkippedCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "{count} skipped"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳過 {count} 項"
+          }
+        }
+      }
+    },
+    "importCoreMemoryCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "{count} core-memory candidates"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "核心記憶候選 {count} 條"
+          }
+        }
+      }
+    },
+    "importDefaultSelectionNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona cards and conversations are off by default; turn on reimport to select duplicates."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "人格卡與對話預設不選；重複項目要打開「重新匯入」才能勾。"
+          }
+        }
+      }
+    },
     "importEstimateConversations": {
       "extractionState": "manual",
       "localizations": {
@@ -443,6 +494,23 @@
         }
       }
     },
+    "importPersonaHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Free text that becomes the persona card body; describe tone, preferences and how you work."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自由文字，會成為人格卡的內文；可以寫語氣、偏好與工作方式。"
+          }
+        }
+      }
+    },
     "importPersonaProvided": {
       "extractionState": "manual",
       "localizations": {
@@ -592,6 +660,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "複製了 {count} 個技能"
+          }
+        }
+      }
+    },
+    "importOpenLibrary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Card Library"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "到卡片庫"
+          }
+        }
+      }
+    },
+    "importResultHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The new cards were created; find them in the card library."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新卡片已建立，可以在卡片庫查看。"
           }
         }
       }

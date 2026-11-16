@@ -280,6 +280,13 @@ public final class AppModel: ObservableObject {
         }
     }
 
+    /// 其他介面造成的內容變更（例如匯入完成）：讓內容模型自己重讀。
+    public func refreshContentModels() async {
+        for model in contentModels {
+            await model.refresh()
+        }
+    }
+
     // MARK: - 內部
 
     private func reloadAfterAttach() async {

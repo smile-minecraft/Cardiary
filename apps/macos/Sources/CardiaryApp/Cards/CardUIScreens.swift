@@ -70,4 +70,8 @@ final class CardContentCoordinator: AppContentModel {
         await inspector.reload()
         await archive.reload()
     }
+
+    func refresh() async {
+        await library.reload()
+    }
 }

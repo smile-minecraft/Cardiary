@@ -24,13 +24,81 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Always allow this tool in this folder"
+            "value": "Always allow"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "此工具在此目錄一律允許"
+            "value": "一律允許"
+          }
+        }
+      }
+    },
+    "approvalAlwaysHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The host decides the scope; later requests in that scope are allowed without asking."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "範圍由主機決定；之後符合這個範圍的請求會直接放行。"
+          }
+        }
+      }
+    },
+    "approvalAlwaysSchedule": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Always allow this scheduled task"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一律允許這個排程"
+          }
+        }
+      }
+    },
+    "approvalAlwaysSettings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Always allow this settings change"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一律允許這項設定變更"
+          }
+        }
+      }
+    },
+    "approvalAlwaysTool": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Always allow “{value}”"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一律允許「{value}」"
           }
         }
       }
@@ -116,6 +184,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "緊急全部暫停"
+          }
+        }
+      }
+    },
+    "approvalPauseAllBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This interrupts every running turn; content being generated will stop."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "會中斷所有進行中的回合，正在生成的內容會停止。"
+          }
+        }
+      }
+    },
+    "approvalPauseAllConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause All"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部暫停"
           }
         }
       }
@@ -881,6 +983,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "已選擇：{value}"
+          }
+        }
+      }
+    },
+    "firstRunImportAction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import Old Data…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "匯入舊資料…"
+          }
+        }
+      }
+    },
+    "firstRunImportHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Already have data in another tool? Import it now and find it in the card library."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已經有資料在別的工具裡？先匯入，之後在卡片庫就能看到。"
           }
         }
       }

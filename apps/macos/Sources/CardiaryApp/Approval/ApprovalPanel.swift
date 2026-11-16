@@ -22,6 +22,7 @@ public final class ApprovalInspectorPanel: InspectorPanel {
 
 struct ApprovalPanelView: View {
     @ObservedObject var model: ApprovalModel
+    @State private var isPauseAllPresented = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
@@ -46,13 +47,25 @@ struct ApprovalPanelView: View {
             }
 
             Button(role: .destructive) {
-                Task { await model.pauseAll() }
+                isPauseAllPresented = true
             } label: {
                 Label(AppL10n.text(.approvalPauseAll), systemImage: "pause.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.themeDanger)
             .disabled(!model.isKnown)
+            .confirmationDialog(
+                AppL10n.text(.approvalPauseAll),
+                isPresented: $isPauseAllPresented,
+                titleVisibility: .visible
+            ) {
+                Button(AppL10n.text(.approvalPauseAllConfirm), role: .destructive) {
+                    Task { await model.pauseAll() }
+                }
+                Button(AppL10n.text(.genericCancel), role: .cancel) {}
+            } message: {
+                Text(AppL10n.text(.approvalPauseAllBody))
+            }
         }
     }
 
@@ -136,10 +149,11 @@ private struct ApprovalCard: View {
                 .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
             }
             if approval.supportsApproveAlways {
-                Button(AppL10n.text(.approvalAlways)) {
+                Button(approval.approveAlwaysTitle()) {
                     Task { await model.approveAlways(approval) }
                 }
                 .buttonStyle(.themeLink)
+                .help(AppL10n.text(.approvalAlwaysHelp))
             }
         }
         .controlSize(.small)
