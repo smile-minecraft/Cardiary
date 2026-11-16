@@ -6,11 +6,19 @@
 	  Hardened Runtime 下，V8 建立可執行程式記憶體需要這個 entitlement。
 	  沒有它，任何 JS 執行都會被系統以 SIGTRAP 結束（退出碼 133）。
 
-	  規格第 2 章要求內嵌 Node 只帶這一項：不得有
-	  com.apple.security.get-task-allow，也不得加 keychain-access-groups。
+	  套件自帶的 sharp 原生模組沒有與 App 相同的 Team ID；啟用 Hardened Runtime
+	  時，系統的 library validation 不會載入它。因此內嵌 Node 另加
+	  com.apple.security.cs.disable-library-validation，只用來載入第三方原生模組，
+	  不表示放寬其他 entitlement。殘餘風險：允許的對象是 Node 會載入的函式庫，
+	  若有人植入惡意或版本錯置的函式庫，Node 不會用 Team ID 擋下。殼的 entitlements
+	  維持空清單，不沿用這項豁免。
+
+	  規格書記載內嵌 Node 不得有 get-task-allow，也不得加 keychain-access-groups。
 	  `Scripts/verify-signing.sh` 會實際跑一次有／沒有這項的對照。
 	-->
 	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
 </dict>
 </plist>

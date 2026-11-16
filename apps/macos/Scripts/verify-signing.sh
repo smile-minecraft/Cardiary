@@ -6,7 +6,7 @@
 # 檢查三件事，結果直接印出來：
 #   1. 帶 com.apple.security.cs.allow-jit 簽章時，Node 可以執行 JS（退出碼 0）。
 #   2. 不帶任何 entitlement 重簽後，Node 以 SIGTRAP 結束（退出碼 133）。
-#   3. 殼的 entitlements 是空的、Node 的只有 allow-jit（若 dist/Cardiary.app 存在）。
+#   3. 殼的 entitlements 是空的、Node 的只有 allow-jit 與 disable-library-validation（若 dist/Cardiary.app 存在）。
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
