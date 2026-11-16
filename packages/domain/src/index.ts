@@ -8,6 +8,7 @@
 export * from "./cards/index.js";
 export * from "./context/index.js";
 export * from "./dealing/index.js";
+export * from "./distillation/index.js";
 export * from "./freshness/index.js";
 export * from "./media/index.js";
 export * from "./permissions/index.js";
