@@ -68,10 +68,11 @@ enum AppRegistry {
             messageKey: .placeholderInspector
         ))
 
-        // 設定分頁：模型、一般設定與模組。卡片相關設定由卡片介面再加一頁。
+        // 設定分頁：模型、一般設定、模組與儲存空間。卡片相關設定由卡片介面再加一頁。
         app.settings.register(ModelsSettingsTab(model: app.settingsModel.models))
         app.settings.register(GeneralSettingsTab(model: app.settingsModel.general))
         app.settings.register(ModulesSettingsTab(model: app.settingsModel.modules))
+        app.settings.register(StorageSettingsTab(model: app.settingsModel.storage))
 
         // 選單：主視窗自己的「檢視」，以及留給卡片與匯入的空群組。
         app.commands.register(CommandGroup(
