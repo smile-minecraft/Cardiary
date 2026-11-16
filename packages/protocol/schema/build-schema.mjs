@@ -1038,6 +1038,152 @@ add(
   }),
 );
 
+add("PendingPatchStatus", stringEnum(["pending", "accepted", "rejected"], "待決補丁的狀態。"));
+
+add(
+  "PendingCardPatch",
+  objectOf(
+    "PendingCardPatch",
+    ["patchId", "cardId", "baseRevision", "patch", "status", "createdAt"],
+    {
+      patchId: str("待決補丁識別碼。"),
+      cardId: str("目標卡片。"),
+      baseRevision: str("提出時讀到的 revision；接受時會重算比對。"),
+      patch: ref("CardPatch"),
+      status: ref("PendingPatchStatus"),
+      summary: str("補丁摘要。"),
+      sourceConversationId: str("來源對話。"),
+      sourceTurnId: str("來源回合。"),
+      createdAt: str("建立時間（ISO 8601）。"),
+      decidedAt: str("決定時間（ISO 8601）；尚未決定時省略。"),
+    },
+  ),
+);
+
+add(
+  "CardPatchProposeRequestPayload",
+  objectOf("CardPatchProposeRequestPayload", ["cardId", "baseRevision", "patch"], {
+    cardId: str("要修改的卡片。"),
+    baseRevision: str("提出時讀到的 revision；接受時會重算比對。"),
+    patch: ref("CardPatch"),
+    summary: str("補丁摘要。"),
+    sourceConversationId: str("來源對話。"),
+    sourceTurnId: str("來源回合。"),
+    clientRequestId: str("冪等鍵；重送不會產生兩筆待決補丁。"),
+  }),
+);
+
+add(
+  "CardPatchProposeResponsePayload",
+  objectOf("CardPatchProposeResponsePayload", ["patch"], {
+    patch: ref("PendingCardPatch"),
+  }),
+);
+
+add(
+  "CardPatchesListRequestPayload",
+  objectOf("CardPatchesListRequestPayload", ["cardId"], {
+    cardId: str("要列出待決補丁的卡片。"),
+    status: ref("PendingPatchStatus"),
+  }),
+);
+
+add(
+  "CardPatchesListResponsePayload",
+  objectOf("CardPatchesListResponsePayload", ["patches"], {
+    patches: arrayOf(ref("PendingCardPatch"), "依建立時間由舊到新。"),
+  }),
+);
+
+add(
+  "CardPatchAcceptRequestPayload",
+  objectOf("CardPatchAcceptRequestPayload", ["patchId", "clientRequestId"], {
+    patchId: str("要接受的待決補丁。"),
+    clientRequestId: str("冪等鍵。"),
+  }),
+);
+
+add(
+  "CardPatchAcceptResponsePayload",
+  objectOf("CardPatchAcceptResponsePayload", ["patch", "card"], {
+    patch: ref("PendingCardPatch"),
+    card: ref("Card"),
+  }),
+);
+
+add(
+  "CardPatchRejectRequestPayload",
+  objectOf("CardPatchRejectRequestPayload", ["patchId", "clientRequestId"], {
+    patchId: str("要拒絕的待決補丁。"),
+    clientRequestId: str("冪等鍵。"),
+  }),
+);
+
+add(
+  "CardPatchRejectResponsePayload",
+  objectOf("CardPatchRejectResponsePayload", ["patch"], {
+    patch: ref("PendingCardPatch"),
+  }),
+);
+
+add(
+  "CardVersionKind",
+  stringEnum(["create", "patch", "checkpoint", "restore", "merge"], "版本記錄的種類。"),
+);
+
+add(
+  "CardVersion",
+  objectOf(
+    "CardVersion",
+    ["versionId", "cardId", "seq", "kind", "revision", "bodyHash", "createdAt"],
+    {
+      versionId: str("版本識別碼。"),
+      cardId: str("卡片識別碼。"),
+      seq: int("遞增序號。", { minimum: 1 }),
+      kind: ref("CardVersionKind"),
+      revision: str("這一版的 revision。"),
+      bodyHash: str("內文 SHA-256。"),
+      baseRevision: str("補丁或還原所根據的 revision。"),
+      patchFormat: str("補丁格式。"),
+      patchText: str("補丁內容或整段內文。"),
+      createdAt: str("建立時間（ISO 8601）。"),
+      mergedCount: int("被合併的版本數。", { minimum: 0 }),
+      mergedSeqRange: str("合併的序號範圍。"),
+    },
+  ),
+);
+
+add(
+  "CardVersionsListRequestPayload",
+  objectOf("CardVersionsListRequestPayload", ["cardId"], {
+    cardId: str("要列出版本歷史的卡片。"),
+  }),
+);
+
+add(
+  "CardVersionsListResponsePayload",
+  objectOf("CardVersionsListResponsePayload", ["versions"], {
+    versions: arrayOf(ref("CardVersion"), "依序號由小到大。"),
+  }),
+);
+
+add(
+  "CardVersionRestoreRequestPayload",
+  objectOf("CardVersionRestoreRequestPayload", ["cardId", "versionId", "clientRequestId"], {
+    cardId: str("要還原的卡片。"),
+    versionId: str("要還原到的版本。"),
+    clientRequestId: str("冪等鍵。"),
+  }),
+);
+
+add(
+  "CardVersionRestoreResponsePayload",
+  objectOf("CardVersionRestoreResponsePayload", ["card", "version"], {
+    card: ref("Card"),
+    version: ref("CardVersion"),
+  }),
+);
+
 add(
   "CardDeleteRequestPayload",
   objectOf("CardDeleteRequestPayload", ["cardId", "clientRequestId"], {
@@ -2016,6 +2162,78 @@ requestFrame("CardCreateRequest", "card.create", "CardCreateRequestPayload", "�
 responseFrame("CardCreateResponse", "card.create", "CardCreateResponsePayload", "建立的卡片。");
 requestFrame("CardPatchRequest", "card.patch", "CardPatchRequestPayload", "以補丁編修卡片。");
 responseFrame("CardPatchResponse", "card.patch", "CardPatchResponsePayload", "編修後的卡片。");
+requestFrame(
+  "CardPatchProposeRequest",
+  "card.patch.propose",
+  "CardPatchProposeRequestPayload",
+  "代理提出補丁；只建立待決項目，不改卡片內文。",
+);
+responseFrame(
+  "CardPatchProposeResponse",
+  "card.patch.propose",
+  "CardPatchProposeResponsePayload",
+  "提出的待決補丁。",
+);
+requestFrame(
+  "CardPatchesListRequest",
+  "card.patches.list",
+  "CardPatchesListRequestPayload",
+  "列出卡片的待決補丁。",
+);
+responseFrame(
+  "CardPatchesListResponse",
+  "card.patches.list",
+  "CardPatchesListResponsePayload",
+  "待決補丁清單。",
+);
+requestFrame(
+  "CardPatchAcceptRequest",
+  "card.patch.accept",
+  "CardPatchAcceptRequestPayload",
+  "接受一筆待決補丁，重算 revision 比對後寫入正本。",
+);
+responseFrame(
+  "CardPatchAcceptResponse",
+  "card.patch.accept",
+  "CardPatchAcceptResponsePayload",
+  "接受結果與更新後的卡片。",
+);
+requestFrame(
+  "CardPatchRejectRequest",
+  "card.patch.reject",
+  "CardPatchRejectRequestPayload",
+  "拒絕一筆待決補丁，卡片內文不變。",
+);
+responseFrame(
+  "CardPatchRejectResponse",
+  "card.patch.reject",
+  "CardPatchRejectResponsePayload",
+  "拒絕結果。",
+);
+requestFrame(
+  "CardVersionsListRequest",
+  "card.versions.list",
+  "CardVersionsListRequestPayload",
+  "列出卡片的版本歷史。",
+);
+responseFrame(
+  "CardVersionsListResponse",
+  "card.versions.list",
+  "CardVersionsListResponsePayload",
+  "版本歷史。",
+);
+requestFrame(
+  "CardVersionRestoreRequest",
+  "card.version.restore",
+  "CardVersionRestoreRequestPayload",
+  "還原到舊版；重放後寫成新版本。",
+);
+responseFrame(
+  "CardVersionRestoreResponse",
+  "card.version.restore",
+  "CardVersionRestoreResponsePayload",
+  "還原後的卡片與新版本。",
+);
 requestFrame("CardDeleteRequest", "card.delete", "CardDeleteRequestPayload", "刪除卡片。");
 responseFrame(
   "CardDeleteResponse",
@@ -2602,6 +2820,12 @@ add("ClientFrame", {
     ref("CardGetRequest"),
     ref("CardCreateRequest"),
     ref("CardPatchRequest"),
+    ref("CardPatchProposeRequest"),
+    ref("CardPatchesListRequest"),
+    ref("CardPatchAcceptRequest"),
+    ref("CardPatchRejectRequest"),
+    ref("CardVersionsListRequest"),
+    ref("CardVersionRestoreRequest"),
     ref("CardDeleteRequest"),
     ref("CardSearchRequest"),
     ref("CardRefreshRequest"),
@@ -2649,6 +2873,12 @@ add("ServerFrame", {
     ref("CardGetResponse"),
     ref("CardCreateResponse"),
     ref("CardPatchResponse"),
+    ref("CardPatchProposeResponse"),
+    ref("CardPatchesListResponse"),
+    ref("CardPatchAcceptResponse"),
+    ref("CardPatchRejectResponse"),
+    ref("CardVersionsListResponse"),
+    ref("CardVersionRestoreResponse"),
     ref("CardDeleteResponse"),
     ref("CardSearchResponse"),
     ref("CardRefreshResponse"),

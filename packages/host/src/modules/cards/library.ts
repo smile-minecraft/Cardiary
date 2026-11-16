@@ -3,13 +3,15 @@ import {
   CardPatchError,
   SUMMARY_MAX_LENGTH,
   TITLE_MAX_LENGTH,
-  applyPatch,
+  acceptPatch,
   computeRevision,
   dedupeTags,
+  DocumentRevisionMismatchError,
   extractOutgoingLinks,
   isUlid,
   newCardId,
   parseCardText,
+  reconstructBody,
   serializeCardFile,
   sha256Hex,
   type Card,
@@ -20,11 +22,20 @@ import {
   type CardQuery,
   type CardSearchHit,
   type CardSummary,
+  type CardVersion,
   type FrontmatterLayoutItem,
 } from "@cardiary/domain";
 import type { ProtocolEventIntent } from "@cardiary/module-api";
 import type { JSONObject } from "@cardiary/protocol";
-import { StorageError, type CardFileEntry, type CardFileStore } from "@cardiary/storage";
+import {
+  CardVersionsStore,
+  PendingPatchesStore,
+  StorageError,
+  type CardFileEntry,
+  type CardFileStore,
+  type PendingCardPatch,
+  type PendingPatchStatus,
+} from "@cardiary/storage";
 import type {
   CardIndexRow,
   CardIndexStore,
@@ -52,6 +63,10 @@ export interface CardLibraryOptions {
   readonly index: () => CardIndexStore;
   readonly assets: () => LocalAssetStore;
   readonly state: CardStateStore;
+  /** 版本歷史，和正本同一條寫入序列；省略時用 state 的資料庫。 */
+  readonly versions?: CardVersionsStore;
+  /** 代理提出的待決補丁；省略時用 state 的資料庫。 */
+  readonly patches?: PendingPatchesStore;
   readonly now?: () => Date;
   readonly emit?: (intent: ProtocolEventIntent) => void;
   readonly warn?: (message: string, fields?: JSONObject) => void;
@@ -76,6 +91,8 @@ export class CardLibrary {
   readonly #index: () => CardIndexStore;
   readonly #assets: () => LocalAssetStore;
   readonly #state: CardStateStore;
+  readonly #versionsOverride: CardVersionsStore | undefined;
+  readonly #patchesOverride: PendingPatchesStore | undefined;
   readonly #now: () => Date;
   readonly #emit: (intent: ProtocolEventIntent) => void;
   readonly #warn: (message: string, fields?: JSONObject) => void;
@@ -88,8 +105,22 @@ export class CardLibrary {
     this.#assets = options.assets;
     this.#state = options.state;
     this.#now = options.now ?? (() => new Date());
+    this.#versionsOverride = options.versions;
+    this.#patchesOverride = options.patches;
     this.#emit = options.emit ?? (() => {});
     this.#warn = options.warn ?? (() => {});
+  }
+
+  get #versions(): CardVersionsStore {
+    return (
+      this.#versionsOverride ?? new CardVersionsStore(this.#state.database, { now: this.#now })
+    );
+  }
+
+  get #patches(): PendingPatchesStore {
+    return (
+      this.#patchesOverride ?? new PendingPatchesStore(this.#state.database, { now: this.#now })
+    );
   }
 
   get files(): CardFileStore {
@@ -341,6 +372,7 @@ export class CardLibrary {
         this.#state.setSupersededBy(frontmatter.supersedes, cardId);
       }
       const revision = computeRevision(frontmatter, body);
+      this.#versions.create(cardId, body, revision, sha256Hex(body));
       this.#emit({ kind: "card-changed", cardId, change: "created", revision });
       return { cardId, frontmatter, body, revision };
     });
@@ -351,6 +383,109 @@ export class CardLibrary {
     readonly baseRevision: string;
     readonly patch: CardPatch;
   }): Promise<Card> {
+    return this.#serialize(() => this.#writePatch(input));
+  }
+
+  /**
+   * 唯一的補丁寫入路徑：協定直接編修與接受待決補丁共用。
+   * 一定要重算目前 revision 比對 baseRevision，過期就拒絕，不覆蓋外部編輯。
+   */
+  #writePatch(input: {
+    readonly cardId: string;
+    readonly baseRevision: string;
+    readonly patch: CardPatch;
+  }): Card {
+    const id = normalizeCardId(input.cardId);
+    const content = this.#files.read(id);
+    if (content === undefined) {
+      throw new ProtocolHandlerError("not_found", `找不到卡片 ${id}。`, { cardId: id });
+    }
+    const parsed = parseCardText(content.text, { expectedCardId: id });
+    if (!parsed.ok) {
+      this.#index().upsert(brokenRecord(content, parsed.reason, this.#now().toISOString()));
+      throw new ProtocolHandlerError("conflict", `卡片檔格式不符：${parsed.reason}`, {
+        reason: "broken_card",
+        cardId: id,
+      });
+    }
+    let body: string;
+    try {
+      body = acceptPatch({
+        frontmatter: parsed.frontmatter,
+        body: parsed.body,
+        baseRevision: input.baseRevision,
+        patch: input.patch,
+      }).body;
+    } catch (error) {
+      if (error instanceof DocumentRevisionMismatchError) {
+        throw new ProtocolHandlerError("conflict", "補丁的基礎 revision 已過期；請重讀後再試。", {
+          reason: "revision_mismatch",
+          currentRevision: error.actual,
+        });
+      }
+      if (error instanceof CardPatchError) {
+        throw new ProtocolHandlerError("invalid_message", error.message, {
+          reason: "patch_failed",
+        });
+      }
+      throw error;
+    }
+    const previousRevision = computeRevision(parsed.frontmatter, parsed.body);
+    const latest = this.#versions.latest(id);
+    if (latest === null) {
+      this.#versions.create(id, parsed.body, previousRevision, sha256Hex(parsed.body));
+    } else if (latest.bodyHash !== sha256Hex(parsed.body)) {
+      this.#versions.appendPatch({
+        cardId: id,
+        baseRevision: latest.revision,
+        body: parsed.body,
+        revision: previousRevision,
+        bodyHash: sha256Hex(parsed.body),
+        patch: { format: "replace", text: parsed.body },
+      });
+    }
+    const now = this.#now().toISOString();
+    const frontmatter: CardFrontmatter = { ...parsed.frontmatter, updated: now };
+    const presentKeys = withUpdatedKey(parsed.presentKeys);
+    const text = serializeCardFile({
+      frontmatter,
+      presentKeys,
+      body,
+      lineEnding: parsed.lineEnding,
+      layout: withUpdatedField(parsed.layout),
+    });
+    this.#files.write({ cardId: id, text });
+    const written = this.#files.read(id);
+    if (written !== undefined) {
+      this.#index().upsert(this.#indexedRecord(written, frontmatter, body));
+    }
+    this.#state.ensure(id, frontmatter.persona);
+    const revision = computeRevision(frontmatter, body);
+    this.#versions.appendPatch({
+      cardId: id,
+      baseRevision: input.baseRevision,
+      body,
+      revision,
+      bodyHash: sha256Hex(body),
+      patch: input.patch,
+    });
+    this.#emit({ kind: "card-changed", cardId: id, change: "updated", revision });
+    return { cardId: id, frontmatter, body, revision };
+  }
+
+  /** 代理提出補丁：只寫待決表，卡片內文與版本歷史都不動。 */
+  async proposePatch(
+    input: {
+      readonly cardId: string;
+      readonly baseRevision: string;
+      readonly patch: CardPatch;
+    } & {
+      readonly summary?: string;
+      readonly sourceConversationId?: string;
+      readonly sourceTurnId?: string;
+      readonly clientRequestId?: string;
+    },
+  ): Promise<PendingCardPatch> {
     return this.#serialize(() => {
       const id = normalizeCardId(input.cardId);
       const content = this.#files.read(id);
@@ -359,23 +494,25 @@ export class CardLibrary {
       }
       const parsed = parseCardText(content.text, { expectedCardId: id });
       if (!parsed.ok) {
-        this.#index().upsert(brokenRecord(content, parsed.reason, this.#now().toISOString()));
         throw new ProtocolHandlerError("conflict", `卡片檔格式不符：${parsed.reason}`, {
           reason: "broken_card",
           cardId: id,
         });
       }
-      const currentRevision = computeRevision(parsed.frontmatter, parsed.body);
-      if (currentRevision !== input.baseRevision) {
-        throw new ProtocolHandlerError("conflict", "卡片已經被改過；請重讀後再送出補丁。", {
-          reason: "revision_mismatch",
-          currentRevision,
-        });
-      }
-      let body: string;
       try {
-        body = applyPatch(parsed.body, input.patch);
+        acceptPatch({
+          frontmatter: parsed.frontmatter,
+          body: parsed.body,
+          baseRevision: input.baseRevision,
+          patch: input.patch,
+        });
       } catch (error) {
+        if (error instanceof DocumentRevisionMismatchError) {
+          throw new ProtocolHandlerError("conflict", "補丁的基礎 revision 已過期；請重讀後再試。", {
+            reason: "revision_mismatch",
+            currentRevision: error.actual,
+          });
+        }
         if (error instanceof CardPatchError) {
           throw new ProtocolHandlerError("invalid_message", error.message, {
             reason: "patch_failed",
@@ -383,25 +520,134 @@ export class CardLibrary {
         }
         throw error;
       }
+      return this.#patches.propose({
+        cardId: id,
+        baseRevision: input.baseRevision,
+        patch: input.patch,
+        ...(input.summary === undefined ? {} : { summary: input.summary }),
+        ...(input.sourceConversationId === undefined
+          ? {}
+          : { sourceConversationId: input.sourceConversationId }),
+        ...(input.sourceTurnId === undefined ? {} : { sourceTurnId: input.sourceTurnId }),
+      });
+    });
+  }
+
+  listPatches(cardId: string, status?: PendingPatchStatus): readonly PendingCardPatch[] {
+    return this.#patches.list({
+      cardId: normalizeCardId(cardId),
+      ...(status === undefined ? {} : { status }),
+    });
+  }
+
+  /** 接受待決補丁：走同一條 revision 比對與版本寫入路徑。 */
+  async acceptPendingPatch(patchId: string): Promise<{
+    readonly patch: PendingCardPatch;
+    readonly card: Card;
+  }> {
+    return this.#serialize(() => {
+      const pending = this.#patches.get(patchId);
+      if (pending === null) {
+        throw new ProtocolHandlerError("not_found", `找不到待決補丁 ${patchId}。`, { patchId });
+      }
+      if (pending.status !== "pending") {
+        throw new ProtocolHandlerError("conflict", "這筆補丁已經決定過了。", {
+          reason: "already_decided",
+          patchId,
+        });
+      }
+      const card = this.#writePatch({
+        cardId: pending.cardId,
+        baseRevision: pending.baseRevision,
+        patch: pending.patch,
+      });
+      const decided = this.#patches.decide(patchId, "accepted");
+      if (decided === null) {
+        throw new ProtocolHandlerError("conflict", "這筆補丁已經決定過了。", {
+          reason: "already_decided",
+          patchId,
+        });
+      }
+      return { patch: decided, card };
+    });
+  }
+
+  /** 拒絕待決補丁：不碰正本；重複拒絕回 conflict。 */
+  async rejectPendingPatch(patchId: string): Promise<PendingCardPatch> {
+    return this.#serialize(() => {
+      const pending = this.#patches.get(patchId);
+      if (pending === null) {
+        throw new ProtocolHandlerError("not_found", `找不到待決補丁 ${patchId}。`, { patchId });
+      }
+      if (pending.status !== "pending") {
+        throw new ProtocolHandlerError("conflict", "這筆補丁已經決定過了。", {
+          reason: "already_decided",
+          patchId,
+        });
+      }
+      const decided = this.#patches.decide(patchId, "rejected");
+      if (decided === null) {
+        throw new ProtocolHandlerError("conflict", "這筆補丁已經決定過了。", {
+          reason: "already_decided",
+          patchId,
+        });
+      }
+      return decided;
+    });
+  }
+
+  listVersions(cardId: string): readonly CardVersion[] {
+    return this.#versions.list(normalizeCardId(cardId));
+  }
+
+  /** 還原：重放目標版內文，再把結果寫成新版本。 */
+  async restoreVersion(
+    cardId: string,
+    versionId: string,
+  ): Promise<{ readonly card: Card; readonly version: CardVersion }> {
+    return this.#serialize(() => {
+      const id = normalizeCardId(cardId);
+      const content = this.#files.read(id);
+      if (content === undefined) {
+        throw new ProtocolHandlerError("not_found", `找不到卡片 ${id}。`, { cardId: id });
+      }
+      const parsed = parseCardText(content.text, { expectedCardId: id });
+      if (!parsed.ok) {
+        throw new ProtocolHandlerError("conflict", `卡片檔格式不符：${parsed.reason}`, {
+          reason: "broken_card",
+          cardId: id,
+        });
+      }
+      const currentRevision = computeRevision(parsed.frontmatter, parsed.body);
+      const versions = this.#versions.list(id);
+      if (!versions.some((version) => version.versionId === versionId)) {
+        throw new ProtocolHandlerError("not_found", `找不到版本 ${versionId}。`, {
+          cardId: id,
+          versionId,
+        });
+      }
+      const restoredBody = reconstructBody(id, versions, versionId);
       const now = this.#now().toISOString();
       const frontmatter: CardFrontmatter = { ...parsed.frontmatter, updated: now };
-      const presentKeys = withUpdatedKey(parsed.presentKeys);
       const text = serializeCardFile({
         frontmatter,
-        presentKeys,
-        body,
+        presentKeys: withUpdatedKey(parsed.presentKeys),
+        body: restoredBody,
         lineEnding: parsed.lineEnding,
         layout: withUpdatedField(parsed.layout),
       });
       this.#files.write({ cardId: id, text });
       const written = this.#files.read(id);
       if (written !== undefined) {
-        this.#index().upsert(this.#indexedRecord(written, frontmatter, body));
+        this.#index().upsert(this.#indexedRecord(written, frontmatter, restoredBody));
       }
-      this.#state.ensure(id, frontmatter.persona);
-      const revision = computeRevision(frontmatter, body);
+      const revision = computeRevision(frontmatter, restoredBody);
+      const restored = this.#versions.restore(id, versionId, currentRevision, revision);
       this.#emit({ kind: "card-changed", cardId: id, change: "updated", revision });
-      return { cardId: id, frontmatter, body, revision };
+      return {
+        card: { cardId: id, frontmatter, body: restoredBody, revision },
+        version: restored.version,
+      };
     });
   }
 
@@ -419,6 +665,8 @@ export class CardLibrary {
       const existed = this.#files.remove(id);
       index.remove(id);
       this.#state.remove(id);
+      this.#versions.deleteCard(id);
+      this.#patches.deleteCard(id);
       // 兩個來源都當候選：索引記得的，以及檔案目前寫的（外部可能改過）。
       // 多送一個候選不會誤刪——回收前還會掃描所有卡片檔；少送才是漏刪。
       const candidates = new Set<string>();

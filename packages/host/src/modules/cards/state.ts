@@ -46,6 +46,10 @@ export class CardStateStore {
     this.#halfLifeDays = options.halfLifeDays;
   }
 
+  get database(): Database {
+    return this.#db();
+  }
+
   /** 讀一張卡的狀態；沒有資料列時回預設值（新鮮度 100、live）。 */
   get(cardId: string): CardStateView {
     const row = this.#db().get<CardStateRow>(

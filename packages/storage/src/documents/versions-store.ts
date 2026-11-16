@@ -133,6 +133,7 @@ export class CardVersionsStore {
     cardId: string,
     targetVersionId: string,
     currentRevision: string | null = null,
+    restoredRevision?: string,
   ): RestoreResult {
     return this.#db.transaction((tx) => {
       const versions = this.#list(tx, cardId);
@@ -144,7 +145,7 @@ export class CardVersionsStore {
       const version = this.#append(tx, {
         cardId,
         kind: "restore",
-        revision: target.revision,
+        revision: restoredRevision ?? target.revision,
         bodyHash: target.bodyHash,
         baseRevision: currentRevision,
         patchFormat: "replace",

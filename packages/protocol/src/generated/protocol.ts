@@ -30,6 +30,12 @@ export type ClientFrame =
   | CardGetRequest
   | CardCreateRequest
   | CardPatchRequest
+  | CardPatchProposeRequest
+  | CardPatchesListRequest
+  | CardPatchAcceptRequest
+  | CardPatchRejectRequest
+  | CardVersionsListRequest
+  | CardVersionRestoreRequest
   | CardDeleteRequest
   | CardSearchRequest
   | CardRefreshRequest
@@ -72,6 +78,10 @@ export type CardLifecycleFilter = "live" | "cold" | "all";
  * 補丁格式；代理只能用 unified。
  */
 export type CardPatchFormat = "unified" | "replace";
+/**
+ * 待決補丁的狀態。
+ */
+export type PendingPatchStatus = "pending" | "accepted" | "rejected";
 /**
  * 任意 JSON 值。只用於工具輸出、模組資料與錯誤細節，協定欄位不使用。
  */
@@ -127,6 +137,12 @@ export type ServerFrame =
   | CardGetResponse
   | CardCreateResponse
   | CardPatchResponse
+  | CardPatchProposeResponse
+  | CardPatchesListResponse
+  | CardPatchAcceptResponse
+  | CardPatchRejectResponse
+  | CardVersionsListResponse
+  | CardVersionRestoreResponse
   | CardDeleteResponse
   | CardSearchResponse
   | CardRefreshResponse
@@ -211,6 +227,10 @@ export type ApprovalEffect = "approve" | "reject" | "approve_always";
  * 卡片生命週期；cold 是蒸餾後的冷封存。
  */
 export type CardLifecycle = "live" | "cold";
+/**
+ * 版本記錄的種類。
+ */
+export type CardVersionKind = "create" | "patch" | "checkpoint" | "restore" | "merge";
 /**
  * 多模態的種類；只有圖片與音訊。
  */
@@ -811,6 +831,158 @@ export interface CardPatch {
    * 統一 diff（unified）或整段內文（replace）。
    */
   text: string;
+}
+/**
+ * 代理提出補丁；只建立待決項目，不改卡片內文。
+ */
+export interface CardPatchProposeRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "card.patch.propose";
+  payload: CardPatchProposeRequestPayload;
+}
+export interface CardPatchProposeRequestPayload {
+  /**
+   * 要修改的卡片。
+   */
+  cardId: string;
+  /**
+   * 提出時讀到的 revision；接受時會重算比對。
+   */
+  baseRevision: string;
+  patch: CardPatch;
+  /**
+   * 補丁摘要。
+   */
+  summary?: string;
+  /**
+   * 來源對話。
+   */
+  sourceConversationId?: string;
+  /**
+   * 來源回合。
+   */
+  sourceTurnId?: string;
+  /**
+   * 冪等鍵；重送不會產生兩筆待決補丁。
+   */
+  clientRequestId?: string;
+}
+/**
+ * 列出卡片的待決補丁。
+ */
+export interface CardPatchesListRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "card.patches.list";
+  payload: CardPatchesListRequestPayload;
+}
+export interface CardPatchesListRequestPayload {
+  /**
+   * 要列出待決補丁的卡片。
+   */
+  cardId: string;
+  status?: PendingPatchStatus;
+}
+/**
+ * 接受一筆待決補丁，重算 revision 比對後寫入正本。
+ */
+export interface CardPatchAcceptRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "card.patch.accept";
+  payload: CardPatchAcceptRequestPayload;
+}
+export interface CardPatchAcceptRequestPayload {
+  /**
+   * 要接受的待決補丁。
+   */
+  patchId: string;
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId: string;
+}
+/**
+ * 拒絕一筆待決補丁，卡片內文不變。
+ */
+export interface CardPatchRejectRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "card.patch.reject";
+  payload: CardPatchRejectRequestPayload;
+}
+export interface CardPatchRejectRequestPayload {
+  /**
+   * 要拒絕的待決補丁。
+   */
+  patchId: string;
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId: string;
+}
+/**
+ * 列出卡片的版本歷史。
+ */
+export interface CardVersionsListRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "card.versions.list";
+  payload: CardVersionsListRequestPayload;
+}
+export interface CardVersionsListRequestPayload {
+  /**
+   * 要列出版本歷史的卡片。
+   */
+  cardId: string;
+}
+/**
+ * 還原到舊版；重放後寫成新版本。
+ */
+export interface CardVersionRestoreRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "card.version.restore";
+  payload: CardVersionRestoreRequestPayload;
+}
+export interface CardVersionRestoreRequestPayload {
+  /**
+   * 要還原的卡片。
+   */
+  cardId: string;
+  /**
+   * 要還原到的版本。
+   */
+  versionId: string;
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId: string;
 }
 /**
  * 刪除卡片。
@@ -2369,6 +2541,193 @@ export interface CardPatchResponse {
 }
 export interface CardPatchResponsePayload {
   card: Card;
+}
+/**
+ * 提出的待決補丁。
+ */
+export interface CardPatchProposeResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "card.patch.propose";
+  payload: CardPatchProposeResponsePayload;
+}
+export interface CardPatchProposeResponsePayload {
+  patch: PendingCardPatch;
+}
+export interface PendingCardPatch {
+  /**
+   * 待決補丁識別碼。
+   */
+  patchId: string;
+  /**
+   * 目標卡片。
+   */
+  cardId: string;
+  /**
+   * 提出時讀到的 revision；接受時會重算比對。
+   */
+  baseRevision: string;
+  patch: CardPatch;
+  status: PendingPatchStatus;
+  /**
+   * 補丁摘要。
+   */
+  summary?: string;
+  /**
+   * 來源對話。
+   */
+  sourceConversationId?: string;
+  /**
+   * 來源回合。
+   */
+  sourceTurnId?: string;
+  /**
+   * 建立時間（ISO 8601）。
+   */
+  createdAt: string;
+  /**
+   * 決定時間（ISO 8601）；尚未決定時省略。
+   */
+  decidedAt?: string;
+}
+/**
+ * 待決補丁清單。
+ */
+export interface CardPatchesListResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "card.patches.list";
+  payload: CardPatchesListResponsePayload;
+}
+export interface CardPatchesListResponsePayload {
+  /**
+   * 依建立時間由舊到新。
+   */
+  patches: PendingCardPatch[];
+}
+/**
+ * 接受結果與更新後的卡片。
+ */
+export interface CardPatchAcceptResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "card.patch.accept";
+  payload: CardPatchAcceptResponsePayload;
+}
+export interface CardPatchAcceptResponsePayload {
+  patch: PendingCardPatch;
+  card: Card;
+}
+/**
+ * 拒絕結果。
+ */
+export interface CardPatchRejectResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "card.patch.reject";
+  payload: CardPatchRejectResponsePayload;
+}
+export interface CardPatchRejectResponsePayload {
+  patch: PendingCardPatch;
+}
+/**
+ * 版本歷史。
+ */
+export interface CardVersionsListResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "card.versions.list";
+  payload: CardVersionsListResponsePayload;
+}
+export interface CardVersionsListResponsePayload {
+  /**
+   * 依序號由小到大。
+   */
+  versions: CardVersion[];
+}
+export interface CardVersion {
+  /**
+   * 版本識別碼。
+   */
+  versionId: string;
+  /**
+   * 卡片識別碼。
+   */
+  cardId: string;
+  /**
+   * 遞增序號。
+   */
+  seq: number;
+  kind: CardVersionKind;
+  /**
+   * 這一版的 revision。
+   */
+  revision: string;
+  /**
+   * 內文 SHA-256。
+   */
+  bodyHash: string;
+  /**
+   * 補丁或還原所根據的 revision。
+   */
+  baseRevision?: string;
+  /**
+   * 補丁格式。
+   */
+  patchFormat?: string;
+  /**
+   * 補丁內容或整段內文。
+   */
+  patchText?: string;
+  /**
+   * 建立時間（ISO 8601）。
+   */
+  createdAt: string;
+  /**
+   * 被合併的版本數。
+   */
+  mergedCount?: number;
+  /**
+   * 合併的序號範圍。
+   */
+  mergedSeqRange?: string;
+}
+/**
+ * 還原後的卡片與新版本。
+ */
+export interface CardVersionRestoreResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "card.version.restore";
+  payload: CardVersionRestoreResponsePayload;
+}
+export interface CardVersionRestoreResponsePayload {
+  card: Card;
+  version: CardVersion;
 }
 /**
  * 刪除結果與連帶刪除的原檔數。
