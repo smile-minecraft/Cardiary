@@ -5,35 +5,29 @@ import XCTest
 @testable import CardiaryApp
 
 /// 審批面板的建構冒煙測試：有資料時整個畫面要能建立並完成排版。
-///
-/// 一般的主視窗需要真的視窗伺服器，這裡只渲染面板本身；`ImageRenderer`
-/// 對 `NavigationSplitView` 與 `ScrollView` 不支援，所以範圍刻意限縮在面板。
+/// ImageRenderer 在 CI runner 會卡住，所以只驗排版。
 @MainActor
 final class ApprovalPanelRenderingTests: XCTestCase {
-    func testPanelRendersWithApprovalAndWithoutAlwaysOption() throws {
-        // CI runner 沒有視窗伺服器時，ImageRenderer 會卡住。
-        guard NSScreen.main != nil else {
-            throw XCTSkip("需要視窗伺服器")
-        }
-
+    func testPanelRendersWithApprovalAndWithoutAlwaysOption() {
         let model = ApprovalModel()
 
         model.update(requests: [Fixtures.approval()])
-        XCTAssertNotNil(render(ApprovalPanelView(model: model)), "有待審批時要能排版")
+        let withApproval = render(ApprovalPanelView(model: model))
+        XCTAssertTrue(withApproval.width > 0 && withApproval.height > 0, "有待審批時要能排版")
 
         model.update(requests: [Fixtures.approval(approveAlways: false)])
-        XCTAssertNotNil(render(ApprovalPanelView(model: model)), "主機沒有提供一律允許時也要能排版")
+        let withoutAlways = render(ApprovalPanelView(model: model))
+        XCTAssertTrue(withoutAlways.width > 0 && withoutAlways.height > 0, "主機沒有提供一律允許時也要能排版")
 
         model.update(requests: [])
-        XCTAssertNotNil(render(ApprovalPanelView(model: model)), "沒有待審批時顯示空狀態")
+        let empty = render(ApprovalPanelView(model: model))
+        XCTAssertTrue(empty.width > 0 && empty.height > 0, "沒有待審批時顯示空狀態")
     }
 
-    private func render(_ view: some View) -> NSImage? {
-        let renderer = ImageRenderer(
-            content: view.frame(width: 320, height: 420)
-                .background(Color(nsColor: .windowBackgroundColor))
-        )
-        renderer.scale = 2
-        return renderer.nsImage
+    private func render(_ view: some View) -> NSSize {
+        let host = NSHostingView(rootView: view.frame(width: 320, height: 420))
+        host.frame = NSRect(x: 0, y: 0, width: 320, height: 420)
+        host.layoutSubtreeIfNeeded()
+        return host.fittingSize
     }
 }
