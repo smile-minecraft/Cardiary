@@ -71,7 +71,11 @@ import type { ActiveTurn, CatalogSnapshot, ConversationMeta } from "./catalog.js
 import { CatalogDoc, emptyCatalog } from "./catalog.js";
 import { appendCompactionEntry, type CompactionCommitRequest } from "./context/compaction.js";
 import { usageOfAssistantEntry, type ConversationUsage } from "./context/usage.js";
-import { CONTEXT_EXTENSION_NAME, createContextExtension } from "./context/volatile-tail.js";
+import {
+  CONTEXT_EXTENSION_NAME,
+  MESSAGE_TRAILING_CONTEXT_ENTRY_KIND,
+  createContextExtension,
+} from "./context/volatile-tail.js";
 import { compactAfterDelete, deleteEngineSubtree, listConversationSubtree } from "./delete.js";
 import { EngineAdapterFailure, engineError } from "./errors.js";
 import { EventBus } from "./event-bus.js";
@@ -1408,12 +1412,16 @@ export class PiEngineAdapter implements EngineAdapter {
           : "followUp";
     let submission: Submission;
     try {
+      const trailingContext = request.trailingContext?.trim();
       submission = await conversation.submit(
         {
           type: "input",
           content: converted.content,
           whenBusy,
           ...(request.clientMessageId === undefined ? {} : { requestId: request.clientMessageId }),
+          ...(trailingContext === undefined || trailingContext.length === 0
+            ? {}
+            : { entry: { kind: MESSAGE_TRAILING_CONTEXT_ENTRY_KIND, data: { trailingContext } } }),
         },
         BACKGROUND_CONTEXT,
       );
@@ -2332,7 +2340,7 @@ function contentText(content: readonly ContentBlock[]): string {
  * 沒有時間的訊息用呼叫端提供的當下時間。
  */
 function entryToMessage(entry: EntryRecord, fallbackAt: string): ConversationMessage | null {
-  if (!entry.kind.startsWith("pi.")) {
+  if (!entry.kind.startsWith("pi.") && entry.kind !== MESSAGE_TRAILING_CONTEXT_ENTRY_KIND) {
     return null;
   }
   const model = entry.model ?? [];
@@ -2344,7 +2352,11 @@ function entryToMessage(entry: EntryRecord, fallbackAt: string): ConversationMes
     return null;
   }
   const role =
-    entry.kind === "pi.user" ? "user" : entry.kind === "pi.tool-result" ? "tool" : "assistant";
+    entry.kind === "pi.user" || entry.kind === MESSAGE_TRAILING_CONTEXT_ENTRY_KIND
+      ? "user"
+      : entry.kind === "pi.tool-result"
+        ? "tool"
+        : "assistant";
   const timestamp = message.timestamp;
   const createdAt =
     typeof timestamp === "number" && Number.isFinite(timestamp) && timestamp > 0

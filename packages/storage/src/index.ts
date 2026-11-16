@@ -7,6 +7,7 @@ export * from "./devices/index.js";
 export * from "./deletions.js";
 export * from "./documents/index.js";
 export * from "./errors.js";
+export * from "./emotion/index.js";
 export * from "./events.js";
 export * from "./folder.js";
 export * from "./freshness/index.js";
