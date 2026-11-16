@@ -389,11 +389,128 @@ export const M1_CONVERSATION_DELETION_COLUMNS = ["card_ids", "asset_ids"] as con
  * 程式的遷移清單。
  *
  * M1 的新表一次建好，之後的工作只寫資料列：`state-schema.ts` 是所有工作
- * 共用的檔案，只讓一個工作改一次，避免平行衝突。
+ * 共用的檔案，只讓一個工作改一次，避免平行衝突。v3 追加在 v2 之後，
+ * 舊有的 checksum 不變。
  */
 export const M1_MIGRATIONS: readonly Migration[] = [
   ...M0_MIGRATIONS,
   { version: 2, name: "m1-cards-context-lifecycle", sql: M1_SCHEMA },
+];
+
+const M3_SCHEMA = `
+CREATE TABLE schedules (
+  schedule_id            TEXT PRIMARY KEY,
+  persona                TEXT NOT NULL DEFAULT 'default',
+  name                   TEXT NOT NULL,
+  kind                   TEXT NOT NULL CHECK (kind IN ('once', 'daily', 'interval', 'heartbeat')),
+  spec_json              TEXT NOT NULL,
+  task_json              TEXT NOT NULL,
+  enabled                INTEGER NOT NULL DEFAULT 1,
+  created_by             TEXT NOT NULL CHECK (created_by IN ('user', 'agent')),
+  source_conversation_id TEXT,
+  next_run_at            TEXT NOT NULL,
+  last_run_at            TEXT,
+  last_status            TEXT CHECK (last_status IN ('ok', 'silent', 'notify', 'error')),
+  last_error             TEXT,
+  run_count              INTEGER NOT NULL DEFAULT 0,
+  created_at             TEXT NOT NULL,
+  updated_at             TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE schedule_runs (
+  run_id          TEXT PRIMARY KEY,
+  schedule_id     TEXT NOT NULL REFERENCES schedules (schedule_id) ON DELETE CASCADE,
+  conversation_id TEXT,
+  started_at      TEXT NOT NULL,
+  finished_at     TEXT,
+  status          TEXT NOT NULL CHECK (status IN ('ok', 'silent', 'notify', 'error', 'cancelled')),
+  error           TEXT
+) STRICT;
+
+CREATE INDEX schedule_runs_by_schedule ON schedule_runs (schedule_id, started_at);
+
+CREATE TABLE notifications (
+  notification_id        TEXT PRIMARY KEY,
+  kind                   TEXT NOT NULL CHECK (kind IN ('schedule', 'heartbeat', 'distillation')),
+  title                  TEXT NOT NULL,
+  body_md                TEXT NOT NULL,
+  payload_json           TEXT NOT NULL DEFAULT '{}',
+  source_schedule_id     TEXT,
+  source_conversation_id TEXT,
+  card_id                TEXT,
+  created_at             TEXT NOT NULL,
+  read_at                TEXT
+) STRICT;
+
+CREATE INDEX notifications_by_created ON notifications (created_at DESC, notification_id DESC);
+CREATE INDEX notifications_by_unread ON notifications (read_at) WHERE read_at IS NULL;
+CREATE INDEX notifications_by_card ON notifications (card_id) WHERE card_id IS NOT NULL;
+
+CREATE TABLE pairing_sessions (
+  id                 TEXT PRIMARY KEY,
+  device_name        TEXT NOT NULL,
+  device_kind        TEXT NOT NULL CHECK (device_kind IN ('web', 'ios')),
+  short_code_hash    TEXT NOT NULL,
+  status             TEXT NOT NULL CHECK (
+                       status IN ('requested', 'approved', 'completed', 'denied', 'expired')
+                     ),
+  connection_id      TEXT NOT NULL,
+  code_attempts_used INTEGER NOT NULL DEFAULT 0,
+  created_at         TEXT NOT NULL,
+  expires_at         TEXT NOT NULL,
+  approved_at        TEXT,
+  completed_at       TEXT,
+  closed_reason      TEXT CHECK (
+                       closed_reason IN ('denied', 'expired', 'disconnected', 'attempts-exhausted')
+                     )
+) STRICT;
+
+CREATE INDEX pairing_sessions_by_status ON pairing_sessions (status, created_at);
+CREATE INDEX pairing_sessions_by_expiry ON pairing_sessions (expires_at)
+  WHERE status IN ('requested', 'approved');
+
+CREATE TABLE device_tokens (
+  id           TEXT PRIMARY KEY,
+  token_hash   TEXT NOT NULL UNIQUE,
+  prefix       TEXT NOT NULL,
+  fingerprint  TEXT NOT NULL,
+  device_name  TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  expires_at   TEXT,
+  revoked_at   TEXT,
+  last_used_at TEXT
+) STRICT;
+
+CREATE INDEX device_tokens_by_fingerprint ON device_tokens (fingerprint);
+CREATE INDEX device_tokens_by_revoked ON device_tokens (revoked_at) WHERE revoked_at IS NOT NULL;
+
+ALTER TABLE conversations ADD COLUMN origin TEXT NOT NULL DEFAULT 'user'
+  CHECK (origin IN ('user', 'schedule'));
+`;
+
+/** v3 新增的表名稱。 */
+export const M2_TABLES = [
+  "schedules",
+  "schedule_runs",
+  "notifications",
+  "pairing_sessions",
+  "device_tokens",
+] as const;
+
+/** v3 在既有表上新增的欄位。 */
+export const M2_CONVERSATION_COLUMNS = ["origin"] as const;
+
+/**
+ * v3「m2-memory-schedule-remote」一次到位的新表。
+ *
+ * `notifications.card_id` 是通知轉卡的去重鍵：重複的 `notification.create_card`
+ * 回同一張卡。`pairing_sessions` 與 `device_tokens` 是遠端配對的正本，這次只
+ * 建表與遷移，配對流程由遠端工作實作；短碼只存雜湊，明文不落地。
+ * `conversations.origin` 讓側欄不列排程背景對話。
+ */
+export const M2_MIGRATIONS: readonly Migration[] = [
+  ...M1_MIGRATIONS,
+  { version: 3, name: "m2-memory-schedule-remote", sql: M3_SCHEMA },
 ];
 
 const SCHEMA_MIGRATIONS_DDL = `
@@ -440,7 +557,7 @@ interface AppliedMigrationRow {
  * - 每個版本在單一交易內完成 SQL、`user_version` 與 `schema_migrations`。
  */
 export function migrate(db: Database, options: MigrateOptions): MigrationOutcome {
-  const migrations = options.migrations ?? M1_MIGRATIONS;
+  const migrations = options.migrations ?? M2_MIGRATIONS;
   const now = options.now ?? (() => new Date());
   db.exec(SCHEMA_MIGRATIONS_DDL);
 
