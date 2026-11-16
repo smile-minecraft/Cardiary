@@ -53,6 +53,11 @@ export type ProtocolEventIntent =
     }
   | { readonly kind: "settings-changed"; readonly payload: JsonValue }
   | { readonly kind: "models-changed"; readonly payload: JsonValue }
+  | {
+      readonly kind: "notification-changed";
+      /** 對應協定 CardiaryNotification；主機驗證後才覆寫。 */
+      readonly notification: JsonValue;
+    }
   | { readonly kind: "module-changed"; readonly payload: JsonValue }
   | { readonly kind: "board-changed"; readonly boardId: string; readonly payload: JsonValue }
   | {

@@ -55,6 +55,8 @@ export const HOST_SERVICE_NAMES = {
   permissionDecision: "permission.decision",
   /** 受控子行程的建立入口；嵌入程序透過它啟動，模組不自己建立子行程。 */
   spawn: "spawn",
+  /** 受控通知服務；由排程模組提供，蒸餾用它建立通知而不自己寫儲存。 */
+  notifications: "notifications",
 } as const;
 
 /** 服務名稱的聯集；`modules.md` 第 5 節那張表。 */

@@ -66,6 +66,17 @@ export function mapEventIntent(intent: ProtocolEventIntent): EventMapping {
         ],
       };
     }
+    case "notification-changed": {
+      const notification = asObject(intent.notification);
+      if (notification === null) {
+        return { error: "notification.changed 的 notification 必須是物件" };
+      }
+      const invalid = notificationWire(notification, "notification");
+      if (invalid !== null) {
+        return { error: invalid };
+      }
+      return one("system", "notification.changed", { notification });
+    }
     case "settings-changed": {
       const payload = asObject(intent.payload);
       if (payload === null) return { error: "settings.changed 的 payload 必須是物件" };
@@ -199,6 +210,10 @@ export function validateEventPayload(type: string, payload: unknown): string | n
       );
     case "system.modules.changed":
       return checkObject(payload, "payload", new Map([["module", moduleInfo]]), ["module"]);
+    case "notification.changed":
+      return checkObject(payload, "payload", new Map([["notification", notificationWire]]), [
+        "notification",
+      ]);
     default:
       return `M1 沒有這個事件型別：${type}`;
   }
@@ -286,6 +301,24 @@ function checkObject(
   }
   return null;
 }
+
+const notificationWire: Checker = (value, path) =>
+  checkObject(
+    value,
+    path,
+    new Map([
+      ["notificationId", string],
+      ["kind", enumeration("schedule", "heartbeat", "distillation")],
+      ["title", string],
+      ["body", string],
+      ["createdAt", dateTime],
+      ["readAt", optional(dateTime)],
+      ["sourceScheduleId", optional(string)],
+      ["sourceConversationId", optional(string)],
+      ["payload", objectJson],
+    ]),
+    ["notificationId", "kind", "title", "body", "createdAt", "payload"],
+  );
 
 const sessionArchive: Checker = (value, path) =>
   checkObject(
