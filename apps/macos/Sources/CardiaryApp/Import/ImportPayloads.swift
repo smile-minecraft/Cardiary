@@ -11,6 +11,10 @@ public enum ImportSourceKind: String, CaseIterable, Codable, Sendable {
     case generic
     case hermes
     case alma
+    case codex
+    case claudeCode = "claude-code"
+    case openClaw = "openclaw"
+    case claude
 }
 
 /// 六類中介格式。
@@ -72,6 +76,7 @@ public struct ImportPreviewItem: Codable, Identifiable, Equatable, Sendable {
     /// 來源的 importance；Alma 是 0 到 1 的小數。
     public let importance: Double?
     public let duplicateCardId: String?
+    public var origin: String? = nil
 }
 
 /// 預覽的一個技能。
