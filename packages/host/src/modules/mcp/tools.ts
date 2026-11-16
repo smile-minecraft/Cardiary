@@ -7,7 +7,13 @@
  * `mcp.<server>.<tool>`。這讓「工具延遲載入」在引擎的靜態工具定義下
  * 仍然成立，也讓同名檢查發生在真正註冊之前。
  */
-import type { JsonSchema, JsonValue, ToolBundleDraft, ToolDefinition, ToolOutcome } from "@cardiary/engine-adapter";
+import type {
+  JsonSchema,
+  JsonValue,
+  ToolBundleDraft,
+  ToolDefinition,
+  ToolOutcome,
+} from "@cardiary/engine-adapter";
 import type { McpServerRecord } from "@cardiary/domain";
 import {
   assertRegisterableToolName,
@@ -63,7 +69,10 @@ export function buildBundleDraft(runtime: McpServerRuntime): ToolBundleDraft {
                 visible.length === 0
                   ? `伺服器「${name}」沒有可用的工具。`
                   : visible
-                      .map((tool) => `- ${tool.name}${tool.description ? `：${tool.description}` : ""}`)
+                      .map(
+                        (tool) =>
+                          `- ${tool.name}${tool.description ? `：${tool.description}` : ""}`,
+                      )
                       .join("\n"),
             },
           ],

@@ -16,7 +16,7 @@ import {
   type SandboxProfileOptions,
 } from "../../permissions/sandbox.js";
 
-export interface McpStdioSandboxOptions extends SandboxProfileOptions {
+export interface McpStdioSandboxOptions extends Omit<SandboxProfileOptions, "workingDir"> {
   readonly folderRoot: string;
   readonly serverId: string;
 }
@@ -29,8 +29,10 @@ export function createMcpStdioSandbox(options: McpStdioSandboxOptions): CommandS
   const workingDir = path.join(options.folderRoot, "tmp", "mcp", options.serverId);
   mkdirSync(workingDir, { recursive: true });
   const base = createCommandSandbox({
-    ...options,
+    folderRoot: options.folderRoot,
     workingDir,
+    ...(options.homeDir === undefined ? {} : { homeDir: options.homeDir }),
+    ...(options.appBundlePath === undefined ? {} : { appBundlePath: options.appBundlePath }),
   });
   if (base === null) {
     return null;
@@ -44,8 +46,10 @@ export function createMcpStdioSandbox(options: McpStdioSandboxOptions): CommandS
 /** 測試與文件用的 profile 產生器；與實際啟動使用的規則同源。 */
 export function buildMcpStdioProfile(options: McpStdioSandboxOptions): string {
   const base = buildSandboxProfile({
-    ...options,
+    folderRoot: options.folderRoot,
     workingDir: path.join(options.folderRoot, "tmp", "mcp", options.serverId),
+    ...(options.homeDir === undefined ? {} : { homeDir: options.homeDir }),
+    ...(options.appBundlePath === undefined ? {} : { appBundlePath: options.appBundlePath }),
   });
   return `${base}\n; MCP stdio 一律不給網路\n(deny network*)\n`;
 }

@@ -11,11 +11,7 @@
  *   閘道另外會把未知的 `mcp.*` 工具當成需要人工審批。
  */
 import type { ToolBundleDraft } from "@cardiary/engine-adapter";
-import {
-  McpConfigError,
-  type McpServerInput,
-  type McpServerRecord,
-} from "@cardiary/domain";
+import { McpConfigError, type McpServerInput, type McpServerRecord } from "@cardiary/domain";
 import type {
   HostModule,
   ModuleActivationContext,
@@ -27,11 +23,7 @@ import { FolderLayout, McpServerStore } from "@cardiary/storage";
 import { ProtocolHandlerError } from "../contract.js";
 import type { HostEngine } from "../../engine/types.js";
 import type { SpawnRegistry } from "../../spawn/wrapper.js";
-import {
-  createMcpClient,
-  McpClientError,
-  type McpClientFactory,
-} from "./client.js";
+import { createMcpClient, McpClientError, type McpClientFactory } from "./client.js";
 import { manifest } from "./manifest.js";
 import { registerMcpProtocol, toServerInfo, type McpController } from "./protocol.js";
 import { buildBundleDraft, type McpServerRuntime } from "./tools.js";
@@ -74,7 +66,6 @@ export async function activateMcpModule(
   const engine = options.engine ?? context.services.host.require<HostEngine>("engine");
   const spawn = options.spawn ?? context.services.host.require<SpawnRegistry>("spawn");
   const clientFactory = options.clientFactory ?? createMcpClient;
-  const now = options.now ?? (() => new Date());
   const logger = context.services.logger;
   const protocol = context.services.protocol;
 
@@ -121,8 +112,7 @@ export async function activateMcpModule(
           await client.close();
           return;
         }
-        let runtime!: McpServerRuntime;
-        runtime = {
+        const runtime: McpServerRuntime = {
           record,
           client,
           refresh: () => {
@@ -134,7 +124,9 @@ export async function activateMcpModule(
             }
           },
           state: "ready",
-          tools,
+          // 啟動時的 tools/list 只用來確認連線；工具定義要等模型呼叫
+          // list_tools 之後才註冊，讓對話開場只看到兩個入口工具。
+          tools: null,
         };
         registerBundle(runtime);
         failures.delete(record.serverId);
@@ -315,7 +307,8 @@ export async function activateMcpModule(
   };
 }
 
-function describeTarget(input: McpServerInput): { label: string; value: string }[] {  const target =
+function describeTarget(input: McpServerInput): { label: string; value: string }[] {
+  const target =
     input.transport === "stdio"
       ? [input.command ?? "", ...(input.args ?? [])].join(" ")
       : (input.url ?? "");
@@ -340,17 +333,17 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** 實際載入時由模組主機建立；狀態跟著 activation context。 */
-const handles = new WeakMap<ModuleActivationContext, McpModuleHandle>();
+/** 實際載入時由模組主機建立；同一行程只會啟用一次。 */
+let activeHandle: McpModuleHandle | null = null;
 
 export const hostModule: HostModule = {
   manifest,
   async activate(context) {
-    handles.set(context, await activateMcpModule(context));
+    activeHandle = await activateMcpModule(context);
   },
-  async deactivate(context) {
-    const handle = handles.get(context);
-    handles.delete(context);
+  async deactivate() {
+    const handle = activeHandle;
+    activeHandle = null;
     await handle?.dispose();
   },
 };

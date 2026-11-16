@@ -101,7 +101,7 @@ export function validateMcpServerInput(input: McpServerInput): McpServerInput {
       name,
       transport: "stdio",
       command,
-      args,
+      ...(args === undefined ? {} : { args }),
       allowedHosts: [],
     };
   }
@@ -193,18 +193,21 @@ function parseRecord(value: unknown, seen: Set<string>): McpServerRecord {
   const updatedAt = requireIsoInstant(value.updatedAt, serverId);
   let base: McpServerInput;
   if (value.transport === "stdio") {
+    const command = optionalString(value.command, "command");
+    const args = optionalStringArray(value.args, "args");
     base = {
       name,
       transport: "stdio",
-      command: optionalString(value.command, "command"),
-      args: optionalStringArray(value.args, "args"),
+      ...(command === undefined ? {} : { command }),
+      ...(args === undefined ? {} : { args }),
       allowedHosts: requireStringArray(value.allowedHosts, "allowedHosts"),
     };
   } else {
+    const url = optionalString(value.url, "url");
     base = {
       name,
       transport: "http",
-      url: optionalString(value.url, "url"),
+      ...(url === undefined ? {} : { url }),
       allowedHosts: requireStringArray(value.allowedHosts, "allowedHosts"),
     };
   }
@@ -256,7 +259,11 @@ function normalizeHostsOrThrow(raw: readonly string[]): string[] {
   }
 }
 
-function assertKnownKeys(value: Record<string, unknown>, allowed: Set<string>, where: string): void {
+function assertKnownKeys(
+  value: Record<string, unknown>,
+  allowed: Set<string>,
+  where: string,
+): void {
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
       throw new McpConfigError(`${where} 有不認識的欄位：${key}`);

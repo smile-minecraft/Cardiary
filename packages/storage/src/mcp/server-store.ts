@@ -119,10 +119,7 @@ export class McpServerStore {
     });
   }
 
-  #update(
-    serverId: string,
-    change: (server: McpServerRecord) => McpServerRecord,
-  ): McpServerRecord {
+  #update(serverId: string, change: (server: McpServerRecord) => McpServerRecord): McpServerRecord {
     const servers = this.#readAll();
     const current = findOrThrow(servers, serverId);
     const updated: McpServerRecord = { ...change(current), updatedAt: nowIso(this.#now) };

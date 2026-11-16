@@ -42,10 +42,7 @@ export interface McpClientContext {
   readonly homeDir?: string;
 }
 
-export type McpClientFactory = (
-  server: McpServerRecord,
-  context: McpClientContext,
-) => McpClient;
+export type McpClientFactory = (server: McpServerRecord, context: McpClientContext) => McpClient;
 
 /** 連線或協定失敗。 */
 export class McpClientError extends Error {
@@ -64,14 +61,11 @@ const MAX_REDIRECTS = 5;
 const MAX_TOOL_PAGES = 20;
 
 /** 依設定建立用戶端；不認識的傳輸方式直接拒絕。 */
-export function createMcpClient(
-  server: McpServerRecord,
-  context: McpClientContext,
-): McpClient {
+export function createMcpClient(server: McpServerRecord, context: McpClientContext): McpClient {
   if (server.transport === "stdio") {
     return new StdioMcpClient(server, context);
   }
-  return new HttpMcpClient(server, context);
+  return new HttpMcpClient(server);
 }
 
 // ── stdio ──────────────────────────────────────────────────────────────────
@@ -93,10 +87,7 @@ class StdioMcpClient implements McpClient {
     return this.#listTools();
   }
 
-  async callTool(
-    name: string,
-    args: Readonly<Record<string, unknown>>,
-  ): Promise<McpCallResult> {
+  async callTool(name: string, args: Readonly<Record<string, unknown>>): Promise<McpCallResult> {
     await this.#connect();
     const result = await this.#rpc!.request("tools/call", { name, arguments: args });
     return normalizeCallResult(result);
@@ -145,12 +136,7 @@ class StdioMcpClient implements McpClient {
         "無法套用 stdio 沙盒（需要 macOS 的 sandbox-exec），伺服器不啟動",
       );
     }
-    const workingDir = path.join(
-      this.#context.folderRoot,
-      "tmp",
-      "mcp",
-      this.#server.serverId,
-    );
+    const workingDir = path.join(this.#context.folderRoot, "tmp", "mcp", this.#server.serverId);
     const home = path.join(workingDir, "home");
     mkdirSync(home, { recursive: true });
     const child = this.#context.spawn.spawn({
@@ -195,10 +181,7 @@ class StdioMcpClient implements McpClient {
     const tools: McpToolDescriptor[] = [];
     let cursor: string | undefined;
     for (let page = 0; page < MAX_TOOL_PAGES; page += 1) {
-      const result = await rpc.request(
-        "tools/list",
-        cursor === undefined ? {} : { cursor },
-      );
+      const result = await rpc.request("tools/list", cursor === undefined ? {} : { cursor });
       const parsed = parseToolsList(result);
       for (const tool of parsed.tools) {
         if (!seen.has(tool.name)) {
@@ -355,15 +338,13 @@ class StdioRpc {
 
 class HttpMcpClient implements McpClient {
   readonly #server: McpServerRecord;
-  readonly #context: McpClientContext;
   #sessionId: string | null = null;
   #nextId = 1;
   #initialized = false;
   #connecting: Promise<void> | null = null;
 
-  constructor(server: McpServerRecord, context: McpClientContext) {
+  constructor(server: McpServerRecord) {
     this.#server = server;
-    this.#context = context;
   }
 
   async listTools(): Promise<McpToolDescriptor[]> {
@@ -388,10 +369,7 @@ class HttpMcpClient implements McpClient {
     throw new McpClientError("too_many_pages", "MCP 工具清單超過分頁上限");
   }
 
-  async callTool(
-    name: string,
-    args: Readonly<Record<string, unknown>>,
-  ): Promise<McpCallResult> {
+  async callTool(name: string, args: Readonly<Record<string, unknown>>): Promise<McpCallResult> {
     await this.#connect();
     return normalizeCallResult(await this.#request("tools/call", { name, arguments: args }));
   }
@@ -567,10 +545,7 @@ function normalizeCallResult(result: unknown): McpCallResult {
 
 async function responseResult(response: Response, expectedId?: number): Promise<unknown> {
   if (!response.ok) {
-    throw new McpClientError(
-      "http_error",
-      `MCP 伺服器回應 HTTP ${String(response.status)}`,
-    );
+    throw new McpClientError("http_error", `MCP 伺服器回應 HTTP ${String(response.status)}`);
   }
   const contentType = response.headers.get("content-type") ?? "";
   const body = await response.text();
