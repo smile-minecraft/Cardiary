@@ -16,6 +16,7 @@ import {
   createModelInvoker,
   delegationCandidate,
   evaluateShellCommand,
+  isHumanSettingsPath,
   isWithin,
   matchesAllowedDomain,
   parseDomainRules,
@@ -257,9 +258,10 @@ function resolveDelegationAction(toolName: string, input: JsonValue): Permission
 /**
  * 限時授權是否涵蓋這個動作。
  *
- * 封閉清單：檔案工具要比對路徑；shell 的路徑範圍約束不了副作用，所以只
- * 接受純唯讀文法；設定、MCP、外部代理不論工具名是什麼都不放行。卡片
- * 建立／編修／刪除沒有路徑可查，只能靠工具名命中。
+ * 封閉清單：檔案工具要比對路徑，寫入與刪除另外排除「僅限人類」的狀態檔；
+ * shell 的路徑範圍約束不了副作用，所以只接受純唯讀文法；設定、MCP、外部
+ * 代理不論工具名是什麼都不放行。卡片建立／編修／刪除沒有路徑可查，只能
+ * 靠工具名命中。
  */
 function allowAllCovers(
   grant: AllowAllGrant,
@@ -277,7 +279,15 @@ function allowAllCovers(
     case "fs.write":
     case "fs.delete": {
       const resolved = resolvePath(action.path, options.roots);
-      return resolved.ok && grant.paths.some((root) => isWithin(root, resolved.path.resolved));
+      if (!resolved.ok || !grant.paths.some((root) => isWithin(root, resolved.path.resolved))) {
+        return false;
+      }
+      if (action.kind === "fs.write" || action.kind === "fs.delete") {
+        // 狀態資料庫、白名單與 MCP 伺服器設定是「僅限人類」的檔案。硬規則
+        // 已經拒絕一次，這裡是第二道：授權路徑涵蓋整個資料夾也一樣不放行。
+        return !isHumanSettingsPath(resolved.path.resolved, options.roots.folderRoot);
+      }
+      return true;
     }
     case "shell.exec": {
       if (grant.paths.length === 0) {
