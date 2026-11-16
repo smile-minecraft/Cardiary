@@ -20,12 +20,12 @@ export function registerMemoryProtocol(options: {
       const notificationId = stringOf(payload.notificationId);
       const itemId = stringOf(payload.itemId);
       if (notificationId === null || itemId === null) {
-        return { ok: false, reason: "invalid-input" } as unknown as JsonValue;
+        return { data: { ok: false, reason: "invalid-input" } } as unknown as JsonValue;
       }
       const outcome = await undoItem(options.undo, notificationId, itemId);
-      return undoOutcomeToJson(outcome);
+      return { data: undoOutcomeToJson(outcome) } as unknown as JsonValue;
     }
-    return { ok: false, reason: "not-found" } as unknown as JsonValue;
+    return { data: { ok: false, reason: "not-found" } } as unknown as JsonValue;
   });
 }
 
