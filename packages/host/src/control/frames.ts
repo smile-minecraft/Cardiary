@@ -10,6 +10,10 @@ export const CONTROL_ROUTES = new Set([
   "control.pause",
   "control.resume",
   "control.shutdown",
+  "control.pairing.approve",
+  "control.pairing.deny",
+  "control.devices.list",
+  "control.devices.revoke",
 ]);
 
 /** 服務 → 殼的系統能力代理。 */
@@ -22,7 +26,11 @@ export const BROKER_ROUTES = new Set([
 ]);
 
 /** 服務 → 殼的通知。 */
-export const NOTIFY_ROUTES = new Set(["notify.fatal", "notify.maintenance"]);
+export const NOTIFY_ROUTES = new Set([
+  "notify.fatal",
+  "notify.maintenance",
+  "notify.pairing_requested",
+]);
 
 export interface ControlAuth {
   readonly token: string;

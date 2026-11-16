@@ -71,6 +71,17 @@ import {
   SERVER_VERSION,
 } from "../version.js";
 import { ClientConnection } from "./connection.js";
+import {
+  createRemoteStack,
+  handlePairingBegin,
+  handlePairingComplete,
+  checkDeviceTokenActive,
+  RemoteFailure,
+  type RemoteStack,
+} from "../remote/index.js";
+import { createStaticHandler, type StaticHandler } from "../remote/static.js";
+import { hashDeviceToken, isDeviceTokenShape, verifyDeviceToken } from "@cardiary/domain";
+import { settingLevel } from "../settings/catalog.js";
 import { mapEventIntent, validateEventPayload } from "./events.js";
 import { DEFAULT_LIMITS, type GatewayLimits } from "./limits.js";
 import { systemStatus, type HostStatusInput } from "./status.js";
@@ -151,6 +162,19 @@ export interface GatewayOptions {
   readonly cancelToolProcesses?: (deadlineMs: number) => Promise<number>;
   /** 測試用故障注入：讓第一個 request_dedupe complete 不寫入，模擬中斷窗口。 */
   readonly faultSkipDedupeComplete?: boolean;
+  /**
+   * 遠端配對堆疊；省略時閘道自己建一份記憶體實作。
+   *
+   * 正式實作接上 `device_tokens` 表之前，重啟會讓已配對裝置失效。
+   */
+  readonly remote?: RemoteStack;
+  /**
+   * 網頁客戶端靜態檔案的目錄；`null` 關閉靜態服務。
+   *
+   * 省略時看 `CARDIARY_WEB_ROOT` 環境變數；再省略看 `apps/web/dist`
+   * （以目前的工作目錄解析）。
+   */
+  readonly webRoot?: string | null;
 }
 
 export class RequestFailure extends Error {
@@ -241,6 +265,8 @@ export class Gateway {
   #storageFailureHandler: ((detail: string) => void) | null = null;
   #storageFailed = false;
   #faultSkipComplete: boolean;
+  readonly #remote: RemoteStack;
+  readonly #staticHandler: StaticHandler | null;
   #http: Server | null = null;
   #wss: WebSocketServer | null = null;
   #heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -259,6 +285,12 @@ export class Gateway {
     this.#logger = options.logger;
     this.#clock = options.clock ?? { now: () => new Date() };
     this.#faultSkipComplete = options.faultSkipDedupeComplete === true;
+    this.#remote = options.remote ?? createRemoteStack();
+    const webRoot =
+      options.webRoot === undefined
+        ? (process.env.CARDIARY_WEB_ROOT ?? "apps/web/dist")
+        : options.webRoot;
+    this.#staticHandler = webRoot === null ? null : createStaticHandler(webRoot);
     this.#modules = options.modules ?? null;
     for (const [namespace, handler] of options.moduleHandlers ?? []) {
       this.#moduleHandlers.set(namespace, handler);
@@ -280,6 +312,27 @@ export class Gateway {
   /** 接上（或換掉）第一方模組主機；組合根在載入模組之後呼叫。 */
   setModuleHost(modules: ModuleHostBridge | null): void {
     this.#modules = modules;
+  }
+
+  /** 遠端配對堆疊；組合根用它註冊控制通道路由。 */
+  get remote(): RemoteStack {
+    return this.#remote;
+  }
+
+  /**
+   * 關閉以指定裝置 Token 認證的所有連線；撤銷裝置時呼叫。
+   *
+   * 回傳關閉的連線數；連線關閉前會先把訂閱清空（`close` 的語義）。
+   */
+  closeDeviceConnections(deviceId: string): number {
+    let closed = 0;
+    for (const connection of this.#connections.values()) {
+      if (connection.deviceId === deviceId) {
+        connection.close(1008, "device_revoked");
+        closed += 1;
+      }
+    }
+    return closed;
   }
 
   /** 由服務接上：儲存失效時停止寫入、送 notify.fatal、關閉客戶端。 */
@@ -534,6 +587,7 @@ export class Gateway {
       sendTimeoutMs: this.limits.sendTimeoutMs,
       onClose: () => {
         this.#connections.delete(connection.id);
+        this.#remote.pairings.disconnect(connection.id, this.#remote.now());
       },
     });
     connection.version = 0;
@@ -546,11 +600,11 @@ export class Gateway {
         .then(() => connection.close(1008, "auth"));
     };
 
-    if (origin !== undefined && !isLoopbackOrigin(origin)) {
+    if (origin !== undefined && !isAllowedOrigin(origin, request.headers.host)) {
       reject("auth_invalid", "不接受的來源。");
       return;
     }
-    if (headerAuth !== null && !isValidToken(headerAuth)) {
+    if (headerAuth !== null && !isValidToken(headerAuth) && !isDeviceTokenShape(headerAuth)) {
       reject("auth_invalid", "Token 格式不正確。");
       return;
     }
@@ -635,14 +689,6 @@ export class Gateway {
       await this.#handleHello(connection, request, headerAuth);
       return;
     }
-    if (!connection.authenticated) {
-      await this.#sendError(
-        connection,
-        protocolError("not_authenticated", "尚未完成 system.hello。"),
-        id,
-      );
-      return;
-    }
     if (!this.#accepting) {
       await this.#sendError(
         connection,
@@ -652,6 +698,51 @@ export class Gateway {
         id,
       );
       return;
+    }
+    if (!connection.authenticated) {
+      // 未認證連線只允許配對開始與（同連線）完成；其餘一律拒絕。
+      try {
+        if (type === "pairing.begin") {
+          const frame = await handlePairingBegin(this.#remote, connection.id, request);
+          await connection.send(frame as Parameters<ClientConnection["send"]>[0]);
+          return;
+        }
+        if (type === "pairing.complete") {
+          const { frame } = await handlePairingComplete(this.#remote, connection.id, request);
+          await connection.send(frame as Parameters<ClientConnection["send"]>[0]);
+          // 設計：配對完成後結束連線，客戶端以裝置 Token 重連。
+          connection.close(1000, "paired");
+          return;
+        }
+      } catch (error) {
+        if (error instanceof RemoteFailure) {
+          await this.#sendError(connection, error.info, id);
+          return;
+        }
+        throw error;
+      }
+      await this.#sendError(
+        connection,
+        protocolError("not_authenticated", "尚未完成 system.hello。"),
+        id,
+      );
+      return;
+    }
+    if (connection.deviceTokenHash !== null) {
+      // 撤銷後下一個請求就失敗，不只關既有連線。
+      const check = await checkDeviceTokenActive(this.#remote, connection.deviceTokenHash);
+      if (!check.ok) {
+        await this.#sendError(
+          connection,
+          protocolError(
+            check.code,
+            check.code === "auth_expired" ? "裝置 Token 已過期。" : "裝置 Token 已失效。",
+          ),
+          id,
+        );
+        connection.close(1008, "device_revoked");
+        return;
+      }
     }
 
     let response: ServerFrame | Unknown;
@@ -743,7 +834,20 @@ export class Gateway {
       return;
     }
     const token = headerAuth ?? messageToken;
-    if (token === null || !constantTimeEqual(token, this.#options.clientToken)) {
+    const matchesClient = token !== null && constantTimeEqual(token, this.#options.clientToken);
+    let deviceId: string | null = null;
+    let deviceTokenHash: string | null = null;
+    if (!matchesClient && token !== null && isDeviceTokenShape(token)) {
+      // 裝置 Token：雜湊比對 + 撤銷／到期檢查（`verifyDeviceToken` fail closed）。
+      const hash = hashDeviceToken(token);
+      const record = await this.#remote.devices.findByHash(hash);
+      const verdict = verifyDeviceToken(token, record, this.#remote.now());
+      if (verdict.ok) {
+        deviceId = verdict.deviceId;
+        deviceTokenHash = hash;
+      }
+    }
+    if (token === null || (!matchesClient && deviceId === null)) {
       connection.authFailures += 1;
       await this.#sendError(connection, protocolError("auth_invalid", "Token 不正確。"));
       if (connection.authFailures >= 3) connection.close(1008, "auth_invalid");
@@ -765,6 +869,8 @@ export class Gateway {
     connection.authenticated = true;
     connection.version = overlapHigh;
     connection.clientInstanceId = client.instanceId;
+    connection.deviceId = deviceId;
+    connection.deviceTokenHash = deviceTokenHash;
     const resume = payload.resume as Unknown | undefined;
     if (typeof resume === "object" && resume !== null && typeof resume.systemSeq === "number") {
       connection.resumeSystemSeq = resume.systemSeq;
@@ -794,6 +900,17 @@ export class Gateway {
     connection: ClientConnection,
     request: ParsedRequest,
   ): Promise<ServerFrame | Unknown> {
+    if (connection.deviceId !== null && request.type === "system.settings.set") {
+      // 遠端裝置不能改僅限人類的設定；未列出的鍵一律視為僅限人類。
+      const denied = firstHumanOnlySettingKey(request.payload);
+      if (denied !== null) {
+        throw new RequestFailure(
+          protocolError("permission_denied", "遠端裝置不能修改僅限人類的設定。", {
+            details: { reason: "human_only", key: denied },
+          }),
+        );
+      }
+    }
     // 分派順序（modules.md 第 3.2 節）：精確型別 → 核心 switch → 前綴 →
     // module.* → unsupported。精確型別在最前面，模組才能用 `session.archive`
     // 擴充核心命名空間；核心型別已在註冊時被保留清單擋下。
@@ -2336,8 +2453,26 @@ export class Gateway {
       });
       response.end(data);
     };
+    if (!url.pathname.startsWith("/v1/")) {
+      // 網頁客戶端的靜態檔案；不需要 Token，頁面先載入再走配對。
+      if (this.#staticHandler?.(request, response) === true) return;
+      sendJson(404, errorBody("not_found", "沒有這個端點。"));
+      return;
+    }
+    const origin = request.headers.origin;
+    if (origin !== undefined && !isAllowedOrigin(origin, request.headers.host)) {
+      sendJson(403, errorBody("permission_denied", "不接受的來源。"));
+      return;
+    }
     const auth = parseBearer(request.headers.authorization);
-    if (auth === null || !constantTimeEqual(auth, this.#options.clientToken)) {
+    const clientOk = auth !== null && constantTimeEqual(auth, this.#options.clientToken);
+    let deviceOk = false;
+    if (!clientOk && auth !== null && isDeviceTokenShape(auth)) {
+      const hash = hashDeviceToken(auth);
+      const record = await this.#remote.devices.findByHash(hash);
+      deviceOk = verifyDeviceToken(auth, record, this.#remote.now()).ok;
+    }
+    if (auth === null || (!clientOk && !deviceOk)) {
       sendJson(401, {
         v: PROTOCOL_VERSION,
         kind: "error",
@@ -2640,6 +2775,38 @@ function isLoopbackOrigin(origin: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * WebSocket／HTTP 的 Origin 規則：
+ * - 沒有 Origin（原生客戶端）：允許，Token 仍然必須通過。
+ * - loopback：允許，維持本機客戶端行為。
+ * - 其他：Origin 的 host 必須與請求的 Host 標頭一致（同源穿透），
+ *   否則視為跨站請求拒絕。標頭只供顯示與診斷，不授權任何東西。
+ */
+function isAllowedOrigin(origin: string, hostHeader: string | undefined): boolean {
+  if (isLoopbackOrigin(origin)) return true;
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+    if (hostHeader === undefined) return false;
+    return url.host.toLowerCase() === hostHeader.trim().toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+/** 遠端裝置不得修改的設定：`human-only`（含未列在目錄裡的鍵）。 */
+function firstHumanOnlySettingKey(payload: JSONObject): string | null {
+  const changes = payload.changes;
+  if (!Array.isArray(changes)) return null;
+  for (const change of changes) {
+    if (typeof change !== "object" || change === null || Array.isArray(change)) continue;
+    const key = (change as Record<string, unknown>).key;
+    if (typeof key !== "string") continue;
+    if (settingLevel(key, "human-only") === "human-only") return key;
+  }
+  return null;
 }
 
 /**

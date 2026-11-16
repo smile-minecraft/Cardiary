@@ -14,6 +14,7 @@ import type {
 } from "@cardiary/engine-adapter";
 
 import { startHost, UnavailableCredentials, type RunningHost } from "./bootstrap.js";
+import { registerRemoteControlRoutes } from "./remote/control.js";
 import type { FolderInfo } from "./control/broker.js";
 import { BrokerClient, BrokerCredentialSource } from "./control/broker.js";
 import { ControlChannel } from "./control/channel.js";
@@ -541,6 +542,15 @@ async function runControl(
       process.exit(0);
     });
     return toJson(result);
+  });
+  // 遠端配對：核准／拒絕／列出／撤銷只走這條私有控制通道；公開協定沒有入口。
+  host.gateway.remote.notifyPairingRequested = (notice) => {
+    void channel
+      .notify("notify.pairing_requested", JSON.parse(JSON.stringify(notice)) as JSONObject)
+      .catch(() => undefined);
+  };
+  registerRemoteControlRoutes(channel, host.gateway.remote, {
+    closeDeviceConnections: (deviceId) => host.gateway.closeDeviceConnections(deviceId),
   });
   const ready: ReadyFrame = {
     type: "ready",
