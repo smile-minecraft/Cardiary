@@ -21,6 +21,16 @@ export type {
 } from "./gateway/status.js";
 export { StreamLog } from "./gateway/streams.js";
 export { StreamingBuffer } from "./gateway/textBuffer.js";
+export {
+  createRemoteStack,
+  createStaticHandler,
+  PairingRegistry,
+  registerRemoteControlRoutes,
+  type RemoteStack,
+  type PairingNotice,
+} from "./remote/index.js";
+export type { PairingRequestContext } from "./remote/pairing-handlers.js";
+export { RemoteFailure } from "./remote/pairing-handlers.js";
 export { ControlChannel } from "./control/channel.js";
 export { installStdoutGuard, createProtocolSink } from "./control/stdoutGuard.js";
 export type { ProtocolSink } from "./control/stdoutGuard.js";
