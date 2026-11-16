@@ -118,6 +118,15 @@ interface ContextAttachService {
   attach(sessionId: string): Promise<void>;
 }
 
+/** 開局發牌服務；閘道只用 `dealIfNeeded`。 */
+interface DealingServiceLike {
+  dealIfNeeded(input: {
+    readonly sessionId: string;
+    readonly requestText: string;
+    readonly turnIndex: number;
+  }): Promise<unknown>;
+}
+
 export interface GatewayOptions {
   readonly engine: HostEngine;
   readonly storage: StorageBundle;
@@ -1751,6 +1760,29 @@ export class Gateway {
   }
 
   /**
+   * 開局發牌：第一則訊息把挑好的卡裝進上下文第 4 層。
+   *
+   * 模組可能還沒啟用或已停用，呼叫當下才取服務；失敗只記警告，對話照常開始。
+   */
+  async #dealOpeningIfNeeded(
+    sessionId: string,
+    requestText: string,
+    turnIndex: number,
+  ): Promise<void> {
+    const modules = this.#modules as ModuleHostWithServices | null;
+    const dealing = modules?.hostServices?.get<DealingServiceLike>(HOST_SERVICE_NAMES.dealing);
+    if (dealing === undefined) return;
+    try {
+      await dealing.dealIfNeeded({ sessionId, requestText, turnIndex });
+    } catch (error) {
+      this.#logger.warn("開局發牌失敗；對話照常開始", {
+        sessionId,
+        message: errorMessage(error),
+      });
+    }
+  }
+
+  /**
    * 新對話釘選的工具組：啟用中的模組提供的版本，加上示範工具。
    *
    * 模組主機在載入完成後才接到閘道，所以每次建立對話都重新取，不快取。
@@ -1930,6 +1962,11 @@ export class Gateway {
       } catch {
         // 已經結束的回合不需要再取消。
       }
+    }
+    // 開局發牌要在引擎開始回合之前裝進上下文；失敗只記警告，不擋對話。
+    // 只對「還沒有任何訊息」的對話呼叫；服務自己會檢查第 4 層是否已寫過。
+    if (state.messageCount === 0) {
+      await this.#dealOpeningIfNeeded(sessionId, text, state.messageCount);
     }
     const sendRequest = {
       conversationId: sessionId,

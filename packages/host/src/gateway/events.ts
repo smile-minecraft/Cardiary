@@ -343,6 +343,8 @@ const contextEntry: Checker = (value, path) =>
       ["tokenEstimate", integer(0)],
       ["state", enumeration("active", "pending-removal")],
       ["position", integer(0)],
+      ["dealProbability", optional(number)],
+      ["dealSource", optional(enumeration("system-one", "retrieval", "manual"))],
     ]),
     ["entryId", "layer", "title", "tokenEstimate", "state", "position"],
   );

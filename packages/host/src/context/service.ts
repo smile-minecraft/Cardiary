@@ -13,6 +13,7 @@ import {
   isCompactionDue,
   type ContextService,
   type ContextView,
+  type DealtCard,
 } from "@cardiary/domain";
 import type { ConversationId, EngineSubscription, JsonValue } from "@cardiary/engine-adapter";
 import type { ModelInvoker, ProtocolEventEmitter } from "@cardiary/module-api";
@@ -104,6 +105,23 @@ export class ContextServiceImpl implements ContextService {
     await this.attach(input.sessionId);
     const view = await this.#assembler.removeCard(input.sessionId, input.cardId);
     this.#emitChanged(view);
+    return view;
+  }
+
+  /**
+   * 開局發牌：把挑好的卡裝進第 4 層、推前綴。
+   *
+   * 這裡刻意不送 `context-changed` 事件：發牌發生在第一則訊息、回合開始之前，
+   * 若在這裡送事件，會先佔用 session 串流的序號，讓 `turn.started` 從 1 變成 2，
+   * 破壞既有的串流契約。客戶端在開啟檢視欄时会用 `context.get` 讀到這一批卡。
+   */
+  async applyOpeningDeal(input: {
+    readonly sessionId: string;
+    readonly cards: readonly DealtCard[];
+  }): Promise<ContextView> {
+    await this.attach(input.sessionId);
+    const view = await this.#assembler.appendOpeningMemory(input.sessionId, input.cards);
+    await this.#pushPrefix(input.sessionId);
     return view;
   }
 

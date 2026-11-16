@@ -47,6 +47,8 @@ export const HOST_SERVICE_NAMES = {
   models: "models",
   recognition: "recognition",
   blobs: "blobs",
+  /** 發牌服務；由發牌模組提供，閘道在 `session.send_message` 前呼叫。 */
+  dealing: "dealing",
   /** 主機接好的卡片儲存；由 `bootstrap` 提供，卡片模組唯一的使用者。 */
   cardStorage: "cardStorage",
   /** 工具權限閘道；由本機工具（Phase 2）提供，引擎的回呼在呼叫當下才取。 */
