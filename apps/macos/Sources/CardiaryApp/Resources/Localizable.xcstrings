@@ -341,6 +341,23 @@
         }
       }
     },
+    "conversationArchive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive conversation"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "封存對話"
+          }
+        }
+      }
+    },
     "conversationDeliveryQueue": {
       "extractionState": "manual",
       "localizations": {

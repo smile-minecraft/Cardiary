@@ -44,13 +44,7 @@ public struct ArchiveDeletionPreview: Identifiable, Equatable, Sendable {
     }
 }
 
-/// 封存區的狀態與請求。
-///
-/// 目前的 `session.list` 不帶封存資訊，所以清單有兩個來源，取聯集：
-/// 主機在 `SessionSummary.archive` 帶上資訊時直接採用；本機只收得到
-/// `session.archived`／`session.unarchived`／`session.deleted` 事件時，
-/// 從事件追蹤封存中的對話。重啟後、事件又沒補送之前，清單可能少
-/// 已封存的對話；這是主機缺欄位的限制，不是介面的錯誤。
+/// 封存區的狀態與請求。重新載入時以主機摘要為準，事件用來即時更新。
 @MainActor
 public final class ArchiveModel: ObservableObject {
     @Published public private(set) var items: [ArchiveEntry] = []
@@ -69,8 +63,8 @@ public final class ArchiveModel: ObservableObject {
     private let now: () -> Date
     private var management: (any SessionManagementService)?
     private var sessions: (any ConversationService)?
-    private var tracked: [String: SessionArchive] = [:]
     private var listCache: [String: SessionSummary] = [:]
+    private var eventsDuringLoad: [ServerFrame] = []
     private var loadGeneration = 0
 
     public init(
@@ -108,6 +102,7 @@ public final class ArchiveModel: ObservableObject {
         }
         loadGeneration += 1
         let current = loadGeneration
+        eventsDuringLoad = []
         isLoading = true
         defer {
             if current == loadGeneration { isLoading = false }
@@ -132,6 +127,10 @@ public final class ArchiveModel: ObservableObject {
 
         listCache = Dictionary(collected.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         merge(collected)
+        for event in eventsDuringLoad {
+            apply(frame: event)
+        }
+        eventsDuringLoad = []
         errorMessage = nil
     }
 
@@ -143,21 +142,6 @@ public final class ArchiveModel: ObservableObject {
             merged[summary.id] = ArchiveEntry(
                 id: summary.id,
                 title: title(for: summary.id),
-                archivedAt: archive.archivedAt,
-                purgeAt: archive.purgeAt
-            )
-        }
-
-        for (sessionId, archive) in tracked {
-            guard merged[sessionId] == nil else { continue }
-            // 追蹤到的對話已經從列表消失（例如被刪除），就不再顯示。
-            guard listCache[sessionId] != nil else {
-                tracked.removeValue(forKey: sessionId)
-                continue
-            }
-            merged[sessionId] = ArchiveEntry(
-                id: sessionId,
-                title: title(for: sessionId),
                 archivedAt: archive.archivedAt,
                 purgeAt: archive.purgeAt
             )
@@ -216,7 +200,6 @@ public final class ArchiveModel: ObservableObject {
         }
         do {
             _ = try await management.unarchiveSession(sessionId: sessionId)
-            tracked.removeValue(forKey: sessionId)
             items.removeAll { $0.id == sessionId }
             noticeMessage = CardL10n.text(.archiveUnarchived)
             errorMessage = nil
@@ -263,9 +246,6 @@ public final class ArchiveModel: ObservableObject {
             )
             var gone = Set(response.deletedSessionIds)
             gone.insert(target.sessionId)
-            for id in gone {
-                tracked.removeValue(forKey: id)
-            }
             items.removeAll { gone.contains($0.id) }
             deletionTarget = nil
             noticeMessage = CardL10n.text(.archiveDeleted)
@@ -284,10 +264,14 @@ public final class ArchiveModel: ObservableObject {
     /// `session.archived`／`session.unarchived`／`session.deleted` 掛在 system
     /// 串流；其他事件忽略。
     public func handle(frame: ServerFrame) {
+        if isLoading { eventsDuringLoad.append(frame) }
+        apply(frame: frame)
+    }
+
+    private func apply(frame: ServerFrame) {
         switch frame {
         case .sessionArchivedEvent(let event):
             let payload = event.payload
-            tracked[payload.sessionId] = payload.archive
             upsert(ArchiveEntry(
                 id: payload.sessionId,
                 title: title(for: payload.sessionId),
@@ -295,14 +279,10 @@ public final class ArchiveModel: ObservableObject {
                 purgeAt: payload.archive.purgeAt
             ))
         case .sessionUnarchivedEvent(let event):
-            tracked.removeValue(forKey: event.payload.sessionId)
             items.removeAll { $0.id == event.payload.sessionId }
         case .sessionDeletedEvent(let event):
             var gone = Set(event.payload.deletedSessionIds)
             gone.insert(event.payload.sessionId)
-            for id in gone {
-                tracked.removeValue(forKey: id)
-            }
             items.removeAll { gone.contains($0.id) }
             if let target = deletionTarget, gone.contains(target.sessionId) {
                 deletionTarget = nil

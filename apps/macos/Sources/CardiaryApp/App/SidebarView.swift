@@ -55,7 +55,23 @@ struct SidebarView: View {
                                 isSelected: model.selection == .conversation(session.id)
                             )
                             .tag(AppSelection.conversation(session.id))
+                            .contextMenu {
+                                if session.status != .archived {
+                                    Button {
+                                        guard let service = model.service else { return }
+                                        Task { await conversations.archive(sessionId: session.id, using: service) }
+                                    } label: {
+                                        Label(AppL10n.text(.conversationArchive), systemImage: "archivebox")
+                                    }
+                                    .disabled(!model.isServiceAvailable)
+                                }
+                            }
                         }
+                    }
+                    if let error = conversations.errorMessage {
+                        Text(error)
+                            .font(.cardiary(.caption))
+                            .foregroundStyle(Palette.inkSecondary)
                     }
                 } header: {
                     SidebarSectionLabel(title: AppL10n.text(.sidebarSectionSession), suit: .spade)

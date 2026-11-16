@@ -43,6 +43,7 @@ async function client(service: SpawnedService): Promise<ProtocolClient> {
 async function createSession(connected: ProtocolClient): Promise<string> {
   const id = connected.request("session.create", { clientRequestId: `cr-${Math.random()}` });
   const reply = await connected.waitForReply(id);
+  expect(reply.kind, JSON.stringify(reply)).toBe("response");
   return (reply.payload as { session: { id: string } }).session.id;
 }
 
@@ -157,6 +158,40 @@ describe("以 node 直接啟動的主機服務", () => {
       listed.payload as { sessions: Array<{ id: string; title: string }> }
     ).sessions.find((session) => session.id === sessionId);
     expect(summary?.title).toBe("安排週末旅程");
+  });
+
+  it("封存的對話在主機重啟後仍帶有封存時間，取消後不再帶欄位", async () => {
+    const first = await boot({ engine: "pi", scripts: [[{ kind: "text", text: "ok" }]] });
+    const connected = await client(first);
+    const sessionId = await createSession(connected);
+    const normalId = await createSession(connected);
+    const archived = await connected.waitForReply(
+      connected.request("session.archive", { sessionId, purgeAfterDays: 30 }),
+    );
+    expect(archived.kind, JSON.stringify(archived)).toBe("response");
+    const archive = (archived.payload as { archive: { archivedAt: string; purgeAt: string } })
+      .archive;
+    await connected.close();
+    await first.stop();
+
+    const restarted = await boot({ engine: "pi", folder: first.folder });
+    const reopened = await client(restarted);
+    const list = async () => {
+      const result = await reopened.waitForReply(reopened.request("session.list", {}));
+      return (result.payload as { sessions: Array<{ id: string; archive?: typeof archive }> })
+        .sessions;
+    };
+    const summaries = await list();
+    expect(summaries.find((session) => session.id === sessionId)?.archive).toEqual(archive);
+    expect(summaries.find((session) => session.id === normalId)).not.toHaveProperty("archive");
+
+    const unarchived = await reopened.waitForReply(
+      reopened.request("session.unarchive", { sessionId }),
+    );
+    expect(unarchived.kind, JSON.stringify(unarchived)).toBe("response");
+    expect((await list()).find((session) => session.id === sessionId)).not.toHaveProperty(
+      "archive",
+    );
   });
 
   it("中途插話：先中斷目前回合再開始新回合，已生成內容標成 interrupted", async () => {
