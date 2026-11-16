@@ -72,6 +72,19 @@ export interface PendingPermissionRequest {
  * `lastEventSeq` 是橋接層自己維護的單調遞增序號，用來分辨「重啟前已經處理過」
  * 和「重啟後才收到的」事件，避免同一事件被套用兩次。
  */
+/**
+ * 外部代理子行程的身分，用來在主機服務重啟後認出同一個行程。
+ *
+ * `startedAt` 是作業系統回報的啟動時間（`ps -o lstart=`），用來排除 PID 重用後
+ * 指到別的行程的情況；`processGroupId` 是啟動時的行程群組，用來確認不會殺到
+ * 由別的管理主機建立、共用同一個 PID 的行程。
+ */
+export interface ExternalAgentChildProcess {
+  readonly pid: number;
+  readonly processGroupId: number;
+  readonly startedAt: string;
+}
+
 export interface ExternalAgentSessionRecord {
   readonly agentSessionId: string;
   readonly agentKind: ExternalAgentKind;
@@ -94,6 +107,11 @@ export interface ExternalAgentSessionRecord {
   readonly startApprovalId?: string | undefined;
   /** 客戶端給的冪等鍵；重送同一個 id 只會啟動一次。 */
   readonly clientRequestId?: string | undefined;
+  /**
+   * 代理子行程的身分；終態之後或代理結束之後清空。
+   * 主機服務在啟動時讀這個欄位，找出上一次強制結束時留下的行程。
+   */
+  readonly child?: ExternalAgentChildProcess | undefined;
 }
 
 export interface ExternalAgentUsage {

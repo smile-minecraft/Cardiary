@@ -136,6 +136,8 @@ export interface SpawnedService {
     handler: (route: string, payload: Record<string, unknown>) => Record<string, unknown> | null,
   ): void;
   stop(): Promise<void>;
+  /** 模擬主機關機（SIGKILL）；用來驗證下次啟動的孤兒清理。 */
+  kill(): Promise<void>;
 }
 
 /** 啟動一個獨立執行的主機服務（控制面或獨立模式），回傳埠與 Token。 */
@@ -329,6 +331,12 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
     async stop() {
       if (child.exitCode !== null) return;
       child.kill("SIGTERM");
+      await waitForExit(child, 5000);
+      lines.close();
+    },
+    async kill() {
+      if (child.exitCode !== null) return;
+      child.kill("SIGKILL");
       await waitForExit(child, 5000);
       lines.close();
     },

@@ -195,6 +195,12 @@ export interface AgentApprovalsService {
   ): Promise<AgentApprovalResolution>;
   /** 撤回尚未決定的請求；已有決定時不影響任何事。 */
   withdraw(approvalId: string, reason: string): Promise<void>;
+  /**
+   * 撤回某個代理所有還卡在 pending 的審批。
+   * 主機服務重啟之後，沒人會再去等這些審批；一次全部撤回，
+   * 不然它們會一直卡在客戶端的佇列裡，按了也沒有反應。
+   */
+  withdrawPendingForAgent(agentSessionId: string, reason: string): Promise<void>;
 }
 
 export interface AgentApprovalRequestInput {

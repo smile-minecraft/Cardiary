@@ -346,7 +346,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   hostServices.provide(HOST_SERVICE_NAMES.engine, engine);
   hostServices.provide(HOST_SERVICE_NAMES.storage, storage);
   hostServices.provide(HOST_SERVICE_NAMES.paths, paths);
-  // 外部代理的審批入口：模組只拿到建立、等決定、撤回這三個窄操作，
+  // 外部代理的審批入口：模組只拿到建立、等決定、撤回與整批撤回這幾個窄操作，
   // 整個引擎不下放。`requestedBy` 一律標成 `{ kind: "agent" }`，
   // 客戶端才分得出哪一個代理在等決定。
   const agentApprovals: AgentApprovalsService = {
@@ -376,6 +376,27 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
         await engine.approvals.withdraw(approvalId, reason);
       } catch {
         // 已經有決定或不存在：沒有東西需要撤回，不能因為它讓代理停不掉。
+      }
+    },
+    async withdrawPendingForAgent(agentSessionId, reason) {
+      let pending;
+      try {
+        pending = await engine.approvals.listPending();
+      } catch {
+        // 讀不到清單時不要讓啟動流程炸掉；這筆 session 的紀錄上還留著 id。
+        return;
+      }
+      for (const request of pending) {
+        if (
+          request.draft.requestedBy.kind === "agent" &&
+          request.draft.requestedBy.agentId === agentSessionId
+        ) {
+          try {
+            await engine.approvals.withdraw(request.id, reason);
+          } catch {
+            // 單筆失敗不影響其他筆。
+          }
+        }
       }
     },
   };

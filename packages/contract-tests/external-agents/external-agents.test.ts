@@ -218,6 +218,11 @@ describe.skipIf(!darwin)("外部代理契約", () => {
         (state) => state.status === "stopped",
       );
       expect(completed.message).toBe("代理完成任務");
+      // 真正的 ACP 代理回完 completion 也不會自己退出；完成事件處理完之前
+      // 行程就該被關掉，客戶端看到終態時不能有孤兒。
+      const pid = await pidOf(agent);
+      await eventually(async () => !processAlive(pid));
+      expect(processAlive(pid)).toBe(false);
 
       const listed = await listAgents(client);
       expect(listed[0]).toMatchObject({
@@ -242,6 +247,146 @@ describe.skipIf(!darwin)("外部代理契約", () => {
         ),
       ) as { status: string };
       expect(record.status).toBe("completed");
+    },
+    TEST_TIMEOUT,
+  );
+
+  it(
+    "clientRequestId 重送：等待審批時回同一個審批，決定後只回同一個工作階段",
+    async () => {
+      const { client, workingDirectory, agent } = await bootWithAgent({
+        kind: "opencode",
+        mode: "complete",
+      });
+      const request = {
+        agentKind: "opencode",
+        workingDirectory,
+        prompt: "只啟動一次",
+        clientRequestId: "start-once",
+      };
+      const firstId = client.request("agent.start", request);
+      const firstReply = await client.waitForReply(firstId);
+      const first = firstReply.payload as { agentSessionId: string; approvalId: string };
+      expect(first.approvalId).toBeTruthy();
+      await waitForState(
+        client,
+        first.agentSessionId,
+        (state) => state.status === "waiting-approval",
+      );
+
+      // 還在等審批時重送：同一個工作階段、同一個還可以按的審批 id。
+      const waitingId = client.request("agent.start", request);
+      const waitingReply = await client.waitForReply(waitingId);
+      expect(waitingReply.payload).toEqual({
+        agentSessionId: first.agentSessionId,
+        approvalId: first.approvalId,
+      });
+
+      await decide(client, first.approvalId, "approve");
+      await waitForState(client, first.agentSessionId, (state) => state.status === "stopped");
+
+      // 決定之後再重送：只回同一個工作階段，不再回舊審批，也不重新 spawn。
+      const afterId = client.request("agent.start", request);
+      const afterReply = await client.waitForReply(afterId);
+      expect(afterReply.payload).toEqual({ agentSessionId: first.agentSessionId });
+      await eventually(
+        async () => (await agent.readLog()).filter((e) => e.event === "start").length === 1,
+      );
+      expect((await agent.readLog()).filter((e) => e.event === "start")).toHaveLength(1);
+    },
+    TEST_TIMEOUT,
+  );
+
+  it(
+    "opencode：代理不配合關門與 SIGTERM 時，完成後仍被 SIGKILL、暫存區清空",
+    async () => {
+      const { service, client, workingDirectory, agent } = await bootWithAgent({
+        kind: "opencode",
+        mode: "complete-stubborn",
+      });
+      const { agentSessionId, approvalId } = await startAgent(client, {
+        kind: "opencode",
+        workingDirectory,
+        prompt: "完成後賴著不走",
+      });
+      await waitForState(client, agentSessionId, (state) => state.status === "waiting-approval");
+      await decide(client, approvalId, "approve");
+      await waitForState(client, agentSessionId, (state) => state.status === "stopped");
+
+      // 代理收到 stdin close、cancel 與 SIGTERM 都不離開；只能靠 SIGKILL 收尾，
+      // 而終態必須等行程真的消失之後才送出來。
+      const pid = await pidOf(agent);
+      expect(processAlive(pid)).toBe(false);
+      const log = await agent.readLog();
+      expect(log.some((entry) => entry.event === "completed")).toBe(true);
+      expect(log.some((entry) => entry.event === "cancel")).toBe(true);
+      expect(log.some((entry) => entry.event === "sigterm-ignored")).toBe(true);
+      expect(log.some((entry) => entry.event === "stdin-closed")).toBe(true);
+
+      await eventually(async () => (await scratchEntries(service.folder)).length === 0);
+      expect(await scratchEntries(service.folder)).toEqual([]);
+    },
+    TEST_TIMEOUT,
+  );
+
+  it(
+    "opencode：兩筆並行權限各別核准／拒絕，回覆不互換、任務續跑完成",
+    async () => {
+      const { service, client, workingDirectory, markerFile, agent } = await bootWithAgent({
+        kind: "opencode",
+        mode: "permission-pair",
+      });
+      const { agentSessionId, approvalId } = await startAgent(client, {
+        kind: "opencode",
+        workingDirectory,
+        prompt: "兩個動作一個准一個不准",
+      });
+      await waitForState(client, agentSessionId, (state) => state.status === "waiting-approval");
+      await decide(client, approvalId, "approve");
+
+      // agent 審批沒有 conversationId，引擎不發 approval.requested；兩筆權限的
+      // 審批 id 跟著 pendingPermission 出現在不同的 state_changed 事件裡，
+      // description 帶工具標題（執行 bash 指令 42／43），用來分辨誰是誰。
+      const pendings = new Map<string, string>();
+      await client.waitFor((frame) => {
+        if (
+          frame.kind !== "event" ||
+          frame.type !== "agent.state_changed" ||
+          (frame.payload as AgentStatePayload).agentSessionId !== agentSessionId
+        ) {
+          return false;
+        }
+        const pending = (frame.payload as AgentStatePayload).pendingPermission;
+        if (pending?.approvalId && pending.description) {
+          pendings.set(pending.description, pending.approvalId);
+        }
+        return pendings.size >= 2;
+      });
+      const first = pendings.get("執行 bash 指令 42");
+      const second = pendings.get("執行 bash 指令 43");
+      expect(first).toBeTruthy();
+      expect(second).toBeTruthy();
+      expect(first).not.toBe(second);
+
+      // 42 核准、43 拒絕；各别送到自己的請求，不得互相覆蓋。
+      await decide(client, first ?? "", "approve");
+      await decide(client, second ?? "", "deny");
+
+      const resumed = await waitForState(
+        client,
+        agentSessionId,
+        (state) =>
+          state.message === "權限請求被拒絕：bash" && state.pendingPermission === undefined,
+      );
+      expect(resumed.status).toBe("running");
+      await waitForState(client, agentSessionId, (state) => state.status === "stopped");
+
+      const log = await agent.readLog();
+      expect(log.find((entry) => entry.event === "permission-allowed")?.id).toBe(42);
+      expect(log.find((entry) => entry.event === "permission-denied")?.id).toBe(43);
+      expect(await readFile(`${markerFile}-42`, "utf8")).toBe("executed\n");
+      await expect(readFile(`${markerFile}-43`, "utf8")).rejects.toThrow();
+      await eventually(async () => (await scratchEntries(service.folder)).length === 0);
     },
     TEST_TIMEOUT,
   );
@@ -468,11 +613,15 @@ describe.skipIf(!darwin)("外部代理契約", () => {
       expect(progress.progress?.completed).toBe(1);
       const pid = await pidOf(first.agent);
 
-      // 主機關閉：未完成的 session 標成結果未知，行程被收掉。
+      // 主机关机：未完成的 session 標成結果未知，行程被收掉。
       await first.client.close().catch(() => undefined);
       clients.splice(clients.indexOf(first.client), 1);
-      await first.service.stop().catch(() => undefined);
+      // 用真正的 SIGKILL，不能用 service.stop()（那是優雅關機，
+      // 不會留下需要 startupCleanup 处理的孤兒行程）。
+      await first.service.kill();
       services.splice(services.indexOf(first.service), 1);
+      // 宿主被 SIGKILL 砍掉時，detached 的代理行程自己還活著。
+      expect(processAlive(pid)).toBe(true);
 
       const service = await spawnService({ folder });
       services.push(service);

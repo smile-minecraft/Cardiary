@@ -13,7 +13,8 @@ import { join } from "node:path";
  * 自己的暫存區），測試用它證明「動作有沒有真的執行」與「有沒有重跑」。
  */
 
-export type FakeAgentMode = "complete" | "fail" | "hang" | "permission";
+export type FakeAgentMode =
+  "complete" | "fail" | "hang" | "permission" | "complete-stubborn" | "permission-pair";
 
 export interface FakeAgentOptions {
   readonly kind: "opencode" | "claude-code";
@@ -43,22 +44,40 @@ const send = (frame) => process.stdout.write(JSON.stringify(frame) + "\n");
 
 log({ event: "start", pid: process.pid, argv: process.argv.slice(2) });
 
-let settlePermission = null;
-const waitPermission = () =>
+// 真正的 ACP／Claude Code 收到完成回應也不會自己退出，會等著處理下一輪。
+// 假代理也一樣：送完完成訊息就留著，由卡片這端關 stdin 來結束它。
+const permissionWaiters = new Map();
+const waitPermission = (id) =>
   new Promise((resolve) => {
-    settlePermission = resolve;
+    permissionWaiters.set(String(id), resolve);
   });
+const resolvePermission = (id, allowed) => {
+  const waiter = permissionWaiters.get(String(id));
+  if (!waiter) return;
+  permissionWaiters.delete(String(id));
+  waiter(allowed);
+};
+
+if (plan.mode === "complete-stubborn") {
+  // 用來逼出 SIGKILL 路徑：連 stdin 關閉與 SIGTERM 都忽略。
+  process.on("SIGTERM", () => log({ event: "sigterm-ignored" }));
+}
+
+function stayAlive() {
+  log({ event: "persistent" });
+  setInterval(() => undefined, 1000);
+}
 
 function finish(stopReason) {
   send({ jsonrpc: "2.0", id: 100, result: { stopReason } });
   log({ event: "completed" });
-  setTimeout(() => process.exit(0), 20);
+  stayAlive();
 }
 
 function claudeFinish(subtype, text) {
   send({ type: "result", subtype, result: text, session_id: "sess_fake" });
   log({ event: "completed" });
-  setTimeout(() => process.exit(0), 20);
+  stayAlive();
 }
 
 async function runAcpPrompt() {
@@ -99,9 +118,33 @@ async function runAcpPrompt() {
         },
       },
     });
-    const allowed = await waitPermission();
-    log({ event: allowed ? "permission-allowed" : "permission-denied" });
+    const allowed = await waitPermission(42);
+    log({ event: allowed ? "permission-allowed" : "permission-denied", id: 42 });
     if (allowed) writeFileSync(plan.markerFile, "executed\n");
+  }
+  if (plan.mode === "permission-pair") {
+    // 兩筆同時送出，各自等决定；核准其中一筆不該覆蓋另一筆的回覆。
+    for (const id of [42, 43]) {
+      send({
+        jsonrpc: "2.0",
+        id,
+        method: "session/request_permission",
+        params: {
+          sessionId: "sess_fake",
+          toolCall: {
+            toolName: "bash",
+            title: "執行 bash 指令 " + id,
+            rawInput: { command: "touch marker-" + id },
+          },
+        },
+      });
+    }
+    const replies = await Promise.all([waitPermission(42), waitPermission(43)]);
+    for (const [index, allowed] of replies.entries()) {
+      const id = 42 + index;
+      log({ event: allowed ? "permission-allowed" : "permission-denied", id });
+      if (allowed) writeFileSync(plan.markerFile + "-" + id, "executed\n");
+    }
   }
   if (plan.mode === "hang") {
     log({ event: "hanging" });
@@ -134,9 +177,29 @@ async function runClaudePrompt() {
         description: "執行 bash 指令",
       },
     });
-    const allowed = await waitPermission();
-    log({ event: allowed ? "permission-allowed" : "permission-denied" });
+    const allowed = await waitPermission("perm_1");
+    log({ event: allowed ? "permission-allowed" : "permission-denied", id: "perm_1" });
     if (allowed) writeFileSync(plan.markerFile, "executed\n");
+  }
+  if (plan.mode === "permission-pair") {
+    for (const id of ["perm_1", "perm_2"]) {
+      send({
+        type: "control_request",
+        request_id: id,
+        request: {
+          subtype: "can_use_tool",
+          tool_name: "Bash",
+          input: { command: "touch marker-" + id },
+          description: "執行 bash 指令 " + id,
+        },
+      });
+    }
+    const replies = await Promise.all([waitPermission("perm_1"), waitPermission("perm_2")]);
+    for (const [index, allowed] of replies.entries()) {
+      const id = index === 0 ? "perm_1" : "perm_2";
+      log({ event: allowed ? "permission-allowed" : "permission-denied", id });
+      if (allowed) writeFileSync(plan.markerFile + "-" + id, "executed\n");
+    }
   }
   if (plan.mode === "hang") {
     log({ event: "hanging" });
@@ -161,6 +224,7 @@ function handleAcp(frame) {
   }
   if (frame.method === "session/cancel") {
     log({ event: "cancel" });
+    if (plan.mode === "complete-stubborn") return;
     setTimeout(() => process.exit(0), 10);
     return;
   }
@@ -168,12 +232,11 @@ function handleAcp(frame) {
     void runAcpPrompt();
     return;
   }
-  if (String(frame.id) === "42" && frame.result) {
+  if ((String(frame.id) === "42" || String(frame.id) === "43") && frame.result) {
     const outcome = frame.result.outcome ?? {};
     const allowed = outcome.outcome === "selected" && outcome.optionId !== "reject_once";
-    log({ event: "permission-reply", outcome });
-    settlePermission?.(allowed);
-    settlePermission = null;
+    log({ event: "permission-reply", id: String(frame.id), outcome });
+    resolvePermission(frame.id, allowed);
     return;
   }
 }
@@ -188,14 +251,17 @@ function handleClaude(frame) {
   }
   if (frame.type === "control_request" && frame.request?.subtype === "interrupt") {
     log({ event: "interrupt" });
+    if (plan.mode === "complete-stubborn") return;
     setTimeout(() => process.exit(0), 10);
     return;
   }
-  if (frame.type === "control_response" && frame.response?.request_id === "perm_1") {
+  if (
+    frame.type === "control_response" &&
+    (frame.response?.request_id === "perm_1" || frame.response?.request_id === "perm_2")
+  ) {
     const allowed = frame.response?.response?.behavior === "allow";
-    log({ event: "permission-reply", allowed });
-    settlePermission?.(allowed);
-    settlePermission = null;
+    log({ event: "permission-reply", id: frame.response.request_id, allowed });
+    resolvePermission(frame.response.request_id, allowed);
     return;
   }
   if (frame.type === "user") {
@@ -216,6 +282,11 @@ lines.on("line", (line) => {
   }
   if (plan.kind === "opencode") handleAcp(frame);
   else handleClaude(frame);
+});
+lines.on("close", () => {
+  log({ event: "stdin-closed" });
+  // hang 與 complete-stubborn 故意留著，讓測試有機會驗證上層真的會送信號殺行程。
+  if (plan.mode !== "hang" && plan.mode !== "complete-stubborn") process.exit(0);
 });
 `;
 

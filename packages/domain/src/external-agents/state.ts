@@ -94,6 +94,7 @@ export function applyAgentEvent(
           status: "completed",
           message: event.message,
           pendingPermission: null,
+          child: undefined,
           progress: record.progress
             ? {
                 ...record.progress,
@@ -111,6 +112,7 @@ export function applyAgentEvent(
           status: "failed",
           message: event.message,
           pendingPermission: null,
+          child: undefined,
         },
         applied: true,
       };
@@ -150,6 +152,7 @@ export function markStopped(
     status: "stopped",
     message,
     pendingPermission: null,
+    child: undefined,
     updatedAt: now.toISOString(),
     lastEventSeq: record.lastEventSeq + 1,
   };
@@ -171,6 +174,7 @@ export function markUnknownAfterRestart(
     status: "failed",
     resultUnknown: true,
     pendingPermission: null,
+    child: undefined,
     message: "主機重啟，未完成的步驟結果未知",
     updatedAt: now.toISOString(),
     lastEventSeq: record.lastEventSeq + 1,

@@ -21,6 +21,7 @@ import {
   nextEventSeq,
   normalizeAcpFrame,
   normalizeStreamJsonLine,
+  type ExternalAgentChildProcess,
   type ExternalAgentKind,
   type ExternalAgentSessionRecord,
   type ExternalAgentStatus,
@@ -31,7 +32,7 @@ import type { CardiaryPaths } from "@cardiary/module-api";
 
 import { prefixed } from "../../ids.js";
 import { createCommandSandbox } from "../../permissions/sandbox.js";
-import type { ManagedChild, SpawnRegistry } from "../../spawn/wrapper.js";
+import { describeProcess, type ManagedChild, type SpawnRegistry } from "../../spawn/wrapper.js";
 import type { AgentApprovalsService } from "../contract.js";
 import {
   agentStoragePaths,
@@ -40,7 +41,6 @@ import {
   ensureSessionDirs,
   homeDir,
   isProtectedWorkingDirectory,
-  listNonTerminal,
   listRecords,
   markOrphansAfterRestart,
   purgeStaleCache,
@@ -104,7 +104,11 @@ export interface StartAgentInput {
 
 export interface StartAgentResult {
   readonly agentSessionId: string;
-  readonly approvalId: string;
+  /**
+   * 啟動審批還在等待時才有值；已經過了那個階段（審批決定、撤回或逾時）就省略。
+   * 客戶端不該拿它當按鈕表達式之外的參考。
+   */
+  readonly approvalId?: string;
 }
 
 /** 啟動被拒絕時的原因，`protocol.ts` 把它映射到適當的錯誤碼。 */
@@ -145,9 +149,18 @@ interface TrackedPermission {
 interface LiveSession {
   record: ExternalAgentSessionRecord;
   child: ManagedChild | null;
+  /** `child.exited` 的 promise，`#onExit` 完成後 resolve。 */
+  exitTask: Promise<void> | null;
   acpSessionId: string | null;
   permissionPromptSent: boolean;
   stopping: boolean;
+  /**
+   * 完成／失敗事件正在處理時的 promise；處理完之後紀錄才會是終態。
+   * stop、pauseAll、shutdown 要等它結束，才知道 child 是不是已經被清掉。
+   */
+  termination: Promise<void> | null;
+  /** 同一個 session 的 stdout／stderr 行依序處理的鏈結。 */
+  queue: Promise<void>;
   readonly abort: AbortController;
   readonly permissions: Map<string, TrackedPermission>;
   readonly stderrTail: string[];
@@ -168,16 +181,19 @@ export class ExternalAgentsService {
     this.#approvals = deps.approvals;
   }
 
-  /** 服務啟動時：清暫存、把懸空 session 標結果未知、清 30 天快取。 */
+  /** 服務啟動時：清暫存、清掉舊行程、把懸空 session 標結果未知、清 30 天快取。 */
   async startupCleanup(): Promise<{ orphaned: number; purged: number }> {
+    const records = await listRecords(this.#storage);
+    // 先處理上次強制結束留下的行程；PID 重用時身分對不上就不動它。
+    for (const record of records) {
+      if (record.child) await this.#terminateRecordedChild(record.child);
+    }
     await clearScratch(this.#storage);
-    const orphans = await listNonTerminal(this.#storage);
-    for (const record of orphans) {
-      if (record.startApprovalId) {
-        await this.#approvals.withdraw(record.startApprovalId, "主機重新啟動");
-      }
-      if (record.pendingPermission?.approvalId) {
-        await this.#approvals.withdraw(record.pendingPermission.approvalId, "代理已不存在");
+    for (const record of records) {
+      // 撤回這個代理還卡在 pending 的審批；不只是紀錄上記得的那幾筆。
+      await this.#approvals.withdrawPendingForAgent(record.agentSessionId, "主機重新啟動");
+      if (record.child) {
+        await writeRecord(this.#storage, { ...record, child: undefined });
       }
     }
     const marked = await markOrphansAfterRestart(this.#storage, this.#now());
@@ -210,10 +226,15 @@ export class ExternalAgentsService {
       const records = await listRecords(this.#storage);
       const existing = records.find((record) => record.clientRequestId === input.clientRequestId);
       if (existing) {
-        return {
-          agentSessionId: existing.agentSessionId,
-          approvalId: existing.startApprovalId ?? "",
-        };
+        // 已經過了等待審批的階段就不要回傳上一場審批的 id，
+        // 客戶端容易把它當成還可以按的按鈕。
+        const waitingOnStart =
+          existing.status === "waiting-approval" &&
+          existing.startApprovalId !== undefined &&
+          existing.startApprovalId.length > 0;
+        return waitingOnStart
+          ? { agentSessionId: existing.agentSessionId, approvalId: existing.startApprovalId }
+          : { agentSessionId: existing.agentSessionId };
       }
     }
 
@@ -272,9 +293,12 @@ export class ExternalAgentsService {
     this.#live.set(agentSessionId, {
       record,
       child: null,
+      exitTask: null,
       acpSessionId: null,
       permissionPromptSent: false,
       stopping: false,
+      termination: null,
+      queue: Promise.resolve(),
       abort: new AbortController(),
       permissions: new Map(),
       stderrTail: [],
@@ -290,26 +314,28 @@ export class ExternalAgentsService {
     if (current === null) {
       throw new Error(`沒有這個代理工作階段：${agentSessionId}`);
     }
+    if (live?.termination) {
+      // 完成／失敗事件正在處理；等它收尾（殺行程、清暫存、寫終態）再看紀錄。
+      await live.termination;
+      return { agentSessionId, stopped: false };
+    }
     if (isTerminalAgentStatus(current.status)) {
+      // 狀態是終態，但行程可能還沒清乾淨；該清就清。
+      if (live?.child?.running) {
+        await this.#terminateChild(live);
+        await removeScratch(this.#storage, agentSessionId);
+      }
       return { agentSessionId, stopped: false };
     }
     if (live) live.stopping = true;
     await this.#withdrawPending(agentSessionId, current, "代理已停止");
     live?.abort.abort();
-    const child = live?.child ?? null;
-    if (child && child.running) {
-      if (current.agentKind === "opencode" && live?.acpSessionId) {
-        child.write(encodeAcpCancel(live.acpSessionId));
-      } else if (current.agentKind === "claude-code") {
-        child.write(encodeClaudeInterrupt(`interrupt-${Date.now()}`));
-      }
-      child.signal("SIGTERM");
-      const killer = setTimeout(() => {
-        if (child.running) child.signal("SIGKILL");
-      }, 3_000);
-      killer.unref?.();
+    if (live) {
+      await this.#terminateChild(live);
     }
-    const updated = markStopped(current, "使用者停止", this.#now());
+    // #onExit 可能已經用「代理行程結束」蓋過紀錄；以紀錄目前的值為準。
+    const latest = live?.record ?? current;
+    const updated = markStopped(latest, "使用者停止", this.#now());
     if (live) live.record = updated;
     await writeRecord(this.#storage, updated);
     this.#emit(updated);
@@ -364,25 +390,35 @@ export class ExternalAgentsService {
   /** 緊急全部暫停：撤回等待中的審批並中止代理，避免核准後才冒出新行程。 */
   async pauseAll(reason: string): Promise<void> {
     for (const [agentSessionId, live] of this.#live) {
-      if (isTerminalAgentStatus(live.record.status)) continue;
+      if (live.termination) {
+        // 完成／失敗事件正在處理；等它收尾，避免兩邊搶寫終態。
+        await live.termination;
+      }
+      if (isTerminalAgentStatus(live.record.status)) {
+        // 終態但行程還沒清乾淨：該殺就殺、該清暫存就清。
+        if (live.child?.running) {
+          await this.#terminateChild(live);
+        }
+        await removeScratch(this.#storage, agentSessionId);
+        continue;
+      }
       // 先記下「還沒生出行程」，撤回審批時等待中的啟動流程可能同步改寫紀錄。
       const waitedOnly = live.record.status === "waiting-approval" && live.child === null;
       live.stopping = true;
       live.abort.abort();
       await this.#withdrawPending(agentSessionId, live.record, reason);
-      if (live.child?.running) {
-        live.child.signal("SIGTERM");
-        const killer = setTimeout(() => {
-          if (live.child?.running) live.child.signal("SIGKILL");
-        }, 3_000);
-        killer.unref?.();
+      if (live.child) {
+        await this.#terminateChild(live);
       }
-      const updated = waitedOnly
-        ? markStopped(live.record, `緊急暫停：代理沒有啟動（${reason}）`, this.#now())
-        : markUnknownAfterRestart(live.record, this.#now());
-      live.record = updated;
-      await writeRecord(this.#storage, updated);
-      this.#emit(updated);
+      const latest = live.record;
+      if (!isTerminalAgentStatus(latest.status)) {
+        const updated = waitedOnly
+          ? markStopped(latest, `緊急暫停：代理沒有啟動（${reason}）`, this.#now())
+          : markUnknownAfterRestart(latest, this.#now());
+        live.record = updated;
+        await writeRecord(this.#storage, updated);
+        this.#emit(updated);
+      }
     }
     await clearScratch(this.#storage);
   }
@@ -390,15 +426,30 @@ export class ExternalAgentsService {
   /** 主機關閉：中斷還活著的行程、撤回審批、把結果標成未知。 */
   async shutdown(): Promise<void> {
     for (const [agentSessionId, live] of this.#live) {
-      if (isTerminalAgentStatus(live.record.status)) continue;
+      if (live.termination) {
+        await live.termination;
+      }
+      if (isTerminalAgentStatus(live.record.status)) {
+        if (live.child?.running) {
+          await this.#terminateChild(live);
+        }
+        await removeScratch(this.#storage, agentSessionId);
+        continue;
+      }
       live.stopping = true;
       live.abort.abort();
       await this.#withdrawPending(agentSessionId, live.record, "主機關閉");
-      if (live.child?.running) live.child.signal("SIGTERM");
-      const updated = markUnknownAfterRestart(live.record, this.#now());
-      live.record = updated;
-      await writeRecord(this.#storage, updated);
-      this.#emit(updated);
+      if (live.child) {
+        await this.#terminateChild(live);
+      }
+      const latest = live.record;
+      // #onExit 可能已經把紀錄寫成終態；那時不要再蓋或重寫。
+      if (!isTerminalAgentStatus(latest.status)) {
+        const updated = markUnknownAfterRestart(latest, this.#now());
+        live.record = updated;
+        await writeRecord(this.#storage, updated);
+        this.#emit(updated);
+      }
     }
     await clearScratch(this.#storage);
   }
@@ -498,14 +549,24 @@ export class ExternalAgentsService {
       stdio: ["pipe", "pipe", "pipe"],
     });
     live.child = child;
-    if (child.stdout) this.#consumeLines(child.stdout, (line) => void this.#onLine(live, line));
+    // 掛上 stdout/stderr 之前不會丟資料：pipe 在沒有消費者的時候會自己緩衝。
+    if (child.stdout) {
+      this.#consumeLines(child.stdout, (line) => {
+        this.#enqueueLine(live, line);
+      });
+    }
     if (child.stderr) {
       this.#consumeLines(child.stderr, (line) => {
         live.stderrTail.push(line.slice(-500));
         if (live.stderrTail.length > 20) live.stderrTail.shift();
       });
     }
-    void child.exited.then((exit) => void this.#onExit(live, exit));
+    live.exitTask = child.exited.then((exit) => this.#onExit(live, exit));
+    // 先確認停止沒有在 spawn 之後生效，再讓 child 開始聊。
+    if (live.stopping) {
+      await this.#terminateChild(live);
+      return;
+    }
 
     if (record.agentKind === "opencode") {
       child.write(encodeAcpInitialize());
@@ -513,13 +574,24 @@ export class ExternalAgentsService {
       child.write(encodeClaudeInitialize());
       if (record.prompt) child.write(encodeClaudeUser(record.prompt));
     }
+    // 記住行程的身分，之後重啟可以認出它；讀不到就回報並繼續啟動。
+    const identity = await describeProcess(child.pid);
+    if (identity === null) {
+      this.#deps.logger?.warn(
+        `無法讀取代理 ${agentSessionId} 的行程啟動時間；重啟時將無法認出這個行程`,
+      );
+    }
+    // 代理可能在這個空檔就發了事件；以目前的紀錄為準，不要蓋回剛才的等待狀態。
+    const current = live.record;
+    if (live.stopping || isTerminalAgentStatus(current.status)) return;
     const updated: ExternalAgentSessionRecord = {
-      ...record,
-      status: "running",
+      ...current,
+      status: current.pendingPermission ? "waiting-approval" : "running",
       message: undefined,
       startApprovalId: undefined,
       updatedAt: this.#now().toISOString(),
-      lastEventSeq: record.lastEventSeq + 1,
+      lastEventSeq: current.lastEventSeq + 1,
+      ...(identity ? { child: identity } : {}),
     };
     live.record = updated;
     await writeRecord(this.#storage, updated);
@@ -541,6 +613,17 @@ export class ExternalAgentsService {
     });
   }
 
+  /** 同一個 session 的事件要依序處理，否則兩次權限請求會互相踩。 */
+  #enqueueLine(live: LiveSession, line: string): void {
+    // 事件要照順序；出錯也不能把整條鏈卡住。
+    const next = live.queue.then(() => this.#onLine(live, line));
+    live.queue = next.catch((error: unknown) => {
+      this.#deps.logger?.warn(
+        `處理代理輸出失敗：${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }
+
   // ---- 訊息與事件 -------------------------------------------------------
 
   async #onLine(live: LiveSession, line: string): Promise<void> {
@@ -549,7 +632,7 @@ export class ExternalAgentsService {
     if (kind === "opencode") {
       const frame = classifyAcpLine(line);
       if (frame.kind === "response") {
-        this.#onAcpResponse(live, frame.frame.id, frame.frame.result ?? {}, line);
+        await this.#onAcpResponse(live, frame.frame.id, frame.frame.result ?? {}, line);
         return;
       }
       events = normalizeAcpFrame(frame);
@@ -561,12 +644,12 @@ export class ExternalAgentsService {
     }
   }
 
-  #onAcpResponse(
+  async #onAcpResponse(
     live: LiveSession,
     id: number | string,
     result: Record<string, unknown>,
     raw: string,
-  ): void {
+  ): Promise<void> {
     const child = live.child;
     if (!child || !child.running) return;
     if (id === ACP_IDS.initialize) {
@@ -597,11 +680,11 @@ export class ExternalAgentsService {
       }
       if (stopReason === "cancelled") {
         if (!live.stopping) {
-          void this.#applyEvent(live, { kind: "failed", message: "代理取消了這次任務" });
+          await this.#applyEvent(live, { kind: "failed", message: "代理取消了這次任務" });
         }
         return;
       }
-      void this.#applyEvent(live, {
+      await this.#applyEvent(live, {
         kind: "completed",
         message:
           stopReason === "end_turn" ? "代理完成任務" : `代理結束（${stopReason ?? "unknown"}）`,
@@ -612,12 +695,18 @@ export class ExternalAgentsService {
   }
 
   async #applyEvent(live: LiveSession, event: NormalizedAgentEvent): Promise<void> {
-    if (isTerminalAgentStatus(live.record.status)) return;
-    const now = this.#now();
-    const reduced = applyAgentEvent(live.record, event, nextEventSeq(live.record), now);
-    if (!reduced.applied) return;
-    let updated = reduced.record;
+    // 正在收尾或停止中時，不要把任何事件再套進紀錄。
+    if (live.stopping || isTerminalAgentStatus(live.record.status)) return;
+
+    // 完成／失敗事件會走一輪完整的收尾：殺行程 → 清暫存 → 才寫終態。
+    if (event.kind === "completed" || event.kind === "failed") {
+      await this.#finishSession(live, event);
+      return;
+    }
+
     if (event.kind === "permission") {
+      // 先擋住，再等審批；回來時會再擋一次。
+      const now = this.#now();
       const approval = await this.#approvals.request({
         agentSessionId: live.record.agentSessionId,
         requestId: `permission:${event.requestKey}`,
@@ -633,7 +722,16 @@ export class ExternalAgentsService {
         toolInput: event.input as JsonValue,
         risk: "high",
       });
-      updated = attachPermissionApproval(updated, approval.approvalId);
+      // 等待審批的時候，使用者可能已經按停止，或事件已經被別的流程處理；
+      // 不要把「等待核准」寫回已經是終態的紀錄。
+      if (live.stopping || isTerminalAgentStatus(live.record.status)) {
+        await this.#approvals.withdraw(approval.approvalId, "代理已不存在");
+        return;
+      }
+      const reapplied = applyAgentEvent(live.record, event, nextEventSeq(live.record), now);
+      if (!reapplied.applied) return;
+      const updated = attachPermissionApproval(reapplied.record, approval.approvalId);
+      live.record = updated;
       live.permissions.set(event.requestKey, {
         approvalId: approval.approvalId,
         replyToken: event.replyToken,
@@ -641,11 +739,18 @@ export class ExternalAgentsService {
         input: event.input,
         resolved: false,
       });
+      await writeRecord(this.#storage, updated);
+      this.#emit(updated);
       void this.#awaitPermissionApproval(live, event.requestKey);
+      return;
     }
-    live.record = updated;
-    await writeRecord(this.#storage, updated);
-    this.#emit(updated);
+
+    const now = this.#now();
+    const reduced = applyAgentEvent(live.record, event, nextEventSeq(live.record), now);
+    if (!reduced.applied) return;
+    live.record = reduced.record;
+    await writeRecord(this.#storage, reduced.record);
+    this.#emit(reduced.record);
   }
 
   async #awaitPermissionApproval(live: LiveSession, requestKey: string): Promise<void> {
@@ -695,29 +800,218 @@ export class ExternalAgentsService {
     live.permissions.delete(requestKey);
   }
 
-  #onExit(live: LiveSession, exit: { code: number | null; signal: NodeJS.Signals | null }): void {
-    void (async () => {
-      await this.#withdrawPending(live.record.agentSessionId, live.record, "代理行程已結束");
-      live.abort.abort();
-      const current = live.record;
-      if (!live.stopping && !isTerminalAgentStatus(current.status)) {
-        const tail = live.stderrTail.slice(-3).join(" ");
-        const detail = tail.length > 0 ? `：${tail}` : "";
-        const updated: ExternalAgentSessionRecord = {
-          ...current,
-          status: "failed",
-          message: `代理行程結束（code ${exit.code ?? "null"}，signal ${exit.signal ?? "null"}），結果未知${detail}`,
-          pendingPermission: null,
-          resultUnknown: true,
-          updatedAt: this.#now().toISOString(),
-          lastEventSeq: current.lastEventSeq + 1,
-        };
-        live.record = updated;
-        await writeRecord(this.#storage, updated);
-        this.#emit(updated);
+  async #onExit(
+    live: LiveSession,
+    exit: { code: number | null; signal: NodeJS.Signals | null },
+  ): Promise<void> {
+    const agentSessionId = live.record.agentSessionId;
+    await this.#withdrawPending(agentSessionId, live.record, "代理行程已結束");
+    live.abort.abort();
+    live.child = null;
+    const current = live.record;
+    if (!live.stopping && !isTerminalAgentStatus(current.status)) {
+      const tail = live.stderrTail.slice(-3).join(" ");
+      const detail = tail.length > 0 ? `：${tail}` : "";
+      const updated: ExternalAgentSessionRecord = {
+        ...current,
+        status: "failed",
+        message: `代理行程結束（code ${exit.code ?? "null"}，signal ${exit.signal ?? "null"}），結果未知${detail}`,
+        pendingPermission: null,
+        resultUnknown: true,
+        child: undefined,
+        updatedAt: this.#now().toISOString(),
+        lastEventSeq: current.lastEventSeq + 1,
+      };
+      live.record = updated;
+      await writeRecord(this.#storage, updated);
+      this.#emit(updated);
+    } else if (current.child) {
+      // 狀態已經是終態或正在停止；只把紀錄上的 child 欄位清掉就好，
+      // 不要再發一次狀態事件給客戶端。
+      const updated: ExternalAgentSessionRecord = {
+        ...current,
+        child: undefined,
+        updatedAt: this.#now().toISOString(),
+      };
+      live.record = updated;
+      await writeRecord(this.#storage, updated);
+    }
+    await removeScratch(this.#storage, agentSessionId);
+  }
+
+  /**
+   * 完成／失敗事件的收尾。
+   *
+   * 真的 ACP 代理一輪結束之後不會自己退出，所以這裡一定要把行程終止：
+   * 先送 cancel／interrupt，再關 stdin，然後 SIGTERM，最後 SIGKILL。
+   * 暫存要在終態寫出之前清乾淨，客戶端看到 completed 的時候，
+   * `tmp/agents` 就已經是空的了。
+   */
+  async #finishSession(live: LiveSession, event: NormalizedAgentEvent): Promise<void> {
+    if (live.termination) return live.termination;
+    if (live.stopping) return;
+    live.stopping = true;
+    const agentSessionId = live.record.agentSessionId;
+    const task = (async () => {
+      await this.#withdrawPending(agentSessionId, live.record, "代理已結束");
+      await this.#terminateChild(live);
+      if (live.exitTask) {
+        try {
+          await live.exitTask;
+        } catch (error) {
+          this.#deps.logger?.warn(
+            `等待代理行程結束時發生錯誤：${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
-      await removeScratch(this.#storage, live.record.agentSessionId);
+      await removeScratch(this.#storage, agentSessionId);
+      // 行程已經結束，安全地套用完成／失敗事件。
+      const current = live.record;
+      if (isTerminalAgentStatus(current.status)) return;
+      const reduced = applyAgentEvent(current, event, nextEventSeq(current), this.#now());
+      if (!reduced.applied) return;
+      live.record = reduced.record;
+      await writeRecord(this.#storage, reduced.record);
+      this.#emit(reduced.record);
     })();
+    live.termination = task;
+    try {
+      await task;
+    } finally {
+      live.termination = null;
+    }
+  }
+
+  /**
+   * 終止還活著的 child：趁 stdin 還開著先送 cancel／interrupt，
+   * 再關 stdin（讓配合的代理自己退出），然後 SIGTERM，最後 SIGKILL。
+   */
+  async #terminateChild(live: LiveSession): Promise<void> {
+    const child = live.child;
+    if (!child) return;
+
+    // cancel／interrupt 必須趁 stdin 還開著先送；等資料沖進管線後才關 stdin，
+    // 代理才會先讀到 cancel 才看到 EOF。配合的代理收到就自己結束；
+    // 不配合的（例如 complete-stubborn）被動等到下面的信號。
+    let cancel: string | null = null;
+    if (live.record.agentKind === "opencode" && live.acpSessionId) {
+      cancel = encodeAcpCancel(live.acpSessionId);
+    } else if (live.record.agentKind === "claude-code") {
+      cancel = encodeClaudeInterrupt(`interrupt-${Date.now()}`);
+    }
+    await child.writeThenCloseInput(cancel);
+    if (await this.#waitForExit(child, 1_000)) {
+      await this.#awaitExitTask(live);
+      return;
+    }
+
+    child.signal("SIGTERM");
+    if (await this.#waitForExit(child, 2_000)) {
+      await this.#awaitExitTask(live);
+      return;
+    }
+
+    child.signal("SIGKILL");
+    if (!(await this.#waitForExit(child, 2_000))) {
+      this.#deps.logger?.warn(
+        `代理 ${live.record.agentSessionId} 的行程 ${child.pid} SIGKILL 後仍未結束`,
+      );
+    }
+    await this.#awaitExitTask(live);
+  }
+
+  async #awaitExitTask(live: LiveSession): Promise<void> {
+    if (!live.exitTask) return;
+    try {
+      await live.exitTask;
+    } catch (error) {
+      this.#deps.logger?.warn(
+        `等待代理行程結束時發生錯誤：${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      live.exitTask = null;
+    }
+  }
+
+  /** 等 `child` 結束；時間到還沒結束就回 `false`。 */
+  #waitForExit(child: ManagedChild, ms: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (!child.running) {
+        resolve(true);
+        return;
+      }
+      let settled = false;
+      const finish = (done: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(done);
+      };
+      const timer = setTimeout(() => finish(false), ms);
+      timer.unref?.();
+      child.exited.then(() => finish(true));
+    });
+  }
+
+  /**
+   * 終止上次強制結束留下的行程。
+   *
+   * 先比對 PID、行程群組和啟動時間；任一個對不上就是 PID 重用或已經不存在，
+   * 這時不動它，只把耐久紀錄上的 child 欄位清掉。
+   */
+  async #terminateRecordedChild(child: ExternalAgentChildProcess): Promise<void> {
+    if ((await this.#recordedChildState(child)) !== "same") return;
+
+    this.#signalGroup(child.processGroupId, "SIGTERM");
+    if (await this.#waitForRecordedChild(child, 2_000)) return;
+
+    this.#signalGroup(child.processGroupId, "SIGKILL");
+    if (!(await this.#waitForRecordedChild(child, 3_000))) {
+      this.#deps.logger?.warn(`無法結束舊行程 ${child.pid}`);
+    }
+  }
+
+  async #waitForRecordedChild(child: ExternalAgentChildProcess, ms: number): Promise<boolean> {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      const state = await this.#recordedChildState(child);
+      if (state !== "same") return true;
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    }
+    return (await this.#recordedChildState(child)) !== "same";
+  }
+
+  /**
+   * 分辨「同一個行程」「已經不存在」「讀不出來」。
+   * 讀不出身分時一律當成同一個行程處理，呼叫端才能決定要不要殺。
+   */
+  async #recordedChildState(child: ExternalAgentChildProcess): Promise<"gone" | "same"> {
+    try {
+      process.kill(child.pid, 0);
+    } catch (error) {
+      // ESRCH = PID 不在了；EPERM = 不屬於我們的行程，可以當成別人的。
+      const code = (error as NodeJS.ErrnoException).code;
+      return code === "ESRCH" || code === "EPERM" ? "gone" : "same";
+    }
+    const current = await describeProcess(child.pid);
+    if (current === null) return "same";
+    return current.processGroupId === child.processGroupId && current.startedAt === child.startedAt
+      ? "same"
+      : "gone";
+  }
+
+  #signalGroup(processGroupId: number, signal: NodeJS.Signals): void {
+    try {
+      process.kill(-processGroupId, signal);
+      return;
+    } catch {
+      // 沒有群組時退回單一 pid。
+    }
+    try {
+      process.kill(Math.abs(processGroupId), signal);
+    } catch {
+      // 已經結束。
+    }
   }
 
   async #withdrawPending(

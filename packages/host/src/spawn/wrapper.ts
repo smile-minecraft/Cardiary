@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import type { Readable } from "node:stream";
 
@@ -81,6 +81,74 @@ export class ManagedChild {
   closeInput(): void {
     this.child.stdin?.end();
   }
+
+  /**
+   * 寫入 cancel／interrupt，等資料真正沖進管線之後才關 stdin。
+   *
+   * `write` 的 callback 在 chunk 被送進核心管線時才觸發；等它再 `end()`，
+   * 才能保證代理先讀到 cancel 才看到 EOF，而不是讓兩件事的順序靠排程決定。
+   * 以行程結束為上限，避免行程已死時 callback 不觸發而卡住收尾。
+   */
+  async writeThenCloseInput(data: string | null): Promise<void> {
+    const stdin = this.child.stdin;
+    if (!stdin || stdin.destroyed) return;
+    if (data !== null) {
+      await Promise.race([
+        new Promise<void>((resolve) => stdin.write(data, () => resolve())),
+        this.exited.then(() => undefined),
+      ]);
+    }
+    if (!stdin.destroyed) stdin.end();
+  }
+}
+
+/**
+ * 讀出一個行程的啟動時間（`ps -o lstart=`）。
+ *
+ * 主機服務重啟後要用它分辨「同一個 PID 是不是同一個行程」。讀不到（行程已結束、
+ * 沒有 ps、輸出格式不符）時回 `null`；呼叫端要自己決定要不要因此不殺。
+ */
+export async function readProcessStartTime(pid: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile("ps", ["-p", String(pid), "-o", "lstart="], { timeout: 5_000 }, (error, stdout) => {
+      const value = stdout?.toString().trim();
+      if (error || !value) {
+        resolve(null);
+        return;
+      }
+      resolve(value);
+    });
+  });
+}
+
+/**
+ * 讀出行程的群組 id（`ps -o pgid=`）。detached 啟動的代理 pgid 等於自己的 pid；
+ * 但重啟後一定要重新讀一次，才不會殺到沿用同一 pid 的無關行程。
+ */
+async function readProcessGroupId(pid: number): Promise<number | null> {
+  return new Promise((resolve) => {
+    execFile("ps", ["-p", String(pid), "-o", "pgid="], { timeout: 5_000 }, (error, stdout) => {
+      const value = Number(stdout?.toString().trim());
+      resolve(!error && Number.isInteger(value) && value > 0 ? value : null);
+    });
+  });
+}
+
+/**
+ * 讀出一個行程的身分，用來寫進耐久紀錄、之後比對是否為同一個行程。
+ * 讀不到啟動時間或群組 id 時回 `null`。
+ */
+export async function describeProcess(pid: number): Promise<{
+  readonly pid: number;
+  readonly processGroupId: number;
+  readonly startedAt: string;
+} | null> {
+  const [startedAt, processGroupId] = await Promise.all([
+    readProcessStartTime(pid),
+    readProcessGroupId(pid),
+  ]);
+  if (startedAt === null || processGroupId === null) return null;
+  return { pid, processGroupId, startedAt };
 }
 
 export function killGroup(pid: number, signal: NodeJS.Signals): void {
