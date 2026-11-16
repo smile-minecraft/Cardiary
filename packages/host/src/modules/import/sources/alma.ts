@@ -107,7 +107,7 @@ export function createAlmaAdapter(deps: {
             title: persona.title,
             body: persona.body,
           }),
-          source: { tool: "alma", path: `${databasePath}#provided` },
+          source: { tool: "alma", path: `${basename(databasePath)}#provided` },
         });
       }
 
@@ -171,7 +171,14 @@ function scanDatabase(openDatabase: ReadonlyDatabaseOpener, scan: DatabaseScan):
         });
         continue;
       }
-      const title = titleFrom({ body, fallback: "記憶" });
+      const legacyTitle = titleFrom({ body, fallback: "記憶" });
+      const firstLine =
+        body
+          .split(/\r?\n/u)[0]
+          ?.replace(/^#{1,6}\s*/u, "")
+          .trim() || "記憶";
+      const characters = [...firstLine];
+      const title = characters.length > 60 ? `${characters.slice(0, 59).join("")}…` : firstLine;
       const tags = [
         "alma",
         ...metadata.tags,
@@ -182,11 +189,11 @@ function scanDatabase(openDatabase: ReadonlyDatabaseOpener, scan: DatabaseScan):
         category: "memory",
         title,
         body,
-        ...optionalSummary(firstLine(body)),
         tags,
         createdAt: memory.created_at,
-        contentHash: contentHash({ category: "memory", title, body }),
-        source: { tool: "alma", path: `${scan.path}#memories/${memory.id}` },
+        // 保留舊標題的雜湊，避免格式變更讓既有記憶被重複匯入。
+        contentHash: contentHash({ category: "memory", title: legacyTitle, body }),
+        source: { tool: "alma", path: `${basename(scan.path)}#memories/${memory.id}` },
         ...(metadata.importance === undefined ? {} : { importance: metadata.importance }),
       });
     }
@@ -230,7 +237,7 @@ function scanDatabase(openDatabase: ReadonlyDatabaseOpener, scan: DatabaseScan):
         body,
         tags: ["alma"],
         contentHash: contentHash({ category: "rule", title, body }),
-        source: { tool: "alma", path: `${scan.path}#prompts/${prompt.id}` },
+        source: { tool: "alma", path: `${basename(scan.path)}#prompts/${prompt.id}` },
       });
     }
 
@@ -289,7 +296,7 @@ function scanDatabase(openDatabase: ReadonlyDatabaseOpener, scan: DatabaseScan):
         characterCount: conclusions.length,
         existingSummary: conclusions,
         contentHash: conversationContentHash({ tool: "alma", anchor: thread.id, updatedAt }),
-        source: { tool: "alma", path: `${scan.path}#threads/${thread.id}` },
+        source: { tool: "alma", path: `${basename(scan.path)}#threads/${thread.id}` },
       });
     }
     if (messagesFailed > 0) {
@@ -373,7 +380,7 @@ async function readExportFile(
       characterCount: summary?.length ?? transcript.length,
       ...(summary === undefined ? {} : { existingSummary: summary }),
       contentHash: conversationContentHash({ tool: "alma", anchor, updatedAt }),
-      source: { tool: "alma", path: `${path}#threads/${anchor}` },
+      source: { tool: "alma", path: `${basename(path)}#threads/${anchor}` },
       unverified: true,
     });
   }
@@ -451,18 +458,6 @@ function conclusionsFromExport(value: unknown): string | undefined {
 
 function stringOf(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
-}
-
-function optionalSummary(summary: string | undefined): { summary?: string } {
-  return summary === undefined ? {} : { summary };
-}
-
-function firstLine(text: string): string | undefined {
-  const line = text
-    .split(/\r?\n/u)
-    .map((entry) => entry.replace(/^#{1,6}\s*/u, "").trim())
-    .find((entry) => entry.length > 0);
-  return line === undefined ? undefined : [...line].slice(0, 200).join("");
 }
 
 /** Alma 的預設資料位置；沒有 App Sandbox，所以不在 `~/Library/Containers`。 */

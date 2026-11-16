@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,6 +6,8 @@ import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { ImportCardWriter } from "../../../src/modules/import/card-writer.js";
+import { contentHash, titleFrom } from "../../../src/modules/import/interchange.js";
 import { ALMA_FORBIDDEN_TABLES } from "../../../src/modules/import/sources/alma-db.js";
 import {
   cardFileNames,
@@ -74,6 +76,89 @@ async function alma(): Promise<AlmaFixture> {
 }
 
 describe("Alma 來源", () => {
+  it("預覽與寫入記憶卡時保留內文、縮短標題並省略重複摘要", async () => {
+    const f = await makeImportFixture();
+    fixtures.push(f);
+    const source = await mkdtemp(join(tmpdir(), "cardiary-alma-shape-"));
+    const databasePath = join(source, "chat_threads.db");
+    const longBody = `${"記憶🙂".repeat(55)}\n\n第二段保持原樣。`;
+    const multiline = "第一行是標題\n第二行補充內容。";
+    await makeAlmaDatabase(databasePath, {
+      memories: [
+        { id: "long", content: longBody },
+        { id: "multiline", content: multiline },
+        { id: "short", content: "簡短記憶。" },
+      ],
+      archived: [],
+      threads: [],
+      prompts: [],
+      crystals: 0,
+    });
+    const preview = await f.service.preview({ sourceKind: "alma", sourcePath: source });
+    const long = preview.items.find((item) => item.body === longBody);
+    const multi = preview.items.find((item) => item.body === multiline);
+    const short = preview.items.find((item) => item.body === "簡短記憶。");
+    expect(long?.title).toBe(`${[...longBody].slice(0, 59).join("")}…`);
+    expect([...(long?.title ?? "")]).toHaveLength(60);
+    expect(long?.summary).toBeUndefined();
+    expect(multi?.title).toBe("第一行是標題");
+    expect(short?.title).toBe("簡短記憶。");
+
+    const report = await f.service.write({ jobId: preview.jobId, itemKeys: [long?.key ?? ""] });
+    expect(report.cardsCreated).toBe(1);
+    const card = await f.library.get(report.results[0]?.cardId ?? "");
+    expect(card?.frontmatter.title).toBe(long?.title);
+    expect(card?.frontmatter.summary).toBeUndefined();
+    expect(card?.frontmatter.importedFrom?.path).toBe("chat_threads.db#memories/long");
+    expect(card?.frontmatter.importedFrom?.path).not.toContain("/Users/");
+    expect(card?.body.trim()).toBe(longBody);
+    const file = await readFile(
+      join(f.storage.layout.subfolderPath("cards"), `${report.results[0]?.cardId ?? ""}.md`),
+      "utf8",
+    );
+    expect(file).toContain("chat_threads.db#memories/long");
+    expect(file).not.toContain("summary:");
+    expect(file).toContain(longBody);
+  });
+
+  it("舊格式記憶保持去重，明確重匯會建立新卡並保留舊卡", async () => {
+    const { f, databasePath } = await alma();
+    const body = "長記憶".repeat(40);
+    const db = new DatabaseSync(databasePath);
+    db.prepare("UPDATE memories SET content = ? WHERE id = ?").run(body, "memory-1");
+    db.close();
+    const legacyTitle = titleFrom({ body, fallback: "記憶" });
+    const oldCard = new ImportCardWriter({
+      cardsDirectory: f.storage.layout.subfolderPath("cards"),
+    }).write({
+      kind: "memory",
+      title: legacyTitle,
+      body,
+      summary: body,
+      tags: ["alma"],
+      source: {
+        tool: "alma",
+        path: "/Users/example/chat_threads.db#memories/memory-1",
+        hash: contentHash({ category: "memory", title: legacyTitle, body }),
+      },
+    });
+    const preview = await f.service.preview({ sourceKind: "alma", sourcePath: databasePath });
+    const memory = preview.items.find((item) => item.body === body);
+    expect(memory?.duplicateCardId).toBe(oldCard.cardId);
+    const report = await f.service.write({
+      jobId: preview.jobId,
+      itemKeys: [memory?.key ?? ""],
+      reimport: true,
+    });
+    expect(report.cardsCreated).toBe(1);
+    expect(report.results[0]?.cardId).not.toBe(oldCard.cardId);
+    const old = await f.library.get(oldCard.cardId);
+    const replacement = await f.library.get(report.results[0]?.cardId ?? "");
+    expect(old?.frontmatter.title).toBe(legacyTitle);
+    expect(replacement?.frontmatter.title).toBe(`${[...body].slice(0, 59).join("")}…`);
+    expect(replacement?.frontmatter.importedFrom?.path).toBe("chat_threads.db#memories/memory-1");
+  });
+
   it("唯讀開啟資料庫：只查白名單的表，憑證表一條 SQL 都沒有", async () => {
     const { f, databasePath } = await alma();
     const before = await snapshotDirectory(databasePath.replace(/\/chat_threads\.db$/u, ""));
@@ -140,7 +225,10 @@ describe("Alma 來源", () => {
     const card = await f.library.get(memoryCardId);
     expect(card?.frontmatter.kind).toBe("memory");
     expect(card?.frontmatter.tags).toEqual(expect.arrayContaining(["importance-4"]));
-    expect(card?.frontmatter.importedFrom?.path).toContain("#memories/memory-1");
+    expect(card?.frontmatter.importedFrom?.path).toBe("chat_threads.db#memories/memory-1");
+    const rule = report.results.find((result) => result.category === "rule");
+    const ruleCard = await f.library.get(rule?.cardId ?? "");
+    expect(ruleCard?.frontmatter.importedFrom?.path).toBe("chat_threads.db#prompts/prompt-1");
     expect(JSON.stringify(report)).not.toContain("sk-fake-provider-key");
   });
 
@@ -188,7 +276,7 @@ describe("Alma 來源", () => {
     expect(card?.frontmatter.title).toBe("對話摘要：書櫃整理");
     expect(card?.body).toContain("層板");
     expect(card?.body).not.toContain("不該進卡片");
-    expect(card?.frontmatter.importedFrom?.path).toContain("#threads/thread-1");
+    expect(card?.frontmatter.importedFrom?.path).toBe("chat_threads.db#threads/thread-1");
   });
 
   it("對話匯出的 JSON 也能讀；格式認不出來時跳過並回報", async () => {
@@ -221,6 +309,7 @@ describe("Alma 來源", () => {
       rangeEnd: "2026-11-30T23:59:59.000Z",
     });
     expect(preview.conversations).toHaveLength(1);
+    expect(preview.conversations[0]?.source.path).toBe("threads.json#threads/export-1");
     expect(preview.conversations[0]?.unverified).toBe(true);
     expect(preview.conversations[0]?.existingSummary).toBeUndefined();
 
@@ -257,6 +346,7 @@ describe("Alma 來源", () => {
     expect(report.cardsCreated).toBe(1);
     const card = await f.library.get(report.results[0]?.cardId ?? "");
     expect(card?.frontmatter.kind).toBe("persona");
+    expect(card?.frontmatter.importedFrom?.path).toBe("chat_threads.db#provided");
   });
 });
 

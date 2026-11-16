@@ -94,7 +94,7 @@ export interface ImportItemDraft {
 /** 資料從哪個工具、哪個檔案來；寫進卡片的 `importedFrom`。 */
 export interface ImportItemSource {
   readonly tool: string;
-  /** 讀取到的位置；資料庫加上錨點，例如 `…/chat_threads.db#memories/42`。 */
+  /** 來源位置；Alma 資料庫用檔名與錨點，例如 `chat_threads.db#memories/42`。 */
   readonly path: string;
 }
 
