@@ -124,6 +124,7 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case statusRunning
     case statusIdle
     case settingsTitle
+    case settingsRemoteTab
     case settingsModelsTab
     case settingsGeneralTab
     case settingsAddProvider

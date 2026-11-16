@@ -1990,6 +1990,23 @@
         }
       }
     },
+    "settingsRemoteTab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remote Access"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "遠端存取"
+          }
+        }
+      }
+    },
     "settingsRequestFailed": {
       "extractionState": "manual",
       "localizations": {
@@ -2279,6 +2296,40 @@
         }
       }
     },
+    "settingsSummaryMaxOutputTokensBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Output token limit for summaries and distillation; the host still uses 4,096 when the setting is lower."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "摘要與蒸餾的輸出 token 上限；低於 4,096 時主機仍會用 4,096。"
+          }
+        }
+      }
+    },
+    "settingsSummaryMaxOutputTokensTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Summary output limit"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "摘要輸出上限"
+          }
+        }
+      }
+    },
     "settingsTitle": {
       "extractionState": "manual",
       "localizations": {
@@ -2564,40 +2615,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "需要更新"
-          }
-        }
-      }
-    },
-    "settingsSummaryMaxOutputTokensTitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Summary output limit"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "摘要輸出上限"
-          }
-        }
-      }
-    },
-    "settingsSummaryMaxOutputTokensBody": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Output token limit for summaries and distillation; the host still uses 4,096 when the setting is lower."
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "摘要與蒸餾的輸出 token 上限；低於 4,096 時主機仍會用 4,096。"
           }
         }
       }

@@ -1,4 +1,5 @@
 import CardiaryKit
+import CardiaryShellCore
 import Foundation
 
 /// 對話需要的請求。view model 只依賴這個介面，測試用假的實作，不需要真的主機。
@@ -221,11 +222,25 @@ public struct CardiaryMediaService: MediaService {
     }
 }
 
+/// 通知流的讀取、標已讀與轉卡；view model 只依賴這個介面。
+public protocol NotificationService: Sendable {
+    func listNotifications(limit: Int?, before: String?, unreadOnly: Bool?) async throws -> NotificationListResponsePayload
+    func markNotificationsRead(ids: [String]?, all: Bool?) async throws -> NotificationMarkReadResponsePayload
+    func createCardFromNotification(notificationId: String) async throws -> NotificationCreateCardResponsePayload
+}
+
+/// 配對核准與裝置管理：全部走殼的私有控制通道，不在客戶端協定上。
+public protocol RemoteControlService: Sendable {
+    func decidePairing(requestId: String, approve: Bool) async throws
+    func listDevices() async throws -> [ShellPairedDevice]
+    func revokeDevice(deviceId: String) async throws
+}
+
 public typealias CardiaryService =
     ConversationService & ModelSettingsService & SettingsService & ModulesService & ApprovalService
-    & CardService & ContextService & SessionManagementService & MediaImportService
+    & CardService & ContextService & SessionManagementService & MediaImportService & NotificationService
 
 extension CardiaryClient:
     ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService,
-    CardService, ContextService, SessionManagementService, MediaImportService
+    CardService, ContextService, SessionManagementService, MediaImportService, NotificationService
 {}

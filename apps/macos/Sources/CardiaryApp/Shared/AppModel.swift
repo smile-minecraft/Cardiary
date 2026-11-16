@@ -21,6 +21,10 @@ public final class AppModel: ObservableObject {
     public let conversation: ConversationModel
     public let firstRun: FirstRunModel
     public let approvals: ApprovalModel
+    /// 遠端配對與裝置管理；資料走殼的私有控制通道。
+    public let remote: RemoteModel
+    /// 通知流；資料走客戶端協定。
+    public let notifications: NotificationModel
     public let settingsModel: SettingsModel
     public let sidebar = SidebarRegistry()
     public let inspector = InspectorRegistry()
@@ -40,6 +44,8 @@ public final class AppModel: ObservableObject {
     public private(set) var media: (any MediaService)?
     /// 卡片與封存的模型；由 `CardUIModule` 掛上，AppModel 只轉發生命週期。
     public private(set) var contentModels: [any AppContentModel] = []
+    /// 配對與裝置管理的控制通道服務；由殼提供，與客戶端連線分開。
+    public private(set) var remoteControl: (any RemoteControlService)?
 
     /// - Parameter setupCompleted: 殼在啟動時是否已經有資料夾授權紀錄。有的話是回訪，
     ///   直接進主畫面，不再走首次設定。
@@ -56,6 +62,8 @@ public final class AppModel: ObservableObject {
         self.conversation = ConversationModel()
         self.firstRun = FirstRunModel(keychain: keychain)
         self.approvals = ApprovalModel(language: language)
+        self.remote = RemoteModel(language: language)
+        self.notifications = NotificationModel(language: language)
         self.settingsModel = SettingsModel(keychain: keychain, language: language)
         conversation.onMessageSent = { [weak self] in
             await self?.conversations.reload()
@@ -90,6 +98,17 @@ public final class AppModel: ObservableObject {
         bridge.update(approvalCount: approvals?.count)
     }
 
+    /// 殼提供的配對與裝置控制通道；與客戶端連線分開，服務就緒後才attach。
+    public func attach(remoteControl: any RemoteControlService) {
+        self.remoteControl = remoteControl
+        remote.attach(service: remoteControl)
+    }
+
+    /// 服務通知有新配對請求：轉給遠端模型顯示核准視窗。
+    public func handle(pairingRequest notice: PairingNotice) {
+        remote.receive(notice: notice)
+    }
+
     /// 新的客戶端連線（第一次連上、重連、服務換行程後都走這裡）。
     ///
     /// `media` 由殼一起給：原檔的 HTTP 端點與 client Token 只有殼知道。
@@ -110,6 +129,7 @@ public final class AppModel: ObservableObject {
         firstRun.attach(service: service)
         approvals.attach(service: service)
         settingsModel.attach(service: service)
+        notifications.attach(service: service)
         for model in contentModels {
             model.attach(service: service)
         }
@@ -129,6 +149,7 @@ public final class AppModel: ObservableObject {
         conversation.markDisconnected()
         settingsModel.detach()
         firstRun.detach()
+        notifications.detach()
         update(approvals: nil)
     }
 
@@ -148,6 +169,9 @@ public final class AppModel: ObservableObject {
 
     /// 殼轉來的會話事件。對話只套用目前開啟的那一場；卡片與封存的模型自己過濾。
     public func handle(sessionEvent frame: ServerFrame) {
+        if case .notificationChangedEvent(let event) = frame {
+            notifications.handle(change: event)
+        }
         conversations.handle(frame: frame)
         reconcileSelection()
         conversation.apply(frame: frame)

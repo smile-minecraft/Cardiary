@@ -1,9 +1,33 @@
 import Foundation
 
+/// 配對請求的通知內容（服務 → 殼）。
+public struct PairingNotice: Equatable, Sendable {
+    public let pairingRequestId: String
+    public let deviceName: String
+    public let deviceKind: String
+    public let code: String
+    public let expiresAt: String
+
+    public init(
+        pairingRequestId: String,
+        deviceName: String,
+        deviceKind: String,
+        code: String,
+        expiresAt: String
+    ) {
+        self.pairingRequestId = pairingRequestId
+        self.deviceName = deviceName
+        self.deviceKind = deviceKind
+        self.code = code
+        self.expiresAt = expiresAt
+    }
+}
+
 /// 服務送來的通知。
 public enum ControlNotification: Equatable, Sendable {
     case fatal(reason: String, detail: String?)
     case maintenance(lifecycle: String, operationId: String?)
+    case pairingRequested(PairingNotice)
 
     /// 刪除或 VACUUM 進行中時，殼要暫停健康檢查。
     public var suspendsHealthChecks: Bool {
@@ -440,6 +464,23 @@ public final class ControlChannel: @unchecked Sendable {
             let lifecycle = payload?["lifecycle"]?.stringValue ?? "idle"
             let operationId = payload?["operationId"]?.stringValue
             onNotification?(.maintenance(lifecycle: lifecycle, operationId: operationId))
+        case ControlRoute.notifyPairingRequested:
+            guard let id = payload?["pairingRequestId"]?.stringValue,
+                let deviceName = payload?["deviceName"]?.stringValue,
+                let deviceKind = payload?["deviceKind"]?.stringValue,
+                let code = payload?["code"]?.stringValue,
+                let expiresAt = payload?["expiresAt"]?.stringValue
+            else {
+                close(.protocolViolation("notify.pairing_requested 缺欄位"))
+                return
+            }
+            onNotification?(.pairingRequested(PairingNotice(
+                pairingRequestId: id,
+                deviceName: deviceName,
+                deviceKind: deviceKind,
+                code: code,
+                expiresAt: expiresAt
+            )))
         default:
             break
         }

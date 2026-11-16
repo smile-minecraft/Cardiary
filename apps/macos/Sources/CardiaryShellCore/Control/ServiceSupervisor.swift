@@ -74,6 +74,35 @@ public struct ShutdownOutcome: Equatable, Sendable {
     public var isBusy: Bool { reason == "busy" }
 }
 
+/// 一台已配對裝置在介面上的樣子。
+public struct ShellPairedDevice: Equatable, Identifiable, Sendable {
+    public let deviceId: String
+    public let deviceName: String
+    public let deviceKind: String
+    public let fingerprint: String
+    public let createdAt: String
+    public let revokedAt: String?
+
+    public var id: String { deviceId }
+    public var isRevoked: Bool { revokedAt != nil }
+
+    public init(
+        deviceId: String,
+        deviceName: String,
+        deviceKind: String,
+        fingerprint: String,
+        createdAt: String,
+        revokedAt: String? = nil
+    ) {
+        self.deviceId = deviceId
+        self.deviceName = deviceName
+        self.deviceKind = deviceKind
+        self.fingerprint = fingerprint
+        self.createdAt = createdAt
+        self.revokedAt = revokedAt
+    }
+}
+
 public struct FolderSnapshot: Equatable, Sendable {
     public var state: FolderAvailabilityState
     public var path: String?
@@ -173,6 +202,8 @@ public final class ServiceSupervisor: @unchecked Sendable {
     public var onLog: (@Sendable (String) -> Void)?
     /// 服務就緒後拿到客戶端 Token；殼用它建立客戶端連線，不寫進日誌或磁碟。
     public var onClientToken: (@Sendable (String) -> Void)?
+    /// 服務通知有新配對請求，殼要顯示核准視窗。
+    public var onPairingRequested: (@Sendable (PairingNotice) -> Void)?
 
     public init(
         configuration: ServiceSupervisorConfiguration,
@@ -851,7 +882,70 @@ public final class ServiceSupervisor: @unchecked Sendable {
             }
             log("服務進入維護狀態：\(lifecycle)")
             publishStatus()
+        case .pairingRequested(let notice):
+            log("收到配對請求：\(notice.deviceName)（\(notice.deviceKind)）")
+            onPairingRequested?(notice)
         }
+    }
+
+    // MARK: - 遠端配對與裝置（私有控制通道）
+
+    /// 核准或拒絕一筆配對請求。只經私有控制通道，公開協定沒有這個入口。
+    public func decidePairing(requestId: String, approve: Bool) async throws {
+        guard let channel = queue.sync(execute: { channel }) else {
+            throw ControlChannel.ChannelError.closed
+        }
+        _ = try await channel.request(
+            route: approve ? ControlRoute.pairingApprove : ControlRoute.pairingDeny,
+            payload: .object(["pairingRequestId": .string(requestId)])
+        )
+        log("配對請求 \(requestId) 已\(approve ? "核准" : "拒絕")")
+    }
+
+    /// 列出已配對裝置。
+    public func listDevices() async throws -> [ShellPairedDevice] {
+        guard let channel = queue.sync(execute: { channel }) else {
+            throw ControlChannel.ChannelError.closed
+        }
+        let response = try await channel.request(route: ControlRoute.devicesList)
+        guard case .object(let object) = response,
+            case .array(let devices) = object["devices"]
+        else {
+            throw ControlChannel.ChannelError.protocolViolation("devices.list 回應格式不對")
+        }
+        return devices.compactMap { Self.parseDevice($0) }
+    }
+
+    /// 撤銷一台裝置；成功後該裝置的既有連線立即失效。
+    public func revokeDevice(deviceId: String) async throws {
+        guard let channel = queue.sync(execute: { channel }) else {
+            throw ControlChannel.ChannelError.closed
+        }
+        _ = try await channel.request(
+            route: ControlRoute.devicesRevoke,
+            payload: .object(["deviceId": .string(deviceId)])
+        )
+        log("已撤銷裝置 \(deviceId)")
+    }
+
+    private static func parseDevice(_ value: JSONValue) -> ShellPairedDevice? {
+        guard case .object(let object) = value,
+            case .string(let id) = object["deviceId"],
+            case .string(let name) = object["deviceName"],
+            case .string(let kind) = object["deviceKind"],
+            case .string(let fingerprint) = object["fingerprint"],
+            case .string(let createdAt) = object["createdAt"]
+        else { return nil }
+        var revokedAt: String?
+        if case .string(let value) = object["revokedAt"] { revokedAt = value }
+        return ShellPairedDevice(
+            deviceId: id,
+            deviceName: name,
+            deviceKind: kind,
+            fingerprint: fingerprint,
+            createdAt: createdAt,
+            revokedAt: revokedAt
+        )
     }
 
     // MARK: - 狀態
