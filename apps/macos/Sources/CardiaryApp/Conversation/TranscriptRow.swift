@@ -4,18 +4,56 @@ import SwiftUI
 /// 對話流的一列：使用者訊息、助理訊息、工具呼叫或結構化資料。
 struct TranscriptRow: View {
     let item: ConversationItem
+    /// 只有最後一則使用者訊息會帶非 nil 的重送動作；`isResending` 進行中時按鈕顯示明確狀態。
+    let resendAction: (() -> Void)?
+    let canResend: Bool
+    let isResending: Bool
+
+    init(
+        item: ConversationItem,
+        resendAction: (() -> Void)? = nil,
+        canResend: Bool = true,
+        isResending: Bool = false
+    ) {
+        self.item = item
+        self.resendAction = resendAction
+        self.canResend = canResend
+        self.isResending = isResending
+    }
 
     var body: some View {
         switch item.kind {
         case .userText(let text):
             HStack {
                 Spacer(minLength: 60)
-                Text(text)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Palette.pinkSoft, in: RoundedRectangle(cornerRadius: DesignTokens.messageBubbleRadius, style: .continuous))
-                    .accessibilityLabel(AppL10n.text(.messageRoleUser) + "：" + text)
+                VStack(alignment: .trailing, spacing: DesignTokens.spacingXS) {
+                    Text(text)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Palette.pinkSoft, in: RoundedRectangle(cornerRadius: DesignTokens.messageBubbleRadius, style: .continuous))
+                        .accessibilityLabel(AppL10n.text(.messageRoleUser) + "：" + text)
+                    if let resendAction {
+                        Button {
+                            resendAction()
+                        } label: {
+                            HStack(spacing: DesignTokens.spacingXS) {
+                                if isResending {
+                                    SuitLoader(size: 7)
+                                    Text(AppL10n.text(.conversationResending))
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 9, weight: .bold))
+                                    Text(AppL10n.text(.conversationResend))
+                                }
+                            }
+                        }
+                        .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
+                        .controlSize(.small)
+                        .disabled(!canResend || isResending)
+                        .accessibilityLabel(AppL10n.text(isResending ? .conversationResending : .conversationResend))
+                    }
+                }
             }
 
         case .assistantText(let text, let status):

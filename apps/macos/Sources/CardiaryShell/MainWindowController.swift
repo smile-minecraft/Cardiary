@@ -42,13 +42,16 @@ final class MainWindowController {
             width: DesignTokens.windowDefaultWidth,
             height: DesignTokens.windowDefaultHeight
         ))
-        window.minSize = NSSize(
+        window.contentMinSize = NSSize(
             width: DesignTokens.windowMinWidth,
             height: DesignTokens.windowMinHeight
         )
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
-        window.center()
+        // 記住上次的視窗大小；第一次開啟才用預設大小並置中。
+        if window.setFrameAutosaveName("CardiaryMainWindow") == false {
+            window.center()
+        }
         return window
     }
 }

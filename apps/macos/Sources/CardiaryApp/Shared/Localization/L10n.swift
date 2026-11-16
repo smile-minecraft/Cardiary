@@ -110,6 +110,8 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case conversationLoadOlder
     case conversationLoadingOlder
     case conversationNoMoreHistory
+    case conversationResend
+    case conversationResending
     case conversationToolCall
     case conversationToolResult
     case conversationToolRunning

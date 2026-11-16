@@ -78,8 +78,15 @@ struct ConversationView: View {
                     historyControls
 
                     ForEach(conversation.items) { item in
-                        TranscriptRow(item: item)
-                            .id(item.id)
+                        TranscriptRow(
+                            item: item,
+                            resendAction: item.id == conversation.lastUserMessageId
+                                ? { Task { await conversation.resendLastUserMessage() } }
+                                : nil,
+                            canResend: conversation.canResendLastUserMessage,
+                            isResending: conversation.isResending
+                        )
+                        .id(item.id)
                     }
 
                     if let streaming = conversation.streamingText {

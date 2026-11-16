@@ -22,6 +22,7 @@ actor FakeCardiaryService:
     private let snapshot: SessionSnapshot?
     private let createSummary: SessionSummary?
     private let sendResponse: SessionSendMessageResponsePayload?
+    private var sendDelay: Duration = .zero
     private var modelsState: SystemModelsState
     private let failure: Failure?
     private var settingsItems: [SettingItem]
@@ -61,6 +62,7 @@ actor FakeCardiaryService:
         snapshot: SessionSnapshot? = nil,
         createSummary: SessionSummary? = nil,
         sendResponse: SessionSendMessageResponsePayload? = nil,
+        sendDelay: Duration = .zero,
         modelsState: SystemModelsState = SystemModelsState(providers: [], roles: [], resolved: []),
         settings: [SettingItem] = [],
         modules: [ModuleInfo] = [],
@@ -74,6 +76,7 @@ actor FakeCardiaryService:
         self.snapshot = snapshot
         self.createSummary = createSummary
         self.sendResponse = sendResponse
+        self.sendDelay = sendDelay
         self.modelsState = modelsState
         self.settingsItems = settings
         self.modulesList = modules
@@ -114,6 +117,7 @@ actor FakeCardiaryService:
         clientMessageId: String?
     ) async throws -> SessionSendMessageResponsePayload {
         sends.append((text, delivery, clientMessageId))
+        if sendDelay > .zero { try await Task.sleep(for: sendDelay) }
         if failure == .send { throw Failure.send }
         return sendResponse ?? SessionSendMessageResponsePayload(
             sessionId: sessionId,

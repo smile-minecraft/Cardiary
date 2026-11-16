@@ -38,8 +38,10 @@ struct SidebarView: View {
             .padding(.horizontal, DesignTokens.spacingM)
             .padding(.bottom, DesignTokens.spacingM)
 
-            List(selection: sidebarSelection) {
-                Section {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
+                    SidebarSectionLabel(title: AppL10n.text(.sidebarSectionSession), suit: .spade)
+                        .padding(.bottom, DesignTokens.spacingXS)
                     if conversations.sessions.isEmpty {
                         Text(AppL10n.text(.conversationListEmpty))
                             .font(.cardiary(.caption))
@@ -54,7 +56,7 @@ struct SidebarView: View {
                                 tone: tone(for: session.status),
                                 isSelected: model.selection == .conversation(session.id)
                             )
-                            .tag(AppSelection.conversation(session.id))
+                            .onTapGesture { select(.conversation(session.id)) }
                             .contextMenu {
                                 if session.status != .archived {
                                     Button {
@@ -73,11 +75,10 @@ struct SidebarView: View {
                             .font(.cardiary(.caption))
                             .foregroundStyle(Palette.inkSecondary)
                     }
-                } header: {
-                    SidebarSectionLabel(title: AppL10n.text(.sidebarSectionSession), suit: .spade)
-                }
 
-                Section {
+                    SidebarSectionLabel(title: AppL10n.text(.sidebarSectionTools), suit: .diamond)
+                        .padding(.top, DesignTokens.spacingM)
+                        .padding(.bottom, DesignTokens.spacingXS)
                     ForEach(otherSlots) { slot in
                         SidebarRowLabel(
                             title: AppL10n.text(slot.titleKey),
@@ -85,14 +86,13 @@ struct SidebarView: View {
                             tone: Self.tone(forSlot: slot.id),
                             isSelected: model.selection == .slot(slot.id)
                         )
-                        .tag(AppSelection.slot(slot.id))
+                        .onTapGesture { select(.slot(slot.id)) }
                     }
-                } header: {
-                    SidebarSectionLabel(title: AppL10n.text(.sidebarSectionTools), suit: .diamond)
-                        .padding(.top, DesignTokens.spacingM)
                 }
+                .focusable()
+                .focusEffectDisabled()
+                .onMoveCommand(perform: moveSelection)
             }
-            .listStyle(.plain)
             .scrollIndicators(.never)
 
             SidebarFooter(bridge: model.bridge)
@@ -101,20 +101,39 @@ struct SidebarView: View {
         .background(Palette.sidebar)
     }
 
-    private var sidebarSelection: Binding<AppSelection?> {
-        Binding(
-            get: { model.selection == .none ? nil : model.selection },
-            set: { selection in
-                switch selection {
-                case let .conversation(id):
-                    Task { await model.selectConversation(id) }
-                case let .slot(id):
-                    model.selectSlot(id)
-                case .some(.none), nil:
-                    break
-                }
-            }
-        )
+    /// 目前可用方向鍵選取的列，順序和畫面上一致。
+    private var selectableItems: [AppSelection] {
+        conversations.sessions.map { .conversation($0.id) } + otherSlots.map { .slot($0.id) }
+    }
+
+    private func select(_ selection: AppSelection) {
+        switch selection {
+        case let .conversation(id):
+            Task { await model.selectConversation(id) }
+        case let .slot(id):
+            model.selectSlot(id)
+        case .none:
+            break
+        }
+    }
+
+    /// 側欄本身承接方向鍵：上下移動選取，和滑鼠點選走同一條路。
+    private func moveSelection(_ direction: MoveCommandDirection) {
+        let items = selectableItems
+        guard !items.isEmpty else { return }
+        let current = items.firstIndex(of: model.selection)
+        let index: Int
+        switch direction {
+        case .up:
+            index = current.map { max(0, $0 - 1) } ?? 0
+        case .down:
+            index = current.map { min(items.count - 1, $0 + 1) } ?? 0
+        default:
+            return
+        }
+        let target = items[index]
+        guard target != model.selection else { return }
+        select(target)
     }
 
     private var otherSlots: [SidebarSlot] {
@@ -200,11 +219,9 @@ private struct SidebarRowLabel: View {
         .padding(.vertical, 7)
         .background(background, in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovered)
+        .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 

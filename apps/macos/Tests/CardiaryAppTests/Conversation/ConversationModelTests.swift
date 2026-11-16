@@ -207,6 +207,76 @@ final class ConversationModelTests: XCTestCase {
         XCTAssertTrue(sends.isEmpty)
     }
 
+    func testResendRepeatsLastUserMessageWithNewClientMessageId() async {
+        let fake = FakeCardiaryService(
+            historyPages: [nil: SessionGetHistoryResponsePayload(entries: [
+                Fixtures.userEntry("user-1", text: "第一次"),
+                Fixtures.assistantEntry("assistant-1", text: "回答"),
+                Fixtures.userEntry("user-2", text: "  重送這則  "),
+            ])]
+        )
+        let conversation = makeConversation()
+        await conversation.open(sessionId: "s1", service: fake)
+
+        conversation.delivery = .steer
+        await conversation.resendLastUserMessage()
+
+        let sends = await fake.sends
+        XCTAssertEqual(sends.map(\.text), ["重送這則"])
+        XCTAssertEqual(sends.map(\.delivery), [.steer])
+        XCTAssertEqual(conversation.items.last?.id, "user-sent")
+        XCTAssertNotNil(sends.first?.clientMessageId)
+    }
+
+    func testResendDoesNothingWhileBusyOrSending() async {
+        let fake = FakeCardiaryService(
+            historyPages: [nil: SessionGetHistoryResponsePayload(entries: [
+                Fixtures.userEntry("user-1", text: "重新送出我"),
+            ])]
+        )
+        let conversation = makeConversation()
+        await conversation.open(sessionId: "s1", service: fake)
+        conversation.apply(frame: Fixtures.turnStarted())
+
+        await conversation.resendLastUserMessage()
+
+        let sends = await fake.sends
+        XCTAssertTrue(sends.isEmpty)
+    }
+
+    func testResendDoesNothingWithoutAUserMessage() async {
+        let fake = FakeCardiaryService(historyPages: [nil: Fixtures.historyPage([])])
+        let conversation = makeConversation()
+        await conversation.open(sessionId: "s1", service: fake)
+
+        await conversation.resendLastUserMessage()
+
+        let sends = await fake.sends
+        XCTAssertTrue(sends.isEmpty)
+    }
+
+    func testResendMarksResendingOnlyUntilTheRequestFinishes() async {
+        let fake = FakeCardiaryService(
+            historyPages: [nil: SessionGetHistoryResponsePayload(entries: [
+                Fixtures.userEntry("user-1", text: "重送我"),
+            ])],
+            sendDelay: .milliseconds(200)
+        )
+        let conversation = makeConversation()
+        await conversation.open(sessionId: "s1", service: fake)
+
+        let resending = expectation(description: "開始重送")
+        let task = Task { @MainActor in
+            resending.fulfill()
+            await conversation.resendLastUserMessage()
+        }
+        await fulfillment(of: [resending], timeout: 1)
+
+        XCTAssertTrue(conversation.isResending)
+        await task.value
+        XCTAssertFalse(conversation.isResending)
+    }
+
     func testInterruptCallsService() async {
         let conversation = makeConversation()
         let fake = FakeCardiaryService()
