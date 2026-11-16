@@ -10,3 +10,4 @@ export * from "./context/index.js";
 export * from "./freshness/index.js";
 export * from "./media/index.js";
 export * from "./permissions/index.js";
+export * from "./retrieval/index.js";

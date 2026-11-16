@@ -25,6 +25,8 @@ export interface SettingsRecord {
 
 /** 儲存層 `SettingsStore` 的最小介面；測試可以給記憶體替身。 */
 export interface SettingsStoreLike {
+  /** 相同底層設定庫的服務共用通知。 */
+  readonly notificationKey?: object;
   get(key: string): SettingsRecord | null;
   list(): SettingsRecord[];
   set(input: StoreSettingInput): SettingsRecord;
@@ -64,14 +66,20 @@ export interface SetSettingResult {
   readonly changedAt: string;
 }
 
+const listenersByStore = new WeakMap<object, Set<(change: SettingsChange) => void>>();
+
 export class SettingsService {
   readonly #store: SettingsStoreLike;
   readonly #now: () => Date;
   readonly #updatedBy: string;
-  readonly #listeners = new Set<(change: SettingsChange) => void>();
+  readonly #listeners: Set<(change: SettingsChange) => void>;
 
   constructor(store: SettingsStoreLike, options: SettingsServiceOptions = {}) {
     this.#store = store;
+    const key = store.notificationKey ?? store;
+    const listeners = listenersByStore.get(key) ?? new Set<(change: SettingsChange) => void>();
+    listenersByStore.set(key, listeners);
+    this.#listeners = listeners;
     this.#now = options.now ?? (() => new Date());
     this.#updatedBy = options.updatedBy ?? "system";
   }

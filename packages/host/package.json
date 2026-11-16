@@ -21,6 +21,7 @@
     "@cardiary/module-api": "workspace:*",
     "@cardiary/protocol": "workspace:*",
     "@cardiary/storage": "workspace:*",
+    "@huggingface/transformers": "4.3.2",
     "sharp": "0.35.5",
     "ws": "8.23.0"
   },

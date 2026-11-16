@@ -21,6 +21,7 @@ import type { Database, FolderLayout, SettingsStore } from "@cardiary/storage";
 
 import type { BrokerClient } from "../control/broker.js";
 import type { HostEngine } from "../engine/types.js";
+import type { SpawnRegistry } from "../spawn/wrapper.js";
 import type { StorageBundle } from "../storage/interfaces.js";
 
 /**
@@ -52,6 +53,8 @@ export const HOST_SERVICE_NAMES = {
   toolPermissionGate: "toolPermissionGate",
   /** 「一律允許」的決定入口；由權限模組提供，閘道在審批當下才取。 */
   permissionDecision: "permission.decision",
+  /** 受控子行程的建立入口；嵌入程序透過它啟動，模組不自己建立子行程。 */
+  spawn: "spawn",
 } as const;
 
 /** 服務名稱的聯集；`modules.md` 第 5 節那張表。 */
@@ -131,6 +134,7 @@ export interface HostServiceTypeMap {
   cardStorage: CardEnvironment;
   toolPermissionGate: ToolPermissionGate;
   "permission.decision": AlwaysAllowService;
+  spawn: SpawnRegistry;
 }
 
 /**

@@ -36,6 +36,7 @@ export type CardToolName = keyof typeof CARD_TOOL_POLICY;
 
 export interface CardToolsOptions {
   readonly library: CardLibrary;
+  readonly search?: CardLibrary["search"];
 }
 
 export function createCardToolBundle(options: CardToolsOptions): ToolBundleDraft {
@@ -74,7 +75,8 @@ export function createCardToolBundle(options: CardToolsOptions): ToolBundleDraft
           const query = stringOf(record, "query");
           const tags = stringsOf(record, "tags");
           const kinds = stringsOf(record, "kinds");
-          const page = await library.search({
+          const search = options.search ?? library.search.bind(library);
+          const page = await search({
             query,
             ...(tags === undefined ? {} : { tags }),
             ...(kinds === undefined ? {} : { kinds: kinds as CardKind[] }),
