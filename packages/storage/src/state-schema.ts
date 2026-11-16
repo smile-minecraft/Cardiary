@@ -614,6 +614,46 @@ export const M4_MIGRATIONS: readonly Migration[] = [
   { version: 5, name: "m2-dealing-probability", sql: M5_SCHEMA },
 ];
 
+/**
+ * v6「m3-document-versions」的版本歷史表。
+ *
+ * - 每個編輯是一個版本；`patch_format='replace'` 的錨點存完整內文。
+ * - `body_hash` 讓重放能驗證內文，不必讀回 frontmatter。
+ * - 不設指向 card_state 的外部鍵：卡片檔刪除時要立刻清掉版本，而
+ *   card_state 列保留 7 天，串聯會讓版本多活 7 天。
+ */
+const M6_SCHEMA = `
+CREATE TABLE card_versions (
+  version_id       TEXT PRIMARY KEY,
+  card_id          TEXT NOT NULL,
+  seq              INTEGER NOT NULL,
+  kind             TEXT NOT NULL CHECK (kind IN ('create','patch','checkpoint','restore','merge')),
+  revision         TEXT NOT NULL,
+  body_hash        TEXT NOT NULL,
+  base_revision    TEXT,
+  patch_format     TEXT NOT NULL CHECK (patch_format IN ('unified','replace')),
+  patch_text       TEXT NOT NULL,
+  created_at       TEXT NOT NULL,
+  merged_count     INTEGER NOT NULL DEFAULT 0,
+  merged_seq_range TEXT,
+  UNIQUE (card_id, seq)
+) STRICT;
+
+CREATE INDEX card_versions_by_card_seq ON card_versions (card_id, seq);
+CREATE INDEX card_versions_by_revision ON card_versions (card_id, revision);
+`;
+
+/** v6 新增的表名稱。 */
+export const M6_TABLES = ["card_versions"] as const;
+
+/**
+ * v6 的遷移清單：在 v5 之後加版本歷史表。
+ */
+export const M5_MIGRATIONS: readonly Migration[] = [
+  ...M4_MIGRATIONS,
+  { version: 6, name: "m3-document-versions", sql: M6_SCHEMA },
+];
+
 const SCHEMA_MIGRATIONS_DDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version     INTEGER PRIMARY KEY,
@@ -658,7 +698,7 @@ interface AppliedMigrationRow {
  * - 每個版本在單一交易內完成 SQL、`user_version` 與 `schema_migrations`。
  */
 export function migrate(db: Database, options: MigrateOptions): MigrationOutcome {
-  const migrations = options.migrations ?? M4_MIGRATIONS;
+  const migrations = options.migrations ?? M5_MIGRATIONS;
   const now = options.now ?? (() => new Date());
   db.exec(SCHEMA_MIGRATIONS_DDL);
 

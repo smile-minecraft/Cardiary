@@ -4,6 +4,7 @@ export * from "./db.js";
 export * from "./dedupe.js";
 export * from "./devices/index.js";
 export * from "./deletions.js";
+export * from "./documents/index.js";
 export * from "./errors.js";
 export * from "./events.js";
 export * from "./folder.js";
