@@ -180,6 +180,49 @@ public struct AgentListResponsePayload: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - AgentPendingPermission
+
+public struct AgentPendingPermission: Codable, Equatable, Sendable {
+    public let approvalId: String
+    public let toolName: String
+    public let description: String?
+
+    public init(
+        approvalId: String,
+        toolName: String,
+        description: String? = nil
+    ) {
+        self.approvalId = approvalId
+        self.toolName = toolName
+        self.description = description
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case approvalId = "approvalId"
+        case toolName = "toolName"
+        case description = "description"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let approvalId = try container.decode(String.self, forKey: .approvalId)
+        let toolName = try container.decode(String.self, forKey: .toolName)
+        let description = try container.decodeIfPresent(String.self, forKey: .description)
+        self.init(
+            approvalId: approvalId,
+            toolName: toolName,
+            description: description
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(approvalId, forKey: .approvalId)
+        try container.encode(toolName, forKey: .toolName)
+        try container.encodeIfPresent(description, forKey: .description)
+    }
+}
+
 // MARK: - AgentProgress
 
 public struct AgentProgress: Codable, Equatable, Sendable {
@@ -239,6 +282,8 @@ public struct AgentSessionInfo: Codable, Equatable, Sendable {
     public let workingDirectory: String
     public let progress: AgentProgress?
     public let message: String?
+    public let resultUnknown: Bool?
+    public let pendingPermission: AgentPendingPermission?
     public let startedAt: String
 
     public init(
@@ -248,6 +293,8 @@ public struct AgentSessionInfo: Codable, Equatable, Sendable {
         workingDirectory: String,
         progress: AgentProgress? = nil,
         message: String? = nil,
+        resultUnknown: Bool? = nil,
+        pendingPermission: AgentPendingPermission? = nil,
         startedAt: String
     ) {
         self.agentSessionId = agentSessionId
@@ -256,6 +303,8 @@ public struct AgentSessionInfo: Codable, Equatable, Sendable {
         self.workingDirectory = workingDirectory
         self.progress = progress
         self.message = message
+        self.resultUnknown = resultUnknown
+        self.pendingPermission = pendingPermission
         self.startedAt = startedAt
     }
 
@@ -266,6 +315,8 @@ public struct AgentSessionInfo: Codable, Equatable, Sendable {
         case workingDirectory = "workingDirectory"
         case progress = "progress"
         case message = "message"
+        case resultUnknown = "resultUnknown"
+        case pendingPermission = "pendingPermission"
         case startedAt = "startedAt"
     }
 
@@ -277,6 +328,8 @@ public struct AgentSessionInfo: Codable, Equatable, Sendable {
         let workingDirectory = try container.decode(String.self, forKey: .workingDirectory)
         let progress = try container.decodeIfPresent(AgentProgress.self, forKey: .progress)
         let message = try container.decodeIfPresent(String.self, forKey: .message)
+        let resultUnknown = try container.decodeIfPresent(Bool.self, forKey: .resultUnknown)
+        let pendingPermission = try container.decodeIfPresent(AgentPendingPermission.self, forKey: .pendingPermission)
         let startedAt = try container.decode(String.self, forKey: .startedAt)
         self.init(
             agentSessionId: agentSessionId,
@@ -285,6 +338,8 @@ public struct AgentSessionInfo: Codable, Equatable, Sendable {
             workingDirectory: workingDirectory,
             progress: progress,
             message: message,
+            resultUnknown: resultUnknown,
+            pendingPermission: pendingPermission,
             startedAt: startedAt
         )
     }
@@ -297,6 +352,8 @@ public struct AgentSessionInfo: Codable, Equatable, Sendable {
         try container.encode(workingDirectory, forKey: .workingDirectory)
         try container.encodeIfPresent(progress, forKey: .progress)
         try container.encodeIfPresent(message, forKey: .message)
+        try container.encodeIfPresent(resultUnknown, forKey: .resultUnknown)
+        try container.encodeIfPresent(pendingPermission, forKey: .pendingPermission)
         try container.encode(startedAt, forKey: .startedAt)
     }
 }
@@ -607,19 +664,25 @@ public struct AgentStateChangedEventPayload: Codable, Equatable, Sendable {
     public let status: AgentStatus
     public let progress: AgentProgress?
     public let message: String?
+    public let resultUnknown: Bool?
+    public let pendingPermission: AgentPendingPermission?
 
     public init(
         agentSessionId: String,
         agentKind: AgentKind,
         status: AgentStatus,
         progress: AgentProgress? = nil,
-        message: String? = nil
+        message: String? = nil,
+        resultUnknown: Bool? = nil,
+        pendingPermission: AgentPendingPermission? = nil
     ) {
         self.agentSessionId = agentSessionId
         self.agentKind = agentKind
         self.status = status
         self.progress = progress
         self.message = message
+        self.resultUnknown = resultUnknown
+        self.pendingPermission = pendingPermission
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -628,6 +691,8 @@ public struct AgentStateChangedEventPayload: Codable, Equatable, Sendable {
         case status = "status"
         case progress = "progress"
         case message = "message"
+        case resultUnknown = "resultUnknown"
+        case pendingPermission = "pendingPermission"
     }
 
     public init(from decoder: Decoder) throws {
@@ -637,12 +702,16 @@ public struct AgentStateChangedEventPayload: Codable, Equatable, Sendable {
         let status = try container.decode(AgentStatus.self, forKey: .status)
         let progress = try container.decodeIfPresent(AgentProgress.self, forKey: .progress)
         let message = try container.decodeIfPresent(String.self, forKey: .message)
+        let resultUnknown = try container.decodeIfPresent(Bool.self, forKey: .resultUnknown)
+        let pendingPermission = try container.decodeIfPresent(AgentPendingPermission.self, forKey: .pendingPermission)
         self.init(
             agentSessionId: agentSessionId,
             agentKind: agentKind,
             status: status,
             progress: progress,
-            message: message
+            message: message,
+            resultUnknown: resultUnknown,
+            pendingPermission: pendingPermission
         )
     }
 
@@ -653,6 +722,8 @@ public struct AgentStateChangedEventPayload: Codable, Equatable, Sendable {
         try container.encode(status, forKey: .status)
         try container.encodeIfPresent(progress, forKey: .progress)
         try container.encodeIfPresent(message, forKey: .message)
+        try container.encodeIfPresent(resultUnknown, forKey: .resultUnknown)
+        try container.encodeIfPresent(pendingPermission, forKey: .pendingPermission)
     }
 }
 

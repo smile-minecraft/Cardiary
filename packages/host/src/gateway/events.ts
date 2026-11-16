@@ -126,6 +126,18 @@ export function mapEventIntent(intent: ProtocolEventIntent): EventMapping {
               },
             }),
         ...(intent.message === undefined ? {} : { message: intent.message }),
+        ...(intent.resultUnknown === true ? { resultUnknown: true } : {}),
+        ...(intent.pendingPermission === undefined
+          ? {}
+          : {
+              pendingPermission: {
+                approvalId: intent.pendingPermission.approvalId,
+                toolName: intent.pendingPermission.toolName,
+                ...(intent.pendingPermission.description === undefined
+                  ? {}
+                  : { description: intent.pendingPermission.description }),
+              },
+            }),
       });
     default:
       return { error: `M1 沒有這個事件意圖：${intent.kind}` };
@@ -268,6 +280,8 @@ export function validateEventPayload(type: string, payload: unknown): string | n
           ["status", enumeration("starting", "running", "waiting-approval", "stopped", "failed")],
           ["progress", optional(agentProgress)],
           ["message", optional(string)],
+          ["resultUnknown", optional(boolean)],
+          ["pendingPermission", optional(agentPendingPermission)],
         ]),
         ["agentSessionId", "agentKind", "status"],
       );
@@ -342,6 +356,19 @@ const agentProgress: Checker = (value, path) =>
       ["total", integer(0)],
     ]),
     ["step", "label", "completed", "total"],
+  );
+
+/** 對齊協定 `AgentPendingPermission`。 */
+const agentPendingPermission: Checker = (value, path) =>
+  checkObject(
+    value,
+    path,
+    new Map([
+      ["approvalId", string],
+      ["toolName", string],
+      ["description", optional(string)],
+    ]),
+    ["approvalId", "toolName"],
   );
 
 /** 物件檢查：拒絕未知欄位、漏掉的必填欄位。 */

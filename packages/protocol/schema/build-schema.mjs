@@ -3103,6 +3103,15 @@ add(
   }),
 );
 
+add(
+  "AgentPendingPermission",
+  objectOf("AgentPendingPermission", ["approvalId", "toolName"], {
+    approvalId: str("等待決定的審批識別碼；客戶端用 approval.decide 核准或拒絕。"),
+    toolName: str("代理想執行的工具名稱。"),
+    description: str("代理提供的動作說明。"),
+  }),
+);
+
 add("AgentKind", stringEnum(["opencode", "claude-code"], "外部代理的種類。"));
 
 add(
@@ -3125,6 +3134,8 @@ add(
       workingDirectory: str("工作目錄（絕對路徑）。"),
       progress: ref("AgentProgress"),
       message: str("給人看的進度或失敗原因。"),
+      resultUnknown: bool("結果是否未知：主機重啟或代理行程異常結束時為 true。"),
+      pendingPermission: ref("AgentPendingPermission"),
       startedAt: str("建立時間，RFC 3339。", { format: "date-time" }),
     },
   ),
@@ -3183,6 +3194,8 @@ add(
     status: ref("AgentStatus"),
     progress: ref("AgentProgress"),
     message: str("給人看的進度或失敗原因。"),
+    resultUnknown: bool("結果是否未知：主機重啟或代理行程異常結束時為 true。"),
+    pendingPermission: ref("AgentPendingPermission"),
   }),
 );
 

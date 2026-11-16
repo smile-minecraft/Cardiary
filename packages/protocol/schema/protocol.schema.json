@@ -8093,6 +8093,26 @@
         }
       }
     },
+    "AgentPendingPermission": {
+      "title": "AgentPendingPermission",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvalId", "toolName"],
+      "properties": {
+        "approvalId": {
+          "type": "string",
+          "description": "等待決定的審批識別碼；客戶端用 approval.decide 核准或拒絕。"
+        },
+        "toolName": {
+          "type": "string",
+          "description": "代理想執行的工具名稱。"
+        },
+        "description": {
+          "type": "string",
+          "description": "代理提供的動作說明。"
+        }
+      }
+    },
     "AgentKind": {
       "title": "AgentKind",
       "type": "string",
@@ -8131,6 +8151,13 @@
         "message": {
           "type": "string",
           "description": "給人看的進度或失敗原因。"
+        },
+        "resultUnknown": {
+          "type": "boolean",
+          "description": "結果是否未知：主機重啟或代理行程異常結束時為 true。"
+        },
+        "pendingPermission": {
+          "$ref": "#/$defs/AgentPendingPermission"
         },
         "startedAt": {
           "type": "string",
@@ -8251,6 +8278,13 @@
         "message": {
           "type": "string",
           "description": "給人看的進度或失敗原因。"
+        },
+        "resultUnknown": {
+          "type": "boolean",
+          "description": "結果是否未知：主機重啟或代理行程異常結束時為 true。"
+        },
+        "pendingPermission": {
+          "$ref": "#/$defs/AgentPendingPermission"
         }
       }
     },

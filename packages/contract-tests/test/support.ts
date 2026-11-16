@@ -76,6 +76,8 @@ export interface ReadyFrame {
 }
 
 export interface ServiceOptions {
+  /** 注入服務行程的環境變數（在同類測試接縫之後套用）。 */
+  readonly env?: Record<string, string>;
   readonly scripts?: readonly (readonly Record<string, unknown>[])[];
   readonly demo?: boolean;
   /** 控制模式：沒有 --folder，走 init／ready 與 NDJSON。 */
@@ -179,6 +181,7 @@ export async function spawnService(options: ServiceOptions = {}): Promise<Spawne
       // 測試接縫：縮短卡片補掃間隔到 1 秒。FSEvents 在平行測試負載下
       // 可能漏事件；契約測試的外部編輯改由補掃接上，產品預設不變。
       CARDIARY_CARD_RESCAN_MS: "1000",
+      ...options.env,
     },
     stdio: ["pipe", "pipe", "pipe"],
   });

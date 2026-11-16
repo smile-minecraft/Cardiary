@@ -5074,6 +5074,11 @@ export interface AgentSessionInfo {
    */
   message?: string;
   /**
+   * 結果是否未知：主機重啟或代理行程異常結束時為 true。
+   */
+  resultUnknown?: boolean;
+  pendingPermission?: AgentPendingPermission;
+  /**
    * 建立時間，RFC 3339。
    */
   startedAt: string;
@@ -5095,6 +5100,20 @@ export interface AgentProgress {
    * 總步驟數。
    */
   total: number;
+}
+export interface AgentPendingPermission {
+  /**
+   * 等待決定的審批識別碼；客戶端用 approval.decide 核准或拒絕。
+   */
+  approvalId: string;
+  /**
+   * 代理想執行的工具名稱。
+   */
+  toolName: string;
+  /**
+   * 代理提供的動作說明。
+   */
+  description?: string;
 }
 /**
  * 代理狀態改變；掛在 system 串流。
@@ -5129,6 +5148,11 @@ export interface AgentStateChangedEventPayload {
    * 給人看的進度或失敗原因。
    */
   message?: string;
+  /**
+   * 結果是否未知：主機重啟或代理行程異常結束時為 true。
+   */
+  resultUnknown?: boolean;
+  pendingPermission?: AgentPendingPermission;
 }
 /**
  * 目前的 MCP 伺服器清單。

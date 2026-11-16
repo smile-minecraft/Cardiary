@@ -91,6 +91,8 @@ export interface AgentSessionInfoWire {
   readonly startedAt: string;
   readonly progress?: { step: string; label: string; completed: number; total: number };
   readonly message?: string;
+  readonly resultUnknown?: boolean;
+  readonly pendingPermission?: { approvalId: string; toolName: string; description?: string };
 }
 
 export interface StartAgentInput {
@@ -338,6 +340,18 @@ export class ExternalAgentsService {
             }
           : {}),
         ...(record.message ? { message: record.message } : {}),
+        ...(record.resultUnknown ? { resultUnknown: true } : {}),
+        ...(record.pendingPermission && record.pendingPermission.approvalId !== ""
+          ? {
+              pendingPermission: {
+                approvalId: record.pendingPermission.approvalId,
+                toolName: record.pendingPermission.toolName,
+                ...(record.pendingPermission.description === undefined
+                  ? {}
+                  : { description: record.pendingPermission.description }),
+              },
+            }
+          : {}),
       }));
   }
 
@@ -616,6 +630,20 @@ export class ExternalAgentsService {
     if (tracked.resolved) return;
     tracked.resolved = true;
     const allow = resolution.outcome === "approved";
+    // 先把決定寫進紀錄再回覆代理：代理收到拒絕後可能立刻結束，若先回覆，
+    // 「權限請求被拒絕」的狀態會被完成事件蓋掉，客戶端就看不到這次拒絕。
+    const current = live.record;
+    if (current.pendingPermission?.approvalId === tracked.approvalId) {
+      const updated = clearPermission(current);
+      live.record = {
+        ...updated,
+        message: allow ? current.message : `權限請求被拒絕：${tracked.toolName}`,
+        updatedAt: this.#now().toISOString(),
+        lastEventSeq: current.lastEventSeq + 1,
+      };
+      await writeRecord(this.#storage, live.record);
+      this.#emit(live.record);
+    }
     const child = live.child;
     if (child?.running) {
       const message =
@@ -631,18 +659,6 @@ export class ExternalAgentsService {
               ...(allow ? { updatedInput: tracked.input as JsonValue } : { message }),
             });
       child.write(reply);
-    }
-    const current = live.record;
-    if (current.pendingPermission?.approvalId === tracked.approvalId) {
-      const updated = clearPermission(current);
-      live.record = {
-        ...updated,
-        message: allow ? current.message : `權限請求被拒絕：${tracked.toolName}`,
-        updatedAt: this.#now().toISOString(),
-        lastEventSeq: current.lastEventSeq + 1,
-      };
-      await writeRecord(this.#storage, live.record);
-      this.#emit(live.record);
     }
     live.permissions.delete(requestKey);
   }

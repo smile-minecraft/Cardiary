@@ -5,6 +5,7 @@
  * 或使用者手動清除），`tmp/agents/<session>/` 是暫存區，任務結束或主機
  * 啟動時清空。任何檔案刪除只發生在這兩個目錄之下。
  */
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, readFile, rm, stat, mkdir, writeFile, rename } from "node:fs/promises";
 import { join, sep } from "node:path";
@@ -51,15 +52,43 @@ export async function ensureSessionDirs(
   await mkdir(scratchDir(paths, agentSessionId), { recursive: true });
 }
 
+/**
+ * 每個工作階段的寫入佇列。
+ *
+ * 同一筆工作階段的多個事件可能同時觸發寫入；共用同一個暫存檔名會讓其中
+ * 一次 rename 找不到檔案（或把別人的內容搬走）。依工作階段排隊，寫入順序
+ * 就等於呼叫順序。
+ */
+const recordQueues = new Map<string, Promise<void>>();
+
 /** 寫入 session.json；先寫暫存再 rename，讀到半份檔案的機會趨近於零。 */
-export async function writeRecord(
+export function writeRecord(
+  paths: AgentStoragePaths,
+  record: ExternalAgentSessionRecord,
+): Promise<void> {
+  const previous = recordQueues.get(record.agentSessionId) ?? Promise.resolve();
+  const next = previous.then(
+    () => writeRecordNow(paths, record),
+    () => writeRecordNow(paths, record),
+  );
+  recordQueues.set(
+    record.agentSessionId,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return next;
+}
+
+async function writeRecordNow(
   paths: AgentStoragePaths,
   record: ExternalAgentSessionRecord,
 ): Promise<void> {
   const dir = sessionDir(paths, record.agentSessionId);
   await mkdir(dir, { recursive: true });
   const target = join(dir, "session.json");
-  const tmp = join(dir, `.session.json.${process.pid}.tmp`);
+  const tmp = join(dir, `.session.json.${process.pid}.${randomUUID()}.tmp`);
   await writeFile(tmp, JSON.stringify(record, null, 2), "utf8");
   await rename(tmp, target);
 }

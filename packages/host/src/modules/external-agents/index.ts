@@ -65,5 +65,17 @@ function emitState(context: ModuleActivationContext, data: ExternalAgentStateDat
         }
       : {}),
     ...(data.message ? { message: data.message } : {}),
+    ...(data.resultUnknown === true ? { resultUnknown: true } : {}),
+    ...(data.pendingPermission
+      ? {
+          pendingPermission: {
+            approvalId: data.pendingPermission.approvalId,
+            toolName: data.pendingPermission.toolName,
+            ...(data.pendingPermission.description === undefined
+              ? {}
+              : { description: data.pendingPermission.description }),
+          },
+        }
+      : {}),
   });
 }

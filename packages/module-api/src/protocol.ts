@@ -82,6 +82,14 @@ export type ProtocolEventIntent =
         readonly total: number;
       };
       readonly message?: string;
+      /** 結果是否未知：主機重啟或代理行程異常結束。 */
+      readonly resultUnknown?: boolean;
+      /** 代理正在等待決定的權限審批；客戶端用它顯示卡片並送出 approval.decide。 */
+      readonly pendingPermission?: {
+        readonly approvalId: string;
+        readonly toolName: string;
+        readonly description?: string;
+      };
     }
   | { readonly kind: "module-event"; readonly type: string; readonly payload: JsonValue };
 
