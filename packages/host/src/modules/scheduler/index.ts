@@ -3,7 +3,7 @@ import type { CardService } from "@cardiary/domain";
 import { NotificationStore, ScheduleStore } from "@cardiary/storage";
 import type { NotificationService } from "@cardiary/module-api";
 
-import { HOST_SERVICE_NAMES, type CardEnvironment } from "../contract.js";
+import { HOST_SERVICE_NAMES, type CardEnvironment, type DistillationTrigger } from "../contract.js";
 import type { HostEngine } from "../../engine/types.js";
 import { manifest } from "./manifest.js";
 import { SchedulerService } from "./service.js";
@@ -35,6 +35,9 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   const notifications = new NotificationStore(db, { now });
   const engine = context.services.host.get<HostEngine>(HOST_SERVICE_NAMES.engine);
   const cards = context.services.host.get<CardService>(HOST_SERVICE_NAMES.cards);
+  // 記憶模組先於排程模組啟用；蒸餾服務這時已經在服務註冊表裡。沒有記憶模組時
+  // 留 undefined，蒸餾任務到點會記 error 並發通知，不會靜默略過。
+  const distillation = context.services.host.get<DistillationTrigger>(HOST_SERVICE_NAMES.memory);
 
   const emitChanged = (record: Parameters<typeof wireNotification>[0]): void => {
     context.services.protocol.emit({
@@ -52,6 +55,7 @@ async function activate(context: ModuleActivationContext): Promise<void> {
     emitChanged,
     logger,
     now,
+    ...(distillation === undefined ? {} : { distillation }),
   });
   service = scheduler;
 

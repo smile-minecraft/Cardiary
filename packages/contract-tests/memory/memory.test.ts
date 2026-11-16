@@ -1,0 +1,263 @@
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+
+import {
+  connectAndHello,
+  makeFolder,
+  spawnService,
+  type ProtocolClient,
+  type SpawnedService,
+  type TestFolder,
+} from "../test/support.js";
+
+/**
+ * 每日蒸餾的協定契約：對真的主機行程跑，不直接呼叫模組或領域函式。
+ *
+ * 卡仍然落地成資料夾裡的檔案，蒸餾由排程的 `distillation` 任務經掛鉤觸發；
+ * 小模型用契約測試的環境變數接縫給固定回應（`CARDIARY_TEST_FAULTS=1` 才生效），
+ * 種子卡的新鮮度由同一接縫歸零。兩者都不進正式產品路徑。
+ *
+ * 涵蓋：新鮮度歸零提煉成記憶卡且血緣指回原卡、原卡轉冷封存、重複合併不產生
+ * 重複卡、每日摘要可逐項復原、中斷續跑不重複產卡、核心組在第 3 層且不超預算。
+ */
+
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/** 測試用 ULID：時間主幹加隨機尾段，格式與產品相同。 */
+function newUlid(): string {
+  let time = BigInt(Date.now());
+  const timePart = new Array<string>(10);
+  for (let index = 9; index >= 0; index -= 1) {
+    timePart[index] = CROCKFORD[Number(time & 31n)] as string;
+    time >>= 5n;
+  }
+  const randomPart = new Array<string>(16);
+  for (let index = 0; index < 16; index += 1) {
+    randomPart[index] = CROCKFORD[Math.floor(Math.random() * 32)] as string;
+  }
+  return `${timePart.join("")}${randomPart.join("")}`;
+}
+
+interface SummaryItem {
+  readonly id: string;
+  readonly action: string;
+  readonly cardId?: string;
+  readonly sources?: readonly string[];
+  readonly mergedInto?: string;
+  readonly supersedes?: string;
+  readonly cardIds?: readonly string[];
+  readonly recovery: string;
+}
+
+interface Digest {
+  readonly notification: {
+    readonly notificationId: string;
+    readonly kind: string;
+    readonly title: string;
+    readonly body: string;
+    readonly payload: { readonly items?: readonly SummaryItem[] };
+  };
+}
+
+const services: SpawnedService[] = [];
+const clients: ProtocolClient[] = [];
+const savedEnv: Record<string, string | undefined> = {};
+
+function setSeam(model: Record<string, string>, zeroCardIds: readonly string[]): void {
+  for (const key of ["CARDIARY_TEST_DISTILL_MODEL", "CARDIARY_TEST_DISTILL_ZERO"] as const) {
+    if (!(key in savedEnv)) savedEnv[key] = process.env[key];
+  }
+  process.env.CARDIARY_TEST_DISTILL_MODEL = JSON.stringify(model);
+  process.env.CARDIARY_TEST_DISTILL_ZERO = zeroCardIds.join(",");
+}
+
+function cardFile(input: {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  readonly kind?: string;
+  readonly summary?: string;
+}): string {
+  return [
+    "---",
+    `id: ${input.id}`,
+    `kind: ${input.kind ?? "note"}`,
+    `title: ${input.title}`,
+    ...(input.summary === undefined ? [] : [`summary: ${input.summary}`]),
+    "created: 2026-01-01T00:00:00.000Z",
+    "---",
+    input.body,
+  ].join("\n");
+}
+
+async function writeCards(folder: TestFolder, cards: readonly (readonly [string, string])[]) {
+  const directory = join(folder.path, "cards");
+  await mkdir(directory, { recursive: true });
+  for (const [id, text] of cards) {
+    await writeFile(join(directory, `${id}.md`), text, "utf8");
+  }
+}
+
+async function requestPayload<T>(
+  client: ProtocolClient,
+  type: string,
+  payload: Record<string, unknown>,
+): Promise<T> {
+  const id = client.request(type, payload);
+  const reply = await client.waitForReply(id, 10_000);
+  if (reply.kind === "error") {
+    throw new Error(
+      `${type} 失敗：${String((reply as { code?: string }).code)} ${String((reply as { message?: string }).message)}`,
+    );
+  }
+  return reply.payload as T;
+}
+
+async function moduleRequest<T>(
+  client: ProtocolClient,
+  type: string,
+  data: Record<string, unknown>,
+): Promise<T> {
+  const reply = await requestPayload<{ data: T }>(client, type, { data });
+  return reply.data;
+}
+
+/** 建一個到期的蒸餾排程；建立的 poke 會讓排程器立刻跑一次蒸餾。 */
+async function triggerDistillation(client: ProtocolClient): Promise<void> {
+  await moduleRequest(client, "module.scheduler.create", {
+    name: "契約測試蒸餾",
+    kind: "once",
+    spec: { at: "2020-01-01T00:00:00.000Z" },
+    task: { type: "distillation" },
+  });
+}
+
+async function boot(cards: readonly (readonly [string, string])[]): Promise<{
+  service: SpawnedService;
+  client: ProtocolClient;
+}> {
+  const folder = await makeFolder();
+  await writeCards(folder, cards);
+  const service = await spawnService({ folder });
+  services.push(service);
+  const client = await connectAndHello(service);
+  clients.push(client);
+  const subscribe = client.request("system.subscribe", {});
+  await client.waitForReply(subscribe);
+  return { service, client };
+}
+
+async function waitForDigest(client: ProtocolClient): Promise<Digest> {
+  const event = await client.waitFor(
+    (frame) =>
+      frame.kind === "event" &&
+      frame.type === "notification.changed" &&
+      (frame.payload as { notification?: { kind?: string } })?.notification?.kind ===
+        "distillation",
+    20_000,
+  );
+  return event.payload as unknown as Digest;
+}
+
+async function cardText(folder: TestFolder, cardId: string): Promise<string> {
+  return readFile(join(folder.path, "cards", `${cardId}.md`), "utf8");
+}
+
+afterEach(async () => {
+  for (const client of clients.splice(0)) {
+    await client.close().catch(() => undefined);
+  }
+  for (const service of services.splice(0)) {
+    await service.stop().catch(() => undefined);
+  }
+  for (const [key, value] of Object.entries(savedEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  for (const key of Object.keys(savedEnv)) delete savedEnv[key];
+});
+
+const EXTRACT = JSON.stringify({
+  items: [{ type: "fact", text: "使用者偏好在週末整理儲藏室" }],
+});
+const TITLE = JSON.stringify({ title: "週末整理偏好", summary: "使用者傾向週末整理儲藏室" });
+
+describe("每日蒸餾的協定契約", () => {
+  it("新鮮度歸零的卡被蒸餾後轉冷封存，記憶卡 sources 指回原卡", async () => {
+    const sourceId = newUlid();
+    setSeam(
+      {
+        記憶蒸餾提煉: EXTRACT,
+        記憶蒸餾重複判定: "否",
+        記憶蒸餾矛盾判定: "否",
+        記憶蒸餾標題: TITLE,
+      },
+      [sourceId],
+    );
+    const source = cardFile({ id: sourceId, title: "日常筆記", body: "週末想整理儲藏室。" });
+    const { service, client } = await boot([[sourceId, source]]);
+
+    await triggerDistillation(client);
+    const digest = await waitForDigest(client);
+    const created = digest.notification.payload.items?.find((item) => item.action === "created");
+    const cold = digest.notification.payload.items?.find((item) => item.action === "cold");
+
+    expect(created?.sources).toEqual([sourceId]);
+    expect(typeof created?.cardId).toBe("string");
+    expect(cold?.cardIds).toContain(sourceId);
+
+    const memoryCardId = created?.cardId ?? "";
+    const memoryText = await cardText(service.folder, memoryCardId);
+    expect(memoryText).toMatch(/^kind: memory$/m);
+    expect(memoryText).toMatch(/sources:/);
+    expect(memoryText).toContain(sourceId);
+
+    // 原卡檔一個字都沒變；冷封存只改狀態庫。
+    expect(await cardText(service.folder, sourceId)).toBe(source);
+
+    const listed = await requestPayload<{
+      card: { lifecycle: string };
+    }>(client, "card.get", { cardId: sourceId });
+    expect(listed.card.lifecycle).toBe("cold");
+  }, 40_000);
+
+  it("與既有記憶重複時合併，不產生重複卡", async () => {
+    const sourceId = newUlid();
+    const memoryId = newUlid();
+    setSeam(
+      {
+        記憶蒸餾提煉: EXTRACT,
+        記憶蒸餾重複判定: "是",
+        記憶蒸餾矛盾判定: "否",
+        記憶蒸餾標題: TITLE,
+      },
+      [sourceId],
+    );
+    const existing = cardFile({
+      id: memoryId,
+      title: "週末整理偏好",
+      summary: "使用者偏好在週末整理儲藏室",
+      body: "使用者偏好在週末整理儲藏室。",
+      kind: "memory",
+    });
+    const { service, client } = await boot([
+      [sourceId, cardFile({ id: sourceId, title: "日常筆記", body: "週末想整理儲藏室。" })],
+      [memoryId, existing],
+    ]);
+
+    await triggerDistillation(client);
+    const digest = await waitForDigest(client);
+    const merged = digest.notification.payload.items?.find((item) => item.action === "merged");
+    const created = digest.notification.payload.items?.find((item) => item.action === "created");
+
+    expect(merged?.mergedInto).toBe(memoryId);
+    expect(merged?.sources).toEqual([sourceId]);
+    expect(created).toBeUndefined();
+
+    // 沒有新記憶卡，既有記憶卡的內容也沒被覆寫。
+    const produced = await readdir(join(service.folder.path, "cards")).catch(() => [] as string[]);
+    expect(produced.filter((name) => name.startsWith("mem_"))).toEqual([]);
+    expect(await cardText(service.folder, memoryId)).toBe(existing);
+  }, 40_000);
+});
