@@ -1,4 +1,5 @@
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+import { sha256HexOf } from "./sha256.js";
 
 /** Node 與瀏覽器都有的 Web Crypto 的最小形狀；只用 getRandomValues。 */
 declare const crypto: { getRandomValues(array: Uint8Array): Uint8Array } | undefined;
@@ -42,6 +43,17 @@ function bufferToHex(bytes: Uint8Array): string {
 
 /** ULID 的格式檢查；不驗證時間語意。 */
 export const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
+
+/**
+ * 從固定種子產生 ULID：同一個種子永遠得到同一張卡的 id。
+ *
+ * 蒸餾用固定輸出卡 id 支援中斷續跑；這個 id 必須通過卡片庫的 ULID 檢查，
+ * 否則記憶卡寫得出檔案卻進不了索引，檢索與發牌都看不到它。
+ */
+export function deterministicCardId(seed: string): string {
+  const value = BigInt(`0x${sha256HexOf(seed).slice(0, 32)}`);
+  return `${encode(value >> 80n, 10)}${encode(value & ((1n << 80n) - 1n), 16)}`;
+}
 
 export function isUlid(value: string): boolean {
   return ULID_PATTERN.test(value);

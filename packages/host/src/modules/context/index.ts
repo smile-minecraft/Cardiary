@@ -1,7 +1,10 @@
 import type { CardService } from "@cardiary/domain";
 import type { JsonValue } from "@cardiary/engine-adapter";
-import type { HostModule, ModuleActivationContext } from "@cardiary/module-api";
-
+import type {
+  HostModule,
+  ModuleActivationContext,
+  ProtocolRequestContext,
+} from "@cardiary/module-api";
 import type { HostEngine } from "../../engine/types.js";
 import {
   ContextAssembler,
@@ -94,6 +97,10 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   const ready = service;
 
   registerContextProtocol({ service: ready, protocol: context.services.protocol });
+  // 整合驗收接縫：只在測試環境註冊，讓黑箱契約測試讀到送進模型的系統前綴。
+  if (process.env.CARDIARY_TEST_FAULTS === "1") {
+    registerContextTestProtocol({ protocol: context.services.protocol, assembler });
+  }
   context.services.host.provide(HOST_SERVICE_NAMES.context, ready);
   running.add(ready);
 
@@ -106,6 +113,36 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   });
   void recovery.then(() => {
     void attachKnownConversations(engine, ready, warn);
+  });
+}
+
+/** 整合驗收用的測試命名空間；正式環境不會註冊。 */
+function registerContextTestProtocol(options: {
+  readonly protocol: {
+    registerNamespace(
+      namespace: string,
+      handler: (request: ProtocolRequestContext) => Promise<JsonValue>,
+    ): unknown;
+  };
+  readonly assembler: ContextAssembler;
+}): void {
+  options.protocol.registerNamespace("module.context.test", async (request) => {
+    if (request.type === "module.context.test.system-context") {
+      const raw = request.payload;
+      const payload =
+        raw !== null && typeof raw === "object" && "data" in raw
+          ? (raw as { data: Record<string, unknown> }).data
+          : {};
+      const sessionId = typeof payload["sessionId"] === "string" ? payload["sessionId"] : "";
+      const assembled = await options.assembler.assemble(sessionId);
+      return {
+        data: {
+          systemContext: assembled.systemContext,
+          sections: assembled.sections as unknown as JsonValue,
+        },
+      } as JsonValue;
+    }
+    return { data: { ok: false, reason: "not-found" } } as JsonValue;
   });
 }
 
