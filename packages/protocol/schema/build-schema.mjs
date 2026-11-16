@@ -1839,6 +1839,236 @@ add(
 );
 
 // ---------------------------------------------------------------------------
+// M4：白板。卡片本體仍在 cards/；投影不是複本，一份卡可出現在多個白板。
+// ---------------------------------------------------------------------------
+
+add(
+  "BoardPoint",
+  objectOf("BoardPoint", ["x", "y"], {
+    x: int("畫布 x 座標。", { minimum: 0 }),
+    y: int("畫布 y 座標。", { minimum: 0 }),
+  }),
+);
+
+add(
+  "BoardSize",
+  objectOf("BoardSize", ["width", "height"], {
+    width: int("投影框寬度。", { minimum: 0 }),
+    height: int("投影框高度。", { minimum: 0 }),
+  }),
+);
+
+add(
+  "BoardItem",
+  objectOf("BoardItem", ["id", "cardId", "position", "size", "pinned"], {
+    id: str("投影的 ULID；不同白板上的同一張卡有不同 id。"),
+    cardId: str("卡片本體的 ULID。"),
+    position: ref("BoardPoint"),
+    size: ref("BoardSize"),
+    pinned: bool("任一個投影釘選時，該卡片的新鮮度固定 100。"),
+    groupId: str("所屬分組 id；省略代表在畫布上。"),
+  }),
+);
+
+add(
+  "BoardEdge",
+  objectOf("BoardEdge", ["id", "from", "to"], {
+    id: str("連線的 ULID。"),
+    from: str("起點投影 id，不是卡片 id。"),
+    to: str("終點投影 id，不是卡片 id。"),
+    label: str("連線標籤。"),
+  }),
+);
+
+add(
+  "BoardGroup",
+  objectOf("BoardGroup", ["id", "label"], {
+    id: str("分組的 ULID。"),
+    label: str("分組名稱。"),
+    parentId: str("上層分組 id；形成循環時拒絕。"),
+  }),
+);
+
+add(
+  "BoardDocument",
+  objectOf(
+    "BoardDocument",
+    ["schema", "id", "title", "createdAt", "updatedAt", "items", "edges", "groups"],
+    {
+      schema: literal(1),
+      id: str("白板 ULID。"),
+      title: str("白板名稱。"),
+      createdAt: str("建立時間，RFC 3339。", { format: "date-time" }),
+      updatedAt: str("最後變更時間；同時是儲存的樂觀鎖。", { format: "date-time" }),
+      items: arrayOf(ref("BoardItem"), "投影清單。"),
+      edges: arrayOf(ref("BoardEdge"), "只屬於這份白板的顯式連線。"),
+      groups: arrayOf(ref("BoardGroup"), "可巢狀的分組。"),
+    },
+    "一份白板的完整內容，等於 boards/<id>.json。",
+  ),
+);
+
+add(
+  "BoardSummary",
+  objectOf("BoardSummary", ["id", "title", "updatedAt", "itemCount"], {
+    id: str("白板 ULID。"),
+    title: str("白板名稱。"),
+    updatedAt: str("最後變更時間，RFC 3339。", { format: "date-time" }),
+    itemCount: int("投影數量。", { minimum: 0 }),
+  }),
+);
+
+add("BoardChange", stringEnum(["created", "updated", "deleted"], "白板變更的種類。"));
+
+add(
+  "BoardListRequestPayload",
+  objectOf("BoardListRequestPayload", [], {}, "列出所有白板；不需要參數。"),
+);
+
+add(
+  "BoardListResponsePayload",
+  objectOf("BoardListResponsePayload", ["boards"], {
+    boards: arrayOf(ref("BoardSummary"), "依最後變更時間排序。"),
+  }),
+);
+
+add(
+  "BoardGetRequestPayload",
+  objectOf("BoardGetRequestPayload", ["boardId"], {
+    boardId: str("要讀取的白板。"),
+  }),
+);
+
+add(
+  "BoardGetResponsePayload",
+  objectOf("BoardGetResponsePayload", ["board"], {
+    board: ref("BoardDocument"),
+  }),
+);
+
+add(
+  "BoardCreateRequestPayload",
+  objectOf("BoardCreateRequestPayload", ["boardId", "title", "clientRequestId"], {
+    boardId: str("客戶端產生的白板 ULID。"),
+    title: str("白板名稱。"),
+    clientRequestId: str("冪等鍵；重送只建立一次。"),
+  }),
+);
+
+add(
+  "BoardCreateResponsePayload",
+  objectOf("BoardCreateResponsePayload", ["board"], {
+    board: ref("BoardDocument"),
+  }),
+);
+
+add(
+  "BoardSaveRequestPayload",
+  objectOf("BoardSaveRequestPayload", ["board", "baseUpdatedAt"], {
+    board: ref("BoardDocument"),
+    baseUpdatedAt: str("客戶端讀到的 updatedAt；與目前檔不符時回 conflict。", {
+      format: "date-time",
+    }),
+    clientRequestId: str("冪等鍵。"),
+  }),
+);
+
+add(
+  "BoardSaveResponsePayload",
+  objectOf("BoardSaveResponsePayload", ["board"], {
+    board: ref("BoardDocument"),
+  }),
+);
+
+add(
+  "BoardDeleteRequestPayload",
+  objectOf("BoardDeleteRequestPayload", ["boardId"], {
+    boardId: str("要刪除的白板；卡片本體不受影響。"),
+  }),
+);
+
+add(
+  "BoardDeleteResponsePayload",
+  objectOf("BoardDeleteResponsePayload", ["deleted"], {
+    deleted: bool("是否真的刪掉了檔案。"),
+  }),
+);
+
+add(
+  "BoardProjectCardRequestPayload",
+  objectOf(
+    "BoardProjectCardRequestPayload",
+    ["boardId", "itemId", "cardId", "position"],
+    {
+      boardId: str("目標白板。"),
+      itemId: str("新投影的 ULID。"),
+      cardId: str("卡片本體的 ULID。"),
+      position: ref("BoardPoint"),
+      size: ref("BoardSize"),
+      groupId: str("放進的分組；省略代表畫布。"),
+      pinned: bool("是否釘選；預設 false。"),
+    },
+  ),
+);
+
+add(
+  "BoardProjectCardResponsePayload",
+  objectOf("BoardProjectCardResponsePayload", ["board"], {
+    board: ref("BoardDocument"),
+  }),
+);
+
+add(
+  "BoardUnprojectCardRequestPayload",
+  objectOf("BoardUnprojectCardRequestPayload", ["boardId", "itemId"], {
+    boardId: str("白板。"),
+    itemId: str("要移除的投影；卡片本體不受影響。"),
+  }),
+);
+
+add(
+  "BoardUnprojectCardResponsePayload",
+  objectOf("BoardUnprojectCardResponsePayload", ["board"], {
+    board: ref("BoardDocument"),
+  }),
+);
+
+add(
+  "BoardCreateCardFromSelectionRequestPayload",
+  objectOf(
+    "BoardCreateCardFromSelectionRequestPayload",
+    ["boardId", "cardIds", "title", "body", "itemId", "position", "clientRequestId"],
+    {
+      boardId: str("圈選所在的白板；新卡會投影到這份白板。"),
+      cardIds: arrayOf(str("被圈選的卡片 ULID；順序保留，重複去掉。"), "來源卡。"),
+      title: str("新卡標題。"),
+      body: str("新卡內文（Markdown）。"),
+      itemId: str("新投影的 ULID。"),
+      position: ref("BoardPoint"),
+      clientRequestId: str("冪等鍵。"),
+    },
+  ),
+);
+
+add(
+  "BoardCreateCardFromSelectionResponsePayload",
+  objectOf("BoardCreateCardFromSelectionResponsePayload", ["board", "cardId"], {
+    board: ref("BoardDocument"),
+    cardId: str("新卡的 ULID；其 sources 指回被圈選的卡。"),
+  }),
+);
+
+add(
+  "BoardChangedEventPayload",
+  objectOf("BoardChangedEventPayload", ["boardId", "change"], {
+    boardId: str("變更的白板。"),
+    change: ref("BoardChange"),
+    board: ref("BoardDocument"),
+    cardIds: arrayOf(str("受影響的卡片，用來同步釘選與新鮮度。"), "受影響的卡片。"),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // 訊息外殼
 // ---------------------------------------------------------------------------
 
@@ -2254,6 +2484,65 @@ eventFrame(
   "card.changed",
   "CardChangedEventPayload",
   "卡片建立、更新、刪除、保鮮或重新索引；掛在 system 串流。",
+);
+
+// 白板
+requestFrame("BoardListRequest", "board.list", "BoardListRequestPayload", "列出所有白板。");
+responseFrame("BoardListResponse", "board.list", "BoardListResponsePayload", "白板列表。");
+requestFrame("BoardGetRequest", "board.get", "BoardGetRequestPayload", "讀取一份白板。");
+responseFrame("BoardGetResponse", "board.get", "BoardGetResponsePayload", "白板完整內容。");
+requestFrame("BoardCreateRequest", "board.create", "BoardCreateRequestPayload", "建立空白白板。");
+responseFrame("BoardCreateResponse", "board.create", "BoardCreateResponsePayload", "建立的白板。");
+requestFrame("BoardSaveRequest", "board.save", "BoardSaveRequestPayload", "整份覆寫白板。");
+responseFrame("BoardSaveResponse", "board.save", "BoardSaveResponsePayload", "儲存後的白板。");
+requestFrame("BoardDeleteRequest", "board.delete", "BoardDeleteRequestPayload", "刪除白板，不刪卡片。");
+responseFrame(
+  "BoardDeleteResponse",
+  "board.delete",
+  "BoardDeleteResponsePayload",
+  "刪除結果。",
+);
+requestFrame(
+  "BoardProjectCardRequest",
+  "board.project_card",
+  "BoardProjectCardRequestPayload",
+  "把卡片投影進白板。",
+);
+responseFrame(
+  "BoardProjectCardResponse",
+  "board.project_card",
+  "BoardProjectCardResponsePayload",
+  "投影後的白板。",
+);
+requestFrame(
+  "BoardUnprojectCardRequest",
+  "board.unproject_card",
+  "BoardUnprojectCardRequestPayload",
+  "取消投影，不刪卡片。",
+);
+responseFrame(
+  "BoardUnprojectCardResponse",
+  "board.unproject_card",
+  "BoardUnprojectCardResponsePayload",
+  "取消後的白板。",
+);
+requestFrame(
+  "BoardCreateCardFromSelectionRequest",
+  "board.create_card_from_selection",
+  "BoardCreateCardFromSelectionRequestPayload",
+  "圈選卡片生成新卡並投影到白板；sources 指回來源卡。",
+);
+responseFrame(
+  "BoardCreateCardFromSelectionResponse",
+  "board.create_card_from_selection",
+  "BoardCreateCardFromSelectionResponsePayload",
+  "新卡與更新後的白板。",
+);
+eventFrame(
+  "BoardChangedEvent",
+  "board.changed",
+  "BoardChangedEventPayload",
+  "白板建立、更新或刪除；掛在 system 串流。",
 );
 
 // 多模態
@@ -2828,6 +3117,14 @@ add("ClientFrame", {
     ref("CardDeleteRequest"),
     ref("CardSearchRequest"),
     ref("CardRefreshRequest"),
+    ref("BoardListRequest"),
+    ref("BoardGetRequest"),
+    ref("BoardCreateRequest"),
+    ref("BoardSaveRequest"),
+    ref("BoardDeleteRequest"),
+    ref("BoardProjectCardRequest"),
+    ref("BoardUnprojectCardRequest"),
+    ref("BoardCreateCardFromSelectionRequest"),
     ref("MediaImportRequest"),
     ref("ContextGetRequest"),
     ref("ContextAddCardRequest"),
@@ -2881,6 +3178,14 @@ add("ServerFrame", {
     ref("CardDeleteResponse"),
     ref("CardSearchResponse"),
     ref("CardRefreshResponse"),
+    ref("BoardListResponse"),
+    ref("BoardGetResponse"),
+    ref("BoardCreateResponse"),
+    ref("BoardSaveResponse"),
+    ref("BoardDeleteResponse"),
+    ref("BoardProjectCardResponse"),
+    ref("BoardUnprojectCardResponse"),
+    ref("BoardCreateCardFromSelectionResponse"),
     ref("MediaImportResponse"),
     ref("ContextGetResponse"),
     ref("ContextAddCardResponse"),
@@ -2900,6 +3205,7 @@ add("ServerFrame", {
     ref("StreamTurnStateEvent"),
     ref("StreamUiEvent"),
     ref("CardChangedEvent"),
+    ref("BoardChangedEvent"),
     ref("ContextChangedEvent"),
     ref("ContextCompactedEvent"),
     ref("SessionArchivedEvent"),
