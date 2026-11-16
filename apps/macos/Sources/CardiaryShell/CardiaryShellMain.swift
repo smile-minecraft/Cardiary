@@ -1,6 +1,6 @@
 import AppKit
 
-// 殼以「只留選單列」的方式啟動：不佔 Dock，關閉視窗不等於結束服務。
+// 一般 App 保留 Dock 圖示與選單列；關閉視窗不等於結束服務。
 @main
 @MainActor
 struct CardiaryShellMain {
@@ -8,7 +8,7 @@ struct CardiaryShellMain {
         let application = NSApplication.shared
         let delegate = AppDelegate()
         application.delegate = delegate
-        application.setActivationPolicy(.accessory)
+        application.setActivationPolicy(.regular)
         application.run()
     }
 }

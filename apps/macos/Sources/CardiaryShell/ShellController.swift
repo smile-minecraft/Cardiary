@@ -99,14 +99,13 @@ final class ShellController: NSObject {
         loadAuthorization()
 
         installAppModel()
+        installMainMenu()
 
-        if authorization == nil {
-            refreshMenu()
-            showMainWindow()
-        } else {
+        if authorization != nil {
             refreshFolder(startService: true)
-            refreshMenu()
         }
+        refreshMenu()
+        showMainWindow()
     }
 
     /// 建立產品介面的根狀態，並把殼能做的事交給它。
@@ -127,7 +126,7 @@ final class ShellController: NSObject {
         syncFolderToApp()
     }
 
-    private func showMainWindow() {
+    func showMainWindow() {
         guard let appModel else { return }
         if mainWindow == nil {
             mainWindow = MainWindowController(model: appModel)
@@ -697,7 +696,45 @@ final class ShellController: NSObject {
         }
     }
 
-    // MARK: - 選單列
+    // MARK: - 應用程式選單與選單列
+
+    private func installMainMenu() {
+        let mainMenu = NSMenu()
+        let appEntry = NSMenuItem(title: "Cardiary", action: nil, keyEquivalent: "")
+        let appMenu = NSMenu(title: "Cardiary")
+        let isChinese = AppL10n.language == .zhHant
+        appMenu.addItem(withTitle: isChinese ? "關於 Cardiary" : "About Cardiary",
+                        action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        let settings = NSMenuItem(title: AppL10n.text(.settingsTitle) + "…",
+                                  action: #selector(openSettingsAction), keyEquivalent: ",")
+        settings.target = self
+        appMenu.addItem(settings)
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: L10n.text(.menuQuit), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appEntry.submenu = appMenu
+        mainMenu.addItem(appEntry)
+
+        let fileTitle = isChinese ? "檔案" : "File"
+        let fileEntry = NSMenuItem(title: fileTitle, action: nil, keyEquivalent: "")
+        let fileMenu = NSMenu(title: fileTitle)
+        let importItem = NSMenuItem(title: AppL10n.text(.commandGroupImport) + "…",
+                                    action: #selector(openImportAction), keyEquivalent: "")
+        importItem.target = self
+        fileMenu.addItem(importItem)
+        fileEntry.submenu = fileMenu
+        mainMenu.addItem(fileEntry)
+        NSApp.mainMenu = mainMenu
+    }
+
+    @objc private func openSettingsAction() {
+        appModel?.selectSettings()
+        showMainWindow()
+    }
+
+    @objc private func openImportAction() {
+        appModel?.openImport()
+    }
 
     private func installStatusItem() {
         statusItem.menu = menu
