@@ -39,6 +39,14 @@ export type ClientFrame =
   | CardDeleteRequest
   | CardSearchRequest
   | CardRefreshRequest
+  | BoardListRequest
+  | BoardGetRequest
+  | BoardCreateRequest
+  | BoardSaveRequest
+  | BoardDeleteRequest
+  | BoardProjectCardRequest
+  | BoardUnprojectCardRequest
+  | BoardCreateCardFromSelectionRequest
   | MediaImportRequest
   | ContextGetRequest
   | ContextAddCardRequest
@@ -146,6 +154,14 @@ export type ServerFrame =
   | CardDeleteResponse
   | CardSearchResponse
   | CardRefreshResponse
+  | BoardListResponse
+  | BoardGetResponse
+  | BoardCreateResponse
+  | BoardSaveResponse
+  | BoardDeleteResponse
+  | BoardProjectCardResponse
+  | BoardUnprojectCardResponse
+  | BoardCreateCardFromSelectionResponse
   | MediaImportResponse
   | ContextGetResponse
   | ContextAddCardResponse
@@ -165,6 +181,7 @@ export type ServerFrame =
   | StreamTurnStateEvent
   | StreamUiEvent
   | CardChangedEvent
+  | BoardChangedEvent
   | ContextChangedEvent
   | ContextCompactedEvent
   | SessionArchivedEvent
@@ -288,6 +305,10 @@ export type ToolResultStatus = "ok" | "error";
  * 卡片變更的種類。reindexed 表示只有索引或中繼資料變了。
  */
 export type CardChange = "created" | "updated" | "deleted" | "refreshed" | "reindexed";
+/**
+ * 白板變更的種類。
+ */
+export type BoardChange = "created" | "updated" | "deleted";
 /**
  * 做出決定的來源。
  */
@@ -1053,6 +1074,320 @@ export interface CardRefreshRequestPayload {
    * 要保鮮的卡片。
    */
   cardId: string;
+}
+/**
+ * 列出所有白板。
+ */
+export interface BoardListRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "board.list";
+  payload: BoardListRequestPayload;
+}
+/**
+ * 列出所有白板；不需要參數。
+ */
+export interface BoardListRequestPayload {}
+/**
+ * 讀取一份白板。
+ */
+export interface BoardGetRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "board.get";
+  payload: BoardGetRequestPayload;
+}
+export interface BoardGetRequestPayload {
+  /**
+   * 要讀取的白板。
+   */
+  boardId: string;
+}
+/**
+ * 建立空白白板。
+ */
+export interface BoardCreateRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "board.create";
+  payload: BoardCreateRequestPayload;
+}
+export interface BoardCreateRequestPayload {
+  /**
+   * 客戶端產生的白板 ULID。
+   */
+  boardId: string;
+  /**
+   * 白板名稱。
+   */
+  title: string;
+  /**
+   * 冪等鍵；重送只建立一次。
+   */
+  clientRequestId: string;
+}
+/**
+ * 整份覆寫白板。
+ */
+export interface BoardSaveRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "board.save";
+  payload: BoardSaveRequestPayload;
+}
+export interface BoardSaveRequestPayload {
+  board: BoardDocument;
+  /**
+   * 單寫者比對用的 updatedAt；不保護同時寫入。
+   */
+  baseUpdatedAt: string;
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId?: string;
+}
+/**
+ * 一份白板的完整內容，等於 boards/<id>.json。
+ */
+export interface BoardDocument {
+  schema: 1;
+  /**
+   * 白板 ULID。
+   */
+  id: string;
+  /**
+   * 白板名稱。
+   */
+  title: string;
+  /**
+   * 建立時間，RFC 3339。
+   */
+  createdAt: string;
+  /**
+   * 最後變更時間；單寫者可用於儲存前比對。
+   */
+  updatedAt: string;
+  /**
+   * 投影清單。
+   */
+  items: BoardItem[];
+  /**
+   * 只屬於這份白板的顯式連線。
+   */
+  edges: BoardEdge[];
+  /**
+   * 可巢狀的分組。
+   */
+  groups: BoardGroup[];
+}
+export interface BoardItem {
+  /**
+   * 投影的 ULID；不同白板上的同一張卡有不同 id。
+   */
+  id: string;
+  /**
+   * 卡片本體的 ULID。
+   */
+  cardId: string;
+  position: BoardPoint;
+  size: BoardSize;
+  /**
+   * 任一個投影釘選時，該卡片的新鮮度固定 100。
+   */
+  pinned: boolean;
+  /**
+   * 所屬分組 id；省略代表在畫布上。
+   */
+  groupId?: string;
+}
+export interface BoardPoint {
+  /**
+   * 畫布 x 座標。
+   */
+  x: number;
+  /**
+   * 畫布 y 座標。
+   */
+  y: number;
+}
+export interface BoardSize {
+  /**
+   * 投影框寬度。
+   */
+  width: number;
+  /**
+   * 投影框高度。
+   */
+  height: number;
+}
+export interface BoardEdge {
+  /**
+   * 連線的 ULID。
+   */
+  id: string;
+  /**
+   * 起點投影 id，不是卡片 id。
+   */
+  from: string;
+  /**
+   * 終點投影 id，不是卡片 id。
+   */
+  to: string;
+  /**
+   * 連線標籤。
+   */
+  label?: string;
+}
+export interface BoardGroup {
+  /**
+   * 分組的 ULID。
+   */
+  id: string;
+  /**
+   * 分組名稱。
+   */
+  label: string;
+  /**
+   * 上層分組 id；形成循環時拒絕。
+   */
+  parentId?: string;
+}
+/**
+ * 刪除白板，不刪卡片。
+ */
+export interface BoardDeleteRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "board.delete";
+  payload: BoardDeleteRequestPayload;
+}
+export interface BoardDeleteRequestPayload {
+  /**
+   * 要刪除的白板；卡片本體不受影響。
+   */
+  boardId: string;
+}
+/**
+ * 把卡片投影進白板。
+ */
+export interface BoardProjectCardRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "board.project_card";
+  payload: BoardProjectCardRequestPayload;
+}
+export interface BoardProjectCardRequestPayload {
+  /**
+   * 目標白板。
+   */
+  boardId: string;
+  /**
+   * 新投影的 ULID。
+   */
+  itemId: string;
+  /**
+   * 卡片本體的 ULID。
+   */
+  cardId: string;
+  position: BoardPoint;
+  size?: BoardSize;
+  /**
+   * 放進的分組；省略代表畫布。
+   */
+  groupId?: string;
+  /**
+   * 是否釘選；預設 false。
+   */
+  pinned?: boolean;
+}
+/**
+ * 取消投影，不刪卡片。
+ */
+export interface BoardUnprojectCardRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "board.unproject_card";
+  payload: BoardUnprojectCardRequestPayload;
+}
+export interface BoardUnprojectCardRequestPayload {
+  /**
+   * 白板。
+   */
+  boardId: string;
+  /**
+   * 要移除的投影；卡片本體不受影響。
+   */
+  itemId: string;
+}
+/**
+ * 圈選卡片生成新卡並投影到白板；sources 指回來源卡。
+ */
+export interface BoardCreateCardFromSelectionRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "board.create_card_from_selection";
+  payload: BoardCreateCardFromSelectionRequestPayload;
+}
+export interface BoardCreateCardFromSelectionRequestPayload {
+  /**
+   * 圈選所在的白板；新卡會投影到這份白板。
+   */
+  boardId: string;
+  /**
+   * 來源卡。
+   *
+   * Items: 被圈選的卡片 ULID；順序保留，重複去掉。
+   */
+  cardIds: string[];
+  /**
+   * 新卡標題。
+   */
+  title: string;
+  /**
+   * 新卡內文（Markdown）。
+   */
+  body: string;
+  /**
+   * 新投影的 ULID。
+   */
+  itemId: string;
+  position: BoardPoint;
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId: string;
 }
 /**
  * 以已上傳的 blobId 匯入圖片或音訊。
@@ -2800,6 +3135,162 @@ export interface CardRefreshResponsePayload {
   freshness: number;
 }
 /**
+ * 白板列表。
+ */
+export interface BoardListResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "board.list";
+  payload: BoardListResponsePayload;
+}
+export interface BoardListResponsePayload {
+  /**
+   * 依最後變更時間排序。
+   */
+  boards: BoardSummary[];
+}
+export interface BoardSummary {
+  /**
+   * 白板 ULID。
+   */
+  id: string;
+  /**
+   * 白板名稱。
+   */
+  title: string;
+  /**
+   * 最後變更時間，RFC 3339。
+   */
+  updatedAt: string;
+  /**
+   * 投影數量。
+   */
+  itemCount: number;
+}
+/**
+ * 白板完整內容。
+ */
+export interface BoardGetResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "board.get";
+  payload: BoardGetResponsePayload;
+}
+export interface BoardGetResponsePayload {
+  board: BoardDocument;
+}
+/**
+ * 建立的白板。
+ */
+export interface BoardCreateResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "board.create";
+  payload: BoardCreateResponsePayload;
+}
+export interface BoardCreateResponsePayload {
+  board: BoardDocument;
+}
+/**
+ * 儲存後的白板。
+ */
+export interface BoardSaveResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "board.save";
+  payload: BoardSaveResponsePayload;
+}
+export interface BoardSaveResponsePayload {
+  board: BoardDocument;
+}
+/**
+ * 刪除結果。
+ */
+export interface BoardDeleteResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "board.delete";
+  payload: BoardDeleteResponsePayload;
+}
+export interface BoardDeleteResponsePayload {
+  /**
+   * 是否真的刪掉了檔案。
+   */
+  deleted: boolean;
+}
+/**
+ * 投影後的白板。
+ */
+export interface BoardProjectCardResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "board.project_card";
+  payload: BoardProjectCardResponsePayload;
+}
+export interface BoardProjectCardResponsePayload {
+  board: BoardDocument;
+}
+/**
+ * 取消後的白板。
+ */
+export interface BoardUnprojectCardResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "board.unproject_card";
+  payload: BoardUnprojectCardResponsePayload;
+}
+export interface BoardUnprojectCardResponsePayload {
+  board: BoardDocument;
+}
+/**
+ * 新卡與更新後的白板。
+ */
+export interface BoardCreateCardFromSelectionResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "board.create_card_from_selection";
+  payload: BoardCreateCardFromSelectionResponsePayload;
+}
+export interface BoardCreateCardFromSelectionResponsePayload {
+  board: BoardDocument;
+  /**
+   * 新卡的 ULID；其 sources 指回被圈選的卡。
+   */
+  cardId: string;
+}
+/**
  * 匯入結果與文字替身狀態。
  */
 export interface MediaImportResponse {
@@ -3476,6 +3967,41 @@ export interface CardChangedEventPayload {
    * 變更後的新鮮度；只有保鮮與載入會帶。
    */
   freshness?: number;
+}
+/**
+ * 白板建立、更新或刪除；掛在 system 串流。
+ */
+export interface BoardChangedEvent {
+  v: 1;
+  kind: "event";
+  type: "board.changed";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: BoardChangedEventPayload;
+}
+export interface BoardChangedEventPayload {
+  /**
+   * 變更的白板。
+   */
+  boardId: string;
+  change: BoardChange;
+  board?: BoardDocument;
+  /**
+   * 受影響的卡片。
+   *
+   * Items: 受影響的卡片，用來同步釘選與新鮮度。
+   */
+  cardIds?: string[];
 }
 /**
  * 上下文內容變了；掛在會話串流。

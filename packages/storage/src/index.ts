@@ -1,5 +1,6 @@
 export * from "./approvals.js";
 export * from "./cards/index.js";
+export * from "./boards/index.js";
 export * from "./db.js";
 export * from "./dedupe.js";
 export * from "./devices/index.js";

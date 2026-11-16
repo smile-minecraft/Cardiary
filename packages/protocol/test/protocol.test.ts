@@ -17,6 +17,8 @@ import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { describe, expect, it } from "vitest";
 
+import { assertValidBoard } from "../../domain/src/boards/validate.js";
+
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 
@@ -90,6 +92,18 @@ describe("協定 schema 與範例", () => {
       rmSync(temp, { recursive: true, force: true });
     }
   });
+  it("白板範例同時符合領域規則，拒絕小數及超出安全範圍的格點", () => {
+    const example = structuredClone(examples.boardSaveRequest);
+    expect(validateClient(example)).toBe(true);
+    expect(() => assertValidBoard({ board: example.payload.board })).not.toThrow();
+    for (const value of [0.5, -1, Number.MAX_SAFE_INTEGER + 1]) {
+      const invalid = structuredClone(example);
+      invalid.payload.board.items[0].position.x = value;
+      expect(validateClient(invalid)).toBe(false);
+      expect(() => assertValidBoard({ board: invalid.payload.board })).toThrow();
+    }
+  });
+
   it("每個範例都符合對應的影格 schema", () => {
     for (const [name, example] of Object.entries(examples)) {
       const validator = example.kind === "request" ? validateClient : validateServer;

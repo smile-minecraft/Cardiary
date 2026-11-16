@@ -3635,6 +3635,487 @@
         }
       }
     },
+    "BoardPoint": {
+      "title": "BoardPoint",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": {
+          "type": "integer",
+          "description": "畫布 x 座標。",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "y": {
+          "type": "integer",
+          "description": "畫布 y 座標。",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "BoardSize": {
+      "title": "BoardSize",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "description": "投影框寬度。",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "height": {
+          "type": "integer",
+          "description": "投影框高度。",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "BoardItem": {
+      "title": "BoardItem",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "cardId", "position", "size", "pinned"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "投影的 ULID；不同白板上的同一張卡有不同 id。"
+        },
+        "cardId": {
+          "type": "string",
+          "description": "卡片本體的 ULID。"
+        },
+        "position": {
+          "$ref": "#/$defs/BoardPoint"
+        },
+        "size": {
+          "$ref": "#/$defs/BoardSize"
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "任一個投影釘選時，該卡片的新鮮度固定 100。"
+        },
+        "groupId": {
+          "type": "string",
+          "description": "所屬分組 id；省略代表在畫布上。"
+        }
+      }
+    },
+    "BoardEdge": {
+      "title": "BoardEdge",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "from", "to"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "連線的 ULID。"
+        },
+        "from": {
+          "type": "string",
+          "description": "起點投影 id，不是卡片 id。"
+        },
+        "to": {
+          "type": "string",
+          "description": "終點投影 id，不是卡片 id。"
+        },
+        "label": {
+          "type": "string",
+          "description": "連線標籤。"
+        }
+      }
+    },
+    "BoardGroup": {
+      "title": "BoardGroup",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "分組的 ULID。"
+        },
+        "label": {
+          "type": "string",
+          "description": "分組名稱。"
+        },
+        "parentId": {
+          "type": "string",
+          "description": "上層分組 id；形成循環時拒絕。"
+        }
+      }
+    },
+    "BoardDocument": {
+      "title": "BoardDocument",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "id", "title", "createdAt", "updatedAt", "items", "edges", "groups"],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "description": "白板 ULID。"
+        },
+        "title": {
+          "type": "string",
+          "description": "白板名稱。"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "建立時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "最後變更時間；單寫者可用於儲存前比對。",
+          "format": "date-time"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoardItem"
+          },
+          "description": "投影清單。"
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoardEdge"
+          },
+          "description": "只屬於這份白板的顯式連線。"
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoardGroup"
+          },
+          "description": "可巢狀的分組。"
+        }
+      },
+      "description": "一份白板的完整內容，等於 boards/<id>.json。"
+    },
+    "BoardSummary": {
+      "title": "BoardSummary",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "updatedAt", "itemCount"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "白板 ULID。"
+        },
+        "title": {
+          "type": "string",
+          "description": "白板名稱。"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "最後變更時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "itemCount": {
+          "type": "integer",
+          "description": "投影數量。",
+          "minimum": 0
+        }
+      }
+    },
+    "BoardChange": {
+      "title": "BoardChange",
+      "type": "string",
+      "enum": ["created", "updated", "deleted"],
+      "description": "白板變更的種類。"
+    },
+    "BoardListRequestPayload": {
+      "title": "BoardListRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {},
+      "description": "列出所有白板；不需要參數。"
+    },
+    "BoardListResponsePayload": {
+      "title": "BoardListResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boards"],
+      "properties": {
+        "boards": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoardSummary"
+          },
+          "description": "依最後變更時間排序。"
+        }
+      }
+    },
+    "BoardGetRequestPayload": {
+      "title": "BoardGetRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boardId"],
+      "properties": {
+        "boardId": {
+          "type": "string",
+          "description": "要讀取的白板。"
+        }
+      }
+    },
+    "BoardGetResponsePayload": {
+      "title": "BoardGetResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["board"],
+      "properties": {
+        "board": {
+          "$ref": "#/$defs/BoardDocument"
+        }
+      }
+    },
+    "BoardCreateRequestPayload": {
+      "title": "BoardCreateRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boardId", "title", "clientRequestId"],
+      "properties": {
+        "boardId": {
+          "type": "string",
+          "description": "客戶端產生的白板 ULID。"
+        },
+        "title": {
+          "type": "string",
+          "description": "白板名稱。"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵；重送只建立一次。"
+        }
+      }
+    },
+    "BoardCreateResponsePayload": {
+      "title": "BoardCreateResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["board"],
+      "properties": {
+        "board": {
+          "$ref": "#/$defs/BoardDocument"
+        }
+      }
+    },
+    "BoardSaveRequestPayload": {
+      "title": "BoardSaveRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["board", "baseUpdatedAt"],
+      "properties": {
+        "board": {
+          "$ref": "#/$defs/BoardDocument"
+        },
+        "baseUpdatedAt": {
+          "type": "string",
+          "description": "單寫者比對用的 updatedAt；不保護同時寫入。",
+          "format": "date-time"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵。"
+        }
+      }
+    },
+    "BoardSaveResponsePayload": {
+      "title": "BoardSaveResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["board"],
+      "properties": {
+        "board": {
+          "$ref": "#/$defs/BoardDocument"
+        }
+      }
+    },
+    "BoardDeleteRequestPayload": {
+      "title": "BoardDeleteRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boardId"],
+      "properties": {
+        "boardId": {
+          "type": "string",
+          "description": "要刪除的白板；卡片本體不受影響。"
+        }
+      }
+    },
+    "BoardDeleteResponsePayload": {
+      "title": "BoardDeleteResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deleted"],
+      "properties": {
+        "deleted": {
+          "type": "boolean",
+          "description": "是否真的刪掉了檔案。"
+        }
+      }
+    },
+    "BoardProjectCardRequestPayload": {
+      "title": "BoardProjectCardRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boardId", "itemId", "cardId", "position"],
+      "properties": {
+        "boardId": {
+          "type": "string",
+          "description": "目標白板。"
+        },
+        "itemId": {
+          "type": "string",
+          "description": "新投影的 ULID。"
+        },
+        "cardId": {
+          "type": "string",
+          "description": "卡片本體的 ULID。"
+        },
+        "position": {
+          "$ref": "#/$defs/BoardPoint"
+        },
+        "size": {
+          "$ref": "#/$defs/BoardSize"
+        },
+        "groupId": {
+          "type": "string",
+          "description": "放進的分組；省略代表畫布。"
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "是否釘選；預設 false。"
+        }
+      }
+    },
+    "BoardProjectCardResponsePayload": {
+      "title": "BoardProjectCardResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["board"],
+      "properties": {
+        "board": {
+          "$ref": "#/$defs/BoardDocument"
+        }
+      }
+    },
+    "BoardUnprojectCardRequestPayload": {
+      "title": "BoardUnprojectCardRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boardId", "itemId"],
+      "properties": {
+        "boardId": {
+          "type": "string",
+          "description": "白板。"
+        },
+        "itemId": {
+          "type": "string",
+          "description": "要移除的投影；卡片本體不受影響。"
+        }
+      }
+    },
+    "BoardUnprojectCardResponsePayload": {
+      "title": "BoardUnprojectCardResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["board"],
+      "properties": {
+        "board": {
+          "$ref": "#/$defs/BoardDocument"
+        }
+      }
+    },
+    "BoardCreateCardFromSelectionRequestPayload": {
+      "title": "BoardCreateCardFromSelectionRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boardId", "cardIds", "title", "body", "itemId", "position", "clientRequestId"],
+      "properties": {
+        "boardId": {
+          "type": "string",
+          "description": "圈選所在的白板；新卡會投影到這份白板。"
+        },
+        "cardIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "被圈選的卡片 ULID；順序保留，重複去掉。"
+          },
+          "description": "來源卡。"
+        },
+        "title": {
+          "type": "string",
+          "description": "新卡標題。"
+        },
+        "body": {
+          "type": "string",
+          "description": "新卡內文（Markdown）。"
+        },
+        "itemId": {
+          "type": "string",
+          "description": "新投影的 ULID。"
+        },
+        "position": {
+          "$ref": "#/$defs/BoardPoint"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵。"
+        }
+      }
+    },
+    "BoardCreateCardFromSelectionResponsePayload": {
+      "title": "BoardCreateCardFromSelectionResponsePayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["board", "cardId"],
+      "properties": {
+        "board": {
+          "$ref": "#/$defs/BoardDocument"
+        },
+        "cardId": {
+          "type": "string",
+          "description": "新卡的 ULID；其 sources 指回被圈選的卡。"
+        }
+      }
+    },
+    "BoardChangedEventPayload": {
+      "title": "BoardChangedEventPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boardId", "change"],
+      "properties": {
+        "boardId": {
+          "type": "string",
+          "description": "變更的白板。"
+        },
+        "change": {
+          "$ref": "#/$defs/BoardChange"
+        },
+        "board": {
+          "$ref": "#/$defs/BoardDocument"
+        },
+        "cardIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "受影響的卡片，用來同步釘選與新鮮度。"
+          },
+          "description": "受影響的卡片。"
+        }
+      }
+    },
     "SystemHelloRequest": {
       "title": "SystemHelloRequest",
       "type": "object",
@@ -5363,6 +5844,441 @@
         }
       },
       "description": "卡片建立、更新、刪除、保鮮或重新索引；掛在 system 串流。"
+    },
+    "BoardListRequest": {
+      "title": "BoardListRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "board.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardListRequestPayload"
+        }
+      },
+      "description": "列出所有白板。"
+    },
+    "BoardListResponse": {
+      "title": "BoardListResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "board.list"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardListResponsePayload"
+        }
+      },
+      "description": "白板列表。"
+    },
+    "BoardGetRequest": {
+      "title": "BoardGetRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "board.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardGetRequestPayload"
+        }
+      },
+      "description": "讀取一份白板。"
+    },
+    "BoardGetResponse": {
+      "title": "BoardGetResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "board.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardGetResponsePayload"
+        }
+      },
+      "description": "白板完整內容。"
+    },
+    "BoardCreateRequest": {
+      "title": "BoardCreateRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "board.create"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardCreateRequestPayload"
+        }
+      },
+      "description": "建立空白白板。"
+    },
+    "BoardCreateResponse": {
+      "title": "BoardCreateResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "board.create"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardCreateResponsePayload"
+        }
+      },
+      "description": "建立的白板。"
+    },
+    "BoardSaveRequest": {
+      "title": "BoardSaveRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "board.save"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardSaveRequestPayload"
+        }
+      },
+      "description": "整份覆寫白板。"
+    },
+    "BoardSaveResponse": {
+      "title": "BoardSaveResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "board.save"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardSaveResponsePayload"
+        }
+      },
+      "description": "儲存後的白板。"
+    },
+    "BoardDeleteRequest": {
+      "title": "BoardDeleteRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "board.delete"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardDeleteRequestPayload"
+        }
+      },
+      "description": "刪除白板，不刪卡片。"
+    },
+    "BoardDeleteResponse": {
+      "title": "BoardDeleteResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "board.delete"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardDeleteResponsePayload"
+        }
+      },
+      "description": "刪除結果。"
+    },
+    "BoardProjectCardRequest": {
+      "title": "BoardProjectCardRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "board.project_card"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardProjectCardRequestPayload"
+        }
+      },
+      "description": "把卡片投影進白板。"
+    },
+    "BoardProjectCardResponse": {
+      "title": "BoardProjectCardResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "board.project_card"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardProjectCardResponsePayload"
+        }
+      },
+      "description": "投影後的白板。"
+    },
+    "BoardUnprojectCardRequest": {
+      "title": "BoardUnprojectCardRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "board.unproject_card"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardUnprojectCardRequestPayload"
+        }
+      },
+      "description": "取消投影，不刪卡片。"
+    },
+    "BoardUnprojectCardResponse": {
+      "title": "BoardUnprojectCardResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "board.unproject_card"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardUnprojectCardResponsePayload"
+        }
+      },
+      "description": "取消後的白板。"
+    },
+    "BoardCreateCardFromSelectionRequest": {
+      "title": "BoardCreateCardFromSelectionRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "board.create_card_from_selection"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardCreateCardFromSelectionRequestPayload"
+        }
+      },
+      "description": "圈選卡片生成新卡並投影到白板；sources 指回來源卡。"
+    },
+    "BoardCreateCardFromSelectionResponse": {
+      "title": "BoardCreateCardFromSelectionResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "board.create_card_from_selection"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardCreateCardFromSelectionResponsePayload"
+        }
+      },
+      "description": "新卡與更新後的白板。"
+    },
+    "BoardChangedEvent": {
+      "title": "BoardChangedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "board.changed"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/BoardChangedEventPayload"
+        }
+      },
+      "description": "白板建立、更新或刪除；掛在 system 串流。"
     },
     "MediaImportRequest": {
       "title": "MediaImportRequest",
@@ -7202,6 +8118,30 @@
           "$ref": "#/$defs/CardRefreshRequest"
         },
         {
+          "$ref": "#/$defs/BoardListRequest"
+        },
+        {
+          "$ref": "#/$defs/BoardGetRequest"
+        },
+        {
+          "$ref": "#/$defs/BoardCreateRequest"
+        },
+        {
+          "$ref": "#/$defs/BoardSaveRequest"
+        },
+        {
+          "$ref": "#/$defs/BoardDeleteRequest"
+        },
+        {
+          "$ref": "#/$defs/BoardProjectCardRequest"
+        },
+        {
+          "$ref": "#/$defs/BoardUnprojectCardRequest"
+        },
+        {
+          "$ref": "#/$defs/BoardCreateCardFromSelectionRequest"
+        },
+        {
           "$ref": "#/$defs/MediaImportRequest"
         },
         {
@@ -7349,6 +8289,30 @@
           "$ref": "#/$defs/CardRefreshResponse"
         },
         {
+          "$ref": "#/$defs/BoardListResponse"
+        },
+        {
+          "$ref": "#/$defs/BoardGetResponse"
+        },
+        {
+          "$ref": "#/$defs/BoardCreateResponse"
+        },
+        {
+          "$ref": "#/$defs/BoardSaveResponse"
+        },
+        {
+          "$ref": "#/$defs/BoardDeleteResponse"
+        },
+        {
+          "$ref": "#/$defs/BoardProjectCardResponse"
+        },
+        {
+          "$ref": "#/$defs/BoardUnprojectCardResponse"
+        },
+        {
+          "$ref": "#/$defs/BoardCreateCardFromSelectionResponse"
+        },
+        {
           "$ref": "#/$defs/MediaImportResponse"
         },
         {
@@ -7404,6 +8368,9 @@
         },
         {
           "$ref": "#/$defs/CardChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/BoardChangedEvent"
         },
         {
           "$ref": "#/$defs/ContextChangedEvent"

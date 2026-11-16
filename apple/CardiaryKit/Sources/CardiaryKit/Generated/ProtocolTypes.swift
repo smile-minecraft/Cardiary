@@ -948,6 +948,2128 @@ public struct BlobInfo: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - BoardChange
+
+public enum BoardChange: String, Codable, Equatable, Sendable, CaseIterable {
+    case created = "created"
+    case updated = "updated"
+    case deleted = "deleted"
+}
+
+// MARK: - BoardChangedEvent
+
+public struct BoardChangedEvent: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let type: String
+    public let stream: String
+    public let seq: Int
+    public let emittedAt: String
+    public let payload: BoardChangedEventPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "event",
+        type: String = "board.changed",
+        stream: String,
+        seq: Int,
+        emittedAt: String,
+        payload: BoardChangedEventPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.type = type
+        self.stream = stream
+        self.seq = seq
+        self.emittedAt = emittedAt
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case type = "type"
+        case stream = "stream"
+        case seq = "seq"
+        case emittedAt = "emittedAt"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardChangedEvent.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "event" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardChangedEvent.kind 必須是 event")
+        }
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.changed" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardChangedEvent.type 必須是 board.changed")
+        }
+        let stream = try container.decode(String.self, forKey: .stream)
+        let seq = try container.decode(Int.self, forKey: .seq)
+        let emittedAt = try container.decode(String.self, forKey: .emittedAt)
+        let payload = try container.decode(BoardChangedEventPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            type: type,
+            stream: stream,
+            seq: seq,
+            emittedAt: emittedAt,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(type, forKey: .type)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(seq, forKey: .seq)
+        try container.encode(emittedAt, forKey: .emittedAt)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardChangedEventPayload
+
+public struct BoardChangedEventPayload: Codable, Equatable, Sendable {
+    public let boardId: String
+    public let change: BoardChange
+    public let board: BoardDocument?
+    public let cardIds: [String]?
+
+    public init(
+        boardId: String,
+        change: BoardChange,
+        board: BoardDocument? = nil,
+        cardIds: [String]? = nil
+    ) {
+        self.boardId = boardId
+        self.change = change
+        self.board = board
+        self.cardIds = cardIds
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case boardId = "boardId"
+        case change = "change"
+        case board = "board"
+        case cardIds = "cardIds"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let boardId = try container.decode(String.self, forKey: .boardId)
+        let change = try container.decode(BoardChange.self, forKey: .change)
+        let board = try container.decodeIfPresent(BoardDocument.self, forKey: .board)
+        let cardIds = try container.decodeIfPresent([String].self, forKey: .cardIds)
+        self.init(
+            boardId: boardId,
+            change: change,
+            board: board,
+            cardIds: cardIds
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(boardId, forKey: .boardId)
+        try container.encode(change, forKey: .change)
+        try container.encodeIfPresent(board, forKey: .board)
+        try container.encodeIfPresent(cardIds, forKey: .cardIds)
+    }
+}
+
+// MARK: - BoardCreateCardFromSelectionRequest
+
+public struct BoardCreateCardFromSelectionRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: BoardCreateCardFromSelectionRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "board.create_card_from_selection",
+        payload: BoardCreateCardFromSelectionRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardCreateCardFromSelectionRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardCreateCardFromSelectionRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.create_card_from_selection" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardCreateCardFromSelectionRequest.type 必須是 board.create_card_from_selection")
+        }
+        let payload = try container.decode(BoardCreateCardFromSelectionRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardCreateCardFromSelectionRequestPayload
+
+public struct BoardCreateCardFromSelectionRequestPayload: Codable, Equatable, Sendable {
+    public let boardId: String
+    public let cardIds: [String]
+    public let title: String
+    public let body: String
+    public let itemId: String
+    public let position: BoardPoint
+    public let clientRequestId: String
+
+    public init(
+        boardId: String,
+        cardIds: [String],
+        title: String,
+        body: String,
+        itemId: String,
+        position: BoardPoint,
+        clientRequestId: String
+    ) {
+        self.boardId = boardId
+        self.cardIds = cardIds
+        self.title = title
+        self.body = body
+        self.itemId = itemId
+        self.position = position
+        self.clientRequestId = clientRequestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case boardId = "boardId"
+        case cardIds = "cardIds"
+        case title = "title"
+        case body = "body"
+        case itemId = "itemId"
+        case position = "position"
+        case clientRequestId = "clientRequestId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let boardId = try container.decode(String.self, forKey: .boardId)
+        let cardIds = try container.decode([String].self, forKey: .cardIds)
+        let title = try container.decode(String.self, forKey: .title)
+        let body = try container.decode(String.self, forKey: .body)
+        let itemId = try container.decode(String.self, forKey: .itemId)
+        let position = try container.decode(BoardPoint.self, forKey: .position)
+        let clientRequestId = try container.decode(String.self, forKey: .clientRequestId)
+        self.init(
+            boardId: boardId,
+            cardIds: cardIds,
+            title: title,
+            body: body,
+            itemId: itemId,
+            position: position,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(boardId, forKey: .boardId)
+        try container.encode(cardIds, forKey: .cardIds)
+        try container.encode(title, forKey: .title)
+        try container.encode(body, forKey: .body)
+        try container.encode(itemId, forKey: .itemId)
+        try container.encode(position, forKey: .position)
+        try container.encode(clientRequestId, forKey: .clientRequestId)
+    }
+}
+
+// MARK: - BoardCreateCardFromSelectionResponse
+
+public struct BoardCreateCardFromSelectionResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: BoardCreateCardFromSelectionResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "board.create_card_from_selection",
+        payload: BoardCreateCardFromSelectionResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardCreateCardFromSelectionResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardCreateCardFromSelectionResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.create_card_from_selection" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardCreateCardFromSelectionResponse.type 必須是 board.create_card_from_selection")
+        }
+        let payload = try container.decode(BoardCreateCardFromSelectionResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardCreateCardFromSelectionResponsePayload
+
+public struct BoardCreateCardFromSelectionResponsePayload: Codable, Equatable, Sendable {
+    public let board: BoardDocument
+    public let cardId: String
+
+    public init(
+        board: BoardDocument,
+        cardId: String
+    ) {
+        self.board = board
+        self.cardId = cardId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case board = "board"
+        case cardId = "cardId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let board = try container.decode(BoardDocument.self, forKey: .board)
+        let cardId = try container.decode(String.self, forKey: .cardId)
+        self.init(
+            board: board,
+            cardId: cardId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(board, forKey: .board)
+        try container.encode(cardId, forKey: .cardId)
+    }
+}
+
+// MARK: - BoardCreateRequest
+
+public struct BoardCreateRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: BoardCreateRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "board.create",
+        payload: BoardCreateRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardCreateRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardCreateRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.create" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardCreateRequest.type 必須是 board.create")
+        }
+        let payload = try container.decode(BoardCreateRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardCreateRequestPayload
+
+public struct BoardCreateRequestPayload: Codable, Equatable, Sendable {
+    public let boardId: String
+    public let title: String
+    public let clientRequestId: String
+
+    public init(
+        boardId: String,
+        title: String,
+        clientRequestId: String
+    ) {
+        self.boardId = boardId
+        self.title = title
+        self.clientRequestId = clientRequestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case boardId = "boardId"
+        case title = "title"
+        case clientRequestId = "clientRequestId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let boardId = try container.decode(String.self, forKey: .boardId)
+        let title = try container.decode(String.self, forKey: .title)
+        let clientRequestId = try container.decode(String.self, forKey: .clientRequestId)
+        self.init(
+            boardId: boardId,
+            title: title,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(boardId, forKey: .boardId)
+        try container.encode(title, forKey: .title)
+        try container.encode(clientRequestId, forKey: .clientRequestId)
+    }
+}
+
+// MARK: - BoardCreateResponse
+
+public struct BoardCreateResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: BoardCreateResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "board.create",
+        payload: BoardCreateResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardCreateResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardCreateResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.create" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardCreateResponse.type 必須是 board.create")
+        }
+        let payload = try container.decode(BoardCreateResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardCreateResponsePayload
+
+public struct BoardCreateResponsePayload: Codable, Equatable, Sendable {
+    public let board: BoardDocument
+
+    public init(
+        board: BoardDocument
+    ) {
+        self.board = board
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case board = "board"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let board = try container.decode(BoardDocument.self, forKey: .board)
+        self.init(
+            board: board
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(board, forKey: .board)
+    }
+}
+
+// MARK: - BoardDeleteRequest
+
+public struct BoardDeleteRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: BoardDeleteRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "board.delete",
+        payload: BoardDeleteRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardDeleteRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardDeleteRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.delete" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardDeleteRequest.type 必須是 board.delete")
+        }
+        let payload = try container.decode(BoardDeleteRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardDeleteRequestPayload
+
+public struct BoardDeleteRequestPayload: Codable, Equatable, Sendable {
+    public let boardId: String
+
+    public init(
+        boardId: String
+    ) {
+        self.boardId = boardId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case boardId = "boardId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let boardId = try container.decode(String.self, forKey: .boardId)
+        self.init(
+            boardId: boardId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(boardId, forKey: .boardId)
+    }
+}
+
+// MARK: - BoardDeleteResponse
+
+public struct BoardDeleteResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: BoardDeleteResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "board.delete",
+        payload: BoardDeleteResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardDeleteResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardDeleteResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.delete" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardDeleteResponse.type 必須是 board.delete")
+        }
+        let payload = try container.decode(BoardDeleteResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardDeleteResponsePayload
+
+public struct BoardDeleteResponsePayload: Codable, Equatable, Sendable {
+    public let deleted: Bool
+
+    public init(
+        deleted: Bool
+    ) {
+        self.deleted = deleted
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case deleted = "deleted"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let deleted = try container.decode(Bool.self, forKey: .deleted)
+        self.init(
+            deleted: deleted
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deleted, forKey: .deleted)
+    }
+}
+
+// MARK: - BoardDocument
+
+public struct BoardDocument: Codable, Equatable, Sendable {
+    public let schema: Int
+    public let id: String
+    public let title: String
+    public let createdAt: String
+    public let updatedAt: String
+    public let items: [BoardItem]
+    public let edges: [BoardEdge]
+    public let groups: [BoardGroup]
+
+    public init(
+        schema: Int = 1,
+        id: String,
+        title: String,
+        createdAt: String,
+        updatedAt: String,
+        items: [BoardItem],
+        edges: [BoardEdge],
+        groups: [BoardGroup]
+    ) {
+        self.schema = schema
+        self.id = id
+        self.title = title
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.items = items
+        self.edges = edges
+        self.groups = groups
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schema = "schema"
+        case id = "id"
+        case title = "title"
+        case createdAt = "createdAt"
+        case updatedAt = "updatedAt"
+        case items = "items"
+        case edges = "edges"
+        case groups = "groups"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let schema = try container.decode(Int.self, forKey: .schema)
+        guard schema == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .schema, in: container, debugDescription: "BoardDocument.schema 必須是 1")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let title = try container.decode(String.self, forKey: .title)
+        let createdAt = try container.decode(String.self, forKey: .createdAt)
+        let updatedAt = try container.decode(String.self, forKey: .updatedAt)
+        let items = try container.decode([BoardItem].self, forKey: .items)
+        let edges = try container.decode([BoardEdge].self, forKey: .edges)
+        let groups = try container.decode([BoardGroup].self, forKey: .groups)
+        self.init(
+            schema: schema,
+            id: id,
+            title: title,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            items: items,
+            edges: edges,
+            groups: groups
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schema, forKey: .schema)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(items, forKey: .items)
+        try container.encode(edges, forKey: .edges)
+        try container.encode(groups, forKey: .groups)
+    }
+}
+
+// MARK: - BoardEdge
+
+public struct BoardEdge: Codable, Equatable, Sendable {
+    public let id: String
+    public let from: String
+    public let to: String
+    public let label: String?
+
+    public init(
+        id: String,
+        from: String,
+        to: String,
+        label: String? = nil
+    ) {
+        self.id = id
+        self.from = from
+        self.to = to
+        self.label = label
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case from = "from"
+        case to = "to"
+        case label = "label"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(String.self, forKey: .id)
+        let from = try container.decode(String.self, forKey: .from)
+        let to = try container.decode(String.self, forKey: .to)
+        let label = try container.decodeIfPresent(String.self, forKey: .label)
+        self.init(
+            id: id,
+            from: from,
+            to: to,
+            label: label
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(from, forKey: .from)
+        try container.encode(to, forKey: .to)
+        try container.encodeIfPresent(label, forKey: .label)
+    }
+}
+
+// MARK: - BoardGetRequest
+
+public struct BoardGetRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: BoardGetRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "board.get",
+        payload: BoardGetRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardGetRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardGetRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.get" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardGetRequest.type 必須是 board.get")
+        }
+        let payload = try container.decode(BoardGetRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardGetRequestPayload
+
+public struct BoardGetRequestPayload: Codable, Equatable, Sendable {
+    public let boardId: String
+
+    public init(
+        boardId: String
+    ) {
+        self.boardId = boardId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case boardId = "boardId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let boardId = try container.decode(String.self, forKey: .boardId)
+        self.init(
+            boardId: boardId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(boardId, forKey: .boardId)
+    }
+}
+
+// MARK: - BoardGetResponse
+
+public struct BoardGetResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: BoardGetResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "board.get",
+        payload: BoardGetResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardGetResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardGetResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.get" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardGetResponse.type 必須是 board.get")
+        }
+        let payload = try container.decode(BoardGetResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardGetResponsePayload
+
+public struct BoardGetResponsePayload: Codable, Equatable, Sendable {
+    public let board: BoardDocument
+
+    public init(
+        board: BoardDocument
+    ) {
+        self.board = board
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case board = "board"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let board = try container.decode(BoardDocument.self, forKey: .board)
+        self.init(
+            board: board
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(board, forKey: .board)
+    }
+}
+
+// MARK: - BoardGroup
+
+public struct BoardGroup: Codable, Equatable, Sendable {
+    public let id: String
+    public let label: String
+    public let parentId: String?
+
+    public init(
+        id: String,
+        label: String,
+        parentId: String? = nil
+    ) {
+        self.id = id
+        self.label = label
+        self.parentId = parentId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case label = "label"
+        case parentId = "parentId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(String.self, forKey: .id)
+        let label = try container.decode(String.self, forKey: .label)
+        let parentId = try container.decodeIfPresent(String.self, forKey: .parentId)
+        self.init(
+            id: id,
+            label: label,
+            parentId: parentId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(label, forKey: .label)
+        try container.encodeIfPresent(parentId, forKey: .parentId)
+    }
+}
+
+// MARK: - BoardItem
+
+public struct BoardItem: Codable, Equatable, Sendable {
+    public let id: String
+    public let cardId: String
+    public let position: BoardPoint
+    public let size: BoardSize
+    public let pinned: Bool
+    public let groupId: String?
+
+    public init(
+        id: String,
+        cardId: String,
+        position: BoardPoint,
+        size: BoardSize,
+        pinned: Bool,
+        groupId: String? = nil
+    ) {
+        self.id = id
+        self.cardId = cardId
+        self.position = position
+        self.size = size
+        self.pinned = pinned
+        self.groupId = groupId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case cardId = "cardId"
+        case position = "position"
+        case size = "size"
+        case pinned = "pinned"
+        case groupId = "groupId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(String.self, forKey: .id)
+        let cardId = try container.decode(String.self, forKey: .cardId)
+        let position = try container.decode(BoardPoint.self, forKey: .position)
+        let size = try container.decode(BoardSize.self, forKey: .size)
+        let pinned = try container.decode(Bool.self, forKey: .pinned)
+        let groupId = try container.decodeIfPresent(String.self, forKey: .groupId)
+        self.init(
+            id: id,
+            cardId: cardId,
+            position: position,
+            size: size,
+            pinned: pinned,
+            groupId: groupId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(cardId, forKey: .cardId)
+        try container.encode(position, forKey: .position)
+        try container.encode(size, forKey: .size)
+        try container.encode(pinned, forKey: .pinned)
+        try container.encodeIfPresent(groupId, forKey: .groupId)
+    }
+}
+
+// MARK: - BoardListRequest
+
+public struct BoardListRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: BoardListRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "board.list",
+        payload: BoardListRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardListRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardListRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.list" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardListRequest.type 必須是 board.list")
+        }
+        let payload = try container.decode(BoardListRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardListRequestPayload
+
+public struct BoardListRequestPayload: Codable, Equatable, Sendable {
+
+    public init() {}
+}
+
+// MARK: - BoardListResponse
+
+public struct BoardListResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: BoardListResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "board.list",
+        payload: BoardListResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardListResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardListResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.list" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardListResponse.type 必須是 board.list")
+        }
+        let payload = try container.decode(BoardListResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardListResponsePayload
+
+public struct BoardListResponsePayload: Codable, Equatable, Sendable {
+    public let boards: [BoardSummary]
+
+    public init(
+        boards: [BoardSummary]
+    ) {
+        self.boards = boards
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case boards = "boards"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let boards = try container.decode([BoardSummary].self, forKey: .boards)
+        self.init(
+            boards: boards
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(boards, forKey: .boards)
+    }
+}
+
+// MARK: - BoardPoint
+
+public struct BoardPoint: Codable, Equatable, Sendable {
+    public let x: Int
+    public let y: Int
+
+    public init(
+        x: Int,
+        y: Int
+    ) {
+        self.x = x
+        self.y = y
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case x = "x"
+        case y = "y"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let x = try container.decode(Int.self, forKey: .x)
+        let y = try container.decode(Int.self, forKey: .y)
+        self.init(
+            x: x,
+            y: y
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(x, forKey: .x)
+        try container.encode(y, forKey: .y)
+    }
+}
+
+// MARK: - BoardProjectCardRequest
+
+public struct BoardProjectCardRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: BoardProjectCardRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "board.project_card",
+        payload: BoardProjectCardRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardProjectCardRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardProjectCardRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.project_card" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardProjectCardRequest.type 必須是 board.project_card")
+        }
+        let payload = try container.decode(BoardProjectCardRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardProjectCardRequestPayload
+
+public struct BoardProjectCardRequestPayload: Codable, Equatable, Sendable {
+    public let boardId: String
+    public let itemId: String
+    public let cardId: String
+    public let position: BoardPoint
+    public let size: BoardSize?
+    public let groupId: String?
+    public let pinned: Bool?
+
+    public init(
+        boardId: String,
+        itemId: String,
+        cardId: String,
+        position: BoardPoint,
+        size: BoardSize? = nil,
+        groupId: String? = nil,
+        pinned: Bool? = nil
+    ) {
+        self.boardId = boardId
+        self.itemId = itemId
+        self.cardId = cardId
+        self.position = position
+        self.size = size
+        self.groupId = groupId
+        self.pinned = pinned
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case boardId = "boardId"
+        case itemId = "itemId"
+        case cardId = "cardId"
+        case position = "position"
+        case size = "size"
+        case groupId = "groupId"
+        case pinned = "pinned"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let boardId = try container.decode(String.self, forKey: .boardId)
+        let itemId = try container.decode(String.self, forKey: .itemId)
+        let cardId = try container.decode(String.self, forKey: .cardId)
+        let position = try container.decode(BoardPoint.self, forKey: .position)
+        let size = try container.decodeIfPresent(BoardSize.self, forKey: .size)
+        let groupId = try container.decodeIfPresent(String.self, forKey: .groupId)
+        let pinned = try container.decodeIfPresent(Bool.self, forKey: .pinned)
+        self.init(
+            boardId: boardId,
+            itemId: itemId,
+            cardId: cardId,
+            position: position,
+            size: size,
+            groupId: groupId,
+            pinned: pinned
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(boardId, forKey: .boardId)
+        try container.encode(itemId, forKey: .itemId)
+        try container.encode(cardId, forKey: .cardId)
+        try container.encode(position, forKey: .position)
+        try container.encodeIfPresent(size, forKey: .size)
+        try container.encodeIfPresent(groupId, forKey: .groupId)
+        try container.encodeIfPresent(pinned, forKey: .pinned)
+    }
+}
+
+// MARK: - BoardProjectCardResponse
+
+public struct BoardProjectCardResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: BoardProjectCardResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "board.project_card",
+        payload: BoardProjectCardResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardProjectCardResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardProjectCardResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.project_card" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardProjectCardResponse.type 必須是 board.project_card")
+        }
+        let payload = try container.decode(BoardProjectCardResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardProjectCardResponsePayload
+
+public struct BoardProjectCardResponsePayload: Codable, Equatable, Sendable {
+    public let board: BoardDocument
+
+    public init(
+        board: BoardDocument
+    ) {
+        self.board = board
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case board = "board"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let board = try container.decode(BoardDocument.self, forKey: .board)
+        self.init(
+            board: board
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(board, forKey: .board)
+    }
+}
+
+// MARK: - BoardSaveRequest
+
+public struct BoardSaveRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: BoardSaveRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "board.save",
+        payload: BoardSaveRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardSaveRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardSaveRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.save" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardSaveRequest.type 必須是 board.save")
+        }
+        let payload = try container.decode(BoardSaveRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardSaveRequestPayload
+
+public struct BoardSaveRequestPayload: Codable, Equatable, Sendable {
+    public let board: BoardDocument
+    public let baseUpdatedAt: String
+    public let clientRequestId: String?
+
+    public init(
+        board: BoardDocument,
+        baseUpdatedAt: String,
+        clientRequestId: String? = nil
+    ) {
+        self.board = board
+        self.baseUpdatedAt = baseUpdatedAt
+        self.clientRequestId = clientRequestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case board = "board"
+        case baseUpdatedAt = "baseUpdatedAt"
+        case clientRequestId = "clientRequestId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let board = try container.decode(BoardDocument.self, forKey: .board)
+        let baseUpdatedAt = try container.decode(String.self, forKey: .baseUpdatedAt)
+        let clientRequestId = try container.decodeIfPresent(String.self, forKey: .clientRequestId)
+        self.init(
+            board: board,
+            baseUpdatedAt: baseUpdatedAt,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(board, forKey: .board)
+        try container.encode(baseUpdatedAt, forKey: .baseUpdatedAt)
+        try container.encodeIfPresent(clientRequestId, forKey: .clientRequestId)
+    }
+}
+
+// MARK: - BoardSaveResponse
+
+public struct BoardSaveResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: BoardSaveResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "board.save",
+        payload: BoardSaveResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardSaveResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardSaveResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.save" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardSaveResponse.type 必須是 board.save")
+        }
+        let payload = try container.decode(BoardSaveResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardSaveResponsePayload
+
+public struct BoardSaveResponsePayload: Codable, Equatable, Sendable {
+    public let board: BoardDocument
+
+    public init(
+        board: BoardDocument
+    ) {
+        self.board = board
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case board = "board"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let board = try container.decode(BoardDocument.self, forKey: .board)
+        self.init(
+            board: board
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(board, forKey: .board)
+    }
+}
+
+// MARK: - BoardSize
+
+public struct BoardSize: Codable, Equatable, Sendable {
+    public let width: Int
+    public let height: Int
+
+    public init(
+        width: Int,
+        height: Int
+    ) {
+        self.width = width
+        self.height = height
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case width = "width"
+        case height = "height"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let width = try container.decode(Int.self, forKey: .width)
+        let height = try container.decode(Int.self, forKey: .height)
+        self.init(
+            width: width,
+            height: height
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(width, forKey: .width)
+        try container.encode(height, forKey: .height)
+    }
+}
+
+// MARK: - BoardSummary
+
+public struct BoardSummary: Codable, Equatable, Sendable {
+    public let id: String
+    public let title: String
+    public let updatedAt: String
+    public let itemCount: Int
+
+    public init(
+        id: String,
+        title: String,
+        updatedAt: String,
+        itemCount: Int
+    ) {
+        self.id = id
+        self.title = title
+        self.updatedAt = updatedAt
+        self.itemCount = itemCount
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case title = "title"
+        case updatedAt = "updatedAt"
+        case itemCount = "itemCount"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(String.self, forKey: .id)
+        let title = try container.decode(String.self, forKey: .title)
+        let updatedAt = try container.decode(String.self, forKey: .updatedAt)
+        let itemCount = try container.decode(Int.self, forKey: .itemCount)
+        self.init(
+            id: id,
+            title: title,
+            updatedAt: updatedAt,
+            itemCount: itemCount
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(itemCount, forKey: .itemCount)
+    }
+}
+
+// MARK: - BoardUnprojectCardRequest
+
+public struct BoardUnprojectCardRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: BoardUnprojectCardRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "board.unproject_card",
+        payload: BoardUnprojectCardRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardUnprojectCardRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardUnprojectCardRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.unproject_card" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardUnprojectCardRequest.type 必須是 board.unproject_card")
+        }
+        let payload = try container.decode(BoardUnprojectCardRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardUnprojectCardRequestPayload
+
+public struct BoardUnprojectCardRequestPayload: Codable, Equatable, Sendable {
+    public let boardId: String
+    public let itemId: String
+
+    public init(
+        boardId: String,
+        itemId: String
+    ) {
+        self.boardId = boardId
+        self.itemId = itemId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case boardId = "boardId"
+        case itemId = "itemId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let boardId = try container.decode(String.self, forKey: .boardId)
+        let itemId = try container.decode(String.self, forKey: .itemId)
+        self.init(
+            boardId: boardId,
+            itemId: itemId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(boardId, forKey: .boardId)
+        try container.encode(itemId, forKey: .itemId)
+    }
+}
+
+// MARK: - BoardUnprojectCardResponse
+
+public struct BoardUnprojectCardResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: BoardUnprojectCardResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "board.unproject_card",
+        payload: BoardUnprojectCardResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "BoardUnprojectCardResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "BoardUnprojectCardResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "board.unproject_card" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "BoardUnprojectCardResponse.type 必須是 board.unproject_card")
+        }
+        let payload = try container.decode(BoardUnprojectCardResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - BoardUnprojectCardResponsePayload
+
+public struct BoardUnprojectCardResponsePayload: Codable, Equatable, Sendable {
+    public let board: BoardDocument
+
+    public init(
+        board: BoardDocument
+    ) {
+        self.board = board
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case board = "board"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let board = try container.decode(BoardDocument.self, forKey: .board)
+        self.init(
+            board: board
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(board, forKey: .board)
+    }
+}
+
 // MARK: - Card
 
 public struct Card: Codable, Equatable, Sendable {
@@ -4508,6 +6630,14 @@ public enum ClientFrame: Codable, Equatable, Sendable {
     case cardDeleteRequest(CardDeleteRequest)
     case cardSearchRequest(CardSearchRequest)
     case cardRefreshRequest(CardRefreshRequest)
+    case boardListRequest(BoardListRequest)
+    case boardGetRequest(BoardGetRequest)
+    case boardCreateRequest(BoardCreateRequest)
+    case boardSaveRequest(BoardSaveRequest)
+    case boardDeleteRequest(BoardDeleteRequest)
+    case boardProjectCardRequest(BoardProjectCardRequest)
+    case boardUnprojectCardRequest(BoardUnprojectCardRequest)
+    case boardCreateCardFromSelectionRequest(BoardCreateCardFromSelectionRequest)
     case mediaImportRequest(MediaImportRequest)
     case contextGetRequest(ContextGetRequest)
     case contextAddCardRequest(ContextAddCardRequest)
@@ -4590,6 +6720,22 @@ public enum ClientFrame: Codable, Equatable, Sendable {
             self = .cardSearchRequest(try CardSearchRequest(from: decoder))
         case .some("card.refresh"):
             self = .cardRefreshRequest(try CardRefreshRequest(from: decoder))
+        case .some("board.list"):
+            self = .boardListRequest(try BoardListRequest(from: decoder))
+        case .some("board.get"):
+            self = .boardGetRequest(try BoardGetRequest(from: decoder))
+        case .some("board.create"):
+            self = .boardCreateRequest(try BoardCreateRequest(from: decoder))
+        case .some("board.save"):
+            self = .boardSaveRequest(try BoardSaveRequest(from: decoder))
+        case .some("board.delete"):
+            self = .boardDeleteRequest(try BoardDeleteRequest(from: decoder))
+        case .some("board.project_card"):
+            self = .boardProjectCardRequest(try BoardProjectCardRequest(from: decoder))
+        case .some("board.unproject_card"):
+            self = .boardUnprojectCardRequest(try BoardUnprojectCardRequest(from: decoder))
+        case .some("board.create_card_from_selection"):
+            self = .boardCreateCardFromSelectionRequest(try BoardCreateCardFromSelectionRequest(from: decoder))
         case .some("media.import"):
             self = .mediaImportRequest(try MediaImportRequest(from: decoder))
         case .some("context.get"):
@@ -4688,6 +6834,22 @@ public enum ClientFrame: Codable, Equatable, Sendable {
         case .cardSearchRequest(let value):
             try value.encode(to: encoder)
         case .cardRefreshRequest(let value):
+            try value.encode(to: encoder)
+        case .boardListRequest(let value):
+            try value.encode(to: encoder)
+        case .boardGetRequest(let value):
+            try value.encode(to: encoder)
+        case .boardCreateRequest(let value):
+            try value.encode(to: encoder)
+        case .boardSaveRequest(let value):
+            try value.encode(to: encoder)
+        case .boardDeleteRequest(let value):
+            try value.encode(to: encoder)
+        case .boardProjectCardRequest(let value):
+            try value.encode(to: encoder)
+        case .boardUnprojectCardRequest(let value):
+            try value.encode(to: encoder)
+        case .boardCreateCardFromSelectionRequest(let value):
             try value.encode(to: encoder)
         case .mediaImportRequest(let value):
             try value.encode(to: encoder)
@@ -9203,6 +11365,14 @@ public enum ServerFrame: Codable, Equatable, Sendable {
     case cardDeleteResponse(CardDeleteResponse)
     case cardSearchResponse(CardSearchResponse)
     case cardRefreshResponse(CardRefreshResponse)
+    case boardListResponse(BoardListResponse)
+    case boardGetResponse(BoardGetResponse)
+    case boardCreateResponse(BoardCreateResponse)
+    case boardSaveResponse(BoardSaveResponse)
+    case boardDeleteResponse(BoardDeleteResponse)
+    case boardProjectCardResponse(BoardProjectCardResponse)
+    case boardUnprojectCardResponse(BoardUnprojectCardResponse)
+    case boardCreateCardFromSelectionResponse(BoardCreateCardFromSelectionResponse)
     case mediaImportResponse(MediaImportResponse)
     case contextGetResponse(ContextGetResponse)
     case contextAddCardResponse(ContextAddCardResponse)
@@ -9222,6 +11392,7 @@ public enum ServerFrame: Codable, Equatable, Sendable {
     case streamTurnStateEvent(StreamTurnStateEvent)
     case streamUiEvent(StreamUiEvent)
     case cardChangedEvent(CardChangedEvent)
+    case boardChangedEvent(BoardChangedEvent)
     case contextChangedEvent(ContextChangedEvent)
     case contextCompactedEvent(ContextCompactedEvent)
     case sessionArchivedEvent(SessionArchivedEvent)
@@ -9310,6 +11481,22 @@ public enum ServerFrame: Codable, Equatable, Sendable {
             self = .cardSearchResponse(try CardSearchResponse(from: decoder))
         case (.some("response"), .some("card.refresh")):
             self = .cardRefreshResponse(try CardRefreshResponse(from: decoder))
+        case (.some("response"), .some("board.list")):
+            self = .boardListResponse(try BoardListResponse(from: decoder))
+        case (.some("response"), .some("board.get")):
+            self = .boardGetResponse(try BoardGetResponse(from: decoder))
+        case (.some("response"), .some("board.create")):
+            self = .boardCreateResponse(try BoardCreateResponse(from: decoder))
+        case (.some("response"), .some("board.save")):
+            self = .boardSaveResponse(try BoardSaveResponse(from: decoder))
+        case (.some("response"), .some("board.delete")):
+            self = .boardDeleteResponse(try BoardDeleteResponse(from: decoder))
+        case (.some("response"), .some("board.project_card")):
+            self = .boardProjectCardResponse(try BoardProjectCardResponse(from: decoder))
+        case (.some("response"), .some("board.unproject_card")):
+            self = .boardUnprojectCardResponse(try BoardUnprojectCardResponse(from: decoder))
+        case (.some("response"), .some("board.create_card_from_selection")):
+            self = .boardCreateCardFromSelectionResponse(try BoardCreateCardFromSelectionResponse(from: decoder))
         case (.some("response"), .some("media.import")):
             self = .mediaImportResponse(try MediaImportResponse(from: decoder))
         case (.some("response"), .some("context.get")):
@@ -9348,6 +11535,8 @@ public enum ServerFrame: Codable, Equatable, Sendable {
             self = .streamUiEvent(try StreamUiEvent(from: decoder))
         case (.some("event"), .some("card.changed")):
             self = .cardChangedEvent(try CardChangedEvent(from: decoder))
+        case (.some("event"), .some("board.changed")):
+            self = .boardChangedEvent(try BoardChangedEvent(from: decoder))
         case (.some("event"), .some("context.changed")):
             self = .contextChangedEvent(try ContextChangedEvent(from: decoder))
         case (.some("event"), .some("context.compacted")):
@@ -9453,6 +11642,22 @@ public enum ServerFrame: Codable, Equatable, Sendable {
             try value.encode(to: encoder)
         case .cardRefreshResponse(let value):
             try value.encode(to: encoder)
+        case .boardListResponse(let value):
+            try value.encode(to: encoder)
+        case .boardGetResponse(let value):
+            try value.encode(to: encoder)
+        case .boardCreateResponse(let value):
+            try value.encode(to: encoder)
+        case .boardSaveResponse(let value):
+            try value.encode(to: encoder)
+        case .boardDeleteResponse(let value):
+            try value.encode(to: encoder)
+        case .boardProjectCardResponse(let value):
+            try value.encode(to: encoder)
+        case .boardUnprojectCardResponse(let value):
+            try value.encode(to: encoder)
+        case .boardCreateCardFromSelectionResponse(let value):
+            try value.encode(to: encoder)
         case .mediaImportResponse(let value):
             try value.encode(to: encoder)
         case .contextGetResponse(let value):
@@ -9490,6 +11695,8 @@ public enum ServerFrame: Codable, Equatable, Sendable {
         case .streamUiEvent(let value):
             try value.encode(to: encoder)
         case .cardChangedEvent(let value):
+            try value.encode(to: encoder)
+        case .boardChangedEvent(let value):
             try value.encode(to: encoder)
         case .contextChangedEvent(let value):
             try value.encode(to: encoder)
