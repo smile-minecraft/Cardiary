@@ -56,6 +56,8 @@ export interface McpModuleOptions {
    */
   readonly bindings?: McpServerApprovalStore;
   readonly now?: () => Date;
+  /** HTTP MCP 請求的逾期毫秒數；測試可縮短，正式執行沿用 client.ts 的 30 秒。 */
+  readonly requestTimeoutMs?: number;
 }
 
 /** 已啟動伺服器的執行狀態與工具組註冊。 */
@@ -125,6 +127,9 @@ export async function activateMcpModule(
     spawn,
     logger,
     ...(options.homeDir === undefined ? {} : { homeDir: options.homeDir }),
+    ...(options.requestTimeoutMs === undefined
+      ? {}
+      : { requestTimeoutMs: options.requestTimeoutMs }),
   };
 
   const registerBundle = (runtime: McpServerRuntime): ProtocolRegistrationHandle => {
@@ -256,16 +261,23 @@ export async function activateMcpModule(
   /**
    * 停掉伺服器，也讓進行中的啟動失效。先關閉 client 讓 `listTools()` 解脫，
    * 再等啟動工作結束；否則舊啟動會在新的設定生效後才完成，把工具掛回去。
+   *
+   * 等待有上界：`client.close()` 會中止進行中的請求，正常情況下工作立刻結束；
+   * 上界只是保險，讓移除、停用或關閉模組不會被一個不聽話的連線永遠拖住。
    */
   const stopServer = async (serverId: string): Promise<void> => {
     const launch = launches.get(serverId);
+    // 等待期間可能已經有新的啟動完成並註冊新的工具組（快速停用後又啟用）；
+    // 只有當初要停掉的那一筆還在 `active` 時才能拆，否則會把新的 bundle
+    // 一起 dispose 掉，留下一個看似啟用卻沒有工具的伺服器。
+    const activeBefore = active.get(serverId);
     if (launch !== undefined) {
       launch.cancelled = true;
       await launch.client.close().catch(() => undefined);
-      await launch.task;
+      await settleWithin(launch.task, STOP_WAIT_MS);
     }
     const entry = active.get(serverId);
-    if (entry === undefined) {
+    if (entry === undefined || entry !== activeBefore) {
       return;
     }
     active.delete(serverId);
@@ -309,8 +321,9 @@ export async function activateMcpModule(
           if (isApprovedForLaunch(record)) {
             await startServer(record);
           } else {
+            // 未核准不是「壞掉」：不建立連線，也不要留下 failed 讓人以為
+            // 伺服器故障。只記入 pending，交給下面那一次通知統一說明。
             pending.push(record);
-            await startServer(record);
           }
         }
       }
@@ -612,6 +625,27 @@ function describeTarget(input: McpServerInput): { label: string; value: string }
     },
   ];
 }
+
+/**
+ * 等一個 promise 但有上界。 `client.close()` 正常會讓 `launch.task` 立刻結束，
+ * 這個上界只是防止移除／停用／關閉被不聽話的連線永遠拖住。
+ * 計時器 unref，避免它自己把測試行程留著。
+ */
+function settleWithin(task: Promise<void>, ms: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const bound = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+    timer.unref();
+  });
+  return Promise.race([task, bound]).finally(() => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  });
+}
+
+/** 停止時等待啟動工作收斂的上界；正常路徑靠 close() 的中止即時完成。 */
+const STOP_WAIT_MS = 500;
 
 function describeError(error: unknown): string {
   if (error instanceof McpClientError) {

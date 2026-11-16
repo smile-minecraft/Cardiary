@@ -139,8 +139,9 @@ describe("MCP 核准綁定：設定與核准紀錄不符就不啟動", () => {
       expect.objectContaining({ kind: "notification", title: "MCP 設定待核准", level: "warning" }),
     );
     const info = (await handle.controller.listServers())[0];
-    expect(info).toMatchObject({ serverId: record.serverId, state: "failed" });
-    expect(info.failure).toContain("核准");
+    // 未核准不是故障：不啟動、不留下 failed，只靠通知說明待核准。
+    expect(info).toMatchObject({ serverId: record.serverId, state: "disabled" });
+    expect(info.failure).toBeUndefined();
     await handle.dispose();
   });
 
