@@ -4,6 +4,8 @@ import type { JSONObject, JSONValue, SettingItem } from "@cardiary/protocol";
 import { ProtocolHandlerError } from "../contract.js";
 import { ModelSettingsError, type ModelRuntime } from "../../models/index.js";
 import { MODEL_SETTING_KEYS } from "../../models/types.js";
+import type { SettingsGovernance, GovernanceActor } from "../../settings/index.js";
+import { SettingsGovernanceError } from "../../settings/index.js";
 import type { SettingsService } from "../../settings/index.js";
 
 /**
@@ -18,6 +20,8 @@ export interface SettingsProtocolOptions {
   readonly settings: SettingsService;
   readonly protocol: ProtocolEventEmitter;
   readonly now: () => Date;
+  /** 分級治理；沒有提供時只註冊舊的 `system.*` 路徑。 */
+  readonly governance?: SettingsGovernance;
 }
 
 export function registerSettingsProtocol(options: SettingsProtocolOptions): void {
@@ -42,6 +46,132 @@ export function registerSettingsProtocol(options: SettingsProtocolOptions): void
         throw new ProtocolHandlerError("not_found", `主機不支援 ${request.type}。`);
     }
   });
+  if (options.governance !== undefined) {
+    registerTieredSettings(options.governance, protocol, options.now);
+  }
+}
+
+function registerTieredSettings(
+  governance: SettingsGovernance,
+  protocol: ProtocolEventEmitter,
+  now: () => Date,
+): void {
+  protocol.registerNamespace("settings", async (request) => {
+    const actor = actorOf(request);
+    switch (request.type) {
+      case "settings.list":
+        return { settings: governance.listFor(actor.kind) } as unknown as JSONValue;
+      case "settings.propose_change":
+        return proposeChange(request, governance, protocol, actor, now);
+      case "settings.changes.list":
+        return { changes: governance.changesFor(actor.kind) } as unknown as JSONValue;
+      case "settings.change.decide":
+        return decideChange(request, governance, protocol, actor, now);
+      default:
+        throw new ProtocolHandlerError("not_found", `主機不支援 ${request.type}。`);
+    }
+  });
+}
+
+function proposeChange(
+  request: ProtocolRequestContext,
+  governance: SettingsGovernance,
+  protocol: ProtocolEventEmitter,
+  actor: GovernanceActor,
+  now: () => Date,
+): JSONValue {
+  const payload = requireObject(request.payload);
+  if (typeof payload.key !== "string" || payload.key.trim().length === 0) {
+    throw new ProtocolHandlerError("invalid_message", "key 必須是非空字串。", {
+      field: "key",
+    });
+  }
+  if (!Object.hasOwn(payload, "value")) {
+    throw new ProtocolHandlerError("invalid_message", "缺少 value。", { field: "value" });
+  }
+  try {
+    const result = governance.change({
+      key: payload.key,
+      value: payload.value as JSONValue,
+      actor,
+      ...(typeof payload.clientRequestId === "string"
+        ? { clientRequestId: payload.clientRequestId }
+        : {}),
+    });
+    if (result.applied) {
+      const item = governance.itemFor(payload.key);
+      if (item !== undefined) {
+        protocol.emit({
+          kind: "settings-changed",
+          payload: {
+            changes: [item],
+            changedBy: actorText(actor),
+            changedAt: result.change.decidedAt ?? now().toISOString(),
+          } as unknown as JSONValue,
+        });
+      }
+    }
+    return { change: result.change } as unknown as JSONValue;
+  } catch (error) {
+    throw asProtocolError(error);
+  }
+}
+
+function decideChange(
+  request: ProtocolRequestContext,
+  governance: SettingsGovernance,
+  protocol: ProtocolEventEmitter,
+  actor: GovernanceActor,
+  now: () => Date,
+): JSONValue {
+  const payload = requireObject(request.payload);
+  if (typeof payload.changeId !== "string" || payload.changeId.length === 0) {
+    throw new ProtocolHandlerError("invalid_message", "changeId 必須是非空字串。", {
+      field: "changeId",
+    });
+  }
+  if (payload.decision !== "approve" && payload.decision !== "reject") {
+    throw new ProtocolHandlerError("invalid_message", "decision 必須是 approve 或 reject。", {
+      field: "decision",
+    });
+  }
+  try {
+    const result = governance.decide(payload.changeId, payload.decision, actor);
+    if (result.status === "applied") {
+      const item = governance.itemFor(result.key);
+      if (item !== undefined) {
+        protocol.emit({
+          kind: "settings-changed",
+          payload: {
+            changes: [item],
+            changedBy: actorText(actor),
+            changedAt: result.decidedAt ?? now().toISOString(),
+          } as unknown as JSONValue,
+        });
+      }
+    }
+    return { change: result } as unknown as JSONValue;
+  } catch (error) {
+    throw asProtocolError(error);
+  }
+}
+
+function actorOf(request: ProtocolRequestContext): GovernanceActor {
+  if (request.clientId.startsWith("agent:")) {
+    return { kind: "agent", id: request.clientId.slice(6) };
+  }
+  return { kind: "human", id: request.clientId };
+}
+
+function actorText(actor: GovernanceActor): string {
+  return actor.kind === "system" ? "system" : `${actor.kind}:${actor.id ?? "unknown"}`;
+}
+
+function asProtocolError(error: unknown): unknown {
+  if (error instanceof SettingsGovernanceError) {
+    return new ProtocolHandlerError(error.code, error.message);
+  }
+  return error;
 }
 
 async function setModels(

@@ -1,4 +1,12 @@
 export {
+  SettingsGovernance,
+  SettingsGovernanceError,
+  type ChangeInput,
+  type ChangeResult,
+  type GovernanceActor,
+  type SettingsGovernanceOptions,
+} from "./governance.js";
+export {
   SETTING_DEFINITIONS,
   defaultSettingItem,
   settingDefinition,

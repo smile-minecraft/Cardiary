@@ -23,6 +23,7 @@ import type { BrokerClient } from "../control/broker.js";
 import type { HostEngine } from "../engine/types.js";
 import type { SpawnRegistry } from "../spawn/wrapper.js";
 import type { StorageBundle } from "../storage/interfaces.js";
+import type { SettingsGovernance } from "../settings/governance.js";
 
 /**
  * 模組主機的契約：模組之間交換的服務名稱、型別與錯誤。
@@ -134,6 +135,8 @@ export interface HostServiceTypeMap {
   storage: StorageBundle;
   paths: CardiaryPaths;
   broker: BrokerClient;
+  /** M5 的設定分級治理；代理工具與協定處理器共用同一份待決提議。 */
+  settings: SettingsGovernance;
   models: ModelInvoker;
   cards: CardService;
   cardIndex: CardIndex;
