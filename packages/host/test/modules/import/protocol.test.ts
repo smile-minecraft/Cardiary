@@ -76,6 +76,8 @@ describe("module.import 協定", () => {
       "generic",
       "hermes",
       "alma",
+      "codex",
+      "claude-code",
     ]);
   });
 

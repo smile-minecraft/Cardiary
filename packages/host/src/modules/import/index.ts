@@ -14,6 +14,7 @@ import { FileSkillCopier } from "./skills.js";
 import { createAlmaAdapter } from "./sources/alma.js";
 import { createGenericAdapter } from "./sources/generic.js";
 import { createHermesAdapter } from "./sources/hermes.js";
+import { createCodexAdapter, createClaudeCodeAdapter } from "./sources/coding-agents.js";
 import { ImportJobStore } from "./store.js";
 import type { ImportSourceAdapter, ImportSourceKind } from "./types.js";
 
@@ -37,6 +38,8 @@ async function activate(context: ModuleActivationContext): Promise<void> {
     ["generic", createGenericAdapter({ fs })],
     ["hermes", createHermesAdapter({ fs, openDatabase: nodeReadonlyDatabase, homeDir: home })],
     ["alma", createAlmaAdapter({ fs, openDatabase: nodeReadonlyDatabase, homeDir: home })],
+    ["codex", createCodexAdapter({ fs })],
+    ["claude-code", createClaudeCodeAdapter({ fs })],
   ]);
   const service = new ImportService({
     fs,

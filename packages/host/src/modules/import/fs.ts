@@ -1,5 +1,6 @@
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { gunzipSync } from "node:zlib";
 
 /**
  * 來源轉接器唯一的檔案入口。
@@ -92,7 +93,10 @@ export const nodeSourceFileSystem: SourceFileSystem = {
       if (!stats.isFile()) {
         throw new SourceAccessError(path, "不是一般檔案");
       }
-      const bytes = await readFile(path);
+      const raw = await readFile(path);
+      const bytes = path.toLowerCase().endsWith(".jsonl.gz")
+        ? gunzipSync(raw, { maxOutputLength: maxBytes + 1 })
+        : raw;
       const slice = bytes.subarray(0, maxBytes);
       return {
         text: new TextDecoder("utf-8", { fatal: false }).decode(slice),

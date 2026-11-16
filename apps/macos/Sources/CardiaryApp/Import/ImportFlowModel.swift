@@ -240,7 +240,8 @@ public final class ImportFlowModel: ObservableObject {
         do {
             let preview = try await service.preview(request)
             self.preview = preview
-            selectedKeys = Set(selectableKeys(of: preview))
+            let projectKeys = Set(preview.items.filter { $0.category == .memory && $0.origin == "project" }.map(\.key))
+            selectedKeys = Set(selectableKeys(of: preview)).subtracting(projectKeys)
             coreMemoryKeys = Set(
                 preview.items
                     .filter { $0.category == .user && $0.duplicateCardId == nil }

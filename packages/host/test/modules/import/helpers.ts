@@ -27,6 +27,10 @@ import { FileSkillCopier } from "../../../src/modules/import/skills.js";
 import { createAlmaAdapter } from "../../../src/modules/import/sources/alma.js";
 import { createGenericAdapter } from "../../../src/modules/import/sources/generic.js";
 import { createHermesAdapter } from "../../../src/modules/import/sources/hermes.js";
+import {
+  createCodexAdapter,
+  createClaudeCodeAdapter,
+} from "../../../src/modules/import/sources/coding-agents.js";
 import { ImportJobStore } from "../../../src/modules/import/store.js";
 
 /**
@@ -111,6 +115,8 @@ export async function makeImportFixture(options: FixtureOptions = {}): Promise<I
       ["generic", createGenericAdapter({ fs })],
       ["hermes", createHermesAdapter({ fs, openDatabase: database.open, homeDir })],
       ["alma", createAlmaAdapter({ fs, openDatabase: database.open, homeDir })],
+      ["codex", createCodexAdapter({ fs })],
+      ["claude-code", createClaudeCodeAdapter({ fs })],
     ]),
     store: new ImportJobStore({ db: storage.state, now }),
     cards: new ImportCardWriter({ cardsDirectory: storage.layout.subfolderPath("cards"), now }),

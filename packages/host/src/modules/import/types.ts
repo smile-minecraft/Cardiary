@@ -11,7 +11,7 @@ import type { CardKind } from "@cardiary/domain";
  */
 
 /** M1 內建的來源種類；新來源由外掛模組擴充。 */
-export const IMPORT_SOURCE_KINDS = ["generic", "hermes", "alma"] as const;
+export const IMPORT_SOURCE_KINDS = ["generic", "hermes", "alma", "codex", "claude-code"] as const;
 export type ImportSourceKind = (typeof IMPORT_SOURCE_KINDS)[number];
 
 /** 六類中介格式；對應 `import_items.category` 的檢查條件。 */

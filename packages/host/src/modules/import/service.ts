@@ -102,10 +102,12 @@ export class ImportService {
   async sources(): Promise<ImportSourceAvailability[]> {
     const almaPath = `${this.#homeDir}/Library/Application Support/alma/chat_threads.db`;
     const hermesRoot = `${this.#homeDir}/.hermes`;
-    const [almaStat, hermesSkills, hermesConfig] = await Promise.all([
+    const [almaStat, hermesSkills, hermesConfig, codexStat, claudeStat] = await Promise.all([
       this.#fs.stat(almaPath),
       this.#fs.stat(`${hermesRoot}/skills`),
       this.#fs.stat(`${hermesRoot}/config.yaml`),
+      this.#fs.stat(`${this.#homeDir}/.codex`),
+      this.#fs.stat(`${this.#homeDir}/.claude`),
     ]);
     const hermesAvailable = hermesSkills.kind === "directory" || hermesConfig.kind === "file";
     return [
@@ -136,6 +138,22 @@ export class ImportService {
             ? "唯讀開啟 chat_threads.db；人格沒有來源，由你提供。"
             : "找不到 Alma 的 chat_threads.db。",
         unverified: "匯出檔 threads.json 的欄位",
+      },
+      {
+        kind: "codex",
+        name: "Codex",
+        available: codexStat.kind === "directory",
+        path: `${this.#homeDir}/.codex`,
+        detail: "匯入規則、記憶與所選時間的對話。",
+        unverified: "對話格式",
+      },
+      {
+        kind: "claude-code",
+        name: "Claude Code",
+        available: claudeStat.kind === "directory",
+        path: `${this.#homeDir}/.claude`,
+        detail: "匯入規則、專案記憶與所選時間的對話。",
+        unverified: "對話格式",
       },
     ];
   }
@@ -597,6 +615,8 @@ export class ImportService {
     const trimmed = path?.trim() ?? "";
     if (trimmed !== "") return trimmed;
     if (kind === "hermes") return `${this.#homeDir}/.hermes`;
+    if (kind === "codex") return `${this.#homeDir}/.codex`;
+    if (kind === "claude-code") return `${this.#homeDir}/.claude`;
     if (kind === "alma") return `${this.#homeDir}/Library/Application Support/alma/chat_threads.db`;
     throw new ImportError("invalid_message", "通用來源要指定資料夾。", { field: "sourcePath" });
   }
