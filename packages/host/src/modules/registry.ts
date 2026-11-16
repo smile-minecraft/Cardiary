@@ -1,4 +1,5 @@
 import type {
+  ContextSectionContribution,
   HostModule,
   HostServiceRegistry,
   ModuleActivationContext,
@@ -17,6 +18,7 @@ import type {
   ProtocolRequestContext,
   ProtocolRequestHandler,
   RegistrationHandle,
+  ScheduleDeclaration,
 } from "@cardiary/module-api";
 import type { JsonValue, ToolBundlePin, ToolRegistry } from "@cardiary/engine-adapter";
 import { ModuleLifecycleFailure } from "@cardiary/module-api";
@@ -39,6 +41,20 @@ import { ProtocolHandlerError } from "./contract.js";
  */
 
 // ---- 服務註冊表 ---------------------------------------------------------
+
+/**
+ * 模組貢獻的上下文區段與排程。
+ *
+ * 註冊表以服務名稱 `contributions` 提供這份唯讀檢視：上下文模組在每次組裝
+ * 時取得第 3 層內容，主機則在模組載入後同步排程清單。
+ */
+export interface ModuleContributions {
+  sections(): readonly ContextSectionContribution[];
+  schedules(): readonly ScheduleDeclaration[];
+}
+
+/** 貢獻檢視的服務名稱；主機與模組都從服務註冊表取得。 */
+export const CONTRIBUTIONS_SERVICE_NAME = "contributions";
 
 /** 同一個服務名稱被提供兩次。 */
 export class HostServiceConflict extends Error {
@@ -466,6 +482,8 @@ export class HostModuleRegistry implements ModuleHost {
   readonly #options: HostModuleRegistryOptions;
   readonly #entries = new Map<string, ModuleEntry>();
   readonly #hostServices: HostServiceRegistryImpl;
+  readonly #contextSections: ContextSectionContribution[] = [];
+  readonly #schedules: ScheduleDeclaration[] = [];
   #generation = 0;
   #activationCounter = 0;
   #shuttingDown = false;
@@ -473,6 +491,11 @@ export class HostModuleRegistry implements ModuleHost {
   constructor(options: HostModuleRegistryOptions) {
     this.#options = options;
     this.#hostServices = options.hostServices ?? new HostServiceRegistryImpl();
+    // 模組只能透過服務取得別人的貢獻；註冊表本身不交給模組。
+    this.#hostServices.provide(CONTRIBUTIONS_SERVICE_NAME, {
+      sections: () => [...this.#contextSections],
+      schedules: () => [...this.#schedules],
+    } satisfies ModuleContributions);
   }
 
   /** 共用的服務註冊表；組合根在載入前提供 `engine`、`storage` 等服務。 */
@@ -648,6 +671,16 @@ export class HostModuleRegistry implements ModuleHost {
       .flatMap((entry) => entry.bundles);
   }
 
+  /** 目前啟用中的模組註冊的上下文區段，依註冊順序。 */
+  contextSections(): readonly ContextSectionContribution[] {
+    return [...this.#contextSections];
+  }
+
+  /** 目前啟用中的模組註冊的排程，依註冊順序。 */
+  schedules(): readonly ScheduleDeclaration[] {
+    return [...this.#schedules];
+  }
+
   /** 關機時停用所有模組；重複呼叫是安全的。 */
   async deactivateAll(reason: "shutdown" | "user" = "shutdown"): Promise<void> {
     if (this.#shuttingDown) return;
@@ -750,9 +783,21 @@ export class HostModuleRegistry implements ModuleHost {
           this.#options.tools.retire(draft.bundleId, identity.generation),
         );
       },
-      registerContextSection: () => handle("context-section", () => {}),
+      registerContextSection: (section: ContextSectionContribution) => {
+        this.#contextSections.push(section);
+        return handle("context-section", () => {
+          const index = this.#contextSections.indexOf(section);
+          if (index >= 0) this.#contextSections.splice(index, 1);
+        });
+      },
       registerHook: () => handle("hook", () => {}),
-      registerSchedule: () => handle("schedule", () => {}),
+      registerSchedule: (schedule: ScheduleDeclaration) => {
+        this.#schedules.push(schedule);
+        return handle("schedule", () => {
+          const index = this.#schedules.indexOf(schedule);
+          if (index >= 0) this.#schedules.splice(index, 1);
+        });
+      },
     };
   }
 

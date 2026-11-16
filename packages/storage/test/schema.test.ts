@@ -17,6 +17,8 @@ import {
   M2_CONVERSATION_COLUMNS,
   M2_MIGRATIONS,
   M2_TABLES,
+  M3_MIGRATIONS,
+  M3_TABLES,
   RESERVED_M1_TABLES,
   STATE_APPLICATION_ID,
   StorageError,
@@ -59,12 +61,18 @@ describe("資料庫 header 與表結構", () => {
     expect(Number(storage.state.pragma("application_id"))).toBe(STATE_APPLICATION_ID);
     expect(Number(storage.state.pragma("page_size"))).toBe(4096);
     expect(Number(storage.state.pragma("auto_vacuum"))).toBe(2);
-    expect(Number(storage.state.pragma("user_version"))).toBe(3);
+    expect(Number(storage.state.pragma("user_version"))).toBe(4);
     expect(String(storage.state.pragma("journal_mode"))).toBe("wal");
     expect(Number(storage.state.pragma("secure_delete"))).toBe(1);
     expect(Number(storage.state.pragma("foreign_keys"))).toBe(1);
     expect(M0_TABLES).toHaveLength(12);
-    for (const table of [...M0_TABLES, ...RESERVED_M1_TABLES, ...M1_TABLES, ...M2_TABLES]) {
+    for (const table of [
+      ...M0_TABLES,
+      ...RESERVED_M1_TABLES,
+      ...M1_TABLES,
+      ...M2_TABLES,
+      ...M3_TABLES,
+    ]) {
       expect(storage.state.tableExists(table), table).toBe(true);
     }
     const conversationColumns = storage.state
@@ -76,13 +84,15 @@ describe("資料庫 header 與表結構", () => {
     const migrations = storage.state.all<{ version: number; checksum: string }>(
       "SELECT version, checksum FROM schema_migrations ORDER BY version",
     );
-    expect(migrations).toHaveLength(3);
+    expect(migrations).toHaveLength(4);
     expect(migrations[0]?.version).toBe(1);
     expect(migrations[0]?.checksum).toBe(sha256(M0_MIGRATIONS[0]?.sql ?? ""));
     expect(migrations[1]?.version).toBe(2);
     expect(migrations[1]?.checksum).toBe(sha256(M1_MIGRATIONS[1]?.sql ?? ""));
     expect(migrations[2]?.version).toBe(3);
     expect(migrations[2]?.checksum).toBe(sha256(M2_MIGRATIONS[2]?.sql ?? ""));
+    expect(migrations[3]?.version).toBe(4);
+    expect(migrations[3]?.checksum).toBe(sha256(M3_MIGRATIONS[3]?.sql ?? ""));
   });
 
   it("引擎與快取資料庫的 header 正確，三條連線都開 secure_delete", () => {
@@ -123,7 +133,7 @@ describe("資料庫 header 與表結構", () => {
     const second = openTestStorage(tempRoot);
     cleanups.push(() => second.close());
     expect(second.state.countRows("schema_migrations")).toBe(count);
-    expect(Number(second.state.pragma("user_version"))).toBe(3);
+    expect(Number(second.state.pragma("user_version"))).toBe(4);
   });
 
   it("資料庫檔是符號連結時拒絕開啟，不碰外部檔案", () => {
@@ -167,7 +177,7 @@ describe("遷移", () => {
       appVersion: "test",
       backupDirectory: directory,
     });
-    expect(first.migration.appliedVersions).toEqual([1, 2, 3]);
+    expect(first.migration.appliedVersions).toEqual([1, 2, 3, 4]);
     first.db.close();
 
     const second = openStateDatabase({
@@ -229,7 +239,7 @@ describe("遷移", () => {
     }
   });
 
-  it("v1 升 v2：七張新表與 conversation_deletions 的新欄位都在，成功後刪除備份", () => {
+  it("v1 升 v4：七張新表與 conversation_deletions 的新欄位都在，成功後刪除備份", () => {
     const directory = scratch();
     const filePath = path.join(directory, "state.sqlite");
     const v1 = Database.open(filePath, {
@@ -265,12 +275,12 @@ describe("遷移", () => {
     });
     try {
       expect(upgraded.migration.fromVersion).toBe(1);
-      expect(upgraded.migration.toVersion).toBe(3);
-      expect(upgraded.migration.appliedVersions).toEqual([2, 3]);
+      expect(upgraded.migration.toVersion).toBe(4);
+      expect(upgraded.migration.appliedVersions).toEqual([2, 3, 4]);
       expect(backupSeen).not.toBeNull();
       expect(existsSync(backupSeen as unknown as string)).toBe(false);
 
-      for (const table of [...M1_TABLES, ...M2_TABLES]) {
+      for (const table of [...M1_TABLES, ...M2_TABLES, ...M3_TABLES]) {
         expect(upgraded.db.tableExists(table), table).toBe(true);
       }
       const columns = upgraded.db
@@ -294,7 +304,7 @@ describe("遷移", () => {
     }
   });
 
-  it("v2 升 v3：五張新表與 conversations.origin 都在，舊資料保留", () => {
+  it("v2 升 v4：五張排程新表、蒸餾四表與 conversations.origin 都在，舊資料保留", () => {
     const directory = scratch();
     const filePath = path.join(directory, "state.sqlite");
     const v2 = Database.open(filePath, {
@@ -328,11 +338,14 @@ describe("遷移", () => {
     });
     try {
       expect(upgraded.migration.fromVersion).toBe(2);
-      expect(upgraded.migration.toVersion).toBe(3);
-      expect(upgraded.migration.appliedVersions).toEqual([3]);
+      expect(upgraded.migration.toVersion).toBe(4);
+      expect(upgraded.migration.appliedVersions).toEqual([3, 4]);
       expect(backupSeen).not.toBeNull();
 
       for (const table of M2_TABLES) {
+        expect(upgraded.db.tableExists(table), table).toBe(true);
+      }
+      for (const table of M3_TABLES) {
         expect(upgraded.db.tableExists(table), table).toBe(true);
       }
       // 舊對話保留，origin 的預設值是 'user'。
@@ -392,6 +405,90 @@ describe("遷移", () => {
            VALUES ('dev_test2', 'hash', 'cdt_87654321', 'EEEE-FFFF-0000-1111', 'iPad', 'now')`,
         ),
       ).toThrowError(/UNIQUE/);
+    } finally {
+      upgraded.db.close();
+    }
+  });
+
+  it("v3 升 v4：蒸餾四表一次到位，既有資料與舊 migration checksum 不變", () => {
+    const directory = scratch();
+    const filePath = path.join(directory, "state.sqlite");
+    const v3 = Database.open(filePath, {
+      create: { applicationId: STATE_APPLICATION_ID, pageSize: 4096, autoVacuum: "incremental" },
+      expectedApplicationId: STATE_APPLICATION_ID,
+    });
+    try {
+      migrate(v3, { migrations: M2_MIGRATIONS, appVersion: "test" });
+      expect(Number(v3.pragma("user_version"))).toBe(3);
+      for (const table of M3_TABLES) {
+        expect(v3.tableExists(table), table).toBe(false);
+      }
+      v3.run(
+        "INSERT INTO conversations (conversation_id, title, created_at, updated_at, last_activity_at) VALUES ('keep', '留住我', '2026-11-16T00:00:00.000Z', '2026-11-16T00:00:00.000Z', '2026-11-16T00:00:00.000Z')",
+      );
+    } finally {
+      v3.close();
+    }
+
+    const upgraded = openStateDatabase({
+      filePath,
+      appVersion: "test",
+      backupDirectory: directory,
+    });
+    try {
+      expect(upgraded.migration.fromVersion).toBe(3);
+      expect(upgraded.migration.toVersion).toBe(4);
+      expect(upgraded.migration.appliedVersions).toEqual([4]);
+      for (const table of M3_TABLES) {
+        expect(upgraded.db.tableExists(table), table).toBe(true);
+      }
+      // 既有對話還在。
+      expect(
+        upgraded.db.get<{ title: string }>(
+          "SELECT title FROM conversations WHERE conversation_id = 'keep'",
+        ),
+      ).toEqual({ title: "留住我" });
+      // 前三條 migration 的 checksum 沒變，只是追加第四條。
+      const rows = upgraded.db.all<{ version: number; checksum: string }>(
+        "SELECT version, checksum FROM schema_migrations ORDER BY version",
+      );
+      expect(rows).toHaveLength(4);
+      expect(rows[2]?.checksum).toBe(sha256(M2_MIGRATIONS[2]?.sql ?? ""));
+      expect(rows[3]?.checksum).toBe(sha256(M3_MIGRATIONS[3]?.sql ?? ""));
+
+      // 四張表的基本約束：run 一天一次、item 的 phase/status CHECK、核心組一天一次。
+      upgraded.db.run(
+        `INSERT INTO distillation_runs (run_id, persona, day, started_at, status)
+         VALUES ('dst_1', 'default', '2026-11-16', 'now', 'running')`,
+      );
+      expect(() =>
+        upgraded.db.run(
+          `INSERT INTO distillation_runs (run_id, persona, day, started_at, status)
+           VALUES ('dst_2', 'default', '2026-11-16', 'now', 'running')`,
+        ),
+      ).toThrowError(/UNIQUE/);
+      expect(() =>
+        upgraded.db.run(
+          `INSERT INTO distillation_items (run_id, item_key, batch_id, source_card_id, phase, status, updated_at)
+           VALUES ('dst_1', 'k', 'b', 'c', 'bad', 'done', 'now')`,
+        ),
+      ).toThrowError(/CHECK/);
+      upgraded.db.run(
+        `INSERT INTO core_memory (persona, card_id, added_day, source)
+         VALUES ('default', 'card_1', '2026-11-16', 'distillation')`,
+      );
+      expect(() =>
+        upgraded.db.run(
+          `INSERT INTO core_memory (persona, card_id, added_day, source)
+           VALUES ('default', 'card_2', '2026-11-16', 'nope')`,
+        ),
+      ).toThrowError(/CHECK/);
+      expect(() =>
+        upgraded.db.run(
+          `INSERT INTO core_memory_daily (persona, day, changed)
+           VALUES ('default', '2026-11-16', 2)`,
+        ),
+      ).toThrowError(/CHECK/);
     } finally {
       upgraded.db.close();
     }

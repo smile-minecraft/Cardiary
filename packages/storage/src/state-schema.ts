@@ -513,6 +513,85 @@ export const M2_MIGRATIONS: readonly Migration[] = [
   { version: 3, name: "m2-memory-schedule-remote", sql: M3_SCHEMA },
 ];
 
+/**
+ * v4「m2-distillation」的蒸餾表。
+ *
+ * 設計原訂把這些表放進 v3，但 v3 已由排程工作合併（6ac2aa4）且不含蒸餾表；
+ * 派遣指示「v4 遷移，v3 已存在，往後加」，因此这里以 version 4 獨立追加。
+ * 舊 migration 的 checksum 不變。
+ *
+ * - `distillation_runs`：一天一次（persona, day 唯一）；running 超過 30 分鐘視為中斷。
+ * - `distillation_items`：每個單元的批次、來源卡、內容雜湊、輸出卡與寫入狀態。
+ * - `core_memory`／`core_memory_daily`：核心記憶組成員與一天一次變動計數。
+ */
+const M4_SCHEMA = `
+CREATE TABLE distillation_runs (
+  run_id       TEXT PRIMARY KEY,
+  persona      TEXT NOT NULL DEFAULT 'default',
+  day          TEXT NOT NULL,
+  started_at   TEXT NOT NULL,
+  finished_at  TEXT,
+  status       TEXT NOT NULL CHECK (status IN ('running','completed','partial','failed')),
+  stats_json   TEXT,
+  UNIQUE (persona, day)
+) STRICT;
+
+CREATE TABLE distillation_items (
+  run_id         TEXT NOT NULL REFERENCES distillation_runs (run_id) ON DELETE CASCADE,
+  item_key       TEXT NOT NULL,
+  batch_id       TEXT NOT NULL,
+  persona        TEXT NOT NULL DEFAULT 'default',
+  source_card_id TEXT NOT NULL,
+  content_hash   TEXT,
+  output_card_id TEXT,
+  phase          TEXT NOT NULL CHECK (phase IN ('extract','merge','archive','core','notify')),
+  status         TEXT NOT NULL CHECK (status IN ('pending','done','failed')),
+  detail_json    TEXT,
+  undone         INTEGER NOT NULL DEFAULT 0,
+  updated_at     TEXT NOT NULL,
+  PRIMARY KEY (run_id, item_key)
+) STRICT;
+
+CREATE INDEX distillation_items_by_batch ON distillation_items (persona, batch_id);
+CREATE INDEX distillation_items_by_hash ON distillation_items (persona, content_hash)
+  WHERE content_hash IS NOT NULL;
+CREATE INDEX distillation_items_by_source ON distillation_items (run_id, source_card_id);
+
+CREATE TABLE core_memory (
+  persona    TEXT NOT NULL DEFAULT 'default',
+  card_id    TEXT NOT NULL,
+  added_day  TEXT NOT NULL,
+  source     TEXT NOT NULL CHECK (source IN ('distillation','import','user')),
+  PRIMARY KEY (persona, card_id)
+) STRICT;
+
+CREATE INDEX core_memory_by_day ON core_memory (persona, added_day, card_id);
+
+CREATE TABLE core_memory_daily (
+  persona TEXT NOT NULL DEFAULT 'default',
+  day     TEXT NOT NULL,
+  changed INTEGER NOT NULL DEFAULT 0 CHECK (changed IN (0,1)),
+  PRIMARY KEY (persona, day)
+) STRICT;
+`;
+
+/** v4 新增的表名稱。 */
+export const M3_TABLES = [
+  "distillation_runs",
+  "distillation_items",
+  "core_memory",
+  "core_memory_daily",
+] as const;
+
+/**
+ * v4「m2-distillation」的遷移清單：在 v3 之後一次加好蒸餾長久記憶的四張表。
+ * 舊 checksum 不變，只往後加一個版本。
+ */
+export const M3_MIGRATIONS: readonly Migration[] = [
+  ...M2_MIGRATIONS,
+  { version: 4, name: "m2-distillation", sql: M4_SCHEMA },
+];
+
 const SCHEMA_MIGRATIONS_DDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version     INTEGER PRIMARY KEY,
@@ -557,7 +636,7 @@ interface AppliedMigrationRow {
  * - 每個版本在單一交易內完成 SQL、`user_version` 與 `schema_migrations`。
  */
 export function migrate(db: Database, options: MigrateOptions): MigrationOutcome {
-  const migrations = options.migrations ?? M2_MIGRATIONS;
+  const migrations = options.migrations ?? M3_MIGRATIONS;
   const now = options.now ?? (() => new Date());
   db.exec(SCHEMA_MIGRATIONS_DDL);
 
