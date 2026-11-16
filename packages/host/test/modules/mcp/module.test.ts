@@ -2,7 +2,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ToolBundleDraft, ToolDefinition } from "@cardiary/engine-adapter";
-import type { ModuleActivationContext } from "@cardiary/module-api";
+import type { ModuleActivationContext, ProtocolEventIntent } from "@cardiary/module-api";
 import { FolderLayout, McpServerStore } from "@cardiary/storage";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -100,7 +100,10 @@ function fakeClient(calls: string[]): McpClientFactory {
   return (() => client) as unknown as McpClientFactory;
 }
 
-function makeContext(bundles: ToolBundleDraft[]): ModuleActivationContext {
+function makeContext(
+  bundles: ToolBundleDraft[],
+  events: ProtocolEventIntent[] = [],
+): ModuleActivationContext {
   const noop = (): void => {};
   return {
     identity: { moduleId: "mcp", generation: 1 },
@@ -108,7 +111,7 @@ function makeContext(bundles: ToolBundleDraft[]): ModuleActivationContext {
       paths: { root: folderRoot },
       logger: { debug: noop, info: noop, warn: noop, error: noop },
       protocol: {
-        emit: noop,
+        emit: (intent: ProtocolEventIntent) => events.push(intent),
         registerNamespace: () => ({ dispose: noop }),
       },
       host: { provide: noop, get: () => undefined, require: () => undefined },
@@ -126,6 +129,12 @@ function toolIn(draft: ToolBundleDraft, name: string): ToolDefinition {
     throw new Error(`找不到工具 ${name}`);
   }
   return tool;
+}
+
+function changedIn(events: ProtocolEventIntent[]): Array<Record<string, unknown>> {
+  return events
+    .filter((intent) => intent.kind === "mcp-servers-changed")
+    .map((intent) => intent.payload as Record<string, unknown>);
 }
 
 describe("MCP 模組的審批與工具註冊", () => {
@@ -193,6 +202,74 @@ describe("MCP 模組的審批與工具註冊", () => {
     await handle.settled();
     expect(bundles).toEqual([]);
     expect(calls).toEqual([]);
+    await handle.dispose();
+  });
+
+  it("啟停與移除都會發出 servers_changed", async () => {
+    const root = makeFolder();
+    const store = new McpServerStore(new FolderLayout(root));
+    const events: ProtocolEventIntent[] = [];
+    const handle = await activateMcpModule(makeContext([], events), {
+      store,
+      engine: makeEngine(new FakeApprovals()),
+      clientFactory: fakeClient([]),
+      folderRoot: root,
+    });
+    const record = await store.add(INPUT);
+    await handle.settled();
+
+    await handle.controller.setEnabled(record.serverId, false);
+    expect(changedIn(events).at(-1)).toMatchObject({
+      removed: false,
+      server: { serverId: record.serverId, enabled: false, state: "disabled" },
+    });
+
+    await handle.controller.setEnabled(record.serverId, true);
+    expect(changedIn(events).at(-1)).toMatchObject({
+      removed: false,
+      server: { serverId: record.serverId, enabled: true, state: "ready" },
+    });
+
+    await handle.controller.removeServer(record.serverId);
+    expect(changedIn(events).at(-1)).toMatchObject({
+      removed: true,
+      server: { serverId: record.serverId, name: "Local" },
+    });
+    await handle.dispose();
+  });
+
+  it("允許網域變更會發出 servers_changed 並重新連線", async () => {
+    const root = makeFolder();
+    const store = new McpServerStore(new FolderLayout(root));
+    const events: ProtocolEventIntent[] = [];
+    const handle = await activateMcpModule(makeContext([], events), {
+      store,
+      engine: makeEngine(new FakeApprovals()),
+      clientFactory: fakeClient([]),
+      folderRoot: root,
+    });
+    const record = await store.add({
+      name: "Remote",
+      transport: "http",
+      url: "https://example.test/mcp",
+      allowedHosts: ["example.test"],
+    });
+    await handle.settled();
+
+    const info = await handle.controller.setAllowedHosts(record.serverId, [
+      "example.test",
+      "api.example.test",
+    ]);
+    expect(info.allowedHosts).toEqual(["api.example.test", "example.test"]);
+    expect(changedIn(events).at(-1)).toMatchObject({
+      removed: false,
+      server: {
+        serverId: record.serverId,
+        transport: "http",
+        allowedHosts: ["api.example.test", "example.test"],
+        state: "ready",
+      },
+    });
     await handle.dispose();
   });
 

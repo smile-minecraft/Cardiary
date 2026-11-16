@@ -100,6 +100,11 @@ export function mapEventIntent(intent: ProtocolEventIntent): EventMapping {
       if (payload === null) return { error: "module.changed 的 payload 必須是物件" };
       return one("system", "system.modules.changed", payload);
     }
+    case "mcp-servers-changed": {
+      const payload = asObject(intent.payload);
+      if (payload === null) return { error: "mcp.servers_changed 的 payload 必須是物件" };
+      return one("system", "mcp.servers_changed", payload);
+    }
     case "module-event":
       if (!isModuleEventType(intent.type)) {
         return { error: `模組事件型別不合法：${intent.type}` };
@@ -230,6 +235,8 @@ export function validateEventPayload(type: string, payload: unknown): string | n
       );
     case "system.modules.changed":
       return checkObject(payload, "payload", new Map([["module", moduleInfo]]), ["module"]);
+    case "mcp.servers_changed":
+      return mcpServersChanged(payload, "payload");
     case "notification.changed":
       return checkObject(payload, "payload", new Map([["notification", notificationWire]]), [
         "notification",
@@ -610,6 +617,39 @@ const moduleInfo: Checker = (value, path) =>
       ["settings", arrayOf(moduleSetting)],
     ]),
     ["moduleId", "name", "version", "enabled", "state", "protocolPrefixes", "settings"],
+  );
+
+/** MCP 伺服器資訊；與協定 `McpServerInfo` 的欄位一致。 */
+const mcpServerInfo: Checker = (value, path) =>
+  checkObject(
+    value,
+    path,
+    new Map([
+      ["serverId", string],
+      ["name", string],
+      ["transport", enumeration("stdio", "http")],
+      ["command", optional(string)],
+      ["args", optional(arrayOf(string))],
+      ["url", optional(string)],
+      ["allowedHosts", arrayOf(string)],
+      ["enabled", boolean],
+      ["state", enumeration("disabled", "ready", "failed")],
+      ["failure", optional(string)],
+      ["createdAt", dateTime],
+      ["updatedAt", optional(dateTime)],
+    ]),
+    ["serverId", "name", "transport", "allowedHosts", "enabled", "state", "createdAt"],
+  );
+
+const mcpServersChanged: Checker = (value, path) =>
+  checkObject(
+    value,
+    path,
+    new Map([
+      ["server", mcpServerInfo],
+      ["removed", boolean],
+    ]),
+    ["server", "removed"],
   );
 
 // ---- 輔助 ---------------------------------------------------------------

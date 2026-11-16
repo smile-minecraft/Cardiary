@@ -61,6 +61,11 @@ export type ProtocolEventIntent =
   | { readonly kind: "module-changed"; readonly payload: JsonValue }
   | { readonly kind: "board-changed"; readonly boardId: string; readonly payload: JsonValue }
   | {
+      readonly kind: "mcp-servers-changed";
+      /** 對應協定 McpServersChangedEventPayload。 */
+      readonly payload: JsonValue;
+    }
+  | {
       readonly kind: "external-agent-status";
       readonly agentId: string;
       readonly status: ExternalAgentStatus;

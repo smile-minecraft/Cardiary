@@ -10,7 +10,7 @@
  * - 工具呼叫的永久禁止項在 `evaluateMcpToolPolicy` 擋一次，引擎的權限
  *   閘道另外會把未知的 `mcp.*` 工具當成需要人工審批。
  */
-import type { ToolBundleDraft } from "@cardiary/engine-adapter";
+import type { JsonValue, ToolBundleDraft } from "@cardiary/engine-adapter";
 import { McpConfigError, type McpServerInput, type McpServerRecord } from "@cardiary/domain";
 import type {
   HostModule,
@@ -91,6 +91,13 @@ export async function activateMcpModule(
     return registration;
   };
 
+  const emitChanged = (server: McpServerInfo, removed = false): void => {
+    protocol.emit({
+      kind: "mcp-servers-changed",
+      payload: { server, removed } as unknown as JsonValue,
+    });
+  };
+
   const reportFailure = (serverId: string, message: string): void => {
     failures.set(serverId, message);
     logger.warn("MCP 伺服器啟動失敗", { serverId, message });
@@ -136,9 +143,11 @@ export async function activateMcpModule(
           serverId: record.serverId,
           tools: tools.length,
         });
+        emitChanged(infoOf(record));
       } catch (error) {
         await client.close().catch(() => undefined);
         reportFailure(record.serverId, describeError(error));
+        emitChanged(infoOf(record));
       } finally {
         starting.delete(record.serverId);
       }
@@ -228,6 +237,7 @@ export async function activateMcpModule(
         body: `「${record.name}」已核准；工具會在對話第一次載入時出現。`,
         level: "info",
       });
+      emitChanged(infoOf(record));
       await startServer(record);
     } catch (error) {
       logger.warn("MCP 伺服器審批流程失敗", {
@@ -267,12 +277,14 @@ export async function activateMcpModule(
     },
 
     async removeServer(serverId: string): Promise<boolean> {
+      const last = await serverInfo(serverId);
       await stopServer(serverId);
       failures.delete(serverId);
       const removed = await store.remove(serverId);
       if (!removed) {
         throw new ProtocolHandlerError("not_found", `找不到 MCP 伺服器：${serverId}`);
       }
+      emitChanged(last, true);
       return true;
     },
 
@@ -284,7 +296,9 @@ export async function activateMcpModule(
         await stopServer(serverId);
         failures.delete(serverId);
       }
-      return serverInfo(record.serverId);
+      const info = await serverInfo(record.serverId);
+      emitChanged(info);
+      return info;
     },
 
     async setAllowedHosts(
@@ -297,7 +311,9 @@ export async function activateMcpModule(
         await stopServer(serverId);
         await startServer(record);
       }
-      return serverInfo(record.serverId);
+      const info = await serverInfo(record.serverId);
+      emitChanged(info);
+      return info;
     },
   };
 
