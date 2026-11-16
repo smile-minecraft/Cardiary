@@ -6,7 +6,7 @@ import Foundation
 /// 測試用的服務替身：所有請求都回預先設定的資料，並記下呼叫順序。
 actor FakeCardiaryService:
     ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService,
-    CardService, ContextService, SessionManagementService, MediaImportService
+    CardService, ContextService, SessionManagementService, MediaImportService, NotificationService
 {
     enum Failure: Error, Equatable {
         case send
@@ -519,6 +519,41 @@ actor FakeCardiaryService:
             )
         }
         return modelsState
+    }
+
+    // MARK: - NotificationService
+
+    func listNotifications(
+        limit: Int?,
+        before: String?,
+        unreadOnly: Bool?
+    ) async throws -> NotificationListResponsePayload {
+        NotificationListResponsePayload(notifications: [], totalUnread: 0)
+    }
+
+    func markNotificationsRead(
+        ids: [String]?,
+        all: Bool?
+    ) async throws -> NotificationMarkReadResponsePayload {
+        NotificationMarkReadResponsePayload(updated: ids?.count ?? 0, totalUnread: 0)
+    }
+
+    func createCardFromNotification(
+        notificationId: String
+    ) async throws -> NotificationCreateCardResponsePayload {
+        NotificationCreateCardResponsePayload(
+            card: CardSummary(
+                cardId: "card-\(notificationId)",
+                kind: .note,
+                title: "通知",
+                tags: ["通知"],
+                persona: "default",
+                createdAt: "2026-01-01T00:00:00Z",
+                freshness: 100,
+                lifecycle: .live
+            ),
+            deduped: false
+        )
     }
 }
 

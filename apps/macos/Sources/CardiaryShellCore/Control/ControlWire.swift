@@ -24,12 +24,22 @@ public enum ControlRoute {
     public static let brokerRecognitionOcr = "broker.recognition.ocr"
     public static let brokerRecognitionTranscribe = "broker.recognition.transcribe"
 
+    // 殼 → 服務（遠端配對與裝置管理）
+    public static let pairingApprove = "control.pairing.approve"
+    public static let pairingDeny = "control.pairing.deny"
+    public static let devicesList = "control.devices.list"
+    public static let devicesRevoke = "control.devices.revoke"
+
     // 服務 → 殼（通知）
     public static let notifyFatal = "notify.fatal"
     public static let notifyMaintenance = "notify.maintenance"
+    public static let notifyPairingRequested = "notify.pairing_requested"
 
     /// 殼送給服務的控制路由。
-    public static let controlRoutes: Set<String> = [health, pause, resume, shutdown]
+    public static let controlRoutes: Set<String> = [
+        health, pause, resume, shutdown,
+        pairingApprove, pairingDeny, devicesList, devicesRevoke,
+    ]
 
     /// 殼願意回應的代理路由。沒有列舉、沒有搜尋。
     public static let brokerRoutes: Set<String> = [
@@ -38,7 +48,9 @@ public enum ControlRoute {
     ]
 
     /// 殼願意接受的通知。
-    public static let notificationRoutes: Set<String> = [notifyFatal, notifyMaintenance]
+    public static let notificationRoutes: Set<String> = [
+        notifyFatal, notifyMaintenance, notifyPairingRequested
+    ]
 }
 
 /// 控制面的錯誤碼。這組不進客戶端協定的 `ErrorCode`。

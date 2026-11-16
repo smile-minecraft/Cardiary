@@ -487,6 +487,36 @@ public actor CardiaryClient {
         )
     }
 
+    // MARK: - 通知
+
+    public func listNotifications(
+        limit: Int? = nil,
+        before: String? = nil,
+        unreadOnly: Bool? = nil
+    ) async throws -> NotificationListResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.listNotifications(
+            limit: limit,
+            before: before,
+            unreadOnly: unreadOnly
+        )
+    }
+
+    public func markNotificationsRead(
+        ids: [String]? = nil,
+        all: Bool? = nil
+    ) async throws -> NotificationMarkReadResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.markNotificationsRead(ids: ids, all: all)
+    }
+
+    public func createCardFromNotification(
+        notificationId: String
+    ) async throws -> NotificationCreateCardResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.createCardFromNotification(notificationId: notificationId)
+    }
+
     // MARK: - 連線迴圈
 
     private func runLoop() async {

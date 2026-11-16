@@ -93,5 +93,11 @@ enum AppRegistry {
         // 卡片庫、封存區、檢視欄、卡片設定與匯入：一次掛上。
         CardUIModule.install(app)
         ImportUIModule.install(app)
+
+        // 通知流接到既有的側欄入口；配對核准與裝置清單放到設定頁。
+        app.sidebar.installContent(for: "notifications") {
+            AnyView(NotificationListView(model: app.notifications))
+        }
+        app.settings.register(RemoteSettingsTab(remote: app.remote))
     }
 }

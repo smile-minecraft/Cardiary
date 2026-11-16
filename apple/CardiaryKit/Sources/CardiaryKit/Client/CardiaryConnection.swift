@@ -817,6 +817,69 @@ public actor CardiaryConnection {
         return response.payload
     }
 
+    // MARK: - 通知
+
+    /// 列出一頁通知與未讀總數。
+    public func listNotifications(
+        limit: Int? = nil,
+        before: String? = nil,
+        unreadOnly: Bool? = nil,
+        options: RequestOptions = .default
+    ) async throws -> NotificationListResponsePayload {
+        let request = NotificationListRequest(
+            id: RequestID.next(),
+            payload: NotificationListRequestPayload(
+                limit: limit,
+                before: before,
+                unreadOnly: unreadOnly
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .notificationListResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "notification.list 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 標示通知已讀；`ids` 與 `all` 二選一。
+    public func markNotificationsRead(
+        ids: [String]? = nil,
+        all: Bool? = nil,
+        options: RequestOptions = .default
+    ) async throws -> NotificationMarkReadResponsePayload {
+        let request = NotificationMarkReadRequest(
+            id: RequestID.next(),
+            payload: NotificationMarkReadRequestPayload(ids: ids, all: all)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .notificationMarkReadResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "notification.mark_read 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 把通知轉成卡片；主机去重，重送回同一張卡。
+    public func createCardFromNotification(
+        notificationId: String,
+        options: RequestOptions = .default
+    ) async throws -> NotificationCreateCardResponsePayload {
+        let request = NotificationCreateCardRequest(
+            id: RequestID.next(),
+            payload: NotificationCreateCardRequestPayload(notificationId: notificationId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .notificationCreateCardResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "notification.create_card 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
     public func close() async {
         guard !closed else { return }
         closed = true

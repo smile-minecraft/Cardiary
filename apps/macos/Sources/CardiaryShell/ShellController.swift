@@ -122,6 +122,7 @@ final class ShellController: NSObject {
             pauseAllApprovals: { [weak self] in self?.pauseAllApprovals() },
             openMainWindow: { [weak self] in self?.showMainWindow() }
         )
+        model.attach(remoteControl: ShellRemoteControl { [weak self] in self?.supervisor })
         appModel = model
         syncFolderToApp()
     }
@@ -418,6 +419,9 @@ final class ShellController: NSObject {
             }
             supervisor.onClientToken = { [weak self] token in
                 Task { @MainActor in self?.acceptClientToken(token) }
+            }
+            supervisor.onPairingRequested = { [weak self] notice in
+                Task { @MainActor in self?.appModel?.handle(pairingRequest: notice) }
             }
             supervisor.authorizedVolumeUUID = authorization?.volumeUUID
             self.supervisor = supervisor
