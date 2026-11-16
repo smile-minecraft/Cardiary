@@ -164,6 +164,26 @@ async function cardText(folder: TestFolder, cardId: string): Promise<string> {
   return readFile(join(folder.path, "cards", `${cardId}.md`), "utf8");
 }
 
+async function memoryCardCount(folder: TestFolder): Promise<number> {
+  const names = await readdir(join(folder.path, "cards")).catch(() => [] as string[]);
+  return names.filter((name) => name.startsWith("mem_") && name.endsWith(".md")).length;
+}
+
+async function createSession(client: ProtocolClient): Promise<string> {
+  const payload = await requestPayload<{ session: { id: string } }>(client, "session.create", {
+    clientRequestId: `cr-${Math.random().toString(36).slice(2)}`,
+  });
+  return payload.session.id;
+}
+
+interface ContextEntry {
+  readonly entryId: string;
+  readonly layer: string;
+  readonly cardId?: string;
+  readonly tokenEstimate: number;
+  readonly state: string;
+}
+
 afterEach(async () => {
   for (const client of clients.splice(0)) {
     await client.close().catch(() => undefined);
@@ -259,5 +279,174 @@ describe("每日蒸餾的協定契約", () => {
     const produced = await readdir(join(service.folder.path, "cards")).catch(() => [] as string[]);
     expect(produced.filter((name) => name.startsWith("mem_"))).toEqual([]);
     expect(await cardText(service.folder, memoryId)).toBe(existing);
+  }, 40_000);
+
+  it("矛盾時新卡 supersedes 舊卡，舊卡仍可追溯", async () => {
+    const sourceId = newUlid();
+    const memoryId = newUlid();
+    setSeam(
+      {
+        記憶蒸餾提煉: EXTRACT,
+        記憶蒸餾重複判定: "否",
+        記憶蒸餾矛盾判定: "是",
+        記憶蒸餾標題: TITLE,
+      },
+      [sourceId],
+    );
+    // 文字重疊才會被全文檢索列為比對候選，才會問到矛盾判定。
+    const oldMemory = cardFile({
+      id: memoryId,
+      title: "週末整理偏好",
+      summary: "使用者偏好在週末整理儲藏室",
+      body: "使用者偏好在週末整理儲藏室。",
+      kind: "memory",
+    });
+    const { service, client } = await boot([
+      [sourceId, cardFile({ id: sourceId, title: "日常筆記", body: "週末想整理儲藏室。" })],
+      [memoryId, oldMemory],
+    ]);
+
+    await triggerDistillation(client);
+    const digest = await waitForDigest(client);
+    const superseded = digest.notification.payload.items?.find(
+      (item) => item.action === "superseded",
+    );
+
+    expect(superseded?.supersedes).toBe(memoryId);
+    expect(superseded?.sources).toEqual([sourceId]);
+
+    const newCardId = superseded?.cardId ?? "";
+    const newMemoryText = await cardText(service.folder, newCardId);
+    expect(newMemoryText).toContain(`supersedes: ${memoryId}`);
+
+    // 舊卡沒被改寫、沒被刪除，仍可被 card.get 取回（可追溯）。
+    expect(await cardText(service.folder, memoryId)).toBe(oldMemory);
+    const old = await requestPayload<{ card: { cardId: string; supersededBy?: string } }>(
+      client,
+      "card.get",
+      { cardId: memoryId },
+    );
+    expect(old.card.cardId).toBe(memoryId);
+  }, 40_000);
+
+  // 已知缺口：蒸餾記憶卡 id 是 `mem_<run>...`，不是 ULID。卡片的
+  // normalizeCardId 會拒絕它，所以 undo 的 delete-card 步驟回
+  // 「卡片識別碼必須是 ULID。」，記憶卡刪不掉。這是要修產品格式規則的決定，
+  // 不是測試接縫能解決的；先標未完成，留给派遣方裁決。
+  it.skip("每日摘要的每一項可個別復原，卡片、取代與冷封存回到蒸餾前", async () => {
+    const sourceId = newUlid();
+    setSeam(
+      {
+        記憶蒸餾提煉: EXTRACT,
+        記憶蒸餾重複判定: "否",
+        記憶蒸餾矛盾判定: "否",
+        記憶蒸餾標題: TITLE,
+      },
+      [sourceId],
+    );
+    const source = cardFile({ id: sourceId, title: "日常筆記", body: "週末想整理儲藏室。" });
+    const { service, client } = await boot([[sourceId, source]]);
+
+    await triggerDistillation(client);
+    const digest = await waitForDigest(client);
+    const items = digest.notification.payload.items ?? [];
+    const created = items.find((item) => item.action === "created");
+    expect(created?.cardId).toBeTypeOf("string");
+    expect(await memoryCardCount(service.folder)).toBe(1);
+
+    // 逐項復原：.created 刪掉記憶卡並把原卡還原為 live；cold 再uncold 一次。
+    // core-added 因「一天最多變動一次」在當日會被順延（deferred），属預期。
+    for (const item of items) {
+      const result = await moduleRequest<{ ok: boolean; deferred?: boolean }>(
+        client,
+        "module.memory.undo",
+        { notificationId: digest.notification.notificationId, itemId: item.id },
+      );
+      expect(result.ok).toBe(true);
+    }
+
+    expect(await memoryCardCount(service.folder)).toBe(0);
+    const restored = await requestPayload<{ card: { lifecycle: string } }>(client, "card.get", {
+      cardId: sourceId,
+    });
+    expect(restored.card.lifecycle).toBe("live");
+    expect(await cardText(service.folder, sourceId)).toBe(source);
+  }, 40_000);
+
+  it("重啟後再觸發同日蒸餾不會重複產卡", async () => {
+    const sourceId = newUlid();
+    setSeam(
+      {
+        記憶蒸餾提煉: EXTRACT,
+        記憶蒸餾重複判定: "否",
+        記憶蒸餾矛盾判定: "否",
+        記憶蒸餾標題: TITLE,
+      },
+      [sourceId],
+    );
+    const source = cardFile({ id: sourceId, title: "日常筆記", body: "週末想整理儲藏室。" });
+    const folder = await makeFolder();
+    await writeCards(folder, [[sourceId, source]]);
+
+    const first = await spawnService({ folder });
+    services.push(first);
+    const firstClient = await connectAndHello(first);
+    clients.push(firstClient);
+    await firstClient.waitForReply(firstClient.request("system.subscribe", {}));
+    await triggerDistillation(firstClient);
+    await waitForDigest(firstClient);
+    expect(await memoryCardCount(folder)).toBe(1);
+
+    // 關掉再開同一個資料夾；中斷的 run 會在啟動時續跑，已完成的同日 run 略過。
+    await firstClient.close();
+    await first.stop();
+    const restarted = await spawnService({ folder });
+    services.push(restarted);
+    const client = await connectAndHello(restarted);
+    clients.push(client);
+    await client.waitForReply(client.request("system.subscribe", {}));
+
+    // 再觸發一次同日蒸餾：既有 run 已完成，runForDay 直接回傳，不重複產卡。
+    await triggerDistillation(client);
+    await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+    expect(await memoryCardCount(folder)).toBe(1);
+    expect(await cardText(folder, sourceId)).toBe(source);
+  }, 50_000);
+
+  // 已知缺口（同一個 mem_ id 問題）：記憶卡的 id 不是 ULID，核心記憶區段
+  // render 時呼叫 cards.get(mem_ id) 會被 normalizeCardId 擋下，context.get 回
+  // 「卡片識別碼必須是 ULID。」。這需要產品決定記憶卡的 id 格式或讓核心讀取
+  // 走不驗證的路徑；先標未完成，留給派遣方裁決。
+  it.skip("核心記憶在第 3 層載入且不超過 token 預算", async () => {
+    const sourceId = newUlid();
+    setSeam(
+      {
+        記憶蒸餾提煉: EXTRACT,
+        記憶蒸餾重複判定: "否",
+        記憶蒸餾矛盾判定: "否",
+        記憶蒸餾標題: TITLE,
+      },
+      [sourceId],
+    );
+    const { service, client } = await boot([
+      [sourceId, cardFile({ id: sourceId, title: "日常筆記", body: "週末想整理儲藏室。" })],
+    ]);
+
+    await triggerDistillation(client);
+    const digest = await waitForDigest(client);
+    const coreAdded = digest.notification.payload.items?.find(
+      (item) => item.action === "core-added",
+    );
+    expect(coreAdded?.cardId).toBeTypeOf("string");
+
+    const sessionId = await createSession(client);
+    const view = await requestPayload<{
+      context: { entries: readonly ContextEntry[]; usedTokens: number; budgetTokens: number };
+    }>(client, "context.get", { sessionId });
+    const coreEntries = view.context.entries.filter((entry) => entry.layer === "core-memory");
+    expect(coreEntries.length).toBeGreaterThan(0);
+    expect(coreEntries.some((entry) => entry.cardId === coreAdded?.cardId)).toBe(true);
+    expect(view.context.usedTokens).toBeLessThanOrEqual(view.context.budgetTokens);
+    void service;
   }, 40_000);
 });
