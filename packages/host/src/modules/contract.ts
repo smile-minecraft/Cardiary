@@ -24,6 +24,7 @@ import type { HostEngine } from "../engine/types.js";
 import type { SpawnRegistry } from "../spawn/wrapper.js";
 import type { StorageBundle } from "../storage/interfaces.js";
 import type { SettingsGovernance } from "../settings/governance.js";
+import type { BoardService as BoardsService } from "./boards/service.js";
 
 /**
  * 模組主機的契約：模組之間交換的服務名稱、型別與錯誤。
@@ -63,6 +64,8 @@ export const HOST_SERVICE_NAMES = {
   /** 每日蒸餾服務；由記憶模組提供，排程器在 distillation 任務到點時呼叫。 */
   memory: "memory",
   emotion: "emotion",
+  /** 白板服務；由白板模組提供，白板協定與代理工具都透過它讀寫。 */
+  boards: "boards",
 } as const;
 
 /** 服務名稱的聯集；`modules.md` 第 5 節那張表。 */
@@ -148,6 +151,7 @@ export interface HostServiceTypeMap {
   /** 蒸餾入口；排程器只依賴這一個方法，不匯入記憶模組的實作。 */
   memory: DistillationTrigger;
   emotion: EmotionServiceContract;
+  boards: BoardsService;
 }
 
 export interface EmotionServiceContract {
