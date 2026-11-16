@@ -6,7 +6,7 @@ import { BoardFileStore } from "@cardiary/storage";
 import { createAuditLog } from "../../permissions/audit.js";
 import { HOST_SERVICE_NAMES, type CardEnvironment } from "../contract.js";
 import { manifest } from "./manifest.js";
-import { BOARDS_AGENT_MODE_KEY, parseAgentMode, type BoardsAgentMode } from "./policy.js";
+import { BOARDS_AGENT_MODE_KEY, parseAgentModeSetting } from "./policy.js";
 import { registerBoardsProtocol } from "./protocol.js";
 import { BoardService, type BoardCardGateway, type BoardChangedEvent } from "./service.js";
 import { createBoardsToolBundles } from "./tools.js";
@@ -31,8 +31,9 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   const store = new BoardFileStore({ layout: cabinet.layout, now });
   store.ensureDirectory();
 
-  const agentMode = (): BoardsAgentMode =>
-    parseAgentMode(context.services.settings.get(BOARDS_AGENT_MODE_KEY));
+  // 這個鍵屬 human-only，模組的 settings 讀取器會擋掉；主機自己在同一個
+  // 資料庫讀原始值，才能把「只有人能改」與「執行期要判斷」分開。
+  const agentMode = () => parseAgentModeSetting(cabinet.settings.get(BOARDS_AGENT_MODE_KEY)?.value);
 
   const service = new BoardService(
     store,
