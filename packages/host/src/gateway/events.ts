@@ -21,6 +21,14 @@ export type EventMapping = { readonly events: readonly MappedEvent[] } | { reado
 /** 把意圖轉成要落地的正式事件；不支援的意圖回錯誤字串。 */
 export function mapEventIntent(intent: ProtocolEventIntent): EventMapping {
   switch (intent.kind) {
+    case "board-changed": {
+      const payload = asObject(intent.payload);
+      if (payload === null) return { error: "board.changed 的 payload 必須是物件" };
+      if (payload.boardId !== intent.boardId) {
+        return { error: "board.changed 的 payload 與宣告的 boardId 不一致" };
+      }
+      return one("system", "board.changed", payload);
+    }
     case "card-changed":
       return one("system", "card.changed", {
         cardId: intent.cardId,
@@ -127,6 +135,18 @@ export function validateEventPayload(type: string, payload: unknown): string | n
     );
   }
   switch (type) {
+    case "board.changed":
+      return checkObject(
+        payload,
+        "payload",
+        new Map([
+          ["boardId", string],
+          ["change", enumeration("created", "updated", "deleted")],
+          ["board", optional(boardDocument)],
+          ["cardIds", optional(arrayOf(string))],
+        ]),
+        ["boardId", "change"],
+      );
     case "card.changed":
       return checkObject(
         payload,
@@ -301,6 +321,100 @@ function checkObject(
   }
   return null;
 }
+
+/** 白板座標與尺寸是非負安全整數；協定與檔案格式用同一條規則。 */
+const canvasInteger: Checker = (value, path) =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? null
+    : `${path} 必須是非負安全整數`;
+
+const boardPoint: Checker = (value, path) =>
+  checkObject(
+    value,
+    path,
+    new Map([
+      ["x", canvasInteger],
+      ["y", canvasInteger],
+    ]),
+    ["x", "y"],
+  );
+
+const boardSize: Checker = (value, path) =>
+  checkObject(
+    value,
+    path,
+    new Map([
+      ["width", canvasInteger],
+      ["height", canvasInteger],
+    ]),
+    ["width", "height"],
+  );
+
+const boardItem: Checker = (value, path) =>
+  checkObject(
+    value,
+    path,
+    new Map([
+      ["id", string],
+      ["cardId", string],
+      ["position", boardPoint],
+      ["size", boardSize],
+      ["pinned", boolean],
+      ["origin", enumeration("canvas", "inbox")],
+      ["projectedBy", optional(enumeration("user", "agent"))],
+      ["groupId", optional(string)],
+    ]),
+    ["id", "cardId", "position", "size", "pinned", "origin"],
+  );
+
+const boardEdge: Checker = (value, path) =>
+  checkObject(
+    value,
+    path,
+    new Map([
+      ["id", string],
+      ["from", string],
+      ["to", string],
+      ["label", optional(string)],
+    ]),
+    ["id", "from", "to"],
+  );
+
+const boardGroup: Checker = (value, path) =>
+  checkObject(
+    value,
+    path,
+    new Map([
+      ["id", string],
+      ["label", string],
+      ["parentId", optional(string)],
+    ]),
+    ["id", "label"],
+  );
+
+/**
+ * 整份白板文件的形狀；`board.changed` 帶 board 時逐欄檢查。
+ *
+ * 這裡只驗形狀與欄位，不重算領域規則（例如連線端點存在、分組不成環）；
+ * 那種檢查由白板模組在寫入前做，事件層不重複一份會走樣的規則。
+ */
+const boardDocument: Checker = (value, path) =>
+  checkObject(
+    value,
+    path,
+    new Map([
+      ["schema", (entry, entryPath) => (entry === 1 ? null : `${entryPath} 必須是 1`)],
+      ["id", string],
+      ["title", string],
+      ["createdAt", dateTime],
+      ["updatedAt", dateTime],
+      ["items", arrayOf(boardItem)],
+      ["inbox", arrayOf(boardItem)],
+      ["edges", arrayOf(boardEdge)],
+      ["groups", arrayOf(boardGroup)],
+    ]),
+    ["schema", "id", "title", "createdAt", "updatedAt", "items", "inbox", "edges", "groups"],
+  );
 
 const notificationWire: Checker = (value, path) =>
   checkObject(

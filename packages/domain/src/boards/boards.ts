@@ -30,6 +30,8 @@ export interface ProjectCardInput {
   readonly size?: BoardSize | undefined;
   readonly groupId?: string | undefined;
   readonly pinned?: boolean | undefined;
+  readonly origin?: "canvas" | "inbox" | undefined;
+  readonly projectedBy?: "user" | "agent" | undefined;
   readonly now: string;
 }
 
@@ -44,6 +46,7 @@ export function createBoard(input: CreateBoardInput): BoardDocument {
     createdAt: input.now,
     updatedAt: input.now,
     items: [],
+    inbox: [],
     edges: [],
     groups: [],
   };
@@ -58,7 +61,7 @@ export function projectCard(input: ProjectCardInput): BoardDocument {
   if (!isUlid(cardId)) {
     throw new BoardDomainError("invalid_id", `卡片 id 不是 ULID：${cardId}`);
   }
-  if (board.items.some((item) => item.cardId === cardId)) {
+  if ([...board.items, ...board.inbox].some((item) => item.cardId === cardId)) {
     throw new BoardDomainError(
       "duplicate_projection",
       `同一張卡在同一份白板只能投影一次：${cardId}`,
@@ -70,22 +73,32 @@ export function projectCard(input: ProjectCardInput): BoardDocument {
     position,
     size: input.size ?? DEFAULT_ITEM_SIZE,
     pinned: input.pinned ?? false,
+    origin: input.origin ?? "canvas",
+    ...(input.projectedBy !== undefined ? { projectedBy: input.projectedBy } : {}),
     ...(input.groupId !== undefined ? { groupId: input.groupId } : {}),
   };
-  return finish(board, { items: [...board.items, item] }, now);
+  return item.origin === "inbox"
+    ? finish(board, { inbox: [...board.inbox, item] }, now)
+    : finish(board, { items: [...board.items, item] }, now);
 }
 
-/** 移除投影，並連帶移除參照它的連線。卡片本體不受影響。 */
+/**
+ * 移除投影，並連帶移除參照它的連線。卡片本體不受影響。
+ *
+ * 畫布與收件區的投影都算；連線只會指向畫布上的投影，所以收件區的投影
+ * 不會留下連線，但取消時仍走同一條路徑，呼叫端不必先分辨投影在哪一區。
+ */
 export function unprojectCard(input: {
   readonly board: BoardDocument;
   readonly itemId: string;
   readonly now: string;
 }): BoardDocument {
-  requireItem(input.board, input.itemId);
+  requireProjection(input.board, input.itemId);
   return finish(
     input.board,
     {
       items: input.board.items.filter((item) => item.id !== input.itemId),
+      inbox: input.board.inbox.filter((item) => item.id !== input.itemId),
       edges: input.board.edges.filter(
         (edge) => edge.from !== input.itemId && edge.to !== input.itemId,
       ),
@@ -283,6 +296,13 @@ function finish(board: BoardDocument, change: Partial<BoardDocument>, now: strin
 
 function requireItem(board: BoardDocument, itemId: string): void {
   if (!board.items.some((item) => item.id === itemId)) {
+    throw new BoardDomainError("unknown_item", `找不到投影：${itemId}`);
+  }
+}
+
+/** 取消投影時兩區都算；其他操作只認畫布上的投影。 */
+function requireProjection(board: BoardDocument, itemId: string): void {
+  if (![...board.items, ...board.inbox].some((item) => item.id === itemId)) {
     throw new BoardDomainError("unknown_item", `找不到投影：${itemId}`);
   }
 }

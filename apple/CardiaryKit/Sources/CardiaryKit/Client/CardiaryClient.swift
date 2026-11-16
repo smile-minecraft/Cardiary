@@ -517,6 +517,103 @@ public actor CardiaryClient {
         )
     }
 
+    // MARK: - 白板
+
+    /// 列出所有白板；儀表板用 `updatedAt` 排序。
+    public func listBoards() async throws -> BoardListResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.listBoards()
+    }
+
+    public func getBoard(boardId: String) async throws -> BoardGetResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.getBoard(boardId: boardId)
+    }
+
+    public func createBoard(
+        boardId: String,
+        title: String,
+        clientRequestId: String
+    ) async throws -> BoardCreateResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.createBoard(
+            boardId: boardId,
+            title: title,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    /// 存回整份白板；過期的 `baseUpdatedAt` 會讓主機回 `conflict`。
+    public func saveBoard(
+        board: BoardDocument,
+        baseUpdatedAt: String,
+        clientRequestId: String? = nil
+    ) async throws -> BoardSaveResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.saveBoard(
+            board: board,
+            baseUpdatedAt: baseUpdatedAt,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func deleteBoard(boardId: String) async throws -> BoardDeleteResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.deleteBoard(boardId: boardId)
+    }
+
+    /// 人類把既有卡投影到畫布上；釘選在這邊帶。
+    public func projectCardOnBoard(
+        boardId: String,
+        itemId: String,
+        cardId: String,
+        position: BoardPoint,
+        size: BoardSize? = nil,
+        groupId: String? = nil,
+        pinned: Bool? = nil
+    ) async throws -> BoardProjectCardResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.projectCardOnBoard(
+            boardId: boardId,
+            itemId: itemId,
+            cardId: cardId,
+            position: position,
+            size: size,
+            groupId: groupId,
+            pinned: pinned
+        )
+    }
+
+    public func unprojectCardOnBoard(
+        boardId: String,
+        itemId: String
+    ) async throws -> BoardUnprojectCardResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.unprojectCardOnBoard(boardId: boardId, itemId: itemId)
+    }
+
+    /// 圈選既有卡片後生成一張新卡，血緣記在 `cardIds`。
+    public func createCardFromSelection(
+        boardId: String,
+        cardIds: [String],
+        title: String,
+        body: String,
+        itemId: String,
+        position: BoardPoint,
+        clientRequestId: String
+    ) async throws -> BoardCreateCardFromSelectionResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.createCardFromSelection(
+            boardId: boardId,
+            cardIds: cardIds,
+            title: title,
+            body: body,
+            itemId: itemId,
+            position: position,
+            clientRequestId: clientRequestId
+        )
+    }
+
     // MARK: - 通知
 
     public func listNotifications(
@@ -704,6 +801,9 @@ public actor CardiaryClient {
         if case .moduleEvent = frame {
             handlers.onModuleEvent?(frame)
         }
+        if case .boardChangedEvent(let event) = frame {
+            handlers.onBoardChanged?(event.payload)
+        }
 
         switch frame {
         case .systemStatusEvent(let event):
@@ -771,6 +871,7 @@ public final class Handlers: @unchecked Sendable {
     private var diagnosticHandler: (@Sendable (String) -> Void)?
     private var sessionEventHandler: (@Sendable (ServerFrame) -> Void)?
     private var moduleEventHandler: (@Sendable (ServerFrame) -> Void)?
+    private var boardChangedHandler: (@Sendable (BoardChangedEventPayload) -> Void)?
     private var epochChangeHandler: (@Sendable (String) -> Void)?
 
     public init() {}
@@ -811,6 +912,12 @@ public final class Handlers: @unchecked Sendable {
     public var onModuleEvent: (@Sendable (ServerFrame) -> Void)? {
         get { lock.lock(); defer { lock.unlock() }; return moduleEventHandler }
         set { lock.lock(); moduleEventHandler = newValue; lock.unlock() }
+    }
+
+    /// 只轉送 `board.changed`；白板畫面訂閱這一個，不必自己拆 frame。
+    public var onBoardChanged: (@Sendable (BoardChangedEventPayload) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return boardChangedHandler }
+        set { lock.lock(); boardChangedHandler = newValue; lock.unlock() }
     }
 
     /// 收到與先前不同的 epoch（或串流缺口後被迫重載）時觸發，帶新的 epoch。

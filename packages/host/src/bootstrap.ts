@@ -55,6 +55,11 @@ import {
 } from "./modules/loader.js";
 import { HostServiceRegistryImpl } from "./modules/registry.js";
 import {
+  BOARDS_AGENT_MODE_KEY,
+  parseAgentModeSetting,
+  pinToolBundles,
+} from "./modules/boards/policy.js";
+import {
   EphemeralCardEnvironment,
   persistentCardEnvironment,
 } from "./modules/cards/environment.js";
@@ -409,7 +414,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   const loadedModules: { current: { activeToolBundles(): readonly ToolBundlePin[] } | null } = {
     current: null,
   };
-  const modules = await loadFirstPartyModules({
+  const loaded = await loadFirstPartyModules({
     tools: engine.tools,
     services: moduleRuntimeServices({
       hostServices,
@@ -435,8 +440,14 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
       logger.warn(message, fields);
     },
   });
-  gateway.setModuleHost(modules);
-  loadedModules.current = modules;
+  // 工具曝光依 `boards.agentMode`：投影工具只給 `full` 模式的新對話。
+  // 這裡包一層而不是改模組：模組不知道設定，模式是主機的選擇；既有對話的
+  // 釘選已經存進引擎，切換模式不會動到它們。
+  const moduleHost = boardsAwareModuleHost(loaded, () =>
+    parseAgentModeSetting(cardEnvironment.settings.get(BOARDS_AGENT_MODE_KEY)?.value),
+  );
+  gateway.setModuleHost(moduleHost);
+  loadedModules.current = moduleHost;
   const port = await gateway.listen(options.port ?? 0);
   const service = new HostService({
     storage,
@@ -462,7 +473,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
               .find((intent) => intent.rootId === rootId)?.conversationIds ?? [rootId],
         }),
     onShutdown: async () => {
-      await modules.deactivateAll("shutdown");
+      await loaded.deactivateAll("shutdown");
       if (cardEnvironment.ownsConnections) cardEnvironment.close();
     },
   });
@@ -489,9 +500,35 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
     port,
     epoch: snapshot.epoch,
     spawn,
-    modules,
+    modules: moduleHost,
     hostServices,
     agentPermissions,
+  };
+}
+
+/**
+ * 建立對話時釘選的工具組：白板的投影工具只在 `full` 模式曝光。
+ *
+ * `LoadedModules` 帶著私有狀態與服務註冊表，這裡逐項委派，不整份複製；
+ * 只有 `activeToolBundles()` 換成過濾後的清單。模式在每次呼叫當下才讀，
+ * 所以設定切換對之後新開的對話立即生效。
+ */
+function boardsAwareModuleHost(
+  modules: LoadedModules,
+  agentMode: () => ReturnType<typeof parseAgentModeSetting>,
+): LoadedModules {
+  return {
+    registry: modules.registry,
+    hostServices: modules.hostServices,
+    loadFailures: modules.loadFailures,
+    listModules: () => modules.listModules(),
+    activeToolBundles: () => pinToolBundles(modules.activeToolBundles(), agentMode()),
+    setModuleEnabled: (moduleId, enabled) => modules.setModuleEnabled(moduleId, enabled),
+    hasExactHandler: (type) => modules.hasExactHandler(type),
+    hasPrefixHandler: (type) => modules.hasPrefixHandler(type),
+    dispatchProtocol: (request) => modules.dispatchProtocol(request),
+    dispatchHttp: (request) => modules.dispatchHttp(request),
+    deactivateAll: (reason) => modules.deactivateAll(reason),
   };
 }
 

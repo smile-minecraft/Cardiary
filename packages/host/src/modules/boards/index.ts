@@ -1,0 +1,91 @@
+import type { CardService } from "@cardiary/domain";
+import type { JsonValue } from "@cardiary/engine-adapter";
+import type { HostModule, ModuleActivationContext } from "@cardiary/module-api";
+import { BoardFileStore } from "@cardiary/storage";
+
+import { createAuditLog } from "../../permissions/audit.js";
+import { HOST_SERVICE_NAMES, type CardEnvironment } from "../contract.js";
+import { manifest } from "./manifest.js";
+import { BOARDS_AGENT_MODE_KEY, parseAgentModeSetting } from "./policy.js";
+import { registerBoardsProtocol } from "./protocol.js";
+import { BoardService, type BoardCardGateway, type BoardChangedEvent } from "./service.js";
+import { createBoardsToolBundles } from "./tools.js";
+
+/**
+ * 白板模組的進入點。
+ *
+ * 白板正本是資料夾裡的 `boards/<id>.json`；服務只經過 `BoardFileStore`
+ * 讀寫，卡片本體仍由卡片模組擁有。`board.*` 協定給殼與客戶端用，兩個
+ * 工具組給代理用；工具組是否曝光由 `boards.agentMode` 在新的對話決定。
+ */
+export const hostModule: HostModule = {
+  manifest,
+  activate,
+};
+
+async function activate(context: ModuleActivationContext): Promise<void> {
+  const cabinet = context.services.host.require<CardEnvironment>(HOST_SERVICE_NAMES.cardStorage);
+  const cards = context.services.host.require<CardService>(HOST_SERVICE_NAMES.cards);
+  const now = (): Date => context.services.clock.now();
+
+  const store = new BoardFileStore({ layout: cabinet.layout, now });
+  store.ensureDirectory();
+
+  // 這個鍵屬 human-only，模組的 settings 讀取器會擋掉；主機自己在同一個
+  // 資料庫讀原始值，才能把「只有人能改」與「執行期要判斷」分開。
+  const agentMode = () => parseAgentModeSetting(cabinet.settings.get(BOARDS_AGENT_MODE_KEY)?.value);
+
+  const service = new BoardService(
+    store,
+    now,
+    (event: BoardChangedEvent): void => {
+      context.services.protocol.emit({
+        kind: "board-changed",
+        boardId: event.boardId,
+        payload: boardChangedPayload(event),
+      });
+    },
+    cardGateway(cards),
+  );
+  registerBoardsProtocol({ service, protocol: context.services.protocol });
+
+  const bundles = createBoardsToolBundles({
+    service,
+    agentMode,
+    audit: createAuditLog(cabinet.layout.root),
+    now,
+  });
+  context.registerToolBundle(bundles.create);
+  context.registerToolBundle(bundles.project);
+
+  context.services.host.provide(HOST_SERVICE_NAMES.boards, service);
+}
+
+/** 卡片服務的兩個方法就夠白板用；其餘能力不往外開。 */
+function cardGateway(cards: CardService): BoardCardGateway {
+  return {
+    get: (cardId) => cards.get(cardId),
+    create: (input) =>
+      cards.create({
+        kind: input.kind,
+        title: input.title,
+        body: input.body,
+        ...(input.sources === undefined ? {} : { sources: input.sources }),
+      }),
+  };
+}
+
+/**
+ * `board.changed` 的 payload。
+ *
+ * 帶整份白板，讓另一個視窗不必再拉一次；`cardIds` 供釘選與新鮮度同步。
+ * 白板文件是唯讀結構，序列化成事件時再轉成一般 JSON 值。
+ */
+function boardChangedPayload(event: BoardChangedEvent): JsonValue {
+  return {
+    boardId: event.boardId,
+    change: event.change,
+    ...(event.board === undefined ? {} : { board: event.board }),
+    ...(event.cardIds === undefined ? {} : { cardIds: [...event.cardIds] }),
+  } as unknown as JsonValue;
+}

@@ -45,6 +45,11 @@ export function localToolAction(toolName: string, input: unknown): PermissionAct
       const cwd = stringField(fields, "cwd") ?? ".";
       return { kind: "shell.exec", command, cwd };
     }
+    case "create_card_on_board":
+      return { kind: "cards.create", cardKind: "note" };
+    case "project_card_to_board":
+      // 沿用未知工具的審批路徑，不提供「一律允許」。
+      return null;
     default:
       return null;
   }

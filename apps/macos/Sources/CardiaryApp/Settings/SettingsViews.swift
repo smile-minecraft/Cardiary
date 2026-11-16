@@ -286,6 +286,11 @@ struct GeneralSettingsView: View {
                     ForEach(model.items, id: \.key) { item in
                         itemRow(item)
                     }
+                    if model.items.contains(where: { $0.key.hasPrefix("boards.") }) {
+                        Text(BoardL10n.text(.boardsAgentModeNote))
+                            .font(.cardiary(.caption))
+                            .foregroundStyle(Palette.inkSecondary)
+                    }
                 }
 
                 if let error = model.errorMessage {

@@ -948,6 +948,186 @@ public actor CardiaryConnection {
         await transport.close()
     }
 
+    // MARK: - 白板
+
+    public func listBoards(
+        options: RequestOptions = .default
+    ) async throws -> BoardListResponsePayload {
+        let request = BoardListRequest(
+            id: RequestID.next(),
+            payload: BoardListRequestPayload()
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .boardListResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "board.list 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func getBoard(
+        boardId: String,
+        options: RequestOptions = .default
+    ) async throws -> BoardGetResponsePayload {
+        let request = BoardGetRequest(
+            id: RequestID.next(),
+            payload: BoardGetRequestPayload(boardId: boardId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .boardGetResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "board.get 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func createBoard(
+        boardId: String,
+        title: String,
+        clientRequestId: String,
+        options: RequestOptions = .default
+    ) async throws -> BoardCreateResponsePayload {
+        let request = BoardCreateRequest(
+            id: RequestID.next(),
+            payload: BoardCreateRequestPayload(
+                boardId: boardId,
+                title: title,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .boardCreateResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "board.create 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 存回整份白板；`baseUpdatedAt` 是讀到時的版本，過期會得到 `conflict`。
+    public func saveBoard(
+        board: BoardDocument,
+        baseUpdatedAt: String,
+        clientRequestId: String? = nil,
+        options: RequestOptions = .default
+    ) async throws -> BoardSaveResponsePayload {
+        let request = BoardSaveRequest(
+            id: RequestID.next(),
+            payload: BoardSaveRequestPayload(
+                board: board,
+                baseUpdatedAt: baseUpdatedAt,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .boardSaveResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "board.save 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func deleteBoard(
+        boardId: String,
+        options: RequestOptions = .default
+    ) async throws -> BoardDeleteResponsePayload {
+        let request = BoardDeleteRequest(
+            id: RequestID.next(),
+            payload: BoardDeleteRequestPayload(boardId: boardId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .boardDeleteResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "board.delete 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func projectCardOnBoard(
+        boardId: String,
+        itemId: String,
+        cardId: String,
+        position: BoardPoint,
+        size: BoardSize? = nil,
+        groupId: String? = nil,
+        pinned: Bool? = nil,
+        options: RequestOptions = .default
+    ) async throws -> BoardProjectCardResponsePayload {
+        let request = BoardProjectCardRequest(
+            id: RequestID.next(),
+            payload: BoardProjectCardRequestPayload(
+                boardId: boardId,
+                itemId: itemId,
+                cardId: cardId,
+                position: position,
+                size: size,
+                groupId: groupId,
+                pinned: pinned
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .boardProjectCardResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "board.project_card 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func unprojectCardOnBoard(
+        boardId: String,
+        itemId: String,
+        options: RequestOptions = .default
+    ) async throws -> BoardUnprojectCardResponsePayload {
+        let request = BoardUnprojectCardRequest(
+            id: RequestID.next(),
+            payload: BoardUnprojectCardRequestPayload(boardId: boardId, itemId: itemId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .boardUnprojectCardResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "board.unproject_card 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 圈選既有卡片後生成一張新卡，血緣記在 `cardIds`。
+    public func createCardFromSelection(
+        boardId: String,
+        cardIds: [String],
+        title: String,
+        body: String,
+        itemId: String,
+        position: BoardPoint,
+        clientRequestId: String,
+        options: RequestOptions = .default
+    ) async throws -> BoardCreateCardFromSelectionResponsePayload {
+        let request = BoardCreateCardFromSelectionRequest(
+            id: RequestID.next(),
+            payload: BoardCreateCardFromSelectionRequestPayload(
+                boardId: boardId,
+                cardIds: cardIds,
+                title: title,
+                body: body,
+                itemId: itemId,
+                position: position,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .boardCreateCardFromSelectionResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "board.create_card_from_selection 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
     // MARK: - 收送
 
     private func perform<T: Encodable>(

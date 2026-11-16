@@ -1858,14 +1858,19 @@ add(
   }),
 );
 
+add("BoardItemOrigin", stringEnum(["canvas", "inbox"], "投影所在區域。"));
+add("BoardProjectedBy", stringEnum(["user", "agent"], "投影的建立者。"));
+
 add(
   "BoardItem",
-  objectOf("BoardItem", ["id", "cardId", "position", "size", "pinned"], {
+  objectOf("BoardItem", ["id", "cardId", "position", "size", "pinned", "origin"], {
     id: str("投影的 ULID；不同白板上的同一張卡有不同 id。"),
     cardId: str("卡片本體的 ULID。"),
     position: ref("BoardPoint"),
     size: ref("BoardSize"),
     pinned: bool("任一個投影釘選時，該卡片的新鮮度固定 100。"),
+    origin: ref("BoardItemOrigin"),
+    projectedBy: ref("BoardProjectedBy"),
     groupId: str("所屬分組 id；省略代表在畫布上。"),
   }),
 );
@@ -1893,7 +1898,7 @@ add(
   "BoardDocument",
   objectOf(
     "BoardDocument",
-    ["schema", "id", "title", "createdAt", "updatedAt", "items", "edges", "groups"],
+    ["schema", "id", "title", "createdAt", "updatedAt", "items", "inbox", "edges", "groups"],
     {
       schema: literal(1),
       id: str("白板 ULID。"),
@@ -1901,6 +1906,7 @@ add(
       createdAt: str("建立時間，RFC 3339。", { format: "date-time" }),
       updatedAt: str("最後變更時間；單寫者可用於儲存前比對。", { format: "date-time" }),
       items: arrayOf(ref("BoardItem"), "投影清單。"),
+      inbox: arrayOf(ref("BoardItem"), "收件區的投影。"),
       edges: arrayOf(ref("BoardEdge"), "只屬於這份白板的顯式連線。"),
       groups: arrayOf(ref("BoardGroup"), "可巢狀的分組。"),
     },

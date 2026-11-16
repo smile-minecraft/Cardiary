@@ -2586,6 +2586,7 @@ public struct BoardDocument: Codable, Equatable, Sendable {
     public let createdAt: String
     public let updatedAt: String
     public let items: [BoardItem]
+    public let inbox: [BoardItem]
     public let edges: [BoardEdge]
     public let groups: [BoardGroup]
 
@@ -2596,6 +2597,7 @@ public struct BoardDocument: Codable, Equatable, Sendable {
         createdAt: String,
         updatedAt: String,
         items: [BoardItem],
+        inbox: [BoardItem],
         edges: [BoardEdge],
         groups: [BoardGroup]
     ) {
@@ -2605,6 +2607,7 @@ public struct BoardDocument: Codable, Equatable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.items = items
+        self.inbox = inbox
         self.edges = edges
         self.groups = groups
     }
@@ -2616,6 +2619,7 @@ public struct BoardDocument: Codable, Equatable, Sendable {
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
         case items = "items"
+        case inbox = "inbox"
         case edges = "edges"
         case groups = "groups"
     }
@@ -2631,6 +2635,7 @@ public struct BoardDocument: Codable, Equatable, Sendable {
         let createdAt = try container.decode(String.self, forKey: .createdAt)
         let updatedAt = try container.decode(String.self, forKey: .updatedAt)
         let items = try container.decode([BoardItem].self, forKey: .items)
+        let inbox = try container.decode([BoardItem].self, forKey: .inbox)
         let edges = try container.decode([BoardEdge].self, forKey: .edges)
         let groups = try container.decode([BoardGroup].self, forKey: .groups)
         self.init(
@@ -2640,6 +2645,7 @@ public struct BoardDocument: Codable, Equatable, Sendable {
             createdAt: createdAt,
             updatedAt: updatedAt,
             items: items,
+            inbox: inbox,
             edges: edges,
             groups: groups
         )
@@ -2653,6 +2659,7 @@ public struct BoardDocument: Codable, Equatable, Sendable {
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(items, forKey: .items)
+        try container.encode(inbox, forKey: .inbox)
         try container.encode(edges, forKey: .edges)
         try container.encode(groups, forKey: .groups)
     }
@@ -2949,6 +2956,8 @@ public struct BoardItem: Codable, Equatable, Sendable {
     public let position: BoardPoint
     public let size: BoardSize
     public let pinned: Bool
+    public let origin: BoardItemOrigin
+    public let projectedBy: BoardProjectedBy?
     public let groupId: String?
 
     public init(
@@ -2957,6 +2966,8 @@ public struct BoardItem: Codable, Equatable, Sendable {
         position: BoardPoint,
         size: BoardSize,
         pinned: Bool,
+        origin: BoardItemOrigin,
+        projectedBy: BoardProjectedBy? = nil,
         groupId: String? = nil
     ) {
         self.id = id
@@ -2964,6 +2975,8 @@ public struct BoardItem: Codable, Equatable, Sendable {
         self.position = position
         self.size = size
         self.pinned = pinned
+        self.origin = origin
+        self.projectedBy = projectedBy
         self.groupId = groupId
     }
 
@@ -2973,6 +2986,8 @@ public struct BoardItem: Codable, Equatable, Sendable {
         case position = "position"
         case size = "size"
         case pinned = "pinned"
+        case origin = "origin"
+        case projectedBy = "projectedBy"
         case groupId = "groupId"
     }
 
@@ -2983,6 +2998,8 @@ public struct BoardItem: Codable, Equatable, Sendable {
         let position = try container.decode(BoardPoint.self, forKey: .position)
         let size = try container.decode(BoardSize.self, forKey: .size)
         let pinned = try container.decode(Bool.self, forKey: .pinned)
+        let origin = try container.decode(BoardItemOrigin.self, forKey: .origin)
+        let projectedBy = try container.decodeIfPresent(BoardProjectedBy.self, forKey: .projectedBy)
         let groupId = try container.decodeIfPresent(String.self, forKey: .groupId)
         self.init(
             id: id,
@@ -2990,6 +3007,8 @@ public struct BoardItem: Codable, Equatable, Sendable {
             position: position,
             size: size,
             pinned: pinned,
+            origin: origin,
+            projectedBy: projectedBy,
             groupId: groupId
         )
     }
@@ -3001,8 +3020,17 @@ public struct BoardItem: Codable, Equatable, Sendable {
         try container.encode(position, forKey: .position)
         try container.encode(size, forKey: .size)
         try container.encode(pinned, forKey: .pinned)
+        try container.encode(origin, forKey: .origin)
+        try container.encodeIfPresent(projectedBy, forKey: .projectedBy)
         try container.encodeIfPresent(groupId, forKey: .groupId)
     }
+}
+
+// MARK: - BoardItemOrigin
+
+public enum BoardItemOrigin: String, Codable, Equatable, Sendable, CaseIterable {
+    case canvas = "canvas"
+    case inbox = "inbox"
 }
 
 // MARK: - BoardListRequest
@@ -3439,6 +3467,13 @@ public struct BoardProjectCardResponsePayload: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(board, forKey: .board)
     }
+}
+
+// MARK: - BoardProjectedBy
+
+public enum BoardProjectedBy: String, Codable, Equatable, Sendable, CaseIterable {
+    case user = "user"
+    case agent = "agent"
 }
 
 // MARK: - BoardSaveRequest

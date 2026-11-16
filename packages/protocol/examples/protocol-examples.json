@@ -55,9 +55,11 @@
               "width": 200,
               "height": 100
             },
-            "pinned": true
+            "pinned": true,
+            "origin": "canvas"
           }
         ],
+        "inbox": [],
         "edges": [],
         "groups": []
       }
@@ -98,9 +100,11 @@
               "width": 200,
               "height": 100
             },
-            "pinned": true
+            "pinned": true,
+            "origin": "canvas"
           }
         ],
+        "inbox": [],
         "edges": [],
         "groups": []
       }
@@ -130,9 +134,11 @@
               "width": 200,
               "height": 100
             },
-            "pinned": true
+            "pinned": true,
+            "origin": "canvas"
           }
         ],
+        "inbox": [],
         "edges": [],
         "groups": []
       },
@@ -163,9 +169,11 @@
               "width": 200,
               "height": 100
             },
-            "pinned": true
+            "pinned": true,
+            "origin": "canvas"
           }
         ],
+        "inbox": [],
         "edges": [],
         "groups": []
       }
@@ -232,9 +240,11 @@
               "width": 200,
               "height": 100
             },
-            "pinned": true
+            "pinned": true,
+            "origin": "canvas"
           }
         ],
+        "inbox": [],
         "edges": [],
         "groups": []
       }
@@ -274,9 +284,11 @@
               "width": 200,
               "height": 100
             },
-            "pinned": true
+            "pinned": true,
+            "origin": "canvas"
           }
         ],
+        "inbox": [],
         "edges": [],
         "groups": []
       }
@@ -324,9 +336,11 @@
               "width": 200,
               "height": 100
             },
-            "pinned": true
+            "pinned": true,
+            "origin": "canvas"
           }
         ],
+        "inbox": [],
         "edges": [],
         "groups": []
       },
@@ -361,9 +375,11 @@
               "width": 200,
               "height": 100
             },
-            "pinned": true
+            "pinned": true,
+            "origin": "canvas"
           }
         ],
+        "inbox": [],
         "edges": [],
         "groups": []
       },

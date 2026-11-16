@@ -192,7 +192,7 @@ struct CardLibraryView: View {
                         onSelect: { Task { await model.select(cardId: item.id) } },
                         onRefresh: { Task { await model.refresh(cardId: item.id) } }
                     )
-                    .draggable(item.id)
+                    .draggable(BoardCardDrag(cardId: item.id))
                     .onAppear {
                         Task { await model.loadMoreIfNeeded(current: item) }
                     }
@@ -238,6 +238,7 @@ struct CardLibraryView: View {
                                 model.setMode(.list)
                             }
                         }
+                        .draggable(BoardCardDrag(cardId: item.id))
                         .onAppear {
                             Task { await model.loadMoreIfNeeded(current: item) }
                         }

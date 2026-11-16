@@ -22,7 +22,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-import { assertValidBoard, isUlid, type BoardDocument } from "@cardiary/domain";
+import { assertValidBoard, isUlid, type BoardDocument, type BoardItem } from "@cardiary/domain";
 
 import { StorageError } from "../errors.js";
 import type { FolderLayout } from "../paths.js";
@@ -276,19 +276,35 @@ function parseBoardDocument(value: unknown, boardId: string): BoardDocument {
   if (!isString(value["createdAt"])) throw invalidBoard(boardId, "createdAt 必須是字串");
   if (!isString(value["updatedAt"])) throw invalidBoard(boardId, "updatedAt 必須是字串");
 
-  const items = parseArray(value["items"], boardId, "items").map((raw, index) => {
-    if (!isRecord(raw)) throw invalidBoard(boardId, `items[${index}] 必須是物件`);
-    const position = parsePoint(raw["position"], boardId, `items[${index}].position`, "x", "y");
-    const size = parsePoint(raw["size"], boardId, `items[${index}].size`, "width", "height");
+  const parseItem = (raw: unknown, field: string): BoardItem => {
+    if (!isRecord(raw)) throw invalidBoard(boardId, `${field} 必須是物件`);
+    const position = parsePoint(raw["position"], boardId, `${field}.position`, "x", "y");
+    const size = parsePoint(raw["size"], boardId, `${field}.size`, "width", "height");
+    const origin = raw["origin"] ?? "canvas";
+    const projectedBy = raw["projectedBy"];
+    if (origin !== "canvas" && origin !== "inbox") {
+      throw invalidBoard(boardId, `${field}.origin 不合法`);
+    }
+    if (projectedBy !== undefined && projectedBy !== "user" && projectedBy !== "agent") {
+      throw invalidBoard(boardId, `${field}.projectedBy 不合法`);
+    }
     return {
-      id: requiredString(raw["id"], boardId, `items[${index}].id`),
-      cardId: requiredString(raw["cardId"], boardId, `items[${index}].cardId`),
+      id: requiredString(raw["id"], boardId, `${field}.id`),
+      cardId: requiredString(raw["cardId"], boardId, `${field}.cardId`),
       position: { x: position.first, y: position.second },
       size: { width: size.first, height: size.second },
-      pinned: requiredBoolean(raw["pinned"], boardId, `items[${index}].pinned`),
-      ...(optionalString(raw["groupId"], boardId, "groupId", `items[${index}].groupId`) ?? {}),
+      pinned: requiredBoolean(raw["pinned"], boardId, `${field}.pinned`),
+      origin,
+      ...(projectedBy !== undefined ? { projectedBy } : {}),
+      ...(optionalString(raw["groupId"], boardId, "groupId", `${field}.groupId`) ?? {}),
     };
-  });
+  };
+  const items = parseArray(value["items"], boardId, "items").map((raw, index) =>
+    parseItem(raw, `items[${index}]`),
+  );
+  const inbox = parseArray(value["inbox"] ?? [], boardId, "inbox").map((raw, index) =>
+    parseItem(raw, `inbox[${index}]`),
+  );
   const edges = parseArray(value["edges"], boardId, "edges").map((raw, index) => {
     if (!isRecord(raw)) throw invalidBoard(boardId, `edges[${index}] 必須是物件`);
     return {
@@ -314,6 +330,7 @@ function parseBoardDocument(value: unknown, boardId: string): BoardDocument {
     createdAt: value["createdAt"],
     updatedAt: value["updatedAt"],
     items,
+    inbox,
     edges,
     groups,
   };
