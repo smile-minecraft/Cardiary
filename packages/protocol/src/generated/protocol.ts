@@ -65,7 +65,23 @@ export type ClientFrame =
   | NotificationMarkReadRequest
   | NotificationCreateCardRequest
   | PairingBeginRequest
-  | PairingCompleteRequest;
+  | PairingCompleteRequest
+  | AgentStartRequest
+  | AgentStopRequest
+  | AgentListRequest
+  | McpServersListRequest
+  | McpServerAddRequest
+  | McpServerRemoveRequest
+  | McpServerSetEnabledRequest
+  | McpServerAllowHostsRequest
+  | SettingsListRequest
+  | SettingsProposeChangeRequest
+  | SettingsChangesListRequest
+  | SettingsChangeDecideRequest
+  | StorageUsageRequest
+  | StorageCleanupPreviewRequest
+  | StorageCleanupApplyRequest
+  | EmotionGetRequest;
 /**
  * 客戶端平台。
  */
@@ -122,6 +138,18 @@ export type ModelRoleMode = "model" | "unset" | "none";
  * 裝置的種類。
  */
 export type DeviceKind = "web" | "ios";
+/**
+ * 外部代理的種類。
+ */
+export type AgentKind = "opencode" | "claude-code";
+/**
+ * MCP 伺服器的傳輸方式。
+ */
+export type McpTransport = "stdio" | "http";
+/**
+ * 人工對一個待決設定提議的決定。
+ */
+export type SettingsChangeDecision = "approve" | "reject";
 /**
  * 主機送給客戶端的所有訊息。
  */
@@ -200,6 +228,26 @@ export type ServerFrame =
   | NotificationChangedEvent
   | PairingBeginResponse
   | PairingCompleteResponse
+  | AgentStartResponse
+  | AgentStopResponse
+  | AgentListResponse
+  | AgentStateChangedEvent
+  | McpServersListResponse
+  | McpServerAddResponse
+  | McpServerRemoveResponse
+  | McpServerSetEnabledResponse
+  | McpServerAllowHostsResponse
+  | McpServersChangedEvent
+  | SettingsListResponse
+  | SettingsProposeChangeResponse
+  | SettingsChangesListResponse
+  | SettingsChangeDecideResponse
+  | SettingsChangedEvent
+  | StorageUsageResponse
+  | StorageCleanupPreviewResponse
+  | StorageCleanupApplyResponse
+  | StorageChangedEvent
+  | EmotionGetResponse
   | ErrorFrame
   | ModuleResponse
   | ModuleEvent;
@@ -317,6 +365,22 @@ export type DeciderKind = "client" | "system";
  * 通知的來源種類。
  */
 export type NotificationKind = "schedule" | "heartbeat" | "distillation";
+/**
+ * 外部代理的狀態；waiting-approval 表示等待人工審批才能啟動。
+ */
+export type AgentStatus = "starting" | "running" | "waiting-approval" | "stopped" | "failed";
+/**
+ * MCP 伺服器的狀態。
+ */
+export type McpServerState = "disabled" | "ready" | "failed";
+/**
+ * 設定變更紀錄的狀態；pending 等待人工決定，applied 已生效，rejected 被拒絕。
+ */
+export type SettingChangeStatus = "pending" | "applied" | "rejected";
+/**
+ * 儲存用量的類別。
+ */
+export type StorageUsageCategory = "cards" | "assets" | "cache" | "state" | "logs";
 /**
  * 協定層級的錯誤碼。
  */
@@ -1891,6 +1955,360 @@ export interface PairingCompleteRequestPayload {
    */
   pairingRequestId: string;
 }
+/**
+ * 啟動外部代理；啟動前需要人工審批。
+ */
+export interface AgentStartRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "agent.start";
+  payload: AgentStartRequestPayload;
+}
+export interface AgentStartRequestPayload {
+  agentKind: AgentKind;
+  /**
+   * 工作目錄（絕對路徑）；代理會在這個目錄下啟動。
+   */
+  workingDirectory: string;
+  /**
+   * 要交給代理的任務提示；省略代表只啟動不下任務。
+   */
+  prompt?: string;
+  /**
+   * 冪等鍵；重送只啟動一次。
+   */
+  clientRequestId?: string;
+}
+/**
+ * 停止一個代理工作階段。
+ */
+export interface AgentStopRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "agent.stop";
+  payload: AgentStopRequestPayload;
+}
+export interface AgentStopRequestPayload {
+  /**
+   * 要停止的代理工作階段。
+   */
+  agentSessionId: string;
+}
+/**
+ * 列出代理工作階段。
+ */
+export interface AgentListRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "agent.list";
+  payload: AgentListRequestPayload;
+}
+/**
+ * 列出代理工作階段；不需要參數。
+ */
+export interface AgentListRequestPayload {}
+/**
+ * 列出 MCP 伺服器。
+ */
+export interface McpServersListRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "mcp.servers.list";
+  payload: McpServersListRequestPayload;
+}
+/**
+ * 列出 MCP 伺服器；不需要參數。
+ */
+export interface McpServersListRequestPayload {}
+/**
+ * 新增一個 MCP 伺服器；需要人工審批，核准前不存在。
+ */
+export interface McpServerAddRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "mcp.server.add";
+  payload: McpServerAddRequestPayload;
+}
+export interface McpServerAddRequestPayload {
+  /**
+   * 給人看的名稱。
+   */
+  name: string;
+  transport: McpTransport;
+  /**
+   * stdio 傳輸的指令。
+   */
+  command?: string;
+  /**
+   * stdio 傳輸的指令參數。
+   *
+   * Items: 指令參數。
+   */
+  args?: string[];
+  /**
+   * http 傳輸的伺服器 URL。
+   */
+  url?: string;
+  /**
+   * HTTP 傳輸允許連線的主機；stdio 傳輸不需要外連，可以空陣列。
+   *
+   * Items: 主機名稱，例如 api.example.com。
+   */
+  allowedHosts: string[];
+  /**
+   * 冪等鍵；重送只提出一次審批。
+   */
+  clientRequestId?: string;
+}
+/**
+ * 移除一個 MCP 伺服器。
+ */
+export interface McpServerRemoveRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "mcp.server.remove";
+  payload: McpServerRemoveRequestPayload;
+}
+export interface McpServerRemoveRequestPayload {
+  /**
+   * 要移除的 MCP 伺服器。
+   */
+  serverId: string;
+}
+/**
+ * 啟用或停用一個 MCP 伺服器。
+ */
+export interface McpServerSetEnabledRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "mcp.server.set_enabled";
+  payload: McpServerSetEnabledRequestPayload;
+}
+export interface McpServerSetEnabledRequestPayload {
+  /**
+   * MCP 伺服器。
+   */
+  serverId: string;
+  /**
+   * 是否啟用。
+   */
+  enabled: boolean;
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId?: string;
+}
+/**
+ * 修改一個 HTTP MCP 伺服器允許連線的主機。
+ */
+export interface McpServerAllowHostsRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "mcp.server.allow_hosts";
+  payload: McpServerAllowHostsRequestPayload;
+}
+export interface McpServerAllowHostsRequestPayload {
+  /**
+   * HTTP 傳輸的 MCP 伺服器。
+   */
+  serverId: string;
+  /**
+   * 允許連線的主機；改動只影響這個伺服器。
+   *
+   * Items: 主機名稱，例如 api.example.com。
+   */
+  allowedHosts: string[];
+}
+/**
+ * 列出設定與分級。
+ */
+export interface SettingsListRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "settings.list";
+  payload: SettingsListRequestPayload;
+}
+/**
+ * 列出設定與分級；不需要參數。
+ */
+export interface SettingsListRequestPayload {}
+/**
+ * 提出一個設定變更；分級決定是否需要審批。
+ */
+export interface SettingsProposeChangeRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "settings.propose_change";
+  payload: SettingsProposeChangeRequestPayload;
+}
+export interface SettingsProposeChangeRequestPayload {
+  /**
+   * 設定鍵。
+   */
+  key: string;
+  value: JSONValue;
+  /**
+   * 冪等鍵；重送只提出一次。
+   */
+  clientRequestId?: string;
+}
+/**
+ * 列出設定變更紀錄與待決提議。
+ */
+export interface SettingsChangesListRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "settings.changes.list";
+  payload: SettingsChangesListRequestPayload;
+}
+/**
+ * 列出設定變更紀錄與待決提議；不需要參數。
+ */
+export interface SettingsChangesListRequestPayload {}
+/**
+ * 核准或拒絕一個待決的設定提議。
+ */
+export interface SettingsChangeDecideRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "settings.change.decide";
+  payload: SettingsChangeDecideRequestPayload;
+}
+export interface SettingsChangeDecideRequestPayload {
+  /**
+   * 待決的設定變更紀錄。
+   */
+  changeId: string;
+  decision: SettingsChangeDecision;
+}
+/**
+ * 讀取各類別的儲存用量。
+ */
+export interface StorageUsageRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "storage.usage";
+  payload: StorageUsageRequestPayload;
+}
+/**
+ * 讀取各類別的儲存用量；不需要參數。
+ */
+export interface StorageUsageRequestPayload {}
+/**
+ * 預覽一次清理會清掉的目標與釋放空間。
+ */
+export interface StorageCleanupPreviewRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "storage.cleanup.preview";
+  payload: StorageCleanupPreviewRequestPayload;
+}
+export interface StorageCleanupPreviewRequestPayload {
+  /**
+   * 要預覽的類別；正本一律拒絕。
+   *
+   * @minItems 1
+   *
+   * Items: 只接受 cache、temp、indexes、logs。
+   */
+  categories: [string, ...string[]];
+}
+/**
+ * 執行預覽過的清理；未預覽、目標改變或碰到正本時拒絕。
+ */
+export interface StorageCleanupApplyRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "storage.cleanup.apply";
+  payload: StorageCleanupApplyRequestPayload;
+}
+export interface StorageCleanupApplyRequestPayload {
+  /**
+   * 要執行的類別；必須先預覽過、目標沒有改變，而且執行中的暫存不能清。
+   *
+   * @minItems 1
+   *
+   * Items: 只接受 cache、temp、indexes、logs。
+   */
+  categories: [string, ...string[]];
+}
+/**
+ * 讀取目前情緒維度值與更新時間；只給介面顯示。
+ */
+export interface EmotionGetRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "emotion.get";
+  payload: EmotionGetRequestPayload;
+}
+/**
+ * 讀取目前情緒狀態；不需要參數。
+ */
+export interface EmotionGetRequestPayload {}
 /**
  * 驗證與版本協商的結果。
  */
@@ -4558,6 +4976,621 @@ export interface PairingCompleteResponsePayload {
    * 裝置專屬的存取 Token；只在這個回應回一次，主機只存 SHA-256。之後每次連線在 system.hello 的 payload 帶它。
    */
   deviceToken: string;
+}
+/**
+ * 已建立的代理工作階段。
+ */
+export interface AgentStartResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "agent.start";
+  payload: AgentStartResponsePayload;
+}
+export interface AgentStartResponsePayload {
+  /**
+   * 已建立的代理工作階段識別碼；狀態先為 waiting-approval。
+   */
+  agentSessionId: string;
+  /**
+   * 啟動的審批識別碼；核准後代理才會啟動。
+   */
+  approvalId?: string;
+}
+/**
+ * 停止結果。
+ */
+export interface AgentStopResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "agent.stop";
+  payload: AgentStopResponsePayload;
+}
+export interface AgentStopResponsePayload {
+  /**
+   * 要停止的代理工作階段。
+   */
+  agentSessionId: string;
+  /**
+   * 是否真的停掉了代理。
+   */
+  stopped: boolean;
+}
+/**
+ * 目前的代理工作階段清單。
+ */
+export interface AgentListResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "agent.list";
+  payload: AgentListResponsePayload;
+}
+export interface AgentListResponsePayload {
+  /**
+   * 目前存在的代理工作階段，依建立時間由新到舊。
+   */
+  agents: AgentSessionInfo[];
+}
+export interface AgentSessionInfo {
+  /**
+   * 代理工作階段識別碼。
+   */
+  agentSessionId: string;
+  agentKind: AgentKind;
+  status: AgentStatus;
+  /**
+   * 工作目錄（絕對路徑）。
+   */
+  workingDirectory: string;
+  progress?: AgentProgress;
+  /**
+   * 給人看的進度或失敗原因。
+   */
+  message?: string;
+  /**
+   * 建立時間，RFC 3339。
+   */
+  startedAt: string;
+}
+export interface AgentProgress {
+  /**
+   * 步驟識別碼。
+   */
+  step: string;
+  /**
+   * 給人看的步驟說明。
+   */
+  label: string;
+  /**
+   * 已完成的步驟數。
+   */
+  completed: number;
+  /**
+   * 總步驟數。
+   */
+  total: number;
+}
+/**
+ * 代理狀態改變；掛在 system 串流。
+ */
+export interface AgentStateChangedEvent {
+  v: 1;
+  kind: "event";
+  type: "agent.state_changed";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: AgentStateChangedEventPayload;
+}
+export interface AgentStateChangedEventPayload {
+  /**
+   * 代理工作階段識別碼。
+   */
+  agentSessionId: string;
+  agentKind: AgentKind;
+  status: AgentStatus;
+  progress?: AgentProgress;
+  /**
+   * 給人看的進度或失敗原因。
+   */
+  message?: string;
+}
+/**
+ * 目前的 MCP 伺服器清單。
+ */
+export interface McpServersListResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "mcp.servers.list";
+  payload: McpServersListResponsePayload;
+}
+export interface McpServersListResponsePayload {
+  /**
+   * 目前存在的 MCP 伺服器，依名稱排序。
+   */
+  servers: McpServerInfo[];
+}
+export interface McpServerInfo {
+  /**
+   * MCP 伺服器識別碼。
+   */
+  serverId: string;
+  /**
+   * 給人看的名稱。
+   */
+  name: string;
+  transport: McpTransport;
+  /**
+   * stdio 傳輸的指令。
+   */
+  command?: string;
+  /**
+   * stdio 傳輸的指令參數。
+   *
+   * Items: 指令參數。
+   */
+  args?: string[];
+  /**
+   * http 傳輸的伺服器 URL。
+   */
+  url?: string;
+  /**
+   * HTTP 傳輸允許連線的主機；stdio 傳輸不需要外連，可以空陣列。
+   *
+   * Items: 主機名稱，例如 api.example.com。
+   */
+  allowedHosts: string[];
+  /**
+   * 使用者是否啟用。
+   */
+  enabled: boolean;
+  state: McpServerState;
+  /**
+   * 啟動失敗或沙盒無法套用時的原因。
+   */
+  failure?: string;
+  /**
+   * 建立時間，RFC 3339。
+   */
+  createdAt: string;
+  /**
+   * 最後更新時間，RFC 3339。
+   */
+  updatedAt?: string;
+}
+/**
+ * 已送出人工審批。
+ */
+export interface McpServerAddResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "mcp.server.add";
+  payload: McpServerAddResponsePayload;
+}
+export interface McpServerAddResponsePayload {
+  /**
+   * 新增的 MCP 伺服器已送出人工審批；核准前伺服器不存在，也不提供工具。
+   */
+  approvalId: string;
+}
+/**
+ * 移除結果。
+ */
+export interface McpServerRemoveResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "mcp.server.remove";
+  payload: McpServerRemoveResponsePayload;
+}
+export interface McpServerRemoveResponsePayload {
+  /**
+   * 要移除的 MCP 伺服器。
+   */
+  serverId: string;
+  /**
+   * 是否真的移除了伺服器。
+   */
+  removed: boolean;
+}
+/**
+ * 更新後的伺服器資訊。
+ */
+export interface McpServerSetEnabledResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "mcp.server.set_enabled";
+  payload: McpServerSetEnabledResponsePayload;
+}
+export interface McpServerSetEnabledResponsePayload {
+  server: McpServerInfo;
+}
+/**
+ * 更新後的伺服器資訊。
+ */
+export interface McpServerAllowHostsResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "mcp.server.allow_hosts";
+  payload: McpServerAllowHostsResponsePayload;
+}
+export interface McpServerAllowHostsResponsePayload {
+  server: McpServerInfo;
+}
+/**
+ * MCP 伺服器清單改變；掛在 system 串流。
+ */
+export interface McpServersChangedEvent {
+  v: 1;
+  kind: "event";
+  type: "mcp.servers_changed";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: McpServersChangedEventPayload;
+}
+export interface McpServersChangedEventPayload {
+  server: McpServerInfo;
+  /**
+   * true 表示伺服器已被移除；server 是移除前的最後狀態。
+   */
+  removed: boolean;
+}
+/**
+ * 這個客戶端看得到的設定，含分級。
+ */
+export interface SettingsListResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "settings.list";
+  payload: SettingsListResponsePayload;
+}
+export interface SettingsListResponsePayload {
+  /**
+   * 這個客戶端看得到的設定，含分級；人看得到全部，agent 看不到 human-only。
+   */
+  settings: SettingTierItem[];
+}
+/**
+ * 一項設定與它的分級；agent 看到的清單不含 human-only 的項目。
+ */
+export interface SettingTierItem {
+  /**
+   * 設定鍵。
+   */
+  key: string;
+  value: JSONValue;
+  tier: SettingLevel;
+  /**
+   * 給人看的標題。
+   */
+  title?: string;
+  /**
+   * 給人看的說明。
+   */
+  description?: string;
+  /**
+   * 最後更新時間，RFC 3339。
+   */
+  updatedAt: string;
+}
+/**
+ * 設定變更紀錄；approval 分級會先待決。
+ */
+export interface SettingsProposeChangeResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "settings.propose_change";
+  payload: SettingsProposeChangeResponsePayload;
+}
+export interface SettingsProposeChangeResponsePayload {
+  change: SettingChangeRecord;
+}
+/**
+ * 一筆設定變更紀錄；approval 分級的變更會先待決再生效。
+ */
+export interface SettingChangeRecord {
+  /**
+   * 設定變更紀錄識別碼。
+   */
+  changeId: string;
+  /**
+   * 設定鍵。
+   */
+  key: string;
+  value: JSONValue;
+  tier: SettingLevel;
+  status: SettingChangeStatus;
+  /**
+   * 提出者，例如 user:<deviceId>、agent:<conversationId>、system。
+   */
+  proposedBy: string;
+  /**
+   * 提出時間，RFC 3339。
+   */
+  proposedAt: string;
+  /**
+   * 人工決定時間，RFC 3339；尚未決定時省略。
+   */
+  decidedAt?: string;
+}
+/**
+ * 設定變更紀錄清單。
+ */
+export interface SettingsChangesListResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "settings.changes.list";
+  payload: SettingsChangesListResponsePayload;
+}
+export interface SettingsChangesListResponsePayload {
+  /**
+   * 依提出時間由新到舊。
+   */
+  changes: SettingChangeRecord[];
+}
+/**
+ * 決定後的設定變更紀錄。
+ */
+export interface SettingsChangeDecideResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "settings.change.decide";
+  payload: SettingsChangeDecideResponsePayload;
+}
+export interface SettingsChangeDecideResponsePayload {
+  change: SettingChangeRecord;
+}
+/**
+ * 設定變更；掛在 system 串流。
+ */
+export interface SettingsChangedEvent {
+  v: 1;
+  kind: "event";
+  type: "settings.changed";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: SettingsChangedEventPayload;
+}
+export interface SettingsChangedEventPayload {
+  /**
+   * 變更後的設定；這個客戶端看得到的範圍，agent 看不到 human-only。
+   */
+  changes: SettingTierItem[];
+  /**
+   * 變更者，例如 user:<deviceId>、agent:<conversationId>、system。
+   */
+  changedBy: string;
+  /**
+   * 變更時間，RFC 3339。
+   */
+  changedAt: string;
+}
+/**
+ * 各類別的用量與可清理量。
+ */
+export interface StorageUsageResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "storage.usage";
+  payload: StorageUsageResponsePayload;
+}
+export interface StorageUsageResponsePayload {
+  /**
+   * 依類別列出用量。
+   */
+  usage: StorageCategoryUsage[];
+}
+export interface StorageCategoryUsage {
+  category: StorageUsageCategory;
+  /**
+   * 目前佔用的位元組數。
+   */
+  bytes: number;
+  /**
+   * 這個類別可安全釋放的位元組數；cards、assets、state 是正本，固定為 0。
+   */
+  cleanableBytes: number;
+}
+/**
+ * 預覽結果；先確認這個內容再執行 storage.cleanup.apply。
+ */
+export interface StorageCleanupPreviewResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "storage.cleanup.preview";
+  payload: StorageCleanupPreviewResponsePayload;
+}
+export interface StorageCleanupPreviewResponsePayload {
+  /**
+   * 預覽會清掉的目標；沒有目標時為空陣列。
+   */
+  targets: StorageCleanupTarget[];
+  /**
+   * 預計釋放的總位元組數。
+   */
+  totalBytes: number;
+}
+export interface StorageCleanupTarget {
+  /**
+   * 可清理的類別；只接受 cache、temp、indexes、logs。cards、assets、state 等正本一律拒絕，也不能用符號連結逃到正本。
+   */
+  category: string;
+  /**
+   * 要刪除的目標數量（檔案或目錄）。
+   */
+  items: number;
+  /**
+   * 估計會釋放的位元組數。
+   */
+  bytes: number;
+}
+/**
+ * 實際清理結果與紀錄識別碼。
+ */
+export interface StorageCleanupApplyResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "storage.cleanup.apply";
+  payload: StorageCleanupApplyResponsePayload;
+}
+export interface StorageCleanupApplyResponsePayload {
+  /**
+   * 實際清理的目標。
+   */
+  targets: StorageCleanupTarget[];
+  /**
+   * 實際釋放的總位元組數。
+   */
+  totalBytes: number;
+  /**
+   * 這次清理的紀錄識別碼；紀錄是 state 資料庫正本。
+   */
+  recordId: string;
+}
+/**
+ * 儲存用量改變；掛在 system 串流。
+ */
+export interface StorageChangedEvent {
+  v: 1;
+  kind: "event";
+  type: "storage.changed";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: StorageChangedEventPayload;
+}
+export interface StorageChangedEventPayload {
+  /**
+   * 儲存用量變更或清理完成後送出；客戶端應重新讀取 storage.usage。
+   *
+   * Items: 儲存用量改變的類別。
+   */
+  categories: string[];
+  /**
+   * 清理釋放的總位元組數；只在清理完成後的事件帶。
+   */
+  totalBytes?: number;
+}
+/**
+ * 目前的情緒狀態。
+ */
+export interface EmotionGetResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "emotion.get";
+  payload: EmotionGetResponsePayload;
+}
+/**
+ * 目前的情緒維度值；只給介面顯示，代理不能改。具體維度與數值範圍待使用者裁決，協定不約束。
+ */
+export interface EmotionGetResponsePayload {
+  dimensions: {
+    [k: string]: JSONValue;
+  };
+  /**
+   * 上次更新時間，RFC 3339。
+   */
+  updatedAt: string;
 }
 /**
  * 錯誤信封。HTTP 端點使用同一個結構作為錯誤回應內容。

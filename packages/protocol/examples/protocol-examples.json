@@ -2584,5 +2584,462 @@
       "deviceName": "我的 iPhone",
       "deviceToken": "cvd_x8k2m9q4w7e1r3t6y0u5i2o9a1s4d7f6g3h5j8k"
     }
+  },
+  "agentStartRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_agent_start",
+    "type": "agent.start",
+    "payload": {
+      "agentKind": "opencode",
+      "workingDirectory": "/Users/alice/projects/demo",
+      "prompt": "修好這個專案的測試"
+    }
+  },
+  "agentStartResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_agent_start",
+    "type": "agent.start",
+    "payload": {
+      "agentSessionId": "agnt_01JFA1Q2W3E4R5T6Y7U8I9O0P",
+      "approvalId": "appr_01JFA1Q2W3E4R5T6Y7U8I9O1Q"
+    }
+  },
+  "agentStopRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_agent_stop",
+    "type": "agent.stop",
+    "payload": { "agentSessionId": "agnt_01JFA1Q2W3E4R5T6Y7U8I9O0P" }
+  },
+  "agentStopResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_agent_stop",
+    "type": "agent.stop",
+    "payload": { "agentSessionId": "agnt_01JFA1Q2W3E4R5T6Y7U8I9O0P", "stopped": true }
+  },
+  "agentListRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_agent_list",
+    "type": "agent.list",
+    "payload": {}
+  },
+  "agentListResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_agent_list",
+    "type": "agent.list",
+    "payload": {
+      "agents": [
+        {
+          "agentSessionId": "agnt_01JFA1Q2W3E4R5T6Y7U8I9O0P",
+          "agentKind": "opencode",
+          "status": "running",
+          "workingDirectory": "/Users/alice/projects/demo",
+          "progress": {
+            "step": "edit_file",
+            "label": "修改 protocol.ts",
+            "completed": 3,
+            "total": 8
+          },
+          "startedAt": "2026-11-16T03:35:00.000Z"
+        }
+      ]
+    }
+  },
+  "agentStateChangedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "agent.state_changed",
+    "stream": "system",
+    "seq": 52,
+    "emittedAt": "2026-11-16T03:36:00.000Z",
+    "payload": {
+      "agentSessionId": "agnt_01JFA1Q2W3E4R5T6Y7U8I9O0P",
+      "agentKind": "opencode",
+      "status": "waiting-approval",
+      "progress": {
+        "step": "start",
+        "label": "等待人工核准後才會啟動",
+        "completed": 0,
+        "total": 8
+      },
+      "message": "等待人工審批"
+    }
+  },
+  "mcpServersListRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_mcp_servers_list",
+    "type": "mcp.servers.list",
+    "payload": {}
+  },
+  "mcpServersListResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_mcp_servers_list",
+    "type": "mcp.servers.list",
+    "payload": {
+      "servers": [
+        {
+          "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K",
+          "name": "github",
+          "transport": "http",
+          "url": "https://api.github.com/mcp/",
+          "allowedHosts": ["api.github.com"],
+          "enabled": true,
+          "state": "ready",
+          "createdAt": "2026-11-10T02:00:00.000Z",
+          "updatedAt": "2026-11-15T09:30:00.000Z"
+        }
+      ]
+    }
+  },
+  "mcpServerAddRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_mcp_server_add",
+    "type": "mcp.server.add",
+    "payload": {
+      "name": "filesystem",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/alice/Documents"],
+      "allowedHosts": [],
+      "clientRequestId": "cli_01JFB3C4D5E6F7G8H9J0K1L2M"
+    }
+  },
+  "mcpServerAddResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_mcp_server_add",
+    "type": "mcp.server.add",
+    "payload": {
+      "approvalId": "appr_01JFB3C4D5E6F7G8H9J0K1L3M"
+    }
+  },
+  "mcpServerRemoveRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_mcp_server_remove",
+    "type": "mcp.server.remove",
+    "payload": { "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K" }
+  },
+  "mcpServerRemoveResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_mcp_server_remove",
+    "type": "mcp.server.remove",
+    "payload": { "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K", "removed": true }
+  },
+  "mcpServerSetEnabledRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_mcp_server_set_enabled",
+    "type": "mcp.server.set_enabled",
+    "payload": { "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K", "enabled": false }
+  },
+  "mcpServerSetEnabledResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_mcp_server_set_enabled",
+    "type": "mcp.server.set_enabled",
+    "payload": {
+      "server": {
+        "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K",
+        "name": "github",
+        "transport": "http",
+        "url": "https://api.github.com/mcp/",
+        "allowedHosts": ["api.github.com"],
+        "enabled": false,
+        "state": "disabled",
+        "createdAt": "2026-11-10T02:00:00.000Z",
+        "updatedAt": "2026-11-16T03:38:00.000Z"
+      }
+    }
+  },
+  "mcpServerAllowHostsRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_mcp_server_allow_hosts",
+    "type": "mcp.server.allow_hosts",
+    "payload": {
+      "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K",
+      "allowedHosts": ["api.github.com", "uploads.github.com"]
+    }
+  },
+  "mcpServerAllowHostsResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_mcp_server_allow_hosts",
+    "type": "mcp.server.allow_hosts",
+    "payload": {
+      "server": {
+        "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K",
+        "name": "github",
+        "transport": "http",
+        "url": "https://api.github.com/mcp/",
+        "allowedHosts": ["api.github.com", "uploads.github.com"],
+        "enabled": true,
+        "state": "ready",
+        "createdAt": "2026-11-10T02:00:00.000Z",
+        "updatedAt": "2026-11-16T03:39:00.000Z"
+      }
+    }
+  },
+  "mcpServersChangedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "mcp.servers_changed",
+    "stream": "system",
+    "seq": 53,
+    "emittedAt": "2026-11-16T03:39:30.000Z",
+    "payload": {
+      "server": {
+        "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K",
+        "name": "github",
+        "transport": "http",
+        "url": "https://api.github.com/mcp/",
+        "allowedHosts": ["api.github.com", "uploads.github.com"],
+        "enabled": true,
+        "state": "ready",
+        "createdAt": "2026-11-10T02:00:00.000Z",
+        "updatedAt": "2026-11-16T03:39:00.000Z"
+      },
+      "removed": false
+    }
+  },
+  "settingsListRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_settings_list",
+    "type": "settings.list",
+    "payload": {}
+  },
+  "settingsListResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_settings_list",
+    "type": "settings.list",
+    "payload": {
+      "settings": [
+        {
+          "key": "agent.default_timeout_minutes",
+          "value": 30,
+          "tier": "approval",
+          "title": "代理預設逾時",
+          "description": "外部代理單次工作的預設逾時分鐘數。",
+          "updatedAt": "2026-11-16T03:30:00.000Z"
+        },
+        {
+          "key": "storage.cleanup_logs_days",
+          "value": 14,
+          "tier": "free",
+          "title": "日誌保留天數",
+          "updatedAt": "2026-11-16T03:30:00.000Z"
+        }
+      ]
+    }
+  },
+  "settingsProposeChangeRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_settings_propose_change",
+    "type": "settings.propose_change",
+    "payload": {
+      "key": "agent.default_timeout_minutes",
+      "value": 45,
+      "clientRequestId": "cli_01JFC4D5E6F7G8H9J0K1L2M3N4"
+    }
+  },
+  "settingsProposeChangeResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_settings_propose_change",
+    "type": "settings.propose_change",
+    "payload": {
+      "change": {
+        "changeId": "chg_01JFC4D5E6F7G8H9J0K1L2M5N",
+        "key": "agent.default_timeout_minutes",
+        "value": 45,
+        "tier": "approval",
+        "status": "pending",
+        "proposedBy": "agent:conv_01JFC5E6F7G8H9J0K1L2M3N4P",
+        "proposedAt": "2026-11-16T03:41:00.000Z"
+      }
+    }
+  },
+  "settingsChangesListRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_settings_changes_list",
+    "type": "settings.changes.list",
+    "payload": {}
+  },
+  "settingsChangesListResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_settings_changes_list",
+    "type": "settings.changes.list",
+    "payload": {
+      "changes": [
+        {
+          "changeId": "chg_01JFC4D5E6F7G8H9J0K1L2M5N",
+          "key": "agent.default_timeout_minutes",
+          "value": 45,
+          "tier": "approval",
+          "status": "pending",
+          "proposedBy": "agent:conv_01JFC5E6F7G8H9J0K1L2M3N4P",
+          "proposedAt": "2026-11-16T03:41:00.000Z"
+        }
+      ]
+    }
+  },
+  "settingsChangeDecideRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_settings_change_decide",
+    "type": "settings.change.decide",
+    "payload": {
+      "changeId": "chg_01JFC4D5E6F7G8H9J0K1L2M5N",
+      "decision": "approve"
+    }
+  },
+  "settingsChangeDecideResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_settings_change_decide",
+    "type": "settings.change.decide",
+    "payload": {
+      "change": {
+        "changeId": "chg_01JFC4D5E6F7G8H9J0K1L2M5N",
+        "key": "agent.default_timeout_minutes",
+        "value": 45,
+        "tier": "approval",
+        "status": "applied",
+        "proposedBy": "agent:conv_01JFC5E6F7G8H9J0K1L2M3N4P",
+        "proposedAt": "2026-11-16T03:41:00.000Z",
+        "decidedAt": "2026-11-16T03:45:00.000Z"
+      }
+    }
+  },
+  "settingsChangedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "settings.changed",
+    "stream": "system",
+    "seq": 54,
+    "emittedAt": "2026-11-16T03:45:01.000Z",
+    "payload": {
+      "changes": [
+        {
+          "key": "agent.default_timeout_minutes",
+          "value": 45,
+          "tier": "approval",
+          "title": "代理預設逾時",
+          "updatedAt": "2026-11-16T03:45:00.000Z"
+        }
+      ],
+      "changedBy": "user:device_01JFC6F7G8H9J0K1L2M3N4P5Q",
+      "changedAt": "2026-11-16T03:45:00.000Z"
+    }
+  },
+  "storageUsageRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_storage_usage",
+    "type": "storage.usage",
+    "payload": {}
+  },
+  "storageUsageResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_storage_usage",
+    "type": "storage.usage",
+    "payload": {
+      "usage": [
+        { "category": "cards", "bytes": 4823456, "cleanableBytes": 0 },
+        { "category": "assets", "bytes": 128493056, "cleanableBytes": 0 },
+        { "category": "cache", "bytes": 24576100, "cleanableBytes": 24576100 },
+        { "category": "state", "bytes": 1245678, "cleanableBytes": 0 },
+        { "category": "logs", "bytes": 834560, "cleanableBytes": 834560 }
+      ]
+    }
+  },
+  "storageCleanupPreviewRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_storage_cleanup_preview",
+    "type": "storage.cleanup.preview",
+    "payload": { "categories": ["cache", "logs"] }
+  },
+  "storageCleanupPreviewResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_storage_cleanup_preview",
+    "type": "storage.cleanup.preview",
+    "payload": {
+      "targets": [
+        { "category": "cache", "items": 128, "bytes": 24576100 },
+        { "category": "logs", "items": 14, "bytes": 834560 }
+      ],
+      "totalBytes": 25410660
+    }
+  },
+  "storageCleanupApplyRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_storage_cleanup_apply",
+    "type": "storage.cleanup.apply",
+    "payload": { "categories": ["cache", "logs"] }
+  },
+  "storageCleanupApplyResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_storage_cleanup_apply",
+    "type": "storage.cleanup.apply",
+    "payload": {
+      "targets": [
+        { "category": "cache", "items": 128, "bytes": 24576100 },
+        { "category": "logs", "items": 14, "bytes": 834560 }
+      ],
+      "totalBytes": 25410660,
+      "recordId": "rec_01JFD7G8H9J0K1L2M3N4P5Q6R7"
+    }
+  },
+  "storageChangedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "storage.changed",
+    "stream": "system",
+    "seq": 55,
+    "emittedAt": "2026-11-16T03:46:00.000Z",
+    "payload": {
+      "categories": ["cache", "logs"],
+      "totalBytes": 25410660
+    }
+  },
+  "emotionGetRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_emotion_get",
+    "type": "emotion.get",
+    "payload": {}
+  },
+  "emotionGetResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_emotion_get",
+    "type": "emotion.get",
+    "payload": {
+      "dimensions": {
+        "calm": 0.61,
+        "energy": 0.44
+      },
+      "updatedAt": "2026-11-16T03:20:00.000Z"
+    }
   }
 }
