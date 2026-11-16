@@ -13,6 +13,8 @@ public enum ImportSourceKind: String, CaseIterable, Codable, Sendable {
     case alma
     case codex
     case claudeCode = "claude-code"
+    case openClaw = "openclaw"
+    case claude
 }
 
 /// 六類中介格式。

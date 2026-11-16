@@ -116,13 +116,54 @@ async function cardFile(service: SpawnedService, cardId: string): Promise<string
 }
 
 describe("匯入協定", () => {
-  it("三個來源都列得出來，Hermes 未安裝時標明未驗證", async () => {
+  it("來源都列得出來，Hermes 未安裝時標明未驗證", async () => {
     const sources = await request<{
       sources: { kind: string; available: boolean; unverified?: string }[];
     }>(shared.client, "module.import.sources", {});
-    expect(sources.sources.map((source) => source.kind)).toEqual(["generic", "hermes", "alma"]);
+    expect(sources.sources.map((source) => source.kind)).toEqual([
+      "generic",
+      "hermes",
+      "alma",
+      "codex",
+      "claude-code",
+      "openclaw",
+      "claude",
+    ]);
     const hermes = sources.sources.find((source) => source.kind === "hermes");
     expect(hermes?.unverified).toContain("state.db");
+  });
+
+  it("OpenClaw 與 Claude 匯出可經主機預覽", async () => {
+    const source = await makeSource({
+      "workspace/AGENTS.md": "# 規則\n保持簡短",
+      "conversations.json": JSON.stringify([
+        {
+          uuid: "synthetic",
+          name: "測試",
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z",
+          chat_messages: [{ sender: "human", text: "你好" }],
+        },
+      ]),
+    });
+    const openclaw = await request<{ items: { category: string }[] }>(
+      shared.client,
+      "module.import.preview",
+      { sourceKind: "openclaw", sourcePath: source },
+    );
+    expect(openclaw.items.map((item) => item.category)).toEqual(["rule"]);
+    const claude = await request<{
+      conversations: unknown[];
+      conversationEstimate: { candidates: number; messages: number };
+    }>(shared.client, "module.import.preview", {
+      sourceKind: "claude",
+      sourcePath: join(source, "conversations.json"),
+      includeConversations: true,
+      rangeStart: "2026-01-01T00:00:00Z",
+      rangeEnd: "2026-12-31T23:59:59Z",
+    });
+    expect(claude.conversations).toHaveLength(1);
+    expect(claude.conversationEstimate).toMatchObject({ candidates: 1, messages: 1 });
   });
 
   it("預覽、勾選、寫入：卡片落地、frontmatter 記錄來源，重跑不重複", async () => {

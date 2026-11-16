@@ -15,6 +15,8 @@ import { createAlmaAdapter } from "./sources/alma.js";
 import { createGenericAdapter } from "./sources/generic.js";
 import { createHermesAdapter } from "./sources/hermes.js";
 import { createCodexAdapter, createClaudeCodeAdapter } from "./sources/coding-agents.js";
+import { createOpenClawAdapter } from "./sources/openclaw.js";
+import { createClaudeExportAdapter } from "./sources/claude-export.js";
 import { ImportJobStore } from "./store.js";
 import type { ImportSourceAdapter, ImportSourceKind } from "./types.js";
 
@@ -40,6 +42,8 @@ async function activate(context: ModuleActivationContext): Promise<void> {
     ["alma", createAlmaAdapter({ fs, openDatabase: nodeReadonlyDatabase, homeDir: home })],
     ["codex", createCodexAdapter({ fs })],
     ["claude-code", createClaudeCodeAdapter({ fs })],
+    ["openclaw", createOpenClawAdapter({ fs })],
+    ["claude", createClaudeExportAdapter({ fs })],
   ]);
   const service = new ImportService({
     fs,

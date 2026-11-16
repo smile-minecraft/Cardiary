@@ -32,7 +32,7 @@ import {
 /**
  * 匯入的流程：掃描來源、預覽、寫入。
  *
- * 三個轉接器只負責讀來源與轉成中介格式；這一層決定預覽要顯示什麼、哪些
+ * 轉接器只負責讀來源與轉成中介格式；這一層決定預覽要顯示什麼、哪些
  * 項目重複、寫入時建立卡片或複製技能。來源在整條流程裡都是唯讀；寫入只
  * 發生在 Cardiary 自己的資料夾。
  */
@@ -98,17 +98,19 @@ export class ImportService {
     this.#homeDir = options.homeDir ?? homedir();
   }
 
-  /** 三個來源的預設位置與可用性；只 stat，不讀內容。 */
+  /** 來源的預設位置與可用性；只 stat，不讀內容。 */
   async sources(): Promise<ImportSourceAvailability[]> {
     const almaPath = `${this.#homeDir}/Library/Application Support/alma/chat_threads.db`;
     const hermesRoot = `${this.#homeDir}/.hermes`;
-    const [almaStat, hermesSkills, hermesConfig, codexStat, claudeStat] = await Promise.all([
-      this.#fs.stat(almaPath),
-      this.#fs.stat(`${hermesRoot}/skills`),
-      this.#fs.stat(`${hermesRoot}/config.yaml`),
-      this.#fs.stat(`${this.#homeDir}/.codex`),
-      this.#fs.stat(`${this.#homeDir}/.claude`),
-    ]);
+    const [almaStat, hermesSkills, hermesConfig, codexStat, claudeStat, openclawStat] =
+      await Promise.all([
+        this.#fs.stat(almaPath),
+        this.#fs.stat(`${hermesRoot}/skills`),
+        this.#fs.stat(`${hermesRoot}/config.yaml`),
+        this.#fs.stat(`${this.#homeDir}/.codex`),
+        this.#fs.stat(`${this.#homeDir}/.claude`),
+        this.#fs.stat(`${this.#homeDir}/.openclaw`),
+      ]);
     const hermesAvailable = hermesSkills.kind === "directory" || hermesConfig.kind === "file";
     return [
       {
@@ -154,6 +156,22 @@ export class ImportService {
         path: `${this.#homeDir}/.claude`,
         detail: "匯入規則、專案記憶與所選時間的對話。",
         unverified: "對話格式",
+      },
+      {
+        kind: "openclaw",
+        name: "OpenClaw",
+        available: openclawStat.kind === "directory",
+        path: `${this.#homeDir}/.openclaw`,
+        detail: "匯入工作區與所選時間的對話。",
+        unverified: "工作區與對話格式",
+      },
+      {
+        kind: "claude",
+        name: "Claude",
+        available: false,
+        path: "",
+        detail: "選擇帳號匯出的 ZIP 或 JSON；記憶請自行貼入。",
+        unverified: "匯出格式",
       },
     ];
   }
@@ -615,6 +633,7 @@ export class ImportService {
     const trimmed = path?.trim() ?? "";
     if (trimmed !== "") return trimmed;
     if (kind === "hermes") return `${this.#homeDir}/.hermes`;
+    if (kind === "openclaw") return `${this.#homeDir}/.openclaw`;
     if (kind === "codex") return `${this.#homeDir}/.codex`;
     if (kind === "claude-code") return `${this.#homeDir}/.claude`;
     if (kind === "alma") return `${this.#homeDir}/Library/Application Support/alma/chat_threads.db`;

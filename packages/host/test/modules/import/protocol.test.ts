@@ -78,6 +78,8 @@ describe("module.import 協定", () => {
       "alma",
       "codex",
       "claude-code",
+      "openclaw",
+      "claude",
     ]);
   });
 

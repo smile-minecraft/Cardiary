@@ -70,7 +70,7 @@ public final class ImportFlowModel: ObservableObject {
 
     public var canPreview: Bool {
         if phase == .previewing || phase == .writing { return false }
-        if sourceKind == .generic && sourcePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if (sourceKind == .generic || sourceKind == .claude) && sourcePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return false
         }
         if includeConversations && range == nil { return false }
@@ -121,6 +121,7 @@ public final class ImportFlowModel: ObservableObject {
     public func chooseSource(kind: ImportSourceKind, path: String) async {
         sourceKind = kind
         sourcePath = path
+        if kind == .claude { includeConversations = true }
         preview = nil
         result = nil
         progress = nil

@@ -27,6 +27,8 @@ import { FileSkillCopier } from "../../../src/modules/import/skills.js";
 import { createAlmaAdapter } from "../../../src/modules/import/sources/alma.js";
 import { createGenericAdapter } from "../../../src/modules/import/sources/generic.js";
 import { createHermesAdapter } from "../../../src/modules/import/sources/hermes.js";
+import { createOpenClawAdapter } from "../../../src/modules/import/sources/openclaw.js";
+import { createClaudeExportAdapter } from "../../../src/modules/import/sources/claude-export.js";
 import {
   createCodexAdapter,
   createClaudeCodeAdapter,
@@ -117,6 +119,8 @@ export async function makeImportFixture(options: FixtureOptions = {}): Promise<I
       ["alma", createAlmaAdapter({ fs, openDatabase: database.open, homeDir })],
       ["codex", createCodexAdapter({ fs })],
       ["claude-code", createClaudeCodeAdapter({ fs })],
+      ["openclaw", createOpenClawAdapter({ fs })],
+      ["claude", createClaudeExportAdapter({ fs })],
     ]),
     store: new ImportJobStore({ db: storage.state, now }),
     cards: new ImportCardWriter({ cardsDirectory: storage.layout.subfolderPath("cards"), now }),
@@ -167,6 +171,11 @@ export class RecordingFileSystem implements SourceFileSystem {
   readText(path: string, options?: { readonly maxBytes?: number }) {
     this.reads.push(path);
     return this.#inner.readText(path, options);
+  }
+
+  readZipEntry(path: string, entry: string) {
+    this.reads.push(`${path}#${entry}`);
+    return this.#inner.readZipEntry(path, entry);
   }
 
   realPath(path: string) {

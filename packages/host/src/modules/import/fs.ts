@@ -1,6 +1,7 @@
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { gunzipSync } from "node:zlib";
+import { readZipEntry } from "./zip.js";
 
 /**
  * 來源轉接器唯一的檔案入口。
@@ -19,6 +20,8 @@ export interface SourceFileSystem {
    * 二進位檔由呼叫端以 `isBinary` 判斷後跳過。
    */
   readText(path: string, options?: { readonly maxBytes?: number }): Promise<SourceTextFile>;
+  /** 只解開指定的 ZIP 項目，其他項目不解壓。 */
+  readZipEntry(path: string, entry: string): Promise<SourceTextFile>;
   /** 解析符號連結後的路徑；用來確認讀取目標沒有跳出允許的目錄。 */
   realPath(path: string): Promise<string>;
 }
@@ -102,6 +105,18 @@ export const nodeSourceFileSystem: SourceFileSystem = {
         text: new TextDecoder("utf-8", { fatal: false }).decode(slice),
         truncated: bytes.byteLength > maxBytes,
         sizeBytes: bytes.byteLength,
+      };
+    } catch (error) {
+      throw new SourceAccessError(path, describe(error));
+    }
+  },
+  async readZipEntry(path, entry) {
+    try {
+      const bytes = await readZipEntry(path, entry);
+      return {
+        text: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+        truncated: false,
+        sizeBytes: bytes.length,
       };
     } catch (error) {
       throw new SourceAccessError(path, describe(error));
