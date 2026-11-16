@@ -368,6 +368,74 @@ describe("media.import 協定", () => {
   });
 });
 
+describe("同時匯入圖片", () => {
+  it("兩個客戶端都能取得 OCR 並寫進各自的卡片", async () => {
+    const service = await spawnService({ control: true });
+    const clients: ProtocolClient[] = [];
+    try {
+      const firstClient = await connectAndHello(service);
+      clients.push(firstClient);
+      const secondClient = await connectAndHello(service);
+      clients.push(secondClient);
+      const [firstBlob, secondBlob] = await Promise.all([
+        upload(service, imageBytes(10)),
+        upload(service, imageBytes(11)),
+      ]);
+      const requests = () =>
+        service
+          .stdoutLines()
+          .map((line) => JSON.parse(line) as Record<string, unknown>)
+          .filter((frame) => frame.kind === "request" && frame.route === "broker.recognition.ocr");
+      const waitForRequests = async (count: number) => {
+        const deadline = Date.now() + 5000;
+        while (requests().length < count) {
+          if (Date.now() >= deadline) throw new Error("等待 OCR 請求逾時");
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      };
+      const reply = (frame: Record<string, unknown>, text: string) => {
+        service.controlRaw(
+          JSON.stringify({
+            v: 1,
+            kind: "response",
+            id: `response_${String(frame.id)}`,
+            replyTo: frame.id,
+            auth: { token: service.controlToken },
+            ok: true,
+            payload: { available: true, text },
+          }),
+        );
+      };
+      const first = call<ImportResponse>(firstClient, "media.import", { blobId: firstBlob.blobId });
+      await waitForRequests(1);
+      let secondFinished = false;
+      const second = call<ImportResponse>(secondClient, "media.import", {
+        blobId: secondBlob.blobId,
+      }).finally(() => {
+        secondFinished = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(secondFinished).toBe(false);
+      expect(requests()).toHaveLength(1);
+      reply(requests()[0]!, "第一張辨識文字");
+      await waitForRequests(2);
+      reply(requests()[1]!, "第二張辨識文字");
+      const results = await Promise.all([first, second]);
+      expect(results.map((result) => result.textStandIn.sources.ocr)).toEqual(["local", "local"]);
+      const cards = await Promise.all(
+        results.map((result) =>
+          call<{ card: { body: string } }>(firstClient, "card.get", { cardId: result.cardId }),
+        ),
+      );
+      expect(cards[0]?.card.body).toContain("第一張辨識文字");
+      expect(cards[1]?.card.body).toContain("第二張辨識文字");
+    } finally {
+      await Promise.all(clients.map((client) => client.close().catch(() => undefined)));
+      await service.stop();
+    }
+  }, 30_000);
+});
+
 describe("media.import 沒有殼", () => {
   let service: SpawnedService;
   let client: ProtocolClient;
