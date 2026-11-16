@@ -61,7 +61,7 @@ export interface PendingPermissionRequest {
   readonly requestKey: string;
   readonly approvalId: string;
   readonly toolName: string;
-  readonly description?: string;
+  readonly description?: string | undefined;
   readonly input: ExternalAgentJson;
   readonly replyToken: string;
 }
@@ -76,12 +76,12 @@ export interface ExternalAgentSessionRecord {
   readonly agentSessionId: string;
   readonly agentKind: ExternalAgentKind;
   readonly workingDirectory: string;
-  readonly prompt?: string;
+  readonly prompt?: string | undefined;
   readonly startedAt: string;
   readonly updatedAt: string;
   readonly status: ExternalAgentStatus;
-  readonly message?: string;
-  readonly progress?: ExternalAgentProgress;
+  readonly message?: string | undefined;
+  readonly progress?: ExternalAgentProgress | undefined;
   readonly completedSteps: number;
   readonly lastEventSeq: number;
   readonly pendingPermission: PendingPermissionRequest | null;
@@ -91,9 +91,9 @@ export interface ExternalAgentSessionRecord {
    * 啟動審批的 id；代理真的啟動之後以及終態之後清空。
    * 用來在主機重啟時撤回卡在 pending 的啟動審批，避免留下幽靈審批。
    */
-  readonly startApprovalId?: string;
+  readonly startApprovalId?: string | undefined;
   /** 客戶端給的冪等鍵；重送同一個 id 只會啟動一次。 */
-  readonly clientRequestId?: string;
+  readonly clientRequestId?: string | undefined;
 }
 
 export interface ExternalAgentUsage {

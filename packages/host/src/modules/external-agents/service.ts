@@ -157,11 +157,13 @@ const DEFAULT_OPENCODE_MODEL = "opencode/iceman-free";
 export class ExternalAgentsService {
   readonly #deps: ExternalAgentsDeps;
   readonly #storage: AgentStoragePaths;
+  readonly #approvals: AgentApprovalsService;
   readonly #live = new Map<string, LiveSession>();
 
   constructor(deps: ExternalAgentsDeps) {
     this.#deps = deps;
     this.#storage = agentStoragePaths(deps.paths);
+    this.#approvals = deps.approvals;
   }
 
   /** 服務啟動時：清暫存、把懸空 session 標結果未知、清 30 天快取。 */
@@ -235,13 +237,15 @@ export class ExternalAgentsService {
       kind: "tool-execution",
       summary: `啟動 ${label}：${workingDirectory}`,
       details: [
-        `代理：${label}`,
-        `工作目錄：${workingDirectory}`,
-        `任務：${input.prompt ?? "（只啟動，不下任務）"}`,
-      ].join("\n"),
+        { label: "代理", value: label },
+        { label: "工作目錄", value: workingDirectory },
+        { label: "任務", value: input.prompt ?? "（只啟動，不下任務）" },
+      ],
       ...(kind === "opencode"
         ? { toolName: "opencode-acp" }
         : { toolName: "claude-code-stream-json" }),
+      // 每個工作階段都是獨立的審批：同一個工具名稱不能讓後面的啟動沿用前面的決定。
+      toolInput: { agentSessionId, workingDirectory },
       risk: "medium",
     });
     const now = this.#now().toISOString();
@@ -569,7 +573,12 @@ export class ExternalAgentsService {
         agentSessionId: live.record.agentSessionId,
         kind: "tool-execution",
         summary: `${this.#label(live.record.agentKind)} 想執行 ${event.toolName}`,
-        details: event.description ?? JSON.stringify(event.input).slice(0, 2000),
+        details: [
+          {
+            label: "內容",
+            value: event.description ?? JSON.stringify(event.input).slice(0, 2000),
+          },
+        ],
         toolName: event.toolName,
         toolInput: event.input as JsonValue,
         risk: "high",

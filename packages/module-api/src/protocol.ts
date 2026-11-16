@@ -4,9 +4,13 @@ import type { URL } from "node:url";
 /** 卡片變更的種類。 */
 export type CardChangeKind = "created" | "updated" | "deleted" | "refreshed" | "reindexed";
 
-/** 外部程式代理的狀態。 */
-export type ExternalAgentStatus =
-  "starting" | "running" | "waiting-approval" | "completed" | "failed";
+/**
+ * 外部程式代理在協定層的狀態。
+ *
+ * 對齊協定 `AgentStatus`；領域層的 `completed` 在協定層以 `stopped` 表示，
+ * 結果寫在 `message`。模組內部的完整狀態不經這個型別。
+ */
+export type ExternalAgentStatus = "starting" | "running" | "waiting-approval" | "stopped" | "failed";
 
 /**
  * 模組想送給客戶端的協定事件。
@@ -67,8 +71,15 @@ export type ProtocolEventIntent =
     }
   | {
       readonly kind: "external-agent-status";
-      readonly agentId: string;
+      readonly agentSessionId: string;
+      readonly agentKind: "opencode" | "claude-code";
       readonly status: ExternalAgentStatus;
+      readonly progress?: {
+        readonly step: string;
+        readonly label: string;
+        readonly completed: number;
+        readonly total: number;
+      };
       readonly message?: string;
     }
   | { readonly kind: "module-event"; readonly type: string; readonly payload: JsonValue };

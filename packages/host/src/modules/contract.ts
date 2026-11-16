@@ -2,6 +2,7 @@ import type { AssetStore, CardIndex, CardService, EmotionState } from "@cardiary
 import type {
   ApprovalActionKind,
   ApprovalDecision,
+  ApprovalDetail,
   ApprovalRisk,
   HumanActor,
   JsonValue,
@@ -190,7 +191,7 @@ export interface AgentApprovalRequestInput {
   /** 給人看的一行說明，例如「OpenCode 想執行 bash」。 */
   readonly summary: string;
   /** 更細的說明；可帶工具輸入的完整內容。 */
-  readonly details?: string;
+  readonly details?: readonly ApprovalDetail[];
   readonly toolName?: string;
   readonly toolInput?: JsonValue;
   readonly risk?: ApprovalRisk;
