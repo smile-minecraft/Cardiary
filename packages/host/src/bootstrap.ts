@@ -44,6 +44,7 @@ import {
 } from "./permissions/delegation.js";
 import {
   HOST_SERVICE_NAMES,
+  type AgentApprovalsService,
   type CardEnvironment,
   type ModuleRuntimeServices,
 } from "./modules/contract.js";
@@ -345,6 +346,39 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   hostServices.provide(HOST_SERVICE_NAMES.engine, engine);
   hostServices.provide(HOST_SERVICE_NAMES.storage, storage);
   hostServices.provide(HOST_SERVICE_NAMES.paths, paths);
+  // 外部代理的審批入口：模組只拿到建立、等決定、撤回這三個窄操作，
+  // 整個引擎不下放。`requestedBy` 一律標成 `{ kind: "agent" }`，
+  // 客戶端才分得出哪一個代理在等決定。
+  const agentApprovals: AgentApprovalsService = {
+    async request(input) {
+      const request = await engine.approvals.request({
+        action: {
+          kind: input.kind,
+          summary: input.summary,
+          ...(input.details === undefined ? {} : { details: input.details }),
+          ...(input.toolName === undefined ? {} : { toolName: input.toolName }),
+          ...(input.toolInput === undefined ? {} : { toolInput: input.toolInput }),
+        },
+        risk: input.risk ?? "unknown",
+        requestedBy: { kind: "agent", agentId: input.agentSessionId },
+        // 代理停在原地等這筆決定，逾時等於沒人吃的拒絕；不自動過期。
+        timeoutMs: null,
+      });
+      return { approvalId: request.id };
+    },
+    async waitForDecision(approvalId, waitOptions) {
+      const resolution = await engine.approvals.waitForDecision(approvalId, waitOptions);
+      return { outcome: resolution.outcome };
+    },
+    async withdraw(approvalId, reason) {
+      try {
+        await engine.approvals.withdraw(approvalId, reason);
+      } catch {
+        // 已經有決定或不存在：沒有東西需要撤回，不能因為它讓代理停不掉。
+      }
+    },
+  };
+  hostServices.provide(HOST_SERVICE_NAMES.agentApprovals, agentApprovals);
   // 蒸餾後的每日維護：掃描、容量淘汰、日誌輪替與兩個資料庫的完整 VACUUM。
   // 記憶體組裝沒有檔案登記簿與引擎庫，不提供這個服務。
   if (persistent !== null) {

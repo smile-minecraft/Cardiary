@@ -19,7 +19,7 @@ export interface ReducedAgentState {
   readonly applied: boolean;
 }
 
-const TERMINAL: readonly ExternalAgentStatus[] = ["completed", "failed"];
+const TERMINAL: readonly ExternalAgentStatus[] = ["completed", "stopped", "failed"];
 
 export function isTerminalAgentStatus(status: ExternalAgentStatus): boolean {
   return TERMINAL.includes(status);
@@ -133,6 +133,28 @@ export function clearPermission(
 ): ExternalAgentSessionRecord {
   if (!record.pendingPermission) return record;
   return { ...record, pendingPermission: null, status: "running" };
+}
+
+/**
+ * 使用者把一個還沒到終態的 session 停止。
+ *
+ * 已完成的步驟保留；待核准的權限請求由主機層撤回（這裡只清空紀錄上的
+ * `pendingPermission`，真正的審批由呼叫端撤回）。
+ */
+export function markStopped(
+  record: ExternalAgentSessionRecord,
+  message: string,
+  now: Date,
+): ExternalAgentSessionRecord {
+  if (isTerminalAgentStatus(record.status)) return record;
+  return {
+    ...record,
+    status: "stopped",
+    message,
+    pendingPermission: null,
+    updatedAt: now.toISOString(),
+    lastEventSeq: record.lastEventSeq + 1,
+  };
 }
 
 /**

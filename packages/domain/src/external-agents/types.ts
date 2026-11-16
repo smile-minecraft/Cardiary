@@ -14,12 +14,14 @@ export const EXTERNAL_AGENT_STATUSES = [
   "running",
   "waiting-approval",
   "completed",
+  "stopped",
   "failed",
 ] as const;
 export type ExternalAgentStatus = (typeof EXTERNAL_AGENT_STATUSES)[number];
 
 export const EXTERNAL_AGENT_TERMINAL_STATUSES: readonly ExternalAgentStatus[] = [
   "completed",
+  "stopped",
   "failed",
 ];
 
@@ -85,6 +87,13 @@ export interface ExternalAgentSessionRecord {
   readonly pendingPermission: PendingPermissionRequest | null;
   /** 主機服務上次重啟時標記為結果未知的 session。 */
   readonly resultUnknown: boolean;
+  /**
+   * 啟動審批的 id；代理真的啟動之後以及終態之後清空。
+   * 用來在主機重啟時撤回卡在 pending 的啟動審批，避免留下幽靈審批。
+   */
+  readonly startApprovalId?: string;
+  /** 客戶端給的冪等鍵；重送同一個 id 只會啟動一次。 */
+  readonly clientRequestId?: string;
 }
 
 export interface ExternalAgentUsage {

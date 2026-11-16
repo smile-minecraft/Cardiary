@@ -1,6 +1,8 @@
 import type { AssetStore, CardIndex, CardService, EmotionState } from "@cardiary/domain";
 import type {
+  ApprovalActionKind,
   ApprovalDecision,
+  ApprovalRisk,
   HumanActor,
   JsonValue,
   ToolBundlePin,
@@ -66,6 +68,8 @@ export const HOST_SERVICE_NAMES = {
   emotion: "emotion",
   /** 白板服務；由白板模組提供，白板協定與代理工具都透過它讀寫。 */
   boards: "boards",
+  /** 外部代理的審批入口；由組合根提供，只有外部代理模組依賴。 */
+  agentApprovals: "agentApprovals",
 } as const;
 
 /** 服務名稱的聯集；`modules.md` 第 5 節那張表。 */
@@ -152,6 +156,52 @@ export interface HostServiceTypeMap {
   memory: DistillationTrigger;
   emotion: EmotionServiceContract;
   boards: BoardsService;
+  agentApprovals: AgentApprovalsService;
+}
+
+/**
+ * 外部代理的審批入口；服務名稱 `agentApprovals`。
+ *
+ * 外部代理（OpenCode、Claude Code）是自己的行程，Cardiary 攔不到它們自己的
+ * 工具呼叫，只能在對方主動問「可不可以」的時候走這條路。組合根把它接到引擎的
+ * 審批服務上，模組拿到的只有這三個方法，不會接觸整個引擎：
+ *
+ * 建立（`request`）時 `requestedBy` 一律是 `{ kind: "agent", agentId: agentSessionId }`，
+ * 客戶端靠這個標記認出是哪一個代理在等，不進主對話的審批種類。
+ * `waitForDecision` 只回 outcome；決定的理由留在引擎裡，模組不需要。
+ * `withdraw` 用在代理已經被停掉、不再需要等決定的時候，避免留下沒人吃的審批。
+ */
+export interface AgentApprovalsService {
+  /** 建立一筆待決定的審批；回傳它的識別碼。 */
+  request(input: AgentApprovalRequestInput): Promise<AgentApprovalCreated>;
+  /** 等決定、逾時或撤回；與審批服務語意一致，只暴露 outcome。 */
+  waitForDecision(
+    approvalId: string,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<AgentApprovalResolution>;
+  /** 撤回尚未決定的請求；已有決定時不影響任何事。 */
+  withdraw(approvalId: string, reason: string): Promise<void>;
+}
+
+export interface AgentApprovalRequestInput {
+  /** 代理工作階段識別碼；會變成審批的 `requestedBy: { kind: "agent", agentId }`。 */
+  readonly agentSessionId: string;
+  readonly kind: ApprovalActionKind;
+  /** 給人看的一行說明，例如「OpenCode 想執行 bash」。 */
+  readonly summary: string;
+  /** 更細的說明；可帶工具輸入的完整內容。 */
+  readonly details?: string;
+  readonly toolName?: string;
+  readonly toolInput?: JsonValue;
+  readonly risk?: ApprovalRisk;
+}
+
+export interface AgentApprovalCreated {
+  readonly approvalId: string;
+}
+
+export interface AgentApprovalResolution {
+  readonly outcome: "approved" | "denied" | "expired" | "withdrawn";
 }
 
 export interface EmotionServiceContract {
