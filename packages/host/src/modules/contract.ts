@@ -71,6 +71,8 @@ export const HOST_SERVICE_NAMES = {
   boards: "boards",
   /** 外部代理的審批入口；由組合根提供，只有外部代理模組依賴。 */
   agentApprovals: "agentApprovals",
+  /** 外部代理的緊急暫停；由外部代理模組提供，閘道在 `approval.pause_all` 時取。 */
+  externalAgentsPause: "externalAgentsPause",
 } as const;
 
 /** 服務名稱的聯集；`modules.md` 第 5 節那張表。 */
@@ -158,6 +160,17 @@ export interface HostServiceTypeMap {
   emotion: EmotionServiceContract;
   boards: BoardsService;
   agentApprovals: AgentApprovalsService;
+  externalAgentsPause: ExternalAgentsPauseService;
+}
+
+/**
+ * 外部代理的緊急暫停入口；服務名稱 `externalAgentsPause`。
+ *
+ * 閘道只依賴這個方法：暫停時撤回等待中的啟動與權限審批，中止已啟動的
+ * 代理，並把工作階段標成中止。沒有模組主機或模組未啟用時不呼叫。
+ */
+export interface ExternalAgentsPauseService {
+  pauseAll(reason: string): Promise<void>;
 }
 
 /**
@@ -187,6 +200,8 @@ export interface AgentApprovalsService {
 export interface AgentApprovalRequestInput {
   /** 代理工作階段識別碼；會變成審批的 `requestedBy: { kind: "agent", agentId }`。 */
   readonly agentSessionId: string;
+  /** 同一工作階段內穩定且唯一的請求識別碼。 */
+  readonly requestId: string;
   readonly kind: ApprovalActionKind;
   /** 給人看的一行說明，例如「OpenCode 想執行 bash」。 */
   readonly summary: string;

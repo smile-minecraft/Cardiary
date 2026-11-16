@@ -38,6 +38,23 @@ export function canonicalJson(value: JsonValue): string {
   }
 }
 
+/** 外部代理審批使用獨立命名空間與結構化編碼，避免與對話鍵或其他請求碰撞。 */
+export function computeExternalAgentApprovalKey(input: {
+  readonly sessionId: string;
+  readonly requestId: string;
+  readonly toolName: string;
+  readonly payload: JsonValue;
+}): string {
+  const material = canonicalJson([
+    "cardiary.approval.external-agent.v1",
+    input.sessionId,
+    input.requestId,
+    input.toolName,
+    input.payload,
+  ]);
+  return createHash("sha256").update(material, "utf8").digest("hex");
+}
+
 function compareUtf8(left: string, right: string): number {
   return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
 }

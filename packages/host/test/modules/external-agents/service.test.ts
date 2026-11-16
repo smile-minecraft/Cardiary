@@ -194,6 +194,7 @@ describe.skipIf(process.platform !== "darwin")("外部代理啟動驗證", () =>
     expect(approvals.requests).toHaveLength(1);
     expect(approvals.requests[0]).toMatchObject({
       agentSessionId: started.agentSessionId,
+      requestId: "start",
       kind: "tool-execution",
       risk: "medium",
       toolName: "claude-code-stream-json",

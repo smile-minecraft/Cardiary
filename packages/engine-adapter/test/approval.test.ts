@@ -45,6 +45,59 @@ function orderedLedger(log: string[]): ApprovalLedger {
 }
 
 describe("審批", () => {
+  it("外部代理審批依工作階段與請求隔離，重送讀回相同決定", async () => {
+    const fixture = await createFixture();
+    try {
+      const draft = {
+        externalAgent: { sessionId: "agent-1", requestId: "permission:1" },
+        action: {
+          kind: "tool-execution" as const,
+          summary: "執行",
+          toolName: "shell",
+          toolInput: {},
+        },
+        risk: "high" as const,
+        requestedBy: { kind: "agent" as const, agentId: "agent-1" },
+      };
+      const first = await fixture.adapter.approvals.request(draft);
+      await fixture.adapter.approvals.decide({
+        requestId: first.id,
+        verdict: "approve",
+        decidedBy: { kind: "human", clientId: "test" },
+      });
+      const again = await fixture.adapter.approvals.request(draft);
+      expect(again.id).toBe(first.id);
+      expect(again.status).toBe("approved");
+      const otherRequest = await fixture.adapter.approvals.request({
+        ...draft,
+        externalAgent: { sessionId: "agent-1", requestId: "permission:2" },
+      });
+      const otherSession = await fixture.adapter.approvals.request({
+        ...draft,
+        externalAgent: { sessionId: "agent-2", requestId: "permission:1" },
+        requestedBy: { kind: "agent", agentId: "agent-2" },
+      });
+      expect(otherRequest.id).not.toBe(first.id);
+      expect(otherSession.id).not.toBe(first.id);
+      expect(otherRequest.status).toBe("pending");
+      expect(otherSession.status).toBe("pending");
+      await expect(
+        fixture.adapter.approvals.request({
+          ...draft,
+          externalAgent: { sessionId: "agent-1", requestId: "" },
+        }),
+      ).rejects.toThrow();
+      await expect(
+        fixture.adapter.approvals.request({
+          ...draft,
+          externalAgent: { sessionId: "agent-2", requestId: "permission:1" },
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it("核准後工具執行、拒絕後工具不執行", async () => {
     const counter = { runs: 0 };
     const fixture = await createFixture();

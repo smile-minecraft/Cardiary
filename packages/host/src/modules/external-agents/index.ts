@@ -37,6 +37,9 @@ async function activate(context: ModuleActivationContext): Promise<void> {
     homeDir: homedir(),
   });
   registerExternalAgentsProtocol({ service, protocol: context.services.protocol });
+  context.services.host.provide(HOST_SERVICE_NAMES.externalAgentsPause, {
+    pauseAll: (reason: string) => service.pauseAll(reason),
+  });
   await service.startupCleanup();
   active = service;
 }

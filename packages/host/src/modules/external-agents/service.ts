@@ -236,6 +236,7 @@ export class ExternalAgentsService {
     const label = kind === "opencode" ? "OpenCode" : "Claude Code";
     const { approvalId } = await this.#approvals.request({
       agentSessionId,
+      requestId: "start",
       kind: "tool-execution",
       summary: `啟動 ${label}：${workingDirectory}`,
       details: [
@@ -360,6 +361,32 @@ export class ExternalAgentsService {
     return computeUsage(this.#storage);
   }
 
+  /** 緊急全部暫停：撤回等待中的審批並中止代理，避免核准後才冒出新行程。 */
+  async pauseAll(reason: string): Promise<void> {
+    for (const [agentSessionId, live] of this.#live) {
+      if (isTerminalAgentStatus(live.record.status)) continue;
+      // 先記下「還沒生出行程」，撤回審批時等待中的啟動流程可能同步改寫紀錄。
+      const waitedOnly = live.record.status === "waiting-approval" && live.child === null;
+      live.stopping = true;
+      live.abort.abort();
+      await this.#withdrawPending(agentSessionId, live.record, reason);
+      if (live.child?.running) {
+        live.child.signal("SIGTERM");
+        const killer = setTimeout(() => {
+          if (live.child?.running) live.child.signal("SIGKILL");
+        }, 3_000);
+        killer.unref?.();
+      }
+      const updated = waitedOnly
+        ? markStopped(live.record, `緊急暫停：代理沒有啟動（${reason}）`, this.#now())
+        : markUnknownAfterRestart(live.record, this.#now());
+      live.record = updated;
+      await writeRecord(this.#storage, updated);
+      this.#emit(updated);
+    }
+    await clearScratch(this.#storage);
+  }
+
   /** 主機關閉：中斷還活著的行程、撤回審批、把結果標成未知。 */
   async shutdown(): Promise<void> {
     for (const [agentSessionId, live] of this.#live) {
@@ -390,6 +417,8 @@ export class ExternalAgentsService {
       return;
     }
     if (resolution.outcome !== "approved") {
+      // 停止或緊急暫停由呼叫端負責寫最終狀態，這裡不要再蓋成失敗。
+      if (live.stopping) return;
       if (live.record.status === "waiting-approval") {
         const denied = resolution.outcome === "denied";
         const updated: ExternalAgentSessionRecord = {
@@ -407,7 +436,7 @@ export class ExternalAgentsService {
       }
       return;
     }
-    if (live.record.status === "waiting-approval") {
+    if (!live.stopping && live.record.status === "waiting-approval") {
       await this.#spawnAgent(live);
     }
   }
@@ -418,6 +447,7 @@ export class ExternalAgentsService {
     const home = homeDir(this.#storage, agentSessionId);
     if (record.agentKind === "opencode") {
       await mkdir(join(home, ".config", "opencode"), { recursive: true });
+      if (live.stopping) return;
       // 沒有這份設定，OpenCode 會直接執行 bash，不會送 permission 請求。
       await writeFile(
         join(home, ".config", "opencode", "opencode.json"),
@@ -432,6 +462,7 @@ export class ExternalAgentsService {
         "utf8",
       );
     }
+    if (live.stopping) return;
     const sandbox = createCommandSandbox({
       workingDir: record.workingDirectory,
       folderRoot: this.#deps.paths.root,
@@ -589,6 +620,7 @@ export class ExternalAgentsService {
     if (event.kind === "permission") {
       const approval = await this.#approvals.request({
         agentSessionId: live.record.agentSessionId,
+        requestId: `permission:${event.requestKey}`,
         kind: "tool-execution",
         summary: `${this.#label(live.record.agentKind)} 想執行 ${event.toolName}`,
         details: [

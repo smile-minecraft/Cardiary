@@ -196,6 +196,7 @@ describe.skipIf(!darwin)("外部代理契約", () => {
       expect(approvalId).not.toBe("");
 
       await waitForState(client, agentSessionId, (state) => state.status === "waiting-approval");
+      expect(await agent.readLog()).toEqual([]);
 
       await decide(client, approvalId, "approve");
       await waitForState(client, agentSessionId, (state) => state.status === "running");
@@ -266,6 +267,36 @@ describe.skipIf(!darwin)("外部代理契約", () => {
       );
       expect(failed.message).toBe("啟動審批被拒絕，代理沒有啟動");
       expect(await agent.readLog()).toEqual([]);
+    },
+    TEST_TIMEOUT,
+  );
+
+  it.each(["stop", "pause"] as const)(
+    "等待啟動審批時 %s：撤回後不啟動代理",
+    async (action) => {
+      const { client, workingDirectory, agent } = await bootWithAgent({
+        kind: "opencode",
+        mode: "complete",
+      });
+      const { agentSessionId, approvalId } = await startAgent(client, {
+        kind: "opencode",
+        workingDirectory,
+      });
+      const id =
+        action === "stop"
+          ? client.request("agent.stop", { agentSessionId })
+          : client.request("approval.pause_all", { reason: "測試緊急暫停" });
+      const reply = await client.waitForReply(id);
+      expect(reply.kind).not.toBe("error");
+      const decision = client.request("approval.decide", { approvalId, optionId: "approve" });
+      const decisionReply = await client.waitForReply(decision);
+      expect(decisionReply.kind).toBe("error");
+      expect(await agent.readLog()).toEqual([]);
+      const session = (await listAgents(client)).find(
+        (candidate) => candidate.agentSessionId === agentSessionId,
+      );
+      expect(session?.status).toBe("stopped");
+      expect(session?.message).toContain(action === "pause" ? "緊急暫停" : "使用者停止");
     },
     TEST_TIMEOUT,
   );

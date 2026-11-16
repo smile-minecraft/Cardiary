@@ -52,6 +52,8 @@ export interface ApprovalRequestDraft {
   readonly conversationId?: ConversationId;
   readonly turnId?: TurnId;
   readonly toolCallId?: ToolCallId;
+  /** 外部代理的獨立審批，不與對話識別碼混用。 */
+  readonly externalAgent?: { readonly sessionId: string; readonly requestId: string };
   readonly action: ApprovalAction;
   readonly risk: ApprovalRisk;
   readonly requestedBy: ApprovalRequester;

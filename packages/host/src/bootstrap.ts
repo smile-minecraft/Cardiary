@@ -352,6 +352,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
   const agentApprovals: AgentApprovalsService = {
     async request(input) {
       const request = await engine.approvals.request({
+        externalAgent: { sessionId: input.agentSessionId, requestId: input.requestId },
         action: {
           kind: input.kind,
           summary: input.summary,

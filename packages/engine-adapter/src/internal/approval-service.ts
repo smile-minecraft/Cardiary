@@ -16,7 +16,7 @@ import type {
 } from "../approval.js";
 import type { ApprovalRequestId } from "../ids.js";
 import type { Clock, Unsubscribe } from "../runtime.js";
-import { computeApprovalKey } from "./canonical.js";
+import { computeApprovalKey, computeExternalAgentApprovalKey } from "./canonical.js";
 import { engineError } from "./errors.js";
 
 interface Waiter {
@@ -63,25 +63,43 @@ export class ApprovalServiceImpl implements ApprovalService {
   }
 
   async request(draft: ApprovalRequestDraft): Promise<ApprovalRequest> {
-    if (draft.conversationId === undefined || draft.turnId === undefined) {
-      throw engineError(
-        "invalid-request",
-        "M0 只支援對話內的審批，draft 必須帶 conversationId 與 turnId",
-      );
-    }
     const toolName =
       draft.action.toolName ??
       (draft.requestedBy.kind === "tool" ? draft.requestedBy.toolName : undefined);
-    if (toolName === undefined) {
+    if (toolName === undefined || toolName.length === 0) {
       throw engineError("invalid-request", "工具審批必須帶工具名稱");
     }
-    const approvalKey = computeApprovalKey({
-      scope: "tool",
-      conversationId: draft.conversationId,
-      turnId: draft.turnId,
-      toolName,
-      payload: draftPayload(draft) as never,
-    });
+    const external = draft.externalAgent;
+    let approvalKey: string;
+    if (external !== undefined) {
+      if (
+        !external.sessionId ||
+        !external.requestId ||
+        draft.requestedBy.kind !== "agent" ||
+        draft.requestedBy.agentId !== external.sessionId ||
+        draft.conversationId !== undefined ||
+        draft.turnId !== undefined
+      ) {
+        throw engineError("invalid-request", "外部代理審批必須帶一致的工作階段與請求識別碼");
+      }
+      approvalKey = computeExternalAgentApprovalKey({
+        sessionId: external.sessionId,
+        requestId: external.requestId,
+        toolName,
+        payload: draftPayload(draft) as never,
+      });
+    } else {
+      if (draft.conversationId === undefined || draft.turnId === undefined) {
+        throw engineError("invalid-request", "對話審批必須帶 conversationId 與 turnId");
+      }
+      approvalKey = computeApprovalKey({
+        scope: "tool",
+        conversationId: draft.conversationId,
+        turnId: draft.turnId,
+        toolName,
+        payload: draftPayload(draft) as never,
+      });
+    }
 
     const inFlight = this.#byKey.get(approvalKey);
     if (inFlight !== undefined) {
