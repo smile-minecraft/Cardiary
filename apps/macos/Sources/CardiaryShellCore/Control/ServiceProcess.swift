@@ -126,6 +126,15 @@ public final class ProcessServiceHandle: ServiceProcessHandle, @unchecked Sendab
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        // 子行程結束後，stdin 的讀端就全部關閉了。殼在 terminationHandler 收掉通道
+        // 之前仍可能送出 health 或代理回應；寫入這種 pipe 時，核心預設會先送
+        // SIGPIPE 殺掉寫入的行程。只關閉這一個 fd 的 SIGPIPE，讓 write(2) 以 EPIPE
+        // 回報，交給 `write` 既有的 writeFailed 路徑處理。
+        guard fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) != -1
+        else {
+            throw ServiceLaunchError.spawnFailed("無法為 stdin 關閉 SIGPIPE（errno \(errno)）")
+        }
+
         do {
             try process.run()
         } catch {
