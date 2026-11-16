@@ -84,13 +84,7 @@ describe("儲存用量", () => {
         expect(item.cleanableBytes, item.category).toBe(0);
       }
     }
-    expect(cleanup.protocolUsage().map((item) => item.category)).toEqual([
-      "cards",
-      "assets",
-      "cache",
-      "state",
-      "logs",
-    ]);
+    expect(usage.find((item) => item.category === "tmp")?.cleanableBytes).toBe(4);
   });
 });
 

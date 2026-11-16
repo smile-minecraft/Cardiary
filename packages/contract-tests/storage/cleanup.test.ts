@@ -46,7 +46,7 @@ async function requestPayload<T>(
 }
 
 describe("儲存清理的協定契約", () => {
-  it("usage 回正本、快取、暫存、日誌、狀態五類，正本不可清", async () => {
+  it("usage 回七類，暫存與殼狀態都在，正本不可清", async () => {
     const { client } = await boot();
     const payload = await requestPayload<{
       usage: Array<{ category: string; bytes: number; cleanableBytes: number }>;
@@ -57,11 +57,18 @@ describe("儲存清理的協定契約", () => {
       "cache",
       "state",
       "logs",
+      "tmp",
+      "shellState",
     ]);
     for (const item of payload.usage) {
       expect(item.bytes).toBeGreaterThanOrEqual(0);
       expect(item.cleanableBytes).toBeGreaterThanOrEqual(0);
-      if (item.category === "cards" || item.category === "assets" || item.category === "state") {
+      if (
+        item.category === "cards" ||
+        item.category === "assets" ||
+        item.category === "state" ||
+        item.category === "shellState"
+      ) {
         expect(item.cleanableBytes).toBe(0);
       }
     }

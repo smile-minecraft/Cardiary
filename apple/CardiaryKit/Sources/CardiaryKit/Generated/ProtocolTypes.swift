@@ -18982,6 +18982,8 @@ public enum StorageUsageCategory: String, Codable, Equatable, Sendable, CaseIter
     case cache = "cache"
     case state = "state"
     case logs = "logs"
+    case tmp = "tmp"
+    case shellState = "shellState"
 }
 
 // MARK: - StorageUsageRequest

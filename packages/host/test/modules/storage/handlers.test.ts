@@ -15,7 +15,7 @@ afterEach(() => {
   while (cleanups.length > 0) cleanups.pop()?.();
 });
 
-function harness(): {
+function harness(shellState?: () => Promise<{ usedBytes: number; limitBytes: number }>): {
   call(type: string, payload?: Record<string, unknown>): Promise<unknown>;
   layout: Storage["layout"];
   storage: Storage;
@@ -39,7 +39,11 @@ function harness(): {
     layout: storage.layout,
     cache: () => storage.cache,
   });
-  registerStorageProtocol({ cleanup, protocol });
+  registerStorageProtocol({
+    cleanup,
+    protocol,
+    ...(shellState === undefined ? {} : { shellState }),
+  });
   return {
     storage,
     layout: storage.layout,
@@ -58,10 +62,11 @@ function put(layout: Storage["layout"], relativePath: string, content: string): 
 }
 
 describe("storage 協定", () => {
-  it("usage 只回協定五類，正本不可清", async () => {
-    const { call, layout } = harness();
+  it("usage 回報七類，含暫存與殼狀態；正本不可清", async () => {
+    const { call, layout } = harness(async () => ({ usedBytes: 2048, limitBytes: 52428800 }));
     put(layout, "cards/a.md", "card");
     put(layout, "cache/a.bin", "cache");
+    put(layout, "tmp/a.bin", "tmp");
     const response = (await call("storage.usage")) as {
       usage: Array<{ category: string; bytes: number; cleanableBytes: number }>;
     };
@@ -71,18 +76,63 @@ describe("storage 協定", () => {
       "cache",
       "state",
       "logs",
+      "tmp",
+      "shellState",
     ]);
     expect(response.usage.find((item) => item.category === "cards")?.cleanableBytes).toBe(0);
+    expect(response.usage.find((item) => item.category === "shellState")).toEqual({
+      category: "shellState",
+      bytes: 2048,
+      cleanableBytes: 0,
+    });
   });
 
-  it("拒絕正本類別與沒有預覽的執行", async () => {
+  it("沒有殼或殼沒有回應時，殼狀態回 0 而不是讓整個請求失敗", async () => {
+    const withoutShell = (await harness().call("storage.usage")) as {
+      usage: Array<{ category: string; bytes: number }>;
+    };
+    expect(withoutShell.usage.find((item) => item.category === "shellState")?.bytes).toBe(0);
+
+    const failing = (await harness(async () => {
+      throw new Error("控制通道中斷");
+    }).call("storage.usage")) as { usage: Array<{ category: string; bytes: number }> };
+    expect(failing.usage.find((item) => item.category === "shellState")?.bytes).toBe(0);
+  });
+
+  it("拒絕正本類別、殼狀態與沒有預覽的執行", async () => {
     const { call } = harness();
-    await expect(call("storage.cleanup.preview", { categories: ["cards"] })).rejects.toMatchObject({
-      code: "invalid_message",
-    } satisfies Partial<ProtocolHandlerError>);
+    for (const category of ["cards", "assets", "state", "shellState"]) {
+      await expect(
+        call("storage.cleanup.preview", { categories: [category] }),
+        category,
+      ).rejects.toMatchObject({
+        code: "invalid_message",
+      } satisfies Partial<ProtocolHandlerError>);
+    }
     await expect(call("storage.cleanup.apply", { categories: ["cache"] })).rejects.toMatchObject({
       code: "invalid_message",
     } satisfies Partial<ProtocolHandlerError>);
+  });
+
+  it("預覽四類可清理的類別，總量是各類別之和", async () => {
+    const { call, layout } = harness();
+    put(layout, "cache/a.bin", "abc");
+    put(layout, "tmp/b.bin", "12345");
+    put(layout, "logs/host.log", "log-line");
+    const preview = (await call("storage.cleanup.preview", {
+      categories: ["cache", "temp", "indexes", "logs"],
+    })) as {
+      targets: Array<{ category: string; items: number; bytes: number }>;
+      totalBytes: number;
+    };
+    expect(preview.targets.map((target) => target.category)).toEqual([
+      "cache",
+      "temp",
+      "indexes",
+      "logs",
+    ]);
+    expect(preview.totalBytes).toBe(preview.targets.reduce((sum, target) => sum + target.bytes, 0));
+    expect(preview.targets.find((target) => target.category === "temp")?.bytes).toBe(5);
   });
 
   it("預覽後才清除，並留下清理紀錄", async () => {

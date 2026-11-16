@@ -114,6 +114,26 @@ describe("協定 schema 與範例", () => {
     }
   });
 
+  it("儲存用量範例涵蓋所有類別，清理範例只碰可清理的類別", () => {
+    const categories = schema.$defs.StorageUsageCategory.enum as string[];
+    const usage = examples.storageUsageResponse.payload.usage as Array<{
+      category: string;
+      cleanableBytes: number;
+    }>;
+    expect(usage.map((item) => item.category).sort()).toEqual([...categories].sort());
+
+    for (const category of ["cards", "assets", "state", "shellState"]) {
+      expect(usage.find((item) => item.category === category)?.cleanableBytes, category).toBe(0);
+    }
+
+    const cleanable = new Set(["cache", "temp", "indexes", "logs"]);
+    for (const name of ["storageCleanupPreviewRequest", "storageCleanupApplyRequest"]) {
+      for (const category of examples[name].payload.categories as string[]) {
+        expect(cleanable.has(category), `${name}: ${category}`).toBe(true);
+      }
+    }
+  });
+
   it("schema 中的每個訊息型別至少有一個範例", () => {
     const types = collectTypeConstants();
     for (const type of types) {
