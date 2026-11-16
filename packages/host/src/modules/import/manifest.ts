@@ -1,6 +1,6 @@
 import type { ModuleManifest } from "@cardiary/module-api";
 
-/** 匯入模組；三個來源轉接器與 `module.import.*`。 */
+/** 匯入模組；來源轉接器與 `module.import.*`。 */
 export const manifest: ModuleManifest = {
   id: "import",
   name: "匯入",

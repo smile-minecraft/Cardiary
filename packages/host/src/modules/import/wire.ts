@@ -36,6 +36,9 @@ export function wirePreview(preview: ImportPreview): JsonValue {
       ...(item.createdAt === undefined ? {} : { createdAt: item.createdAt }),
       contentHash: item.contentHash,
       source: item.source,
+      ...(item.key.startsWith("codex:project:") || item.key.startsWith("claude-code:project:")
+        ? { origin: "project" }
+        : {}),
       ...(item.importance === undefined ? {} : { importance: item.importance }),
       ...(item.duplicateCardId === undefined ? {} : { duplicateCardId: item.duplicateCardId }),
     })),

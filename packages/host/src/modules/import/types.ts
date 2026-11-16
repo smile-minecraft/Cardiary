@@ -3,15 +3,23 @@ import type { CardKind } from "@cardiary/domain";
 /**
  * 匯入來源轉接器的共通中介格式（規格書第 16 章）。
  *
- * 不論來源是通用資料夾、Hermes 還是 Alma，轉接器都只把資料歸成六類並填
+ * 不論來源種類，轉接器都只把資料歸成六類並填
  * `ImportItemDraft`／`ImportSkillDraft`／`ImportConversationCandidate`；
  * 寫成卡片、複製技能與摘要對話都在這一層之後，轉接器不知道卡片檔長什麼樣。
  *
  * 這裡的型別是主機內部格式；協定上的線路形狀由 `wire.ts` 轉一次。
  */
 
-/** M1 內建的來源種類；新來源由外掛模組擴充。 */
-export const IMPORT_SOURCE_KINDS = ["generic", "hermes", "alma"] as const;
+/** 內建的來源種類。 */
+export const IMPORT_SOURCE_KINDS = [
+  "generic",
+  "hermes",
+  "alma",
+  "codex",
+  "claude-code",
+  "openclaw",
+  "claude",
+] as const;
 export type ImportSourceKind = (typeof IMPORT_SOURCE_KINDS)[number];
 
 /** 六類中介格式；對應 `import_items.category` 的檢查條件。 */

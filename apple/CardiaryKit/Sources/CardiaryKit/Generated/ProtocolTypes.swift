@@ -3074,6 +3074,91 @@ public struct CardSummary: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - CardiaryNotification
+
+public struct CardiaryNotification: Codable, Equatable, Sendable {
+    public let notificationId: String
+    public let kind: NotificationKind
+    public let title: String
+    public let body: String
+    public let createdAt: String
+    public let readAt: String?
+    public let sourceScheduleId: String?
+    public let sourceConversationId: String?
+    public let payload: JSONObject
+
+    public init(
+        notificationId: String,
+        kind: NotificationKind,
+        title: String,
+        body: String,
+        createdAt: String,
+        readAt: String? = nil,
+        sourceScheduleId: String? = nil,
+        sourceConversationId: String? = nil,
+        payload: JSONObject
+    ) {
+        self.notificationId = notificationId
+        self.kind = kind
+        self.title = title
+        self.body = body
+        self.createdAt = createdAt
+        self.readAt = readAt
+        self.sourceScheduleId = sourceScheduleId
+        self.sourceConversationId = sourceConversationId
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case notificationId = "notificationId"
+        case kind = "kind"
+        case title = "title"
+        case body = "body"
+        case createdAt = "createdAt"
+        case readAt = "readAt"
+        case sourceScheduleId = "sourceScheduleId"
+        case sourceConversationId = "sourceConversationId"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let notificationId = try container.decode(String.self, forKey: .notificationId)
+        let kind = try container.decode(NotificationKind.self, forKey: .kind)
+        let title = try container.decode(String.self, forKey: .title)
+        let body = try container.decode(String.self, forKey: .body)
+        let createdAt = try container.decode(String.self, forKey: .createdAt)
+        let readAt = try container.decodeIfPresent(String.self, forKey: .readAt)
+        let sourceScheduleId = try container.decodeIfPresent(String.self, forKey: .sourceScheduleId)
+        let sourceConversationId = try container.decodeIfPresent(String.self, forKey: .sourceConversationId)
+        let payload = try container.decode(JSONObject.self, forKey: .payload)
+        self.init(
+            notificationId: notificationId,
+            kind: kind,
+            title: title,
+            body: body,
+            createdAt: createdAt,
+            readAt: readAt,
+            sourceScheduleId: sourceScheduleId,
+            sourceConversationId: sourceConversationId,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(notificationId, forKey: .notificationId)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(title, forKey: .title)
+        try container.encode(body, forKey: .body)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(readAt, forKey: .readAt)
+        try container.encodeIfPresent(sourceScheduleId, forKey: .sourceScheduleId)
+        try container.encodeIfPresent(sourceConversationId, forKey: .sourceConversationId)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
 // MARK: - ClientFrame
 
 public enum ClientFrame: Codable, Equatable, Sendable {
@@ -3112,6 +3197,11 @@ public enum ClientFrame: Codable, Equatable, Sendable {
     case approvalDecideRequest(ApprovalDecideRequest)
     case approvalPauseAllRequest(ApprovalPauseAllRequest)
     case moduleRequest(ModuleRequest)
+    case notificationListRequest(NotificationListRequest)
+    case notificationMarkReadRequest(NotificationMarkReadRequest)
+    case notificationCreateCardRequest(NotificationCreateCardRequest)
+    case pairingBeginRequest(PairingBeginRequest)
+    case pairingCompleteRequest(PairingCompleteRequest)
 
     private enum DiscriminatorKeys: String, CodingKey {
         case type
@@ -3189,6 +3279,16 @@ public enum ClientFrame: Codable, Equatable, Sendable {
             self = .approvalDecideRequest(try ApprovalDecideRequest(from: decoder))
         case .some("approval.pause_all"):
             self = .approvalPauseAllRequest(try ApprovalPauseAllRequest(from: decoder))
+        case .some("notification.list"):
+            self = .notificationListRequest(try NotificationListRequest(from: decoder))
+        case .some("notification.mark_read"):
+            self = .notificationMarkReadRequest(try NotificationMarkReadRequest(from: decoder))
+        case .some("notification.create_card"):
+            self = .notificationCreateCardRequest(try NotificationCreateCardRequest(from: decoder))
+        case .some("pairing.begin"):
+            self = .pairingBeginRequest(try PairingBeginRequest(from: decoder))
+        case .some("pairing.complete"):
+            self = .pairingCompleteRequest(try PairingCompleteRequest(from: decoder))
         case .some(let value0) where value0.hasPrefix("module."):
             self = .moduleRequest(try ModuleRequest(from: decoder))
         default:
@@ -3267,6 +3367,16 @@ public enum ClientFrame: Codable, Equatable, Sendable {
         case .approvalPauseAllRequest(let value):
             try value.encode(to: encoder)
         case .moduleRequest(let value):
+            try value.encode(to: encoder)
+        case .notificationListRequest(let value):
+            try value.encode(to: encoder)
+        case .notificationMarkReadRequest(let value):
+            try value.encode(to: encoder)
+        case .notificationCreateCardRequest(let value):
+            try value.encode(to: encoder)
+        case .pairingBeginRequest(let value):
+            try value.encode(to: encoder)
+        case .pairingCompleteRequest(let value):
             try value.encode(to: encoder)
         }
     }
@@ -3986,6 +4096,14 @@ public struct ContextCompactedEventPayload: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - ContextDealSource
+
+public enum ContextDealSource: String, Codable, Equatable, Sendable, CaseIterable {
+    case systemOne = "system-one"
+    case retrieval = "retrieval"
+    case manual = "manual"
+}
+
 // MARK: - ContextEntry
 
 public struct ContextEntry: Codable, Equatable, Sendable {
@@ -3996,6 +4114,8 @@ public struct ContextEntry: Codable, Equatable, Sendable {
     public let tokenEstimate: Int
     public let state: ContextEntryState
     public let position: Int
+    public let dealProbability: Double?
+    public let dealSource: ContextDealSource?
 
     public init(
         entryId: String,
@@ -4004,7 +4124,9 @@ public struct ContextEntry: Codable, Equatable, Sendable {
         title: String,
         tokenEstimate: Int,
         state: ContextEntryState,
-        position: Int
+        position: Int,
+        dealProbability: Double? = nil,
+        dealSource: ContextDealSource? = nil
     ) {
         self.entryId = entryId
         self.layer = layer
@@ -4013,6 +4135,8 @@ public struct ContextEntry: Codable, Equatable, Sendable {
         self.tokenEstimate = tokenEstimate
         self.state = state
         self.position = position
+        self.dealProbability = dealProbability
+        self.dealSource = dealSource
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -4023,6 +4147,8 @@ public struct ContextEntry: Codable, Equatable, Sendable {
         case tokenEstimate = "tokenEstimate"
         case state = "state"
         case position = "position"
+        case dealProbability = "dealProbability"
+        case dealSource = "dealSource"
     }
 
     public init(from decoder: Decoder) throws {
@@ -4034,6 +4160,8 @@ public struct ContextEntry: Codable, Equatable, Sendable {
         let tokenEstimate = try container.decode(Int.self, forKey: .tokenEstimate)
         let state = try container.decode(ContextEntryState.self, forKey: .state)
         let position = try container.decode(Int.self, forKey: .position)
+        let dealProbability = try container.decodeIfPresent(Double.self, forKey: .dealProbability)
+        let dealSource = try container.decodeIfPresent(ContextDealSource.self, forKey: .dealSource)
         self.init(
             entryId: entryId,
             layer: layer,
@@ -4041,7 +4169,9 @@ public struct ContextEntry: Codable, Equatable, Sendable {
             title: title,
             tokenEstimate: tokenEstimate,
             state: state,
-            position: position
+            position: position,
+            dealProbability: dealProbability,
+            dealSource: dealSource
         )
     }
 
@@ -4054,6 +4184,8 @@ public struct ContextEntry: Codable, Equatable, Sendable {
         try container.encode(tokenEstimate, forKey: .tokenEstimate)
         try container.encode(state, forKey: .state)
         try container.encode(position, forKey: .position)
+        try container.encodeIfPresent(dealProbability, forKey: .dealProbability)
+        try container.encodeIfPresent(dealSource, forKey: .dealSource)
     }
 }
 
@@ -4591,6 +4723,136 @@ public enum DeliveryMode: String, Codable, Equatable, Sendable, CaseIterable {
     case queue = "queue"
     case steer = "steer"
     case interrupt = "interrupt"
+}
+
+// MARK: - DeviceKind
+
+public enum DeviceKind: String, Codable, Equatable, Sendable, CaseIterable {
+    case web = "web"
+    case ios = "ios"
+}
+
+// MARK: - DeviceListChangedEventPayload
+
+public struct DeviceListChangedEventPayload: Codable, Equatable, Sendable {
+    public let devices: [PairedDevice]
+
+    public init(
+        devices: [PairedDevice]
+    ) {
+        self.devices = devices
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case devices = "devices"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let devices = try container.decode([PairedDevice].self, forKey: .devices)
+        self.init(
+            devices: devices
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(devices, forKey: .devices)
+    }
+}
+
+// MARK: - DeviceListResponsePayload
+
+public struct DeviceListResponsePayload: Codable, Equatable, Sendable {
+    public let devices: [PairedDevice]
+
+    public init(
+        devices: [PairedDevice]
+    ) {
+        self.devices = devices
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case devices = "devices"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let devices = try container.decode([PairedDevice].self, forKey: .devices)
+        self.init(
+            devices: devices
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(devices, forKey: .devices)
+    }
+}
+
+// MARK: - DeviceRevokeRequestPayload
+
+public struct DeviceRevokeRequestPayload: Codable, Equatable, Sendable {
+    public let deviceId: String
+
+    public init(
+        deviceId: String
+    ) {
+        self.deviceId = deviceId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case deviceId = "deviceId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let deviceId = try container.decode(String.self, forKey: .deviceId)
+        self.init(
+            deviceId: deviceId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deviceId, forKey: .deviceId)
+    }
+}
+
+// MARK: - DeviceRevokeResponsePayload
+
+public struct DeviceRevokeResponsePayload: Codable, Equatable, Sendable {
+    public let revoked: Bool
+    public let deviceId: String
+
+    public init(
+        revoked: Bool,
+        deviceId: String
+    ) {
+        self.revoked = revoked
+        self.deviceId = deviceId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case revoked = "revoked"
+        case deviceId = "deviceId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let revoked = try container.decode(Bool.self, forKey: .revoked)
+        let deviceId = try container.decode(String.self, forKey: .deviceId)
+        self.init(
+            revoked: revoked,
+            deviceId: deviceId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(revoked, forKey: .revoked)
+        try container.encode(deviceId, forKey: .deviceId)
+    }
 }
 
 // MARK: - EmptyPayload
@@ -5858,6 +6120,1408 @@ public enum ModuleState: String, Codable, Equatable, Sendable, CaseIterable {
     case failed = "failed"
 }
 
+// MARK: - NotificationChangedEvent
+
+public struct NotificationChangedEvent: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let type: String
+    public let stream: String
+    public let seq: Int
+    public let emittedAt: String
+    public let payload: NotificationChangedEventPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "event",
+        type: String = "notification.changed",
+        stream: String,
+        seq: Int,
+        emittedAt: String,
+        payload: NotificationChangedEventPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.type = type
+        self.stream = stream
+        self.seq = seq
+        self.emittedAt = emittedAt
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case type = "type"
+        case stream = "stream"
+        case seq = "seq"
+        case emittedAt = "emittedAt"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "NotificationChangedEvent.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "event" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "NotificationChangedEvent.kind 必須是 event")
+        }
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "notification.changed" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "NotificationChangedEvent.type 必須是 notification.changed")
+        }
+        let stream = try container.decode(String.self, forKey: .stream)
+        let seq = try container.decode(Int.self, forKey: .seq)
+        let emittedAt = try container.decode(String.self, forKey: .emittedAt)
+        let payload = try container.decode(NotificationChangedEventPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            type: type,
+            stream: stream,
+            seq: seq,
+            emittedAt: emittedAt,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(type, forKey: .type)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(seq, forKey: .seq)
+        try container.encode(emittedAt, forKey: .emittedAt)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - NotificationChangedEventPayload
+
+public struct NotificationChangedEventPayload: Codable, Equatable, Sendable {
+    public let notification: CardiaryNotification
+
+    public init(
+        notification: CardiaryNotification
+    ) {
+        self.notification = notification
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case notification = "notification"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let notification = try container.decode(CardiaryNotification.self, forKey: .notification)
+        self.init(
+            notification: notification
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(notification, forKey: .notification)
+    }
+}
+
+// MARK: - NotificationCreateCardRequest
+
+public struct NotificationCreateCardRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: NotificationCreateCardRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "notification.create_card",
+        payload: NotificationCreateCardRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "NotificationCreateCardRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "NotificationCreateCardRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "notification.create_card" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "NotificationCreateCardRequest.type 必須是 notification.create_card")
+        }
+        let payload = try container.decode(NotificationCreateCardRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - NotificationCreateCardRequestPayload
+
+public struct NotificationCreateCardRequestPayload: Codable, Equatable, Sendable {
+    public let notificationId: String
+
+    public init(
+        notificationId: String
+    ) {
+        self.notificationId = notificationId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case notificationId = "notificationId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let notificationId = try container.decode(String.self, forKey: .notificationId)
+        self.init(
+            notificationId: notificationId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(notificationId, forKey: .notificationId)
+    }
+}
+
+// MARK: - NotificationCreateCardResponse
+
+public struct NotificationCreateCardResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: NotificationCreateCardResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "notification.create_card",
+        payload: NotificationCreateCardResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "NotificationCreateCardResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "NotificationCreateCardResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "notification.create_card" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "NotificationCreateCardResponse.type 必須是 notification.create_card")
+        }
+        let payload = try container.decode(NotificationCreateCardResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - NotificationCreateCardResponsePayload
+
+public struct NotificationCreateCardResponsePayload: Codable, Equatable, Sendable {
+    public let card: CardSummary
+    public let deduped: Bool
+
+    public init(
+        card: CardSummary,
+        deduped: Bool
+    ) {
+        self.card = card
+        self.deduped = deduped
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case card = "card"
+        case deduped = "deduped"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let card = try container.decode(CardSummary.self, forKey: .card)
+        let deduped = try container.decode(Bool.self, forKey: .deduped)
+        self.init(
+            card: card,
+            deduped: deduped
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(card, forKey: .card)
+        try container.encode(deduped, forKey: .deduped)
+    }
+}
+
+// MARK: - NotificationKind
+
+public enum NotificationKind: String, Codable, Equatable, Sendable, CaseIterable {
+    case schedule = "schedule"
+    case heartbeat = "heartbeat"
+    case distillation = "distillation"
+}
+
+// MARK: - NotificationListRequest
+
+public struct NotificationListRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: NotificationListRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "notification.list",
+        payload: NotificationListRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "NotificationListRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "NotificationListRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "notification.list" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "NotificationListRequest.type 必須是 notification.list")
+        }
+        let payload = try container.decode(NotificationListRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - NotificationListRequestPayload
+
+public struct NotificationListRequestPayload: Codable, Equatable, Sendable {
+    public let limit: Int?
+    public let before: String?
+    public let unreadOnly: Bool?
+
+    public init(
+        limit: Int? = nil,
+        before: String? = nil,
+        unreadOnly: Bool? = nil
+    ) {
+        self.limit = limit
+        self.before = before
+        self.unreadOnly = unreadOnly
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case limit = "limit"
+        case before = "before"
+        case unreadOnly = "unreadOnly"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let limit = try container.decodeIfPresent(Int.self, forKey: .limit)
+        let before = try container.decodeIfPresent(String.self, forKey: .before)
+        let unreadOnly = try container.decodeIfPresent(Bool.self, forKey: .unreadOnly)
+        self.init(
+            limit: limit,
+            before: before,
+            unreadOnly: unreadOnly
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(limit, forKey: .limit)
+        try container.encodeIfPresent(before, forKey: .before)
+        try container.encodeIfPresent(unreadOnly, forKey: .unreadOnly)
+    }
+}
+
+// MARK: - NotificationListResponse
+
+public struct NotificationListResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: NotificationListResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "notification.list",
+        payload: NotificationListResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "NotificationListResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "NotificationListResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "notification.list" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "NotificationListResponse.type 必須是 notification.list")
+        }
+        let payload = try container.decode(NotificationListResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - NotificationListResponsePayload
+
+public struct NotificationListResponsePayload: Codable, Equatable, Sendable {
+    public let notifications: [CardiaryNotification]
+    public let totalUnread: Int
+    public let nextCursor: String?
+
+    public init(
+        notifications: [CardiaryNotification],
+        totalUnread: Int,
+        nextCursor: String? = nil
+    ) {
+        self.notifications = notifications
+        self.totalUnread = totalUnread
+        self.nextCursor = nextCursor
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case notifications = "notifications"
+        case totalUnread = "totalUnread"
+        case nextCursor = "nextCursor"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let notifications = try container.decode([CardiaryNotification].self, forKey: .notifications)
+        let totalUnread = try container.decode(Int.self, forKey: .totalUnread)
+        let nextCursor = try container.decodeIfPresent(String.self, forKey: .nextCursor)
+        self.init(
+            notifications: notifications,
+            totalUnread: totalUnread,
+            nextCursor: nextCursor
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(notifications, forKey: .notifications)
+        try container.encode(totalUnread, forKey: .totalUnread)
+        try container.encodeIfPresent(nextCursor, forKey: .nextCursor)
+    }
+}
+
+// MARK: - NotificationMarkReadRequest
+
+public struct NotificationMarkReadRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: NotificationMarkReadRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "notification.mark_read",
+        payload: NotificationMarkReadRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "NotificationMarkReadRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "NotificationMarkReadRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "notification.mark_read" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "NotificationMarkReadRequest.type 必須是 notification.mark_read")
+        }
+        let payload = try container.decode(NotificationMarkReadRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - NotificationMarkReadRequestPayload
+
+public struct NotificationMarkReadRequestPayload: Codable, Equatable, Sendable {
+    public let ids: [String]?
+    public let all: Bool?
+
+    public init(
+        ids: [String]? = nil,
+        all: Bool? = nil
+    ) {
+        self.ids = ids
+        self.all = all
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case ids = "ids"
+        case all = "all"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let ids = try container.decodeIfPresent([String].self, forKey: .ids)
+        let all = try container.decodeIfPresent(Bool.self, forKey: .all)
+        self.init(
+            ids: ids,
+            all: all
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(ids, forKey: .ids)
+        try container.encodeIfPresent(all, forKey: .all)
+    }
+}
+
+// MARK: - NotificationMarkReadResponse
+
+public struct NotificationMarkReadResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: NotificationMarkReadResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "notification.mark_read",
+        payload: NotificationMarkReadResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "NotificationMarkReadResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "NotificationMarkReadResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "notification.mark_read" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "NotificationMarkReadResponse.type 必須是 notification.mark_read")
+        }
+        let payload = try container.decode(NotificationMarkReadResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - NotificationMarkReadResponsePayload
+
+public struct NotificationMarkReadResponsePayload: Codable, Equatable, Sendable {
+    public let updated: Int
+    public let totalUnread: Int
+
+    public init(
+        updated: Int,
+        totalUnread: Int
+    ) {
+        self.updated = updated
+        self.totalUnread = totalUnread
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case updated = "updated"
+        case totalUnread = "totalUnread"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let updated = try container.decode(Int.self, forKey: .updated)
+        let totalUnread = try container.decode(Int.self, forKey: .totalUnread)
+        self.init(
+            updated: updated,
+            totalUnread: totalUnread
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(updated, forKey: .updated)
+        try container.encode(totalUnread, forKey: .totalUnread)
+    }
+}
+
+// MARK: - PairedDevice
+
+public struct PairedDevice: Codable, Equatable, Sendable {
+    public let deviceId: String
+    public let name: String
+    public let kind: DeviceKind
+    public let createdAt: String
+    public let lastUsedAt: String?
+    public let revokedAt: String?
+
+    public init(
+        deviceId: String,
+        name: String,
+        kind: DeviceKind,
+        createdAt: String,
+        lastUsedAt: String? = nil,
+        revokedAt: String? = nil
+    ) {
+        self.deviceId = deviceId
+        self.name = name
+        self.kind = kind
+        self.createdAt = createdAt
+        self.lastUsedAt = lastUsedAt
+        self.revokedAt = revokedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case deviceId = "deviceId"
+        case name = "name"
+        case kind = "kind"
+        case createdAt = "createdAt"
+        case lastUsedAt = "lastUsedAt"
+        case revokedAt = "revokedAt"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let deviceId = try container.decode(String.self, forKey: .deviceId)
+        let name = try container.decode(String.self, forKey: .name)
+        let kind = try container.decode(DeviceKind.self, forKey: .kind)
+        let createdAt = try container.decode(String.self, forKey: .createdAt)
+        let lastUsedAt = try container.decodeIfPresent(String.self, forKey: .lastUsedAt)
+        let revokedAt = try container.decodeIfPresent(String.self, forKey: .revokedAt)
+        self.init(
+            deviceId: deviceId,
+            name: name,
+            kind: kind,
+            createdAt: createdAt,
+            lastUsedAt: lastUsedAt,
+            revokedAt: revokedAt
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deviceId, forKey: .deviceId)
+        try container.encode(name, forKey: .name)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(lastUsedAt, forKey: .lastUsedAt)
+        try container.encodeIfPresent(revokedAt, forKey: .revokedAt)
+    }
+}
+
+// MARK: - PairingApproveRequestPayload
+
+public struct PairingApproveRequestPayload: Codable, Equatable, Sendable {
+    public let pairingRequestId: String
+
+    public init(
+        pairingRequestId: String
+    ) {
+        self.pairingRequestId = pairingRequestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pairingRequestId = "pairingRequestId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let pairingRequestId = try container.decode(String.self, forKey: .pairingRequestId)
+        self.init(
+            pairingRequestId: pairingRequestId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pairingRequestId, forKey: .pairingRequestId)
+    }
+}
+
+// MARK: - PairingApproveResponsePayload
+
+public struct PairingApproveResponsePayload: Codable, Equatable, Sendable {
+    public let approved: Bool
+    public let deviceId: String
+
+    public init(
+        approved: Bool,
+        deviceId: String
+    ) {
+        self.approved = approved
+        self.deviceId = deviceId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case approved = "approved"
+        case deviceId = "deviceId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let approved = try container.decode(Bool.self, forKey: .approved)
+        let deviceId = try container.decode(String.self, forKey: .deviceId)
+        self.init(
+            approved: approved,
+            deviceId: deviceId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(approved, forKey: .approved)
+        try container.encode(deviceId, forKey: .deviceId)
+    }
+}
+
+// MARK: - PairingBeginRequest
+
+public struct PairingBeginRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: PairingBeginRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "pairing.begin",
+        payload: PairingBeginRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "PairingBeginRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "PairingBeginRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "pairing.begin" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "PairingBeginRequest.type 必須是 pairing.begin")
+        }
+        let payload = try container.decode(PairingBeginRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - PairingBeginRequestPayload
+
+public struct PairingBeginRequestPayload: Codable, Equatable, Sendable {
+    public let deviceName: String
+    public let kind: DeviceKind
+
+    public init(
+        deviceName: String,
+        kind: DeviceKind
+    ) {
+        self.deviceName = deviceName
+        self.kind = kind
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case deviceName = "deviceName"
+        case kind = "kind"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let deviceName = try container.decode(String.self, forKey: .deviceName)
+        let kind = try container.decode(DeviceKind.self, forKey: .kind)
+        self.init(
+            deviceName: deviceName,
+            kind: kind
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deviceName, forKey: .deviceName)
+        try container.encode(kind, forKey: .kind)
+    }
+}
+
+// MARK: - PairingBeginResponse
+
+public struct PairingBeginResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: PairingBeginResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "pairing.begin",
+        payload: PairingBeginResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "PairingBeginResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "PairingBeginResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "pairing.begin" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "PairingBeginResponse.type 必須是 pairing.begin")
+        }
+        let payload = try container.decode(PairingBeginResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - PairingBeginResponsePayload
+
+public struct PairingBeginResponsePayload: Codable, Equatable, Sendable {
+    public let pairingRequestId: String
+    public let code: String
+    public let expiresAt: String
+
+    public init(
+        pairingRequestId: String,
+        code: String,
+        expiresAt: String
+    ) {
+        self.pairingRequestId = pairingRequestId
+        self.code = code
+        self.expiresAt = expiresAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pairingRequestId = "pairingRequestId"
+        case code = "code"
+        case expiresAt = "expiresAt"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let pairingRequestId = try container.decode(String.self, forKey: .pairingRequestId)
+        let code = try container.decode(String.self, forKey: .code)
+        let expiresAt = try container.decode(String.self, forKey: .expiresAt)
+        self.init(
+            pairingRequestId: pairingRequestId,
+            code: code,
+            expiresAt: expiresAt
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pairingRequestId, forKey: .pairingRequestId)
+        try container.encode(code, forKey: .code)
+        try container.encode(expiresAt, forKey: .expiresAt)
+    }
+}
+
+// MARK: - PairingCompleteRequest
+
+public struct PairingCompleteRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: PairingCompleteRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "pairing.complete",
+        payload: PairingCompleteRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "PairingCompleteRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "PairingCompleteRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "pairing.complete" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "PairingCompleteRequest.type 必須是 pairing.complete")
+        }
+        let payload = try container.decode(PairingCompleteRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - PairingCompleteRequestPayload
+
+public struct PairingCompleteRequestPayload: Codable, Equatable, Sendable {
+    public let pairingRequestId: String
+
+    public init(
+        pairingRequestId: String
+    ) {
+        self.pairingRequestId = pairingRequestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pairingRequestId = "pairingRequestId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let pairingRequestId = try container.decode(String.self, forKey: .pairingRequestId)
+        self.init(
+            pairingRequestId: pairingRequestId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pairingRequestId, forKey: .pairingRequestId)
+    }
+}
+
+// MARK: - PairingCompleteResponse
+
+public struct PairingCompleteResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: PairingCompleteResponsePayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "pairing.complete",
+        payload: PairingCompleteResponsePayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "PairingCompleteResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "PairingCompleteResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "pairing.complete" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "PairingCompleteResponse.type 必須是 pairing.complete")
+        }
+        let payload = try container.decode(PairingCompleteResponsePayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - PairingCompleteResponsePayload
+
+public struct PairingCompleteResponsePayload: Codable, Equatable, Sendable {
+    public let deviceId: String
+    public let deviceName: String
+    public let deviceToken: String
+
+    public init(
+        deviceId: String,
+        deviceName: String,
+        deviceToken: String
+    ) {
+        self.deviceId = deviceId
+        self.deviceName = deviceName
+        self.deviceToken = deviceToken
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case deviceId = "deviceId"
+        case deviceName = "deviceName"
+        case deviceToken = "deviceToken"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let deviceId = try container.decode(String.self, forKey: .deviceId)
+        let deviceName = try container.decode(String.self, forKey: .deviceName)
+        let deviceToken = try container.decode(String.self, forKey: .deviceToken)
+        self.init(
+            deviceId: deviceId,
+            deviceName: deviceName,
+            deviceToken: deviceToken
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deviceId, forKey: .deviceId)
+        try container.encode(deviceName, forKey: .deviceName)
+        try container.encode(deviceToken, forKey: .deviceToken)
+    }
+}
+
+// MARK: - PairingDenyRequestPayload
+
+public struct PairingDenyRequestPayload: Codable, Equatable, Sendable {
+    public let pairingRequestId: String
+
+    public init(
+        pairingRequestId: String
+    ) {
+        self.pairingRequestId = pairingRequestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pairingRequestId = "pairingRequestId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let pairingRequestId = try container.decode(String.self, forKey: .pairingRequestId)
+        self.init(
+            pairingRequestId: pairingRequestId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pairingRequestId, forKey: .pairingRequestId)
+    }
+}
+
+// MARK: - PairingDenyResponsePayload
+
+public struct PairingDenyResponsePayload: Codable, Equatable, Sendable {
+    public let denied: Bool
+
+    public init(
+        denied: Bool
+    ) {
+        self.denied = denied
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case denied = "denied"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let denied = try container.decode(Bool.self, forKey: .denied)
+        self.init(
+            denied: denied
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(denied, forKey: .denied)
+    }
+}
+
+// MARK: - PairingRequestedEventPayload
+
+public struct PairingRequestedEventPayload: Codable, Equatable, Sendable {
+    public let pairingRequestId: String
+    public let deviceName: String
+    public let code: String
+    public let remoteAddress: String?
+    public let requestedAt: String
+    public let expiresAt: String
+
+    public init(
+        pairingRequestId: String,
+        deviceName: String,
+        code: String,
+        remoteAddress: String? = nil,
+        requestedAt: String,
+        expiresAt: String
+    ) {
+        self.pairingRequestId = pairingRequestId
+        self.deviceName = deviceName
+        self.code = code
+        self.remoteAddress = remoteAddress
+        self.requestedAt = requestedAt
+        self.expiresAt = expiresAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pairingRequestId = "pairingRequestId"
+        case deviceName = "deviceName"
+        case code = "code"
+        case remoteAddress = "remoteAddress"
+        case requestedAt = "requestedAt"
+        case expiresAt = "expiresAt"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let pairingRequestId = try container.decode(String.self, forKey: .pairingRequestId)
+        let deviceName = try container.decode(String.self, forKey: .deviceName)
+        let code = try container.decode(String.self, forKey: .code)
+        let remoteAddress = try container.decodeIfPresent(String.self, forKey: .remoteAddress)
+        let requestedAt = try container.decode(String.self, forKey: .requestedAt)
+        let expiresAt = try container.decode(String.self, forKey: .expiresAt)
+        self.init(
+            pairingRequestId: pairingRequestId,
+            deviceName: deviceName,
+            code: code,
+            remoteAddress: remoteAddress,
+            requestedAt: requestedAt,
+            expiresAt: expiresAt
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pairingRequestId, forKey: .pairingRequestId)
+        try container.encode(deviceName, forKey: .deviceName)
+        try container.encode(code, forKey: .code)
+        try container.encodeIfPresent(remoteAddress, forKey: .remoteAddress)
+        try container.encode(requestedAt, forKey: .requestedAt)
+        try container.encode(expiresAt, forKey: .expiresAt)
+    }
+}
+
 // MARK: - ProtocolInfo
 
 public struct ProtocolInfo: Codable, Equatable, Sendable {
@@ -6115,6 +7779,12 @@ public enum ServerFrame: Codable, Equatable, Sendable {
     case approvalDecideResponse(ApprovalDecideResponse)
     case approvalDecidedEvent(ApprovalDecidedEvent)
     case approvalPauseAllResponse(ApprovalPauseAllResponse)
+    case notificationListResponse(NotificationListResponse)
+    case notificationMarkReadResponse(NotificationMarkReadResponse)
+    case notificationCreateCardResponse(NotificationCreateCardResponse)
+    case notificationChangedEvent(NotificationChangedEvent)
+    case pairingBeginResponse(PairingBeginResponse)
+    case pairingCompleteResponse(PairingCompleteResponse)
     case errorFrame(ErrorFrame)
     case moduleResponse(ModuleResponse)
     case moduleEvent(ModuleEvent)
@@ -6235,6 +7905,18 @@ public enum ServerFrame: Codable, Equatable, Sendable {
             self = .approvalDecidedEvent(try ApprovalDecidedEvent(from: decoder))
         case (.some("response"), .some("approval.pause_all")):
             self = .approvalPauseAllResponse(try ApprovalPauseAllResponse(from: decoder))
+        case (.some("response"), .some("notification.list")):
+            self = .notificationListResponse(try NotificationListResponse(from: decoder))
+        case (.some("response"), .some("notification.mark_read")):
+            self = .notificationMarkReadResponse(try NotificationMarkReadResponse(from: decoder))
+        case (.some("response"), .some("notification.create_card")):
+            self = .notificationCreateCardResponse(try NotificationCreateCardResponse(from: decoder))
+        case (.some("event"), .some("notification.changed")):
+            self = .notificationChangedEvent(try NotificationChangedEvent(from: decoder))
+        case (.some("response"), .some("pairing.begin")):
+            self = .pairingBeginResponse(try PairingBeginResponse(from: decoder))
+        case (.some("response"), .some("pairing.complete")):
+            self = .pairingCompleteResponse(try PairingCompleteResponse(from: decoder))
         case (.some("error"), .none):
             self = .errorFrame(try ErrorFrame(from: decoder))
         case (.some("response"), .some(let value1)) where value1.hasPrefix("module."):
@@ -6353,6 +8035,18 @@ public enum ServerFrame: Codable, Equatable, Sendable {
         case .approvalDecidedEvent(let value):
             try value.encode(to: encoder)
         case .approvalPauseAllResponse(let value):
+            try value.encode(to: encoder)
+        case .notificationListResponse(let value):
+            try value.encode(to: encoder)
+        case .notificationMarkReadResponse(let value):
+            try value.encode(to: encoder)
+        case .notificationCreateCardResponse(let value):
+            try value.encode(to: encoder)
+        case .notificationChangedEvent(let value):
+            try value.encode(to: encoder)
+        case .pairingBeginResponse(let value):
+            try value.encode(to: encoder)
+        case .pairingCompleteResponse(let value):
             try value.encode(to: encoder)
         case .errorFrame(let value):
             try value.encode(to: encoder)

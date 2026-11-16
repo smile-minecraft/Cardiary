@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 匯入畫面：選來源、逐檔指定類別、預覽、勾選、標記核心記憶候選、寫入。
 ///
@@ -84,7 +85,13 @@ public struct ImportView: View {
             ForEach(model.sources) { source in
                 let isChosen = model.sourceKind == source.kind
                 Button {
-                    Task { await model.chooseSource(kind: source.kind, path: source.path) }
+                    if source.kind == .claude {
+                        chooseClaudeExport()
+                    } else if source.kind == .openClaw && !source.available {
+                        chooseFolder(kind: .openClaw)
+                    } else {
+                        Task { await model.chooseSource(kind: source.kind, path: source.path) }
+                    }
                 } label: {
                     HStack(alignment: .top, spacing: DesignTokens.spacingM) {
                         Image(systemName: isChosen ? "checkmark" : Suit.diamond.symbol)
@@ -111,12 +118,12 @@ public struct ImportView: View {
                     .contentShape(RoundedRectangle(cornerRadius: DesignTokens.cardRadius, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(!source.available && source.kind != .generic)
+                .disabled(!source.available && source.kind != .generic && source.kind != .openClaw && source.kind != .claude)
             }
-            if model.sourceKind == .generic {
+            if model.sourceKind == .generic || model.sourceKind == .openClaw {
                 HStack(spacing: DesignTokens.spacingM) {
                     Button(ImportL10n.text(.importChooseFolder)) {
-                        chooseFolder()
+                        chooseFolder(kind: model.sourceKind)
                     }
                     if !model.sourcePath.isEmpty {
                         Text(model.sourcePath)
@@ -127,11 +134,18 @@ public struct ImportView: View {
                     }
                 }
             }
+            if model.sourceKind == .claude && !model.sourcePath.isEmpty {
+                Text(model.sourcePath)
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
         .themeBlock(Palette.surface, radius: DesignTokens.panelRadius, padding: DesignTokens.spacingL)
     }
 
-    private func chooseFolder() {
+    private func chooseFolder(kind: ImportSourceKind) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -139,7 +153,17 @@ public struct ImportView: View {
         panel.canCreateDirectories = false
         panel.prompt = ImportL10n.text(.importChooseFolder)
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await model.chooseSource(kind: .generic, path: url.path) }
+        Task { await model.chooseSource(kind: kind, path: url.path) }
+    }
+
+    private func chooseClaudeExport() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.json, .zip]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await model.chooseSource(kind: .claude, path: url.path) }
     }
 
     private var fileSection: some View {
@@ -189,6 +213,11 @@ public struct ImportView: View {
     private var conversationSection: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
             Toggle(ImportL10n.text(.importIncludeConversations), isOn: $model.includeConversations)
+                .onChange(of: model.includeConversations) { _, value in
+                    if value {
+                        model.setRange(start: startDate, end: endDate)
+                    }
+                }
             if model.includeConversations {
                 HStack(spacing: DesignTokens.spacingM) {
                     DatePicker(

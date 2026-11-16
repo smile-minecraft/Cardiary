@@ -80,6 +80,33 @@ final class ImportFlowModelTests: XCTestCase {
         XCTAssertEqual(model.selectedSkillCount, 1)
     }
 
+    func testProjectMemoryIsNotSelectedByDefault() async {
+        let service = FakeImportService()
+        service.previewResult = SamplePreviews.projectPreview
+        let model = ImportFlowModel(service: service)
+        await model.chooseSource(kind: .codex, path: "/tmp/.codex")
+        await model.preview()
+        XCTAssertFalse(model.selectedKeys.contains("codex:project:memories/rollout_summaries/one.md"))
+        XCTAssertTrue(model.selectedKeys.contains("codex:personal:AGENTS.md"))
+        XCTAssertTrue(model.selectedKeys.contains("codex:personal:memories/MEMORY.md"))
+    }
+
+    func testClaudeExportNeedsAFileAndSelectsConversations() async {
+        let service = FakeImportService()
+        service.previewResult = SamplePreviews.projectPreview
+        let model = ImportFlowModel(service: service)
+        await model.chooseSource(kind: .claude, path: "")
+        XCTAssertTrue(model.includeConversations)
+        XCTAssertFalse(model.canPreview)
+        await model.chooseSource(kind: .claude, path: "/tmp/export.zip")
+        XCTAssertFalse(model.canPreview)
+        model.setRange(
+            start: Date(timeIntervalSince1970: 1_760_000_000),
+            end: Date(timeIntervalSince1970: 1_762_000_000)
+        )
+        XCTAssertTrue(model.canPreview)
+    }
+
     func testPreviewIsNotSentWithoutRangeForConversations() async {
         // 訊息跟著注入的語言走；測試兩種語言都跑，不依賴系統語言。
         for language in AppLanguage.allCases {
@@ -379,11 +406,35 @@ enum SamplePreviews {
         return try! JSONDecoder().decode(JSONValue.self, from: data)
     }()
 
+    static let projectPreview = ImportPreview(
+        jobId: "job-project",
+        source: ImportPreview.Source(kind: .codex, path: "/tmp/.codex", tool: "codex", version: nil),
+        items: [
+            item(key: "codex:personal:AGENTS.md", category: .rule, title: "規則"),
+            item(key: "codex:personal:memories/MEMORY.md", category: .memory, title: "個人記憶"),
+            item(
+                key: "codex:project:memories/rollout_summaries/one.md",
+                category: .memory,
+                title: "專案記憶",
+                origin: "project"
+            ),
+        ],
+        skills: [],
+        conversations: [],
+        skipped: [],
+        notes: [],
+        warnings: [],
+        conversationEstimate: nil,
+        newCards: 3,
+        duplicates: 0
+    )
+
     static func item(
         key: String,
         category: ImportCategory,
         title: String,
-        duplicateCardId: String? = nil
+        duplicateCardId: String? = nil,
+        origin: String? = nil
     ) -> ImportPreviewItem {
         ImportPreviewItem(
             key: key,
@@ -396,7 +447,8 @@ enum SamplePreviews {
             contentHash: "hash-\(key)",
             source: ImportItemSource(tool: "generic", path: "/tmp/source"),
             importance: nil,
-            duplicateCardId: duplicateCardId
+            duplicateCardId: duplicateCardId,
+            origin: origin
         )
     }
 }
