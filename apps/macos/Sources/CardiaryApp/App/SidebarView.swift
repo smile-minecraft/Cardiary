@@ -71,9 +71,12 @@ struct SidebarView: View {
                         }
                     }
                     if let error = conversations.errorMessage {
-                        Text(error)
-                            .font(.cardiary(.caption))
-                            .foregroundStyle(Palette.inkSecondary)
+                        MessageBanner(
+                            text: error,
+                            systemImage: "exclamationmark.triangle",
+                            tone: .red
+                        )
+                        .padding(.horizontal, DesignTokens.spacingXS)
                     }
 
                     SidebarSectionLabel(title: AppL10n.text(.sidebarSectionTools), suit: .diamond)

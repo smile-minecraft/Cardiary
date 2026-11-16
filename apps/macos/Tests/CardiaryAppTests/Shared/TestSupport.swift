@@ -14,6 +14,7 @@ actor FakeCardiaryService:
         case models
         case approval
         case pause
+        case create
     }
 
     private var listPages: [SessionListResponsePayload]
@@ -96,6 +97,7 @@ actor FakeCardiaryService:
     }
 
     func createSession(clientRequestId: String, title: String?) async throws -> SessionCreateResponsePayload {
+        if failure == .create { throw Failure.create }
         let summary = createSummary ?? Fixtures.summary("session-new")
         return SessionCreateResponsePayload(session: summary)
     }

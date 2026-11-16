@@ -54,7 +54,19 @@ enum ImportWindow {
         window.titlebarAppearsTransparent = true
         window.backgroundColor = NSColor(Palette.canvas)
         window.isReleasedWhenClosed = false
-        window.contentViewController = NSHostingController(rootView: ImportView(model: model))
+        let openLibrary: (() -> Void)? = app.screen == .main
+            ? { [weak window] in
+                guard let window else { return }
+                Task { await app.refreshContentModels() }
+                app.selectSlot(AppRegistry.cardsSlotId)
+                app.bridge.actions.openMainWindow()
+                window.close()
+            }
+            : nil
+        window.contentViewController = NSHostingController(rootView: ImportView(
+            model: model,
+            onOpenLibrary: openLibrary
+        ))
 
         let controller = ImportWindowController(window: window)
         controller.onClose = {
@@ -63,6 +75,11 @@ enum ImportWindow {
         }
         window.delegate = controller
         Self.controller = controller
+
+        // 寫入成功後卡片庫要重讀；匯入視窗關著也一樣。
+        model.onWriteCompleted = {
+            Task { await app.refreshContentModels() }
+        }
 
         // 進度事件只轉給這個視窗；App 的共用事件路徑不受影響。
         client.handlers.onModuleEvent = { frame in

@@ -23,6 +23,7 @@ public enum ImportString: String, CaseIterable, Sendable {
     case importCategoryConversation
     case importPersonaProvided
     case importPersonaPlaceholder
+    case importPersonaHint
     case importIncludeConversations
     case importRangeStart
     case importRangeEnd
@@ -44,12 +45,17 @@ public enum ImportString: String, CaseIterable, Sendable {
     case importReimportDetail
     case importNewCards
     case importDuplicates
+    case importSkippedCount
+    case importCoreMemoryCount
+    case importDefaultSelectionNote
     case importSkippedTitle
     case importNotesTitle
     case importWarningsTitle
     case importResultTitle
     case importResultCards
     case importResultSkills
+    case importOpenLibrary
+    case importResultHint
     case importFailed
     case importClose
     case importUnsupported
@@ -76,6 +82,7 @@ enum ImportStrings {
             "importCategoryConversation": "對話",
             "importPersonaProvided": "人格由你提供；Alma 沒有可匯入的人格檔。",
             "importPersonaPlaceholder": "貼上你的語氣、偏好與工作方式",
+            "importPersonaHint": "自由文字，會成為人格卡的內文；可以寫語氣、偏好與工作方式。",
             "importIncludeConversations": "匯入對話摘要",
             "importRangeStart": "開始日期",
             "importRangeEnd": "結束日期",
@@ -97,12 +104,17 @@ enum ImportStrings {
             "importReimportDetail": "打開後，標記為重複的項目可以勾選，再建立一份。",
             "importNewCards": "新卡片 {count} 張",
             "importDuplicates": "重複 {count} 張",
+            "importSkippedCount": "跳過 {count} 項",
+            "importCoreMemoryCount": "核心記憶候選 {count} 條",
+            "importDefaultSelectionNote": "人格卡與對話預設不選；重複項目要打開「重新匯入」才能勾。",
             "importSkippedTitle": "跳過的項目",
             "importNotesTitle": "來源觀察",
             "importWarningsTitle": "提醒",
             "importResultTitle": "匯入完成",
             "importResultCards": "建立了 {count} 張卡",
             "importResultSkills": "複製了 {count} 個技能",
+            "importOpenLibrary": "到卡片庫",
+            "importResultHint": "新卡片已建立，可以在卡片庫查看。",
             "importFailed": "匯入失敗：{value}",
             "importClose": "關閉",
             "importUnsupported": "不支援的格式",
@@ -125,6 +137,7 @@ enum ImportStrings {
             "importCategoryConversation": "Conversation",
             "importPersonaProvided": "You provide the persona; Alma has no importable persona file.",
             "importPersonaPlaceholder": "Paste your tone, preferences and way of working",
+            "importPersonaHint": "Free text that becomes the persona card body; describe tone, preferences and how you work.",
             "importIncludeConversations": "Import conversation summaries",
             "importRangeStart": "Start date",
             "importRangeEnd": "End date",
@@ -146,12 +159,17 @@ enum ImportStrings {
             "importReimportDetail": "When on, items marked as duplicates can be selected to create another copy.",
             "importNewCards": "{count} new cards",
             "importDuplicates": "{count} duplicates",
+            "importSkippedCount": "{count} skipped",
+            "importCoreMemoryCount": "{count} core-memory candidates",
+            "importDefaultSelectionNote": "Persona cards and conversations are off by default; turn on reimport to select duplicates.",
             "importSkippedTitle": "Skipped",
             "importNotesTitle": "Source notes",
             "importWarningsTitle": "Warnings",
             "importResultTitle": "Import complete",
             "importResultCards": "Created {count} cards",
             "importResultSkills": "Copied {count} skills",
+            "importOpenLibrary": "Open Card Library",
+            "importResultHint": "The new cards were created; find them in the card library.",
             "importFailed": "Import failed: {value}",
             "importClose": "Close",
             "importUnsupported": "Unsupported format",

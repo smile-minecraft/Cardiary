@@ -68,6 +68,8 @@ struct FirstRunView: View {
         case .conversation:
             VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
                 SuitHeading(title: AppL10n.text(.firstRunStepConversation), suit: .club)
+                Text(AppL10n.text(.firstRunImportHint))
+                    .foregroundStyle(Palette.inkSecondary)
                 HStack(spacing: DesignTokens.spacingM) {
                     Button(AppL10n.text(.firstRunStartConversation)) {
                         Task { await model.startFirstConversation() }
@@ -75,9 +77,21 @@ struct FirstRunView: View {
                     .buttonStyle(.themePrimary)
                     .keyboardShortcut(.defaultAction)
 
+                    Button(AppL10n.text(.firstRunImportAction)) {
+                        model.openImport()
+                    }
+                    .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
+
                     Button(AppL10n.text(.firstRunStepModel)) {
                         firstRun.editModel()
                     }
+                }
+                if let error = model.conversations.errorMessage {
+                    MessageBanner(
+                        text: error,
+                        systemImage: "exclamationmark.triangle",
+                        tone: .red
+                    )
                 }
             }
 

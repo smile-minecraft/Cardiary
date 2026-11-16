@@ -17,12 +17,15 @@ public protocol AppContentModel: AnyObject {
     func handle(event frame: ServerFrame)
     /// 事件 epoch 換代：丟棄本地狀態，從主機重新載入。
     func handleEpochChange(epoch: String) async
+    /// 介面以外的變更（例如匯入完成）之後重新載入。
+    func refresh() async
 }
 
 extension AppContentModel {
     public func detach() {}
     public func handle(event frame: ServerFrame) {}
     public func handleEpochChange(epoch: String) async {}
+    public func refresh() async {}
 }
 
 // MARK: - 掛載點

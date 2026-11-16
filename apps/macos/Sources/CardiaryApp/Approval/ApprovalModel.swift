@@ -44,6 +44,21 @@ public struct ApprovalPresentation: Identifiable, Equatable, Sendable {
     public var supportsApproveAlways: Bool {
         option(for: .approveAlways) != nil
     }
+
+    /// 「一律允許」的按鈕文字要說出主機給的範圍；不要把 tool_call 的目錄語意套到其他種類。
+    public func approveAlwaysTitle(language: AppLanguage? = nil) -> String {
+        switch scope.kind {
+        case .toolCall:
+            if !scope.target.isEmpty {
+                return AppL10n.format(.approvalAlwaysTool, value: scope.target, language: language)
+            }
+        case .settingsChange:
+            return AppL10n.text(.approvalAlwaysSettings, language: language)
+        case .schedule:
+            return AppL10n.text(.approvalAlwaysSchedule, language: language)
+        }
+        return AppL10n.text(.approvalAlways, language: language)
+    }
 }
 
 /// 檢視欄的審批狀態：待審批清單、送出中的決定、緊急暫停。

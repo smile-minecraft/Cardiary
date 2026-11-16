@@ -299,4 +299,17 @@ final class CardLibraryModelTests: XCTestCase {
         XCTAssertTrue(uploads.isEmpty)
         XCTAssertEqual(model.noticeMessage, CardL10n.text(.cardsImportUnsupported))
     }
+
+    func testTagInputSplitsOnCommasAndTheIdeographicComma() {
+        XCTAssertEqual(
+            CardTagInput.parse("工作, 筆記、想法，紀錄"),
+            ["工作", "筆記", "想法", "紀錄"]
+        )
+        XCTAssertEqual(
+            CardTagInput.parse(" 重複 , 重複、 另一個 "),
+            ["重複", "另一個"],
+            "去空白並去重"
+        )
+        XCTAssertEqual(CardTagInput.parse(" , 、 "), [])
+    }
 }

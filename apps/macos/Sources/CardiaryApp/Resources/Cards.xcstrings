@@ -273,6 +273,23 @@
         }
       }
     },
+    "cardsFreshnessHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Freshness {value}: lower is older; press Refresh to return to 100."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新鮮度 {value}：越低越舊，歸零後按「保鮮」回到 100。"
+          }
+        }
+      }
+    },
     "cardsDetailRefresh": {
       "extractionState": "manual",
       "localizations": {
@@ -744,7 +761,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "標籤（以逗號分隔）"
+            "value": "標籤（以逗號或頓號分隔）"
           }
         }
       }
@@ -796,6 +813,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "一格一張卡，顏色越淡代表越舊。"
+          }
+        }
+      }
+    },
+    "cardsRefresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新整理"
           }
         }
       }

@@ -103,6 +103,9 @@ final class CardUIModuleTests: XCTestCase {
         await model.handleEpochChange(epoch: "epoch-2")
         XCTAssertEqual(probeModel.epochs, ["epoch-2"])
 
+        await model.refreshContentModels()
+        XCTAssertEqual(probeModel.refreshes, 1, "匯入完成等外部變更要讓內容模型自己重讀")
+
         model.detachClient()
         XCTAssertTrue(probeModel.didDetach)
         XCTAssertNil(model.service)
@@ -146,6 +149,7 @@ private final class ProbeContentModel: AppContentModel {
     var didDetach = false
     var events: [ServerFrame] = []
     var epochs: [String] = []
+    var refreshes = 0
 
     func attach(service: any CardiaryService) {
         didAttach = true
@@ -161,6 +165,10 @@ private final class ProbeContentModel: AppContentModel {
 
     func handleEpochChange(epoch: String) async {
         epochs.append(epoch)
+    }
+
+    func refresh() async {
+        refreshes += 1
     }
 }
 

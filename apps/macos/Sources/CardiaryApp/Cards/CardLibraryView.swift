@@ -73,6 +73,16 @@ struct CardLibraryView: View {
                     SuitLoader()
                 }
                 Button {
+                    Task { await model.reload() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .bold))
+                }
+                .buttonStyle(ThemeIconButtonStyle(diameter: 30))
+                .help(CardL10n.text(.cardsRefresh))
+                .accessibilityLabel(CardL10n.text(.cardsRefresh))
+                .disabled(model.isLoading || !model.isServiceAvailable)
+                Button {
                     isNewCardPresented = true
                 } label: {
                     Label(CardL10n.text(.cardsNew), systemImage: "plus")
@@ -363,11 +373,15 @@ private struct CardRowView: View {
                 }
                 HStack(spacing: DesignTokens.spacingXS) {
                     FreshnessPips(appearance: appearance, suit: suit)
+                        .help(CardL10n.format(.cardsFreshnessHelp, value: "\(appearance.value)"))
                     Text(CardL10n.format(.cardsDetailFreshness, value: "\(appearance.value)"))
                         .font(.cardiary(.caption2, monospacedDigits: true))
                         .foregroundStyle(appearance.needsAttention ? Palette.orangeInk : Palette.inkSecondary)
                         .fixedSize()
-                        .help(attentionText ?? "")
+                        .help(
+                            attentionText
+                                ?? CardL10n.format(.cardsFreshnessHelp, value: "\(appearance.value)")
+                        )
                     if appearance.needsAttention {
                         Button(CardL10n.text(.cardsDetailRefresh)) { onRefresh() }
                             .buttonStyle(.themeLink)
@@ -472,6 +486,7 @@ private struct CardDetailView: View {
                     .font(.cardiary(.callout, weight: .semibold, monospacedDigits: true))
                     .foregroundStyle(appearance.needsAttention ? Palette.orangeInk : Palette.ink)
                 FreshnessPips(appearance: appearance, suit: suit)
+                    .help(CardL10n.format(.cardsFreshnessHelp, value: "\(appearance.value)"))
                 if appearance.needsAttention {
                     Button(CardL10n.text(.cardsDetailRefresh)) {
                         Task { await model.refresh(cardId: card.cardId) }
@@ -678,7 +693,7 @@ private struct NewCardSheet: View {
                         let created = await model.createNote(
                             title: title,
                             body: bodyText,
-                            tags: Self.parseTags(tags)
+                            tags: CardTagInput.parse(tags)
                         )
                         isSaving = false
                         if created { dismiss() }
@@ -693,13 +708,5 @@ private struct NewCardSheet: View {
         .frame(width: 520)
         .background(Palette.canvas)
         .cardiaryTheme()
-    }
-
-    private static func parseTags(_ text: String) -> [String] {
-        var seen = Set<String>()
-        return text
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 }

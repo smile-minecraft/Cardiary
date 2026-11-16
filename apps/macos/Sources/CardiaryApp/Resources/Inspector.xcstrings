@@ -578,6 +578,23 @@
           }
         }
       }
+    },
+    "inspectorUsageNoBudget": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Used {value} tokens; the model limit is not available yet."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已用 {value} token；模型上限還沒取得。"
+          }
+        }
+      }
     }
   }
 }

@@ -245,6 +245,19 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.selection, .conversation("s-first"))
     }
 
+    func testStartFirstConversationFailureKeepsUserOnTheStepWithAnError() async {
+        let model = AppModel()
+        model.update(folder: folder(.ready))
+        model.firstRun.skipModel()
+        await model.attach(service: FakeCardiaryService(failure: .create))
+
+        await model.startFirstConversation()
+
+        XCTAssertEqual(model.firstRun.step, .conversation, "建立失敗時不能把首次設定標成完成")
+        XCTAssertEqual(model.screen, .firstRun)
+        XCTAssertNotNil(model.conversations.errorMessage)
+    }
+
     func testInjectedLanguageReachesNestedModels() async {
         let previous = AppL10n.language
         defer { AppL10n.language = previous }

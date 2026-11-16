@@ -62,11 +62,17 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case inspectorApprovalsTitle
     case inspectorApprovalsEmpty
     case approvalAlways
+    case approvalAlwaysHelp
+    case approvalAlwaysSchedule
+    case approvalAlwaysSettings
+    case approvalAlwaysTool
     case approvalApprove
     case approvalApproved
     case approvalDeciding
     case approvalOptionUnavailable
     case approvalPauseAll
+    case approvalPauseAllBody
+    case approvalPauseAllConfirm
     case approvalPauseUnavailable
     case approvalPaused
     case approvalReject
@@ -90,6 +96,8 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case firstRunStepConversation
     case firstRunFolderBody
     case firstRunFolderChosen
+    case firstRunImportAction
+    case firstRunImportHint
     case firstRunModelBody
     case firstRunProvider
     case firstRunModel

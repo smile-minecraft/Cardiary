@@ -10,11 +10,18 @@ public struct ImportView: View {
     @ObservedObject private var model: ImportFlowModel
     @State private var startDate: Date
     @State private var endDate: Date
+    /// 匯入完成後「到卡片庫」的動作；由開啟視窗的一方注入。
+    private let onOpenLibrary: (() -> Void)?
 
-    public init(model: ImportFlowModel, now: Date = Date()) {
+    public init(
+        model: ImportFlowModel,
+        now: Date = Date(),
+        onOpenLibrary: (() -> Void)? = nil
+    ) {
         self.model = model
         _startDate = State(initialValue: now.addingTimeInterval(-30 * 24 * 60 * 60))
         _endDate = State(initialValue: now)
+        self.onOpenLibrary = onOpenLibrary
     }
 
     public var body: some View {
@@ -203,10 +210,23 @@ public struct ImportView: View {
             Text(ImportL10n.text(.importPersonaProvided))
                 .font(.cardiary(.callout))
                 .foregroundStyle(Palette.inkSecondary)
-            TextEditor(text: $model.personaText)
-                .font(.cardiary(.callout))
-                .themeEditor(minHeight: 96)
-                .accessibilityLabel(ImportL10n.text(.importPersonaPlaceholder))
+            Text(ImportL10n.text(.importPersonaHint))
+                .font(.cardiary(.caption))
+                .foregroundStyle(Palette.inkSecondary)
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $model.personaText)
+                    .font(.cardiary(.callout))
+                    .themeEditor(minHeight: 96)
+                    .accessibilityLabel(ImportL10n.text(.importPersonaPlaceholder))
+                if model.personaText.isEmpty {
+                    Text(ImportL10n.text(.importPersonaPlaceholder))
+                        .font(.cardiary(.callout))
+                        .foregroundStyle(Palette.inkTertiary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                }
+            }
         }
     }
 
@@ -269,8 +289,17 @@ public struct ImportView: View {
             .keyboardShortcut(.defaultAction)
             .disabled(!model.canPreview)
 
-            Button(ImportL10n.count(.importWrite, count: model.selectedCardCount)) {
+            Button {
                 Task { await model.write() }
+            } label: {
+                if model.phase == .writing {
+                    HStack(spacing: DesignTokens.spacingXS) {
+                        SuitLoader(size: 7)
+                        Text(ImportL10n.text(.importWriting))
+                    }
+                } else {
+                    Text(ImportL10n.count(.importWrite, count: model.selectedCardCount))
+                }
             }
             .buttonStyle(.themePrimary)
             .disabled(!model.canWrite)
@@ -293,14 +322,23 @@ public struct ImportView: View {
     @ViewBuilder
     private func previewSection(_ preview: ImportPreview) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingL) {
-            HStack(spacing: DesignTokens.spacingL) {
-                Text(ImportL10n.count(.importNewCards, count: preview.newCards))
-                if preview.duplicates > 0 {
-                    Text(ImportL10n.count(.importDuplicates, count: preview.duplicates))
+            VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
+                FlowLayout(spacing: DesignTokens.spacingL) {
+                    Text(ImportL10n.count(.importNewCards, count: preview.newCards))
+                    if preview.duplicates > 0 {
+                        Text(ImportL10n.count(.importDuplicates, count: preview.duplicates))
+                            .foregroundStyle(Palette.inkSecondary)
+                    }
+                    Text(ImportL10n.count(.importSkippedCount, count: preview.skipped.count))
+                        .foregroundStyle(Palette.inkSecondary)
+                    Text(ImportL10n.count(.importCoreMemoryCount, count: model.coreMemoryKeys.count))
                         .foregroundStyle(Palette.inkSecondary)
                 }
+                .font(.cardiary(.headline))
+                Text(ImportL10n.text(.importDefaultSelectionNote))
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
             }
-            .font(.cardiary(.headline))
 
             if let estimate = preview.conversationEstimate {
                 estimateSection(estimate)
@@ -493,6 +531,16 @@ public struct ImportView: View {
             if result.failed > 0 {
                 Text(ImportL10n.format(.importFailed, value: "\(result.failed)"))
                     .foregroundStyle(Palette.redInk)
+            }
+            Text(ImportL10n.text(.importResultHint))
+                .font(.cardiary(.caption))
+                .foregroundStyle(Palette.inkSecondary)
+            if let onOpenLibrary {
+                HStack {
+                    Spacer()
+                    Button(ImportL10n.text(.importOpenLibrary)) { onOpenLibrary() }
+                        .buttonStyle(ThemeButtonStyle(kind: .primary))
+                }
             }
         }
         .font(.cardiary(.callout))
