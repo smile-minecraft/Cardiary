@@ -176,4 +176,154 @@ final class StorageSettingsModelTests: XCTestCase {
         XCTAssertEqual(model.selected, [])
         XCTAssertNil(model.preview)
     }
+
+    // MARK: - 資料夾外寫入明細
+
+    private func outsideWrites() -> [StorageOutsideWriteEntry] {
+        [
+            StorageOutsideWriteEntry(
+                path: "/Users/me/.claude/projects",
+                tool: "claude-code",
+                bytes: 2_048,
+                status: .measured
+            ),
+            StorageOutsideWriteEntry(
+                path: "/Users/me/.claude/backups",
+                tool: "claude-code",
+                bytes: 0,
+                status: .absent
+            ),
+            StorageOutsideWriteEntry(
+                path: "/Users/me/Library/Caches/claude-cli-nodejs",
+                tool: "claude-code",
+                bytes: nil,
+                status: .unavailable
+            ),
+        ]
+    }
+
+    func testLoadFromResponseWithoutOutsideWritesIsEmpty() async {
+        let model = makeModel()
+        model.attach(service: FakeCardiaryService(storageUsage: usageRows()))
+
+        await model.load()
+
+        XCTAssertTrue(model.outsideWrites.isEmpty, "舊版回應缺欄位時不顯示外部明細")
+        XCTAssertNil(model.errorMessage)
+    }
+
+    func testLoadPreservesAllThreeOutsideWriteStates() async {
+        let model = makeModel()
+        model.attach(service: FakeCardiaryService(
+            storageUsage: usageRows(),
+            storageOutsideWrites: outsideWrites()
+        ))
+
+        await model.load()
+
+        XCTAssertEqual(model.outsideWrites.count, 3)
+        XCTAssertEqual(model.outsideWrites[0].status, .measured)
+        XCTAssertEqual(model.outsideWrites[0].bytes, 2_048)
+        XCTAssertEqual(model.outsideWrites[1].status, .absent)
+        XCTAssertEqual(model.outsideWrites[1].bytes, 0)
+        XCTAssertEqual(model.outsideWrites[2].status, .unavailable)
+        XCTAssertNil(model.outsideWrites[2].bytes, "unavailable 不能把 nil 變成 0")
+    }
+
+    func testDetachClearsOutsideWrites() async {
+        let model = makeModel()
+        model.attach(service: FakeCardiaryService(
+            storageUsage: usageRows(),
+            storageOutsideWrites: outsideWrites()
+        ))
+        await model.load()
+        XCTAssertEqual(model.outsideWrites.count, 3)
+
+        model.detach()
+
+        XCTAssertTrue(model.outsideWrites.isEmpty)
+    }
+
+    func testReloadFromPresentToMissingClearsOutsideWrites() async {
+        let model = makeModel()
+        let service = FakeCardiaryService(
+            storageUsage: usageRows(),
+            storageOutsideWrites: outsideWrites()
+        )
+        model.attach(service: service)
+        await model.load()
+        XCTAssertEqual(model.outsideWrites.count, 3)
+
+        await service.setStorageOutsideWrites(nil)
+        await model.load()
+
+        XCTAssertTrue(model.outsideWrites.isEmpty, "從有欄位重載到舊版缺欄位要清掉舊明細")
+    }
+
+    func testOutsideWritesStayOutOfSevenCategoriesAndCleanupRequests() async {
+        let model = makeModel()
+        let service = FakeCardiaryService(
+            storageUsage: usageRows(),
+            storageOutsideWrites: outsideWrites()
+        )
+        model.attach(service: service)
+        await model.load()
+
+        model.toggle(.cache)
+        await model.previewCleanup()
+        await model.applyCleanup()
+
+        let previewed = await service.storagePreviewCategories
+        let applied = await service.storageApplyCategories
+        XCTAssertEqual(model.usage.count, 7, "外部明細不進七類用量")
+        XCTAssertEqual(previewed, [["cache"]])
+        XCTAssertEqual(applied, [["cache"]], "清除請求不含外部位置")
+    }
+
+    func testOutsideWriteSizeFormatting() {
+        let measured = StorageOutsideWriteEntry(
+            path: "/p", tool: "claude-code", bytes: 2_048, status: .measured
+        )
+        XCTAssertEqual(
+            StorageSettingsModel.outsideWriteSize(measured, language: .zhHant),
+            StorageSettingsModel.formattedBytes(2_048)
+        )
+
+        let absent = StorageOutsideWriteEntry(
+            path: "/p", tool: "claude-code", bytes: 0, status: .absent
+        )
+        XCTAssertEqual(
+            StorageSettingsModel.outsideWriteSize(absent, language: .zhHant),
+            "不存在"
+        )
+
+        let unavailable = StorageOutsideWriteEntry(
+            path: "/p", tool: "claude-code", bytes: nil, status: .unavailable
+        )
+        XCTAssertEqual(
+            StorageSettingsModel.outsideWriteSize(unavailable, language: .zhHant),
+            "無法取得大小（可能權限不足）"
+        )
+
+        let measuredMissingBytes = StorageOutsideWriteEntry(
+            path: "/p", tool: "claude-code", bytes: nil, status: .measured
+        )
+        XCTAssertEqual(
+            StorageSettingsModel.outsideWriteSize(measuredMissingBytes, language: .zhHant),
+            "無法取得大小（可能權限不足）",
+            "measured 缺 bytes 不能顯示 0 B"
+        )
+    }
+
+    func testOutsideWriteToolName() {
+        XCTAssertEqual(
+            StorageSettingsModel.outsideWriteToolName("claude-code", language: .zhHant),
+            "Claude Code"
+        )
+        XCTAssertEqual(
+            StorageSettingsModel.outsideWriteToolName("some-other-tool", language: .zhHant),
+            "some-other-tool",
+            "未知工具保留原字串"
+        )
+    }
 }

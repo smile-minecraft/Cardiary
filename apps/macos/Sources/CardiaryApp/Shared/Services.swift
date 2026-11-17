@@ -272,6 +272,18 @@ public protocol NotificationService: Sendable {
     func createCardFromNotification(notificationId: String) async throws -> NotificationCreateCardResponsePayload
 }
 
+/// 外部代理的會話清單、事件串流與啟停；view model 只依賴這個介面。
+public protocol AgentService: Sendable {
+    func listAgents() async throws -> AgentListResponsePayload
+    func startAgent(
+        agentKind: AgentKind,
+        workingDirectory: String,
+        prompt: String?,
+        clientRequestId: String?
+    ) async throws -> AgentStartResponsePayload
+    func stopAgent(agentSessionId: String) async throws -> AgentStopResponsePayload
+}
+
 /// 配對核准與裝置管理：全部走殼的私有控制通道，不在客戶端協定上。
 public protocol RemoteControlService: Sendable {
     func decidePairing(requestId: String, approve: Bool) async throws
@@ -282,10 +294,10 @@ public protocol RemoteControlService: Sendable {
 public typealias CardiaryService =
     ConversationService & ModelSettingsService & SettingsService & ModulesService & ApprovalService
     & CardService & ContextService & SessionManagementService & MediaImportService & NotificationService
-    & StorageService & McpService
+    & StorageService & McpService & AgentService
 
 extension CardiaryClient:
     ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService,
     CardService, ContextService, SessionManagementService, MediaImportService, NotificationService,
-    StorageService, McpService
+    StorageService, McpService, AgentService
 {}

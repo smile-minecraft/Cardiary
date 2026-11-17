@@ -728,6 +728,11 @@ final class ShellController: NSObject {
         fileMenu.addItem(importItem)
         fileEntry.submenu = fileMenu
         mainMenu.addItem(fileEntry)
+
+        let editEntry = NSMenuItem(title: L10n.text(.menuEdit), action: nil, keyEquivalent: "")
+        editEntry.submenu = EditMenu.make()
+        mainMenu.addItem(editEntry)
+
         NSApp.mainMenu = mainMenu
     }
 

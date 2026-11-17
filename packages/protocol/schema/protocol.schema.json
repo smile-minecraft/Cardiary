@@ -8093,6 +8093,26 @@
         }
       }
     },
+    "AgentPendingPermission": {
+      "title": "AgentPendingPermission",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approvalId", "toolName"],
+      "properties": {
+        "approvalId": {
+          "type": "string",
+          "description": "等待決定的審批識別碼；客戶端用 approval.decide 核准或拒絕。"
+        },
+        "toolName": {
+          "type": "string",
+          "description": "代理想執行的工具名稱。"
+        },
+        "description": {
+          "type": "string",
+          "description": "代理提供的動作說明。"
+        }
+      }
+    },
     "AgentKind": {
       "title": "AgentKind",
       "type": "string",
@@ -8131,6 +8151,13 @@
         "message": {
           "type": "string",
           "description": "給人看的進度或失敗原因。"
+        },
+        "resultUnknown": {
+          "type": "boolean",
+          "description": "結果是否未知：主機重啟或代理行程異常結束時為 true。"
+        },
+        "pendingPermission": {
+          "$ref": "#/$defs/AgentPendingPermission"
         },
         "startedAt": {
           "type": "string",
@@ -8251,6 +8278,13 @@
         "message": {
           "type": "string",
           "description": "給人看的進度或失敗原因。"
+        },
+        "resultUnknown": {
+          "type": "boolean",
+          "description": "結果是否未知：主機重啟或代理行程異常結束時為 true。"
+        },
+        "pendingPermission": {
+          "$ref": "#/$defs/AgentPendingPermission"
         }
       }
     },
@@ -8758,6 +8792,36 @@
         }
       }
     },
+    "OutsideWriteStatus": {
+      "title": "OutsideWriteStatus",
+      "type": "string",
+      "enum": ["measured", "absent", "unavailable"],
+      "description": "資料夾外寫入的量測結果；measured 有可信 bytes，absent 的 bytes 為 0，unavailable 省略 bytes、不可報 0。"
+    },
+    "StorageOutsideWriteEntry": {
+      "title": "StorageOutsideWriteEntry",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "tool", "status"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "候選位置的完整路徑。"
+        },
+        "tool": {
+          "type": "string",
+          "description": "寫入這位置的代理工具；目前是 claude-code，日後可擴充其他工具。"
+        },
+        "bytes": {
+          "type": "integer",
+          "description": "量得的位元組數；absent 為 0，unavailable 省略這個欄位。",
+          "minimum": 0
+        },
+        "status": {
+          "$ref": "#/$defs/OutsideWriteStatus"
+        }
+      }
+    },
     "StorageUsageRequestPayload": {
       "title": "StorageUsageRequestPayload",
       "type": "object",
@@ -8778,6 +8842,13 @@
             "$ref": "#/$defs/StorageCategoryUsage"
           },
           "description": "依類別列出用量。"
+        },
+        "outsideWrites": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StorageOutsideWriteEntry"
+          },
+          "description": "選用：代理在 Cardiary 資料夾外的寫入明細；模組未啟用或量測失敗時省略，不報 0。"
         }
       }
     },

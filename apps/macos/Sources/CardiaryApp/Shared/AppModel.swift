@@ -22,6 +22,8 @@ public final class AppModel: ObservableObject {
     public let conversation: ConversationModel
     public let firstRun: FirstRunModel
     public let approvals: ApprovalModel
+    /// 外部代理會話；資料走協定的 `agent.*` 與 `agent.state_changed` 事件。
+    public let agents: AgentModel
     /// 遠端配對與裝置管理；資料走殼的私有控制通道。
     public let remote: RemoteModel
     /// 通知流；資料走客戶端協定。
@@ -63,6 +65,7 @@ public final class AppModel: ObservableObject {
         self.conversation = ConversationModel()
         self.firstRun = FirstRunModel(keychain: keychain)
         self.approvals = ApprovalModel(language: language)
+        self.agents = AgentModel(language: language, keychain: keychain)
         self.remote = RemoteModel(language: language)
         self.notifications = NotificationModel(language: language)
         self.settingsModel = SettingsModel(keychain: keychain, language: language)
@@ -129,12 +132,14 @@ public final class AppModel: ObservableObject {
         conversation.attach(service: service)
         firstRun.attach(service: service)
         approvals.attach(service: service)
+        agents.attach(service: service, approvals: service)
         settingsModel.attach(service: service)
         notifications.attach(service: service)
         for model in contentModels {
             model.attach(service: service)
         }
         await reloadAfterAttach()
+        await agents.reload()
         // 首次設定停在「選模型」時，連線一好就把供應商與模型載進來。
         if firstRun.step == .model, firstRun.providers.isEmpty {
             await firstRun.loadModels()
@@ -151,6 +156,7 @@ public final class AppModel: ObservableObject {
         settingsModel.detach()
         firstRun.detach()
         notifications.detach()
+        agents.markDisconnected()
         update(approvals: nil)
     }
 
@@ -173,6 +179,7 @@ public final class AppModel: ObservableObject {
         if case .notificationChangedEvent(let event) = frame {
             notifications.handle(change: event)
         }
+        agents.handle(frame: frame)
         conversations.handle(frame: frame)
         reconcileSelection()
         conversation.apply(frame: frame)

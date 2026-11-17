@@ -321,6 +321,57 @@ final class ClientAPITests: XCTestCase {
         await client.stop()
     }
 
+    func testStorageUsageOutsideWritesCompatibility() async throws {
+        let queue = TransportQueue()
+        let transport = FakeServerTransport()
+        queue.append(transport)
+        let statuses = Recorder<SystemStatus>()
+        let client = makeClient(queue: queue, statuses: statuses)
+        try await connect(client: client, transport: transport, epoch: "epoch_a")
+
+        // 舊訊息沒有 outsideWrites → 解成 nil。
+        let oldTask = Task { try await client.getStorageUsage() }
+        let oldRequest = JSONFixture.decode(try await transport.nextSent())
+        await transport.push(
+            Self.response(
+                type: "storage.usage",
+                replyTo: try XCTUnwrap(oldRequest["id"] as? String),
+                payload: ["usage": [["category": "cache", "bytes": 1, "cleanableBytes": 1]]]
+            )
+        )
+        let oldResponse = try await oldTask.value
+        XCTAssertNil(oldResponse.outsideWrites)
+
+        // 新訊息三態：measured/absent 有 bytes，unavailable 沒有 bytes。
+        let newTask = Task { try await client.getStorageUsage() }
+        let newRequest = JSONFixture.decode(try await transport.nextSent())
+        await transport.push(
+            Self.response(
+                type: "storage.usage",
+                replyTo: try XCTUnwrap(newRequest["id"] as? String),
+                payload: [
+                    "usage": [["category": "cache", "bytes": 1, "cleanableBytes": 1]],
+                    "outsideWrites": [
+                        ["path": "/h/.claude/projects", "tool": "claude-code", "status": "measured", "bytes": 4096],
+                        ["path": "/h/.claude/backups", "tool": "claude-code", "status": "absent", "bytes": 0],
+                        ["path": "/h/.claude/plugins", "tool": "claude-code", "status": "unavailable"],
+                    ],
+                ]
+            )
+        )
+        let newResponse = try await newTask.value
+        let entries = try XCTUnwrap(newResponse.outsideWrites)
+        XCTAssertEqual(entries.count, 3)
+        XCTAssertEqual(entries[0].status, .measured)
+        XCTAssertEqual(entries[0].bytes, 4096)
+        XCTAssertEqual(entries[1].status, .absent)
+        XCTAssertEqual(entries[1].bytes, 0)
+        XCTAssertEqual(entries[2].status, .unavailable)
+        XCTAssertNil(entries[2].bytes)
+
+        await client.stop()
+    }
+
     func testGetModulesAndSetModuleEnabledRoundTrip() async throws {
         let queue = TransportQueue()
         let transport = FakeServerTransport()

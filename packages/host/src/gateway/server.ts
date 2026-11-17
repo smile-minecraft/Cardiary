@@ -59,6 +59,7 @@ import {
   ProtocolHandlerError,
   type AlwaysAllowService,
   type EmotionServiceContract,
+  type ExternalAgentsPauseService,
   type ModuleHostBridge,
 } from "../modules/contract.js";
 import { lifecycleErrorCode } from "../modules/registry.js";
@@ -2489,6 +2490,14 @@ export class Gateway {
   async #pauseAll(request: ParsedRequest): Promise<Unknown> {
     const reason = optionalString(request.payload, "reason") ?? "使用者緊急暫停";
     const paused = await this.#options.engine.pauseAll(reason);
+    // 外部代理不在引擎的回合裡：撤回它們等待中的審批並中止行程，
+    // 否則緊急暫停之後核准仍會冒出新的代理。
+    const externalAgents = (
+      this.#modules as ModuleHostWithServices | null
+    )?.hostServices?.get<ExternalAgentsPauseService>(HOST_SERVICE_NAMES.externalAgentsPause);
+    if (externalAgents !== undefined) {
+      await externalAgents.pauseAll(reason);
+    }
     // 比照 HostService.pause：工具子行程要真的被取消，不只手停回合。
     if (this.#options.cancelToolProcesses) {
       await this.#options.cancelToolProcesses(5000);

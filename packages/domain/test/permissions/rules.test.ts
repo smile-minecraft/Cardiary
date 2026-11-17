@@ -146,6 +146,24 @@ describe("永遠禁止", () => {
       "deny.human-settings",
     ],
     [
+      "寫外部代理權杖",
+      {
+        kind: "fs.write",
+        path: join(fixture.folder, "state", "external-agent-credentials.json"),
+        mode: "replace",
+      },
+      "deny.human-settings",
+    ],
+    [
+      "刪外部代理權杖",
+      {
+        kind: "fs.delete",
+        path: join(fixture.folder, "state", "external-agent-credentials.json"),
+        recursive: false,
+      },
+      "deny.human-settings",
+    ],
+    [
       "寫 App bundle",
       {
         kind: "fs.write",

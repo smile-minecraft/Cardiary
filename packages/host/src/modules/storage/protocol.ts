@@ -1,5 +1,5 @@
 import type { ProtocolRequestContext, ProtocolEventEmitter } from "@cardiary/module-api";
-import type { JSONObject, JSONValue } from "@cardiary/protocol";
+import type { JSONObject, JSONValue, StorageOutsideWriteEntry } from "@cardiary/protocol";
 import { StorageError, type StorageCleanup } from "@cardiary/storage";
 
 import { ProtocolHandlerError } from "../contract.js";
@@ -12,6 +12,11 @@ export interface StorageProtocolOptions {
     readonly usedBytes: number;
     readonly limitBytes: number;
   }>;
+  /**
+   * 外部代理資料夾外寫入的明細；每次呼叫即時讀服務，模組未啟用回 undefined。
+   * 量測失敗時省略欄位，不讓 storage.usage 整體失敗。
+   */
+  readonly outsideWrites?: () => Promise<readonly StorageOutsideWriteEntry[] | undefined>;
 }
 
 /** `storage.*`：用量、清理預覽與執行。 */
@@ -19,7 +24,7 @@ export function registerStorageProtocol(options: StorageProtocolOptions): void {
   options.protocol.registerNamespace("storage", async (request) => {
     switch (request.type) {
       case "storage.usage":
-        return { usage: await usage(options) } as unknown as JSONValue;
+        return await usage(options);
       case "storage.cleanup.preview":
         return preview(request, options.cleanup) as unknown as JSONValue;
       case "storage.cleanup.apply":
@@ -46,10 +51,21 @@ async function usage(options: StorageProtocolOptions): Promise<JSONValue> {
       shellState = 0;
     }
   }
-  return [
-    ...usage,
-    { category: "shellState", bytes: shellState, cleanableBytes: 0 },
-  ] as unknown as JSONValue;
+  const response: { usage: JSONValue; outsideWrites?: JSONValue } = {
+    usage: [
+      ...usage,
+      { category: "shellState", bytes: shellState, cleanableBytes: 0 },
+    ] as unknown as JSONValue,
+  };
+  if (options.outsideWrites !== undefined) {
+    try {
+      const extra = await options.outsideWrites();
+      if (extra !== undefined) response.outsideWrites = extra as unknown as JSONValue;
+    } catch {
+      // 量測失敗不讓 storage.usage 整體失敗；省略欄位，不報 0。
+    }
+  }
+  return response as unknown as JSONValue;
 }
 
 function preview(request: ProtocolRequestContext, cleanup: StorageCleanup): JSONValue {

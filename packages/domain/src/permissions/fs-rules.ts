@@ -50,6 +50,9 @@ export function isSelfModifyPath(
  * 執行（stdio 子行程或 HTTP 連線），寫得進去就等於繞過「新增 MCP 伺服器
  * 須人工審批」。它和其他受保護檔一樣，連「全部允許」與 System One 都
  * 不能放行。
+ *
+ * `external-agent-credentials.json` 存外部代理的登入權杖，代理一旦能讀寫
+ * 就能取得憑證或竄改，因此同樣列名保護。
  */
 const PROTECTED_STATE_FILES = [
   "cardiary.sqlite",
@@ -60,6 +63,7 @@ const PROTECTED_STATE_FILES = [
   "agent-audit.jsonl",
   "agent-audit.jsonl.1",
   "mcp-servers.json",
+  "external-agent-credentials.json",
 ] as const;
 
 /**

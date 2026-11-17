@@ -30,6 +30,13 @@ export interface SandboxProfileOptions {
   readonly homeDir?: string;
   /** App bundle；預設 `/Applications/Cardiary.app`。 */
   readonly appBundlePath?: string;
+  /**
+   * 外部代理專屬：代理的家目錄（`cache/agents/<session>`）。這個目錄允許
+   * 寫入，但正本區仍然拒絕。沙盒不可用時呼叫端必須拒絕啟動。
+   */
+  readonly agentHomeDir?: string;
+  /** 外部代理專屬：額外允許寫入的目錄（例如代理自己的暫存目錄）。 */
+  readonly extraWritableDirs?: readonly string[];
 }
 
 /**
@@ -209,7 +216,13 @@ export function buildSandboxProfile(options: SandboxProfileOptions): string {
   const homeDir = canonical(options.homeDir ?? homedir());
   const appBundlePath = canonical(options.appBundlePath ?? DEFAULT_APP_BUNDLE_PATH);
 
-  const allowedWrites = [workingDir, join(folderRoot, "tmp")];
+  const agentHome = options.agentHomeDir ? canonical(options.agentHomeDir) : null;
+  const allowedWrites = [
+    workingDir,
+    join(folderRoot, "tmp"),
+    ...(agentHome ? [agentHome] : []),
+    ...(options.extraWritableDirs ?? []).map(canonical),
+  ];
   const protectedWrites = [
     ...PROTECTED_FOLDERS.map((name) => join(folderRoot, name)),
     ...SYSTEM_FOLDERS,

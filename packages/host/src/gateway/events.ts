@@ -110,6 +110,35 @@ export function mapEventIntent(intent: ProtocolEventIntent): EventMapping {
         return { error: `模組事件型別不合法：${intent.type}` };
       }
       return one("system", intent.type, { data: intent.payload });
+    case "external-agent-status":
+      return one("system", "agent.state_changed", {
+        agentSessionId: intent.agentSessionId,
+        agentKind: intent.agentKind,
+        status: intent.status,
+        ...(intent.progress === undefined
+          ? {}
+          : {
+              progress: {
+                step: intent.progress.step,
+                label: intent.progress.label,
+                completed: intent.progress.completed,
+                total: intent.progress.total,
+              },
+            }),
+        ...(intent.message === undefined ? {} : { message: intent.message }),
+        ...(intent.resultUnknown === true ? { resultUnknown: true } : {}),
+        ...(intent.pendingPermission === undefined
+          ? {}
+          : {
+              pendingPermission: {
+                approvalId: intent.pendingPermission.approvalId,
+                toolName: intent.pendingPermission.toolName,
+                ...(intent.pendingPermission.description === undefined
+                  ? {}
+                  : { description: intent.pendingPermission.description }),
+              },
+            }),
+      });
     default:
       return { error: `M1 沒有這個事件意圖：${intent.kind}` };
   }
@@ -241,6 +270,21 @@ export function validateEventPayload(type: string, payload: unknown): string | n
       return checkObject(payload, "payload", new Map([["notification", notificationWire]]), [
         "notification",
       ]);
+    case "agent.state_changed":
+      return checkObject(
+        payload,
+        "payload",
+        new Map([
+          ["agentSessionId", string],
+          ["agentKind", enumeration("opencode", "claude-code")],
+          ["status", enumeration("starting", "running", "waiting-approval", "stopped", "failed")],
+          ["progress", optional(agentProgress)],
+          ["message", optional(string)],
+          ["resultUnknown", optional(boolean)],
+          ["pendingPermission", optional(agentPendingPermission)],
+        ]),
+        ["agentSessionId", "agentKind", "status"],
+      );
     default:
       return `M1 沒有這個事件型別：${type}`;
   }
@@ -299,6 +343,33 @@ const dateTime: Checker = (value, path) =>
   typeof value === "string" && !Number.isNaN(Date.parse(value))
     ? null
     : `${path} 必須是 RFC 3339 時間`;
+
+/** 對齊協定 `AgentProgress`。 */
+const agentProgress: Checker = (value, path) =>
+  checkObject(
+    value,
+    path,
+    new Map([
+      ["step", string],
+      ["label", string],
+      ["completed", integer(0)],
+      ["total", integer(0)],
+    ]),
+    ["step", "label", "completed", "total"],
+  );
+
+/** 對齊協定 `AgentPendingPermission`。 */
+const agentPendingPermission: Checker = (value, path) =>
+  checkObject(
+    value,
+    path,
+    new Map([
+      ["approvalId", string],
+      ["toolName", string],
+      ["description", optional(string)],
+    ]),
+    ["approvalId", "toolName"],
+  );
 
 /** 物件檢查：拒絕未知欄位、漏掉的必填欄位。 */
 function checkObject(

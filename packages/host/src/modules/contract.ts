@@ -1,6 +1,15 @@
-import type { AssetStore, CardIndex, CardService, EmotionState } from "@cardiary/domain";
 import type {
+  AssetStore,
+  CardIndex,
+  CardService,
+  EmotionState,
+  ExternalAgentOutsideWriteEntry,
+} from "@cardiary/domain";
+import type {
+  ApprovalActionKind,
   ApprovalDecision,
+  ApprovalDetail,
+  ApprovalRisk,
   HumanActor,
   JsonValue,
   ToolBundlePin,
@@ -66,6 +75,12 @@ export const HOST_SERVICE_NAMES = {
   emotion: "emotion",
   /** 白板服務；由白板模組提供，白板協定與代理工具都透過它讀寫。 */
   boards: "boards",
+  /** 外部代理的審批入口；由組合根提供，只有外部代理模組依賴。 */
+  agentApprovals: "agentApprovals",
+  /** 外部代理的緊急暫停；由外部代理模組提供，閘道在 `approval.pause_all` 時取。 */
+  externalAgentsPause: "externalAgentsPause",
+  /** 外部代理資料夾外寫入的量測；由外部代理模組提供，storage 模組取用。 */
+  externalAgentsUsage: "externalAgentsUsage",
 } as const;
 
 /** 服務名稱的聯集；`modules.md` 第 5 節那張表。 */
@@ -152,6 +167,82 @@ export interface HostServiceTypeMap {
   memory: DistillationTrigger;
   emotion: EmotionServiceContract;
   boards: BoardsService;
+  agentApprovals: AgentApprovalsService;
+  externalAgentsPause: ExternalAgentsPauseService;
+  externalAgentsUsage: ExternalAgentsUsageService;
+}
+
+/**
+ * 外部代理的緊急暫停入口；服務名稱 `externalAgentsPause`。
+ *
+ * 閘道只依賴這個方法：暫停時撤回等待中的啟動與權限審批，中止已啟動的
+ * 代理，並把工作階段標成中止。沒有模組主機或模組未啟用時不呼叫。
+ */
+export interface ExternalAgentsPauseService {
+  pauseAll(reason: string): Promise<void>;
+}
+
+/**
+ * 外部代理資料夾外寫入的量測入口；服務名稱 `externalAgentsUsage`。
+ *
+ * storage 模組只依賴這個方法，不碰 legacy 的 cacheBytes／tempBytes。
+ * 未啟用外部代理模組時服務不存在，storage 據此省略選用欄位。
+ */
+export interface ExternalAgentsUsageService {
+  outsideWrites(): Promise<readonly ExternalAgentOutsideWriteEntry[]>;
+}
+
+/**
+ * 外部代理的審批入口；服務名稱 `agentApprovals`。
+ *
+ * 外部代理（OpenCode、Claude Code）是自己的行程，Cardiary 攔不到它們自己的
+ * 工具呼叫，只能在對方主動問「可不可以」的時候走這條路。組合根把它接到引擎的
+ * 審批服務上，模組拿到的只有這三個方法，不會接觸整個引擎：
+ *
+ * 建立（`request`）時 `requestedBy` 一律是 `{ kind: "agent", agentId: agentSessionId }`，
+ * 客戶端靠這個標記認出是哪一個代理在等，不進主對話的審批種類。
+ * `waitForDecision` 只回 outcome；決定的理由留在引擎裡，模組不需要。
+ * `withdraw` 用在代理已經被停掉、不再需要等決定的時候，避免留下沒人吃的審批。
+ */
+export interface AgentApprovalsService {
+  /** 建立一筆待決定的審批；回傳它的識別碼。 */
+  request(input: AgentApprovalRequestInput): Promise<AgentApprovalCreated>;
+  /** 等決定、逾時或撤回；與審批服務語意一致，只暴露 outcome。 */
+  waitForDecision(
+    approvalId: string,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<AgentApprovalResolution>;
+  /** 撤回尚未決定的請求；已有決定時不影響任何事。 */
+  withdraw(approvalId: string, reason: string): Promise<void>;
+  /**
+   * 撤回某個代理所有還卡在 pending 的審批。
+   * 主機服務重啟之後，沒人會再去等這些審批；一次全部撤回，
+   * 不然它們會一直卡在客戶端的佇列裡，按了也沒有反應。
+   */
+  withdrawPendingForAgent(agentSessionId: string, reason: string): Promise<void>;
+}
+
+export interface AgentApprovalRequestInput {
+  /** 代理工作階段識別碼；會變成審批的 `requestedBy: { kind: "agent", agentId }`。 */
+  readonly agentSessionId: string;
+  /** 同一工作階段內穩定且唯一的請求識別碼。 */
+  readonly requestId: string;
+  readonly kind: ApprovalActionKind;
+  /** 給人看的一行說明，例如「OpenCode 想執行 bash」。 */
+  readonly summary: string;
+  /** 更細的說明；可帶工具輸入的完整內容。 */
+  readonly details?: readonly ApprovalDetail[];
+  readonly toolName?: string;
+  readonly toolInput?: JsonValue;
+  readonly risk?: ApprovalRisk;
+}
+
+export interface AgentApprovalCreated {
+  readonly approvalId: string;
+}
+
+export interface AgentApprovalResolution {
+  readonly outcome: "approved" | "denied" | "expired" | "withdrawn";
 }
 
 export interface EmotionServiceContract {

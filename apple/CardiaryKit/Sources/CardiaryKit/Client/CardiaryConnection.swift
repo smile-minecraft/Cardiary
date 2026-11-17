@@ -1292,6 +1292,68 @@ public actor CardiaryConnection {
         return response.payload
     }
 
+    // MARK: - 外部代理
+
+    public func listAgents(
+        options: RequestOptions = .default
+    ) async throws -> AgentListResponsePayload {
+        let request = AgentListRequest(
+            id: RequestID.next(),
+            payload: AgentListRequestPayload()
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .agentListResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "agent.list 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 啟動外部代理；主機會先建立啟動審批，核准後才真的啟動行程。
+    public func startAgent(
+        agentKind: AgentKind,
+        workingDirectory: String,
+        prompt: String?,
+        clientRequestId: String?,
+        options: RequestOptions = .default
+    ) async throws -> AgentStartResponsePayload {
+        let request = AgentStartRequest(
+            id: RequestID.next(),
+            payload: AgentStartRequestPayload(
+                agentKind: agentKind,
+                workingDirectory: workingDirectory,
+                prompt: prompt,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .agentStartResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "agent.start 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 停止外部代理；還沒決定的審批會被撤回，行程會被收拾乾淨。
+    public func stopAgent(
+        agentSessionId: String,
+        options: RequestOptions = .default
+    ) async throws -> AgentStopResponsePayload {
+        let request = AgentStopRequest(
+            id: RequestID.next(),
+            payload: AgentStopRequestPayload(agentSessionId: agentSessionId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .agentStopResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "agent.stop 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
     // MARK: - 收送
 
     private func perform<T: Encodable>(
@@ -1476,6 +1538,12 @@ public actor CardiaryConnection {
         case .mcpServerSetEnabledResponse(let response):
             resume(response.replyTo, with: frame)
         case .mcpServerAllowHostsResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .agentListResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .agentStartResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .agentStopResponse(let response):
             resume(response.replyTo, with: frame)
         default:
             eventContinuation.yield(frame)

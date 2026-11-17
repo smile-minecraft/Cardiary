@@ -22,3 +22,4 @@ export * from "./settings/index.js";
 export * from "./permissions/index.js";
 export * from "./retrieval/index.js";
 export * from "./system-one/index.js";
+export * from "./external-agents/index.js";

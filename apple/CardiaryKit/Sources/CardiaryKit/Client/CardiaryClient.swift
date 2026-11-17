@@ -621,6 +621,36 @@ public actor CardiaryClient {
         return try await connection.getBoard(boardId: boardId)
     }
 
+    // MARK: - 外部代理
+
+    /// 列出主機目前追蹤的外部代理會話；`agent.state_changed` 會持續更新內容。
+    public func listAgents() async throws -> AgentListResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.listAgents()
+    }
+
+    /// 啟動外部代理；主機會先建立啟動審批，核准後才真的啟動行程。
+    public func startAgent(
+        agentKind: AgentKind,
+        workingDirectory: String,
+        prompt: String?,
+        clientRequestId: String?
+    ) async throws -> AgentStartResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.startAgent(
+            agentKind: agentKind,
+            workingDirectory: workingDirectory,
+            prompt: prompt,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    /// 停止外部代理；還沒決定的審批會被撤回，行程會被收拾乾淨。
+    public func stopAgent(agentSessionId: String) async throws -> AgentStopResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.stopAgent(agentSessionId: agentSessionId)
+    }
+
     public func createBoard(
         boardId: String,
         title: String,

@@ -79,6 +79,42 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case approvalRejected
     case approvalServiceUnavailable
     case approvalTool
+    case inspectorAgentsTitle
+    case inspectorAgentsEmpty
+    case agentsUnavailable
+    case agentKindOpencode
+    case agentKindClaudeCode
+    case agentClaudeTokenTitle
+    case agentClaudeTokenPlaceholder
+    case agentClaudeTokenHint
+    case agentClaudeTokenSave
+    case agentClaudeTokenSaved
+    case agentClaudeTokenEmpty
+    case agentClaudeTokenUnavailable
+    case agentClaudeTokenSaveFailed
+    case agentStatusStarting
+    case agentStatusRunning
+    case agentStatusWaitingApproval
+    case agentStatusStopped
+    case agentStatusFailed
+    case agentResultUnknown
+    case agentResultUnknownHelp
+    case agentWorkingDirectory
+    case agentPermissionTitle
+    case agentProgressStep
+    case agentServiceUnavailable
+    case agentStartTitle
+    case agentStartKind
+    case agentStartDirectory
+    case agentStartPrompt
+    case agentStartPromptPlaceholder
+    case agentStartAction
+    case agentStartNeedsApproval
+    case agentStartInvalidDirectory
+    case agentStartedNotice
+    case agentStopAction
+    case agentStoppedNotice
+    case agentStopNotAppliedNotice
     case connectionConnecting
     case connectionDisconnected
     case connectionRetry
@@ -209,6 +245,11 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case storageCleanupNothing
     case storageCleanupPreview
     case storageCleanupTitle
+    case storageOutsideAbsent
+    case storageOutsideToolClaudeCode
+    case storageOutsideUnavailable
+    case storageOutsideWritesNote
+    case storageOutsideWritesTitle
     case storagePreviewItems
     case storagePreviewTotal
     case storageShellStateNote

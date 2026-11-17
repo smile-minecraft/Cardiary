@@ -7,7 +7,7 @@ import Foundation
 actor FakeCardiaryService:
     ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService,
     CardService, ContextService, SessionManagementService, MediaImportService, NotificationService,
-    StorageService, McpService
+    StorageService, McpService, AgentService
 {
     enum Failure: Error, Equatable {
         case send
@@ -19,6 +19,9 @@ actor FakeCardiaryService:
         case storageUsage
         case storagePreview
         case storageApply
+        case agentStart
+        case agentStop
+        case agentStartLostResponse
     }
 
     private var listPages: [SessionListResponsePayload]
@@ -29,15 +32,23 @@ actor FakeCardiaryService:
     private let sendResponse: SessionSendMessageResponsePayload?
     private var sendDelay: Duration = .zero
     private var modelsState: SystemModelsState
-    private let failure: Failure?
+    private var failure: Failure?
     private var settingsItems: [SettingItem]
     private var modulesList: [ModuleInfo]
     private var mcpServersList: [McpServerInfo]
     private var cards: [Card]
     private var context: ContextView
     private var storageUsageRows: [StorageCategoryUsage]
+    private var storageOutsideWrites: [StorageOutsideWriteEntry]?
     private let storagePreviewPayload: StorageCleanupPreviewResponsePayload?
     private let storageApplyPayload: StorageCleanupApplyResponsePayload?
+    private var agentSessions: [AgentSessionInfo]
+    private var didLoseStartResponse = false
+    private let agentStopStopped: Bool
+    private let holdFirstStart: Bool
+    private var startHasEntered = false
+    private var startEnteredWaiter: CheckedContinuation<Void, Never>?
+    private var startReleaseGate: CheckedContinuation<Void, Never>?
 
     private(set) var historyCursors: [String?] = []
     private(set) var listCalls = 0
@@ -72,6 +83,24 @@ actor FakeCardiaryService:
     private(set) var storageUsageCalls = 0
     private(set) var storagePreviewCategories: [[String]] = []
     private(set) var storageApplyCategories: [[String]] = []
+    private(set) var agentStartCalls: [(
+        agentKind: AgentKind,
+        workingDirectory: String,
+        prompt: String?,
+        clientRequestId: String?
+    )] = []
+    private(set) var agentStopCalls: [String] = []
+    private(set) var agentListCallCount = 0
+
+    /// 測試中切換外部服務的失敗狀態，用來驗證清除舊訊息等行為。
+    func setFailure(_ newFailure: Failure?) {
+        failure = newFailure
+    }
+
+    /// 測試中切換外部明細，用來驗證從有欄位重載到舊版缺欄位時會清掉舊資料。
+    func setStorageOutsideWrites(_ entries: [StorageOutsideWriteEntry]?) {
+        storageOutsideWrites = entries
+    }
 
     init(
         sessions: [SessionSummary] = [],
@@ -88,8 +117,13 @@ actor FakeCardiaryService:
         cards: [Card] = [],
         context: ContextView? = nil,
         storageUsage: [StorageCategoryUsage] = [],
+        storageOutsideWrites: [StorageOutsideWriteEntry]? = nil,
         storagePreview: StorageCleanupPreviewResponsePayload? = nil,
         storageApply: StorageCleanupApplyResponsePayload? = nil,
+        agentSessions: [AgentSessionInfo] = [],
+        agentStopStopped: Bool = true,
+        holdFirstStart: Bool = false,
+        loseFirstStartResponse: Bool = false,
         failure: Failure? = nil
     ) {
         self.fallbackSessions = sessions
@@ -106,8 +140,13 @@ actor FakeCardiaryService:
         self.cards = cards
         self.context = context ?? Fixtures.contextView()
         self.storageUsageRows = storageUsage
+        self.storageOutsideWrites = storageOutsideWrites
         self.storagePreviewPayload = storagePreview
         self.storageApplyPayload = storageApply
+        self.agentSessions = agentSessions
+        self.agentStopStopped = agentStopStopped
+        self.holdFirstStart = holdFirstStart
+        self.didLoseStartResponse = loseFirstStartResponse
         self.failure = failure
     }
 
@@ -259,7 +298,7 @@ actor FakeCardiaryService:
         if failure == .approval { throw Failure.approval }
         let effect: ApprovalEffect
         switch optionId {
-        case "reject": effect = .reject
+        case "reject", "deny": effect = .reject
         case "always": effect = .approveAlways
         default: effect = .approve
         }
@@ -365,6 +404,59 @@ actor FakeCardiaryService:
     /// 從測試模擬事件到達；模型的事件處理應該更新資料。
     func emitMcpServersChanged(_ payload: McpServersChangedEventPayload) {
         mcpServerHandler?(payload)
+    }
+
+    // MARK: - AgentService
+
+    func listAgents() async throws -> AgentListResponsePayload {
+        agentListCallCount += 1
+        return AgentListResponsePayload(agents: agentSessions)
+    }
+
+    func startAgent(
+        agentKind: AgentKind,
+        workingDirectory: String,
+        prompt: String?,
+        clientRequestId: String?
+    ) async throws -> AgentStartResponsePayload {
+        if failure == .agentStart { throw Failure.agentStart }
+        agentStartCalls.append((agentKind, workingDirectory, prompt, clientRequestId))
+        if holdFirstStart && !startHasEntered {
+            startHasEntered = true
+            startEnteredWaiter?.resume()
+            startEnteredWaiter = nil
+            await withCheckedContinuation { continuation in
+                startReleaseGate = continuation
+            }
+        }
+        if didLoseStartResponse {
+            didLoseStartResponse = false
+            throw Failure.agentStartLostResponse
+        }
+        return AgentStartResponsePayload(
+            agentSessionId: "agent-started",
+            approvalId: "start-approval"
+        )
+    }
+
+    /// 放掉被 `holdFirstStart` 掛起的第一次啟動，讓它繼續送出回應。
+    func releaseFirstStart() {
+        startReleaseGate?.resume()
+        startReleaseGate = nil
+    }
+
+    /// 等第一次啟動進入 `startAgent`；測試用它確認第二次呼叫前第一次還沒回來。
+    func waitForFirstStartEntered() async {
+        if startHasEntered { return }
+        await withCheckedContinuation { continuation in
+            startEnteredWaiter = continuation
+        }
+    }
+
+    func stopAgent(agentSessionId: String) async throws -> AgentStopResponsePayload {
+        if failure == .agentStop { throw Failure.agentStop }
+        agentStopCalls.append(agentSessionId)
+        return AgentStopResponsePayload(agentSessionId: agentSessionId, stopped: agentStopStopped)
     }
 
     // MARK: - CardService
@@ -570,7 +662,10 @@ actor FakeCardiaryService:
     func getStorageUsage() async throws -> StorageUsageResponsePayload {
         storageUsageCalls += 1
         if failure == .storageUsage { throw Failure.storageUsage }
-        return StorageUsageResponsePayload(usage: storageUsageRows)
+        return StorageUsageResponsePayload(
+            usage: storageUsageRows,
+            outsideWrites: storageOutsideWrites
+        )
     }
 
     func previewStorageCleanup(
@@ -836,6 +931,43 @@ enum Fixtures {
             createdAt: "2026-01-01T00:00:00Z",
             updatedAt: updatedAt,
             messageCount: messageCount
+        )
+    }
+
+    /// 外部代理會話；`startedAt` 可排序，方便測試快照順序。
+    static func agentInfo(
+        id: String = "agent-1",
+        kind: AgentKind = .opencode,
+        status: AgentStatus = .running,
+        workingDirectory: String = "/work",
+        progress: AgentProgress? = nil,
+        message: String? = nil,
+        resultUnknown: Bool? = nil,
+        pendingPermission: AgentPendingPermission? = nil,
+        startedAt: String = "2026-01-01T00:00:00Z"
+    ) -> AgentSessionInfo {
+        AgentSessionInfo(
+            agentSessionId: id,
+            agentKind: kind,
+            status: status,
+            workingDirectory: workingDirectory,
+            progress: progress,
+            message: message,
+            resultUnknown: resultUnknown,
+            pendingPermission: pendingPermission,
+            startedAt: startedAt
+        )
+    }
+
+    static func agentPermission(
+        approvalId: String = "approval-1",
+        toolName: String = "shell",
+        description: String? = "執行指令"
+    ) -> AgentPendingPermission {
+        AgentPendingPermission(
+            approvalId: approvalId,
+            toolName: toolName,
+            description: description
         )
     }
 
