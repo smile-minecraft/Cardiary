@@ -276,3 +276,53 @@ describe("排程提議工具", () => {
     expect(verdict.action.kind).toBe("tool-execution");
   });
 });
+
+describe("排程管理協定的負面案例", () => {
+  it("module.scheduler.create 一律記成使用者建立，payload 不能改成代理", async () => {
+    const temp = createTempRoot("scheduler-protocol");
+    const storage = openTestStorage(temp);
+    cleanups.push(() => storage.close());
+    cleanups.push(() => rmSync(temp.root, { recursive: true, force: true }));
+    const schedules = new ScheduleStore(storage.state, { now: () => FIXED_NOW });
+    const notifications = new NotificationStore(storage.state, { now: () => FIXED_NOW });
+    const { registerSchedulerAdminProtocol } =
+      await import("../../host/src/modules/scheduler/protocol.js");
+
+    const handlers = new Map<string, (request: never) => Promise<unknown>>();
+    const emitter = {
+      registerNamespace(namespace: string, handler: never) {
+        handlers.set(namespace, handler);
+      },
+      emit() {
+        return undefined;
+      },
+    };
+    registerSchedulerAdminProtocol(
+      { notifications, schedules, cards: undefined, db: storage.state, now: () => FIXED_NOW },
+      emitter as never,
+    );
+
+    const handler = handlers.get("module.scheduler");
+    expect(handler).toBeDefined();
+    // 代理若能打到這條路徑，最多只能建出 createdBy=user，不能冒充自己提議經核准。
+    const response = (await handler!({
+      type: "module.scheduler.create",
+      payload: {
+        data: {
+          name: "每日摘要",
+          kind: "daily",
+          spec: { time: "04:00" },
+          task: { type: "agent", prompt: "整理" },
+          createdBy: "agent",
+          sourceConversationId: "conv_agent",
+        },
+      },
+      clientId: "client-1",
+    } as never)) as { data: { schedule: { createdBy: string } } };
+
+    expect(response.data.schedule.createdBy).toBe("user");
+    const created = schedules.list()[0];
+    expect(created?.createdBy).toBe("user");
+    expect(created?.sourceConversationId).toBeNull();
+  });
+});
