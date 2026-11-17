@@ -10,10 +10,12 @@ import { homedir } from "node:os";
 import type { HostModule, ModuleActivationContext } from "@cardiary/module-api";
 
 import type { SpawnRegistry } from "../../spawn/wrapper.js";
+import type { BrokerClient } from "../../control/broker.js";
 import { HOST_SERVICE_NAMES, type AgentApprovalsService } from "../contract.js";
 import { manifest } from "./manifest.js";
 import { registerExternalAgentsProtocol } from "./protocol.js";
 import { ExternalAgentsService, type ExternalAgentStateData } from "./service.js";
+import { loadClaudeToken } from "./credentials.js";
 
 export const hostModule: HostModule = { manifest, activate, deactivate };
 
@@ -27,6 +29,7 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   if (spawn === undefined) {
     throw new Error("外部代理需要受控子行程服務才能啟動。");
   }
+  const broker = context.services.host.get<BrokerClient>(HOST_SERVICE_NAMES.broker);
   const service = new ExternalAgentsService({
     paths: context.services.paths,
     spawn,
@@ -35,6 +38,19 @@ async function activate(context: ModuleActivationContext): Promise<void> {
     logger: context.services.logger,
     now: () => context.services.clock.now(),
     homeDir: homedir(),
+    readClaudeToken: async () => {
+      if (broker) {
+        try {
+          const result = await broker.keychain("external-agent/claude-code");
+          if (result.found === true && typeof result.value === "string") {
+            return result.value;
+          }
+        } catch {
+          // 殼的鑰匙圈讀不到時，往下試舊的憑證檔。
+        }
+      }
+      return loadClaudeToken(context.services.paths);
+    },
   });
   registerExternalAgentsProtocol({ service, protocol: context.services.protocol });
   context.services.host.provide(HOST_SERVICE_NAMES.externalAgentsPause, {

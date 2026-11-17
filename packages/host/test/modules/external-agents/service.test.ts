@@ -141,7 +141,7 @@ interface Harness {
   readonly workingDirectory: string;
 }
 
-async function makeHarness(): Promise<Harness> {
+async function makeHarness(readClaudeToken?: () => Promise<string | null>): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), "cardiary-agent-service-"));
   roots.push(root);
   const paths: CardiaryPaths = {
@@ -167,6 +167,7 @@ async function makeHarness(): Promise<Harness> {
     emitState: (data) => events.push(data),
     now: () => NOW,
     homeDir: join(root, "home"),
+    readClaudeToken,
   });
   return { service, paths, approvals, events, workingDirectory };
 }
@@ -301,6 +302,43 @@ describe.skipIf(process.platform !== "darwin")("外部代理啟動驗證", () =>
       const failed = await readRecord(agentStoragePaths(paths), started.agentSessionId);
       expect(failed?.message).toContain("權杖");
       expect(spawnSpy).not.toHaveBeenCalled();
+      spawnSpy.mockRestore();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("Claude 沒有任何權杖來源時，核准啟動會向殼讀一次權杖且不啟動行程", async () => {
+    vi.stubEnv("CARDIARY_CLAUDE_OAUTH_TOKEN", "");
+    try {
+      let reads = 0;
+      const readClaudeToken = async (): Promise<string | null> => {
+        reads += 1;
+        return null;
+      };
+      const { service, approvals, events, paths, workingDirectory } =
+        await makeHarness(readClaudeToken);
+      const spawnSpy = vi.spyOn(neverSpawns, "spawn");
+
+      const started = await service.start({ agentKind: "claude-code", workingDirectory });
+
+      await eventually(async () =>
+        events.some(
+          (event) =>
+            event.agentSessionId === started.agentSessionId && event.status === "waiting-approval",
+        ),
+      );
+      if (!started.approvalId) throw new Error("啟動應回傳審批 id");
+      approvals.approve(started.approvalId);
+
+      await eventually(async () => {
+        const record = await readRecord(agentStoragePaths(paths), started.agentSessionId);
+        return record?.status === "failed";
+      });
+      const failed = await readRecord(agentStoragePaths(paths), started.agentSessionId);
+      expect(failed?.message).toBe("Claude Code 需要授權權杖，請在設定中提供。");
+      expect(spawnSpy).not.toHaveBeenCalled();
+      expect(reads).toBe(1);
       spawnSpy.mockRestore();
     } finally {
       vi.unstubAllEnvs();
