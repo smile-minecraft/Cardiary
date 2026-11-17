@@ -419,6 +419,118 @@ public actor CardiaryConnection {
         return response.payload
     }
 
+    // MARK: - MCP
+
+    public func listMcpServers(
+        options: RequestOptions = .default
+    ) async throws -> McpServersListResponsePayload {
+        let request = McpServersListRequest(
+            id: RequestID.next(),
+            payload: McpServersListRequestPayload()
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .mcpServersListResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "mcp.servers.list 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    /// 新增伺服器。這一步只送審批：回應帶 `approvalId`，批准後才以
+    /// `mcp.servers_changed` 事件通知實際結果。
+    public func addMcpServer(
+        name: String,
+        transport: McpTransport,
+        command: String? = nil,
+        args: [String]? = nil,
+        url: String? = nil,
+        allowedHosts: [String] = [],
+        clientRequestId: String? = nil,
+        options: RequestOptions = .default
+    ) async throws -> McpServerAddResponsePayload {
+        let request = McpServerAddRequest(
+            id: RequestID.next(),
+            payload: McpServerAddRequestPayload(
+                name: name,
+                transport: transport,
+                command: command,
+                args: args,
+                url: url,
+                allowedHosts: allowedHosts,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .mcpServerAddResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "mcp.server.add 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func removeMcpServer(
+        serverId: String,
+        options: RequestOptions = .default
+    ) async throws -> McpServerRemoveResponsePayload {
+        let request = McpServerRemoveRequest(
+            id: RequestID.next(),
+            payload: McpServerRemoveRequestPayload(serverId: serverId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .mcpServerRemoveResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "mcp.server.remove 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func setMcpServerEnabled(
+        serverId: String,
+        enabled: Bool,
+        clientRequestId: String? = nil,
+        options: RequestOptions = .default
+    ) async throws -> McpServerSetEnabledResponsePayload {
+        let request = McpServerSetEnabledRequest(
+            id: RequestID.next(),
+            payload: McpServerSetEnabledRequestPayload(
+                serverId: serverId,
+                enabled: enabled,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .mcpServerSetEnabledResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "mcp.server.set_enabled 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func setMcpServerAllowedHosts(
+        serverId: String,
+        allowedHosts: [String],
+        options: RequestOptions = .default
+    ) async throws -> McpServerAllowHostsResponsePayload {
+        let request = McpServerAllowHostsRequest(
+            id: RequestID.next(),
+            payload: McpServerAllowHostsRequestPayload(
+                serverId: serverId,
+                allowedHosts: allowedHosts
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .mcpServerAllowHostsResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "mcp.server.allow_hosts 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
     /// 對第一方模組的 `module.*` 請求。
     ///
     /// 請求與回應的 payload 都是 `{ data: … }`（`protocol.md` 第 6 節）；這裡
@@ -1354,6 +1466,16 @@ public actor CardiaryConnection {
         case .storageCleanupApplyResponse(let response):
             resume(response.replyTo, with: frame)
         case .moduleResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .mcpServersListResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .mcpServerAddResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .mcpServerRemoveResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .mcpServerSetEnabledResponse(let response):
+            resume(response.replyTo, with: frame)
+        case .mcpServerAllowHostsResponse(let response):
             resume(response.replyTo, with: frame)
         default:
             eventContinuation.yield(frame)

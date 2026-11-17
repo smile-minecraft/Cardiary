@@ -40,6 +40,8 @@ export interface McpClientContext {
   readonly spawn: SpawnRegistry;
   readonly logger: { debug(message: string): void; warn(message: string): void };
   readonly homeDir?: string;
+  /** HTTP 請求的逾期毫秒數；測試可縮短，正式執行沿用 30 秒。 */
+  readonly requestTimeoutMs?: number;
 }
 
 export type McpClientFactory = (server: McpServerRecord, context: McpClientContext) => McpClient;
@@ -65,7 +67,7 @@ export function createMcpClient(server: McpServerRecord, context: McpClientConte
   if (server.transport === "stdio") {
     return new StdioMcpClient(server, context);
   }
-  return new HttpMcpClient(server);
+  return new HttpMcpClient(server, context.requestTimeoutMs);
 }
 
 // ── stdio ──────────────────────────────────────────────────────────────────
@@ -338,13 +340,18 @@ class StdioRpc {
 
 class HttpMcpClient implements McpClient {
   readonly #server: McpServerRecord;
+  readonly #timeoutMs: number;
+  /** 進行中請求的控制器；`close()` 用它中止所有還沒回來的 fetch。 */
+  readonly #controllers = new Set<AbortController>();
   #sessionId: string | null = null;
   #nextId = 1;
   #initialized = false;
   #connecting: Promise<void> | null = null;
+  #closed = false;
 
-  constructor(server: McpServerRecord) {
+  constructor(server: McpServerRecord, timeoutMs: number = REQUEST_TIMEOUT_MS) {
     this.#server = server;
+    this.#timeoutMs = timeoutMs;
   }
 
   async listTools(): Promise<McpToolDescriptor[]> {
@@ -375,11 +382,22 @@ class HttpMcpClient implements McpClient {
   }
 
   async close(): Promise<void> {
+    this.#closed = true;
     this.#sessionId = null;
     this.#initialized = false;
+    this.#connecting = null;
+    // 中止所有還沒回來的請求。fetch 的訊號同時切掉等 headers 與讀 body，
+    // 卡住的 `#send()` 會立刻以 AbortError 結束，`launch.task` 才能收斂。
+    for (const controller of this.#controllers) {
+      controller.abort();
+    }
+    this.#controllers.clear();
   }
 
   async #connect(): Promise<void> {
+    if (this.#closed) {
+      throw new McpClientError("closed", "MCP 用戶端已關閉");
+    }
     if (this.#initialized) {
       return;
     }
@@ -398,18 +416,19 @@ class HttpMcpClient implements McpClient {
       throw new McpClientError("invalid_config", "http 伺服器缺少 url");
     }
     const id = this.#nextId++;
-    const response = await this.#post({
-      jsonrpc: "2.0",
-      id,
-      method: "initialize",
-      params: {
-        protocolVersion: MCP_PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: { name: "Cardiary", version: "0.1.0" },
+    const result = await this.#send(
+      {
+        jsonrpc: "2.0",
+        id,
+        method: "initialize",
+        params: {
+          protocolVersion: MCP_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: { name: "Cardiary", version: "0.1.0" },
+        },
       },
-    });
-    this.#readSessionId(response);
-    const result = await responseResult(response, id);
+      id,
+    );
     if (typeof result !== "object" || result === null) {
       throw new McpClientError("initialize_failed", "MCP 初始化回應不是物件");
     }
@@ -419,25 +438,56 @@ class HttpMcpClient implements McpClient {
 
   async #request(method: string, params: Readonly<Record<string, unknown>>): Promise<unknown> {
     const id = this.#nextId++;
-    const response = await this.#post({ jsonrpc: "2.0", id, method, params });
-    return responseResult(response, id);
+    return this.#send({ jsonrpc: "2.0", id, method, params }, id);
   }
 
   async #notify(method: string, params: Readonly<Record<string, unknown>>): Promise<void> {
-    await this.#post({ jsonrpc: "2.0", method, params });
+    await this.#send({ jsonrpc: "2.0", method, params });
   }
 
-  async #post(message: Record<string, unknown>): Promise<Response> {
+  /**
+   * 送一個請求並讀完回應；fetch 與讀取 body 都在同一個有界訊號下。
+   * 每個請求各自一個控制器：`close()` 可以一次中止所有還沒回來的請求，
+   * 不論卡在等 headers 還是等 body。
+   */
+  async #send(message: Record<string, unknown>, expectedId?: number): Promise<unknown> {
     if (this.#server.url === undefined) {
       throw new McpClientError("invalid_config", "http 伺服器缺少 url");
     }
-    const response = await this.#fetchFollowingAllowedHosts(this.#server.url, message);
-    return response;
+    if (this.#closed) {
+      throw new McpClientError("closed", "MCP 用戶端已關閉");
+    }
+    const controller = new AbortController();
+    this.#controllers.add(controller);
+    const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
+    try {
+      const response = await this.#fetchFollowingAllowedHosts(
+        this.#server.url,
+        message,
+        controller.signal,
+      );
+      return await responseResult(response, expectedId);
+    } catch (error) {
+      if (error instanceof McpClientError) {
+        throw error;
+      }
+      if (error instanceof Error && error.name === "AbortError") {
+        // close() 刻意中止與逾時中止都要當成失敗，不能當成成功回應。
+        throw this.#closed
+          ? new McpClientError("closed", "MCP 用戶端已關閉")
+          : new McpClientError("timeout", `MCP 伺服器 ${this.#server.serverId} 沒有在期限內回應`);
+      }
+      throw new McpClientError("request_failed", `MCP 請求失敗：${errorMessage(error)}`);
+    } finally {
+      clearTimeout(timer);
+      this.#controllers.delete(controller);
+    }
   }
 
   async #fetchFollowingAllowedHosts(
     start: string,
     message: Record<string, unknown>,
+    signal: AbortSignal,
   ): Promise<Response> {
     let target = new URL(start);
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
@@ -450,6 +500,7 @@ class HttpMcpClient implements McpClient {
       const response = await fetch(target, {
         method: "POST",
         redirect: "manual",
+        signal,
         headers: {
           "content-type": "application/json",
           accept: "application/json, text/event-stream",
@@ -547,6 +598,15 @@ async function responseResult(response: Response, expectedId?: number): Promise<
   if (!response.ok) {
     throw new McpClientError("http_error", `MCP 伺服器回應 HTTP ${String(response.status)}`);
   }
+  // 通知（沒有 expectedId）不需要回應內容：JSON-RPC notification 依法沒有 id，
+  // 伺服器常回 202/204 且 body 是空的。只要是 2xx 就當成功，不解析 JSON；
+  // body 仍要取消，避免 200 帶 body 或 text/event-stream 的長連線留到逾時。
+  if (expectedId === undefined) {
+    // 通知的 2xx 回應可能帶 body 或串流；不解析內容，但要取消，
+    // 避免 200 帶 body 或 text/event-stream 的連線留到逾時才釋放。
+    await response.body?.cancel().catch(() => undefined);
+    return undefined;
+  }
   const contentType = response.headers.get("content-type") ?? "";
   const body = await response.text();
   if (contentType.includes("text/event-stream")) {
@@ -576,9 +636,6 @@ async function responseResult(response: Response, expectedId?: number): Promise<
     parsed = JSON.parse(body) as unknown;
   } catch {
     throw new McpClientError("invalid_response", "MCP 回應不是合法 JSON");
-  }
-  if (expectedId === undefined) {
-    return parsed;
   }
   const matched = matchResponse(parsed, expectedId);
   if (matched === undefined) {

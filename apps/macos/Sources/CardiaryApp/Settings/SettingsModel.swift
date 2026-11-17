@@ -3,7 +3,7 @@ import CardiaryShellCore
 import Combine
 import Foundation
 
-/// 設定頁的根狀態：模型、一般設定、模組與儲存空間四個分頁共用一條服務連線。
+/// 設定頁的根狀態：模型、一般設定、模組、儲存空間與 MCP 分頁共用一條服務連線。
 ///
 /// 分頁各自維護自己的資料，只有在畫面出現時才載入；連線換掉時一起換掉服務，
 /// 不保留上一條連線的資料。
@@ -13,6 +13,7 @@ public final class SettingsModel: ObservableObject {
     public let general: GeneralSettingsModel
     public let modules: ModulesSettingsModel
     public let storage: StorageSettingsModel
+    public let mcp: McpSettingsModel
 
     public init(
         keychain: (any KeychainWriting)? = nil,
@@ -22,6 +23,7 @@ public final class SettingsModel: ObservableObject {
         self.general = GeneralSettingsModel(language: language)
         self.modules = ModulesSettingsModel(language: language)
         self.storage = StorageSettingsModel(language: language)
+        self.mcp = McpSettingsModel(language: language)
     }
 
     public func attach(service: any CardiaryService) {
@@ -29,6 +31,7 @@ public final class SettingsModel: ObservableObject {
         general.attach(service: service)
         modules.attach(service: service)
         storage.attach(service: service)
+        mcp.attach(service: service)
     }
 
     public func detach() {
@@ -36,6 +39,7 @@ public final class SettingsModel: ObservableObject {
         general.detach()
         modules.detach()
         storage.detach()
+        mcp.detach()
     }
 }
 

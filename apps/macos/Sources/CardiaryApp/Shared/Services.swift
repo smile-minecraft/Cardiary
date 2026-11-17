@@ -54,6 +54,36 @@ public protocol StorageService: Sendable {
     func applyStorageCleanup(categories: [String]) async throws -> StorageCleanupApplyResponsePayload
 }
 
+/// MCP 伺服器：清單、新增（送審批）、移除、啟停與允許網域。
+///
+/// 新增只回審批編號，真正的變更由 `mcp.servers_changed` 事件送來；畫面用
+/// `setMcpServersChangedHandler` 訂閱，再設定一次會取代前一個。
+public protocol McpService: Sendable {
+    func listMcpServers() async throws -> McpServersListResponsePayload
+    func addMcpServer(
+        name: String,
+        transport: McpTransport,
+        command: String?,
+        args: [String]?,
+        url: String?,
+        allowedHosts: [String],
+        clientRequestId: String?
+    ) async throws -> McpServerAddResponsePayload
+    func removeMcpServer(serverId: String) async throws -> McpServerRemoveResponsePayload
+    func setMcpServerEnabled(
+        serverId: String,
+        enabled: Bool,
+        clientRequestId: String?
+    ) async throws -> McpServerSetEnabledResponsePayload
+    func setMcpServerAllowedHosts(
+        serverId: String,
+        allowedHosts: [String]
+    ) async throws -> McpServerAllowHostsResponsePayload
+    func setMcpServersChangedHandler(
+        _ handler: (@Sendable (McpServersChangedEventPayload) -> Void)?
+    ) async
+}
+
 /// 審批需要的請求。檢視欄與選單列共用同一條路徑。
 public protocol ApprovalService: Sendable {
     func decideApproval(
@@ -252,10 +282,10 @@ public protocol RemoteControlService: Sendable {
 public typealias CardiaryService =
     ConversationService & ModelSettingsService & SettingsService & ModulesService & ApprovalService
     & CardService & ContextService & SessionManagementService & MediaImportService & NotificationService
-    & StorageService
+    & StorageService & McpService
 
 extension CardiaryClient:
     ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService,
     CardService, ContextService, SessionManagementService, MediaImportService, NotificationService,
-    StorageService
+    StorageService, McpService
 {}

@@ -159,6 +159,7 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case settingsModuleStateLoaded
     case settingsModuleVersion
     case settingsModulesEmpty
+    case settingsMcpTab
     case settingsModulesTab
     case settingsStorageTab
     case settingsProviderAdd

@@ -303,6 +303,76 @@ public actor CardiaryClient {
         return try await connection.applyStorageCleanup(categories: categories)
     }
 
+    // MARK: - MCP
+
+    /// `mcp.servers_changed` 的專用回呼；再設定一次會取代前一個，`nil` 取消訂閱。
+    public var onMcpServersChanged: (@Sendable (McpServersChangedEventPayload) -> Void)? {
+        get { handlers.onMcpServersChanged }
+        set { handlers.onMcpServersChanged = newValue }
+    }
+
+    /// MCP 介面用非同步介面訂閱事件，讓測試替身可以用 actor 實作。
+    public func setMcpServersChangedHandler(
+        _ handler: (@Sendable (McpServersChangedEventPayload) -> Void)?
+    ) async {
+        onMcpServersChanged = handler
+    }
+
+    public func listMcpServers() async throws -> McpServersListResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.listMcpServers()
+    }
+
+    public func addMcpServer(
+        name: String,
+        transport: McpTransport,
+        command: String? = nil,
+        args: [String]? = nil,
+        url: String? = nil,
+        allowedHosts: [String] = [],
+        clientRequestId: String? = nil
+    ) async throws -> McpServerAddResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.addMcpServer(
+            name: name,
+            transport: transport,
+            command: command,
+            args: args,
+            url: url,
+            allowedHosts: allowedHosts,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func removeMcpServer(serverId: String) async throws -> McpServerRemoveResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.removeMcpServer(serverId: serverId)
+    }
+
+    public func setMcpServerEnabled(
+        serverId: String,
+        enabled: Bool,
+        clientRequestId: String? = nil
+    ) async throws -> McpServerSetEnabledResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.setMcpServerEnabled(
+            serverId: serverId,
+            enabled: enabled,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func setMcpServerAllowedHosts(
+        serverId: String,
+        allowedHosts: [String]
+    ) async throws -> McpServerAllowHostsResponsePayload {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.setMcpServerAllowedHosts(
+            serverId: serverId,
+            allowedHosts: allowedHosts
+        )
+    }
+
     // MARK: - 模組請求
 
     /// 對第一方模組（`module.*`）送請求，回傳回應的整個 payload（`{ data: … }`）。
@@ -825,6 +895,9 @@ public actor CardiaryClient {
         if case .boardChangedEvent(let event) = frame {
             handlers.onBoardChanged?(event.payload)
         }
+        if case .mcpServersChangedEvent(let event) = frame {
+            handlers.onMcpServersChanged?(event.payload)
+        }
 
         switch frame {
         case .systemStatusEvent(let event):
@@ -893,6 +966,7 @@ public final class Handlers: @unchecked Sendable {
     private var sessionEventHandler: (@Sendable (ServerFrame) -> Void)?
     private var moduleEventHandler: (@Sendable (ServerFrame) -> Void)?
     private var boardChangedHandler: (@Sendable (BoardChangedEventPayload) -> Void)?
+    private var mcpServersChangedHandler: (@Sendable (McpServersChangedEventPayload) -> Void)?
     private var epochChangeHandler: (@Sendable (String) -> Void)?
 
     public init() {}
@@ -939,6 +1013,12 @@ public final class Handlers: @unchecked Sendable {
     public var onBoardChanged: (@Sendable (BoardChangedEventPayload) -> Void)? {
         get { lock.lock(); defer { lock.unlock() }; return boardChangedHandler }
         set { lock.lock(); boardChangedHandler = newValue; lock.unlock() }
+    }
+
+    /// 只轉送 `mcp.servers_changed`；MCP 設定畫面訂閱這一個，不必自己拆 frame。
+    public var onMcpServersChanged: (@Sendable (McpServersChangedEventPayload) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return mcpServersChangedHandler }
+        set { lock.lock(); mcpServersChangedHandler = newValue; lock.unlock() }
     }
 
     /// 收到與先前不同的 epoch（或串流缺口後被迫重載）時觸發，帶新的 epoch。

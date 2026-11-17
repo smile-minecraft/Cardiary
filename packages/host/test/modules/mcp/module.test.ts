@@ -2,7 +2,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ToolBundleDraft, ToolDefinition } from "@cardiary/engine-adapter";
-import type { ModuleActivationContext } from "@cardiary/module-api";
+import type { ModuleActivationContext, ProtocolEventIntent } from "@cardiary/module-api";
 import { FolderLayout, McpServerStore } from "@cardiary/storage";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -15,6 +15,7 @@ import type {
   McpToolDescriptor,
 } from "../../../src/modules/mcp/client.js";
 import { toolNamesOf } from "../../../src/modules/mcp/tools.js";
+import { openMcpApprovals } from "./helpers.js";
 
 const INPUT = {
   name: "Local",
@@ -100,7 +101,10 @@ function fakeClient(calls: string[]): McpClientFactory {
   return (() => client) as unknown as McpClientFactory;
 }
 
-function makeContext(bundles: ToolBundleDraft[]): ModuleActivationContext {
+function makeContext(
+  bundles: ToolBundleDraft[],
+  events: ProtocolEventIntent[] = [],
+): ModuleActivationContext {
   const noop = (): void => {};
   return {
     identity: { moduleId: "mcp", generation: 1 },
@@ -108,7 +112,7 @@ function makeContext(bundles: ToolBundleDraft[]): ModuleActivationContext {
       paths: { root: folderRoot },
       logger: { debug: noop, info: noop, warn: noop, error: noop },
       protocol: {
-        emit: noop,
+        emit: (intent: ProtocolEventIntent) => events.push(intent),
         registerNamespace: () => ({ dispose: noop }),
       },
       host: { provide: noop, get: () => undefined, require: () => undefined },
@@ -128,6 +132,12 @@ function toolIn(draft: ToolBundleDraft, name: string): ToolDefinition {
   return tool;
 }
 
+function changedIn(events: ProtocolEventIntent[]): Array<Record<string, unknown>> {
+  return events
+    .filter((intent) => intent.kind === "mcp-servers-changed")
+    .map((intent) => intent.payload as Record<string, unknown>);
+}
+
 describe("MCP 模組的審批與工具註冊", () => {
   it("核准前不啟動、不寫正本、不註冊工具", async () => {
     const root = makeFolder();
@@ -140,6 +150,7 @@ describe("MCP 模組的審批與工具註冊", () => {
       engine: makeEngine(approvals),
       clientFactory: fakeClient(calls),
       folderRoot: root,
+      bindings: openMcpApprovals(),
     });
     const { approvalId } = await handle.controller.requestAdd(INPUT);
 
@@ -167,6 +178,7 @@ describe("MCP 模組的審批與工具註冊", () => {
       engine: makeEngine(approvals),
       clientFactory: fakeClient([]),
       folderRoot: root,
+      bindings: openMcpApprovals(),
     });
     const { approvalId } = await handle.controller.requestAdd(INPUT);
     approvals.decide(approvalId, "denied");
@@ -184,15 +196,95 @@ describe("MCP 模組的審批與工具註冊", () => {
     await store.setEnabled(record.serverId, false);
     const bundles: ToolBundleDraft[] = [];
     const calls: string[] = [];
+    const bindings = openMcpApprovals();
+    const approved = await store.get(record.serverId);
+    if (approved !== null) {
+      bindings.approve(approved);
+    }
     const handle = await activateMcpModule(makeContext(bundles), {
       store,
       engine: makeEngine(new FakeApprovals()),
       clientFactory: fakeClient(calls),
       folderRoot: root,
+      bindings,
     });
     await handle.settled();
     expect(bundles).toEqual([]);
     expect(calls).toEqual([]);
+    await handle.dispose();
+  });
+
+  it("啟停與移除都會發出 servers_changed", async () => {
+    const root = makeFolder();
+    const store = new McpServerStore(new FolderLayout(root));
+    const events: ProtocolEventIntent[] = [];
+    const bindings = openMcpApprovals();
+    const handle = await activateMcpModule(makeContext([], events), {
+      store,
+      engine: makeEngine(new FakeApprovals()),
+      clientFactory: fakeClient([]),
+      folderRoot: root,
+      bindings,
+    });
+    const record = await store.add(INPUT);
+    bindings.approve(record);
+    await handle.settled();
+
+    await handle.controller.setEnabled(record.serverId, false);
+    expect(changedIn(events).at(-1)).toMatchObject({
+      removed: false,
+      server: { serverId: record.serverId, enabled: false, state: "disabled" },
+    });
+
+    await handle.controller.setEnabled(record.serverId, true);
+    expect(changedIn(events).at(-1)).toMatchObject({
+      removed: false,
+      server: { serverId: record.serverId, enabled: true, state: "ready" },
+    });
+
+    await handle.controller.removeServer(record.serverId);
+    expect(changedIn(events).at(-1)).toMatchObject({
+      removed: true,
+      server: { serverId: record.serverId, name: "Local" },
+    });
+    await handle.dispose();
+  });
+
+  it("允許網域變更會發出 servers_changed 並重新連線", async () => {
+    const root = makeFolder();
+    const store = new McpServerStore(new FolderLayout(root));
+    const events: ProtocolEventIntent[] = [];
+    const bindings = openMcpApprovals();
+    const handle = await activateMcpModule(makeContext([], events), {
+      store,
+      engine: makeEngine(new FakeApprovals()),
+      clientFactory: fakeClient([]),
+      folderRoot: root,
+      bindings,
+    });
+    const record = await store.add({
+      name: "Remote",
+      transport: "http",
+      url: "https://example.test/mcp",
+      allowedHosts: ["example.test"],
+    });
+    bindings.approve(record);
+    await handle.settled();
+
+    const info = await handle.controller.setAllowedHosts(record.serverId, [
+      "example.test",
+      "api.example.test",
+    ]);
+    expect(info.allowedHosts).toEqual(["api.example.test", "example.test"]);
+    expect(changedIn(events).at(-1)).toMatchObject({
+      removed: false,
+      server: {
+        serverId: record.serverId,
+        transport: "http",
+        allowedHosts: ["api.example.test", "example.test"],
+        state: "ready",
+      },
+    });
     await handle.dispose();
   });
 
@@ -207,6 +299,7 @@ describe("MCP 模組的審批與工具註冊", () => {
       engine: makeEngine(approvals),
       clientFactory: fakeClient(calls),
       folderRoot: root,
+      bindings: openMcpApprovals(),
     });
     const { approvalId } = await handle.controller.requestAdd(INPUT);
     approvals.decide(approvalId, "approved");

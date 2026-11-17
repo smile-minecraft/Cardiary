@@ -62,6 +62,18 @@ const moduleInfo = {
   settings: [{ key: "mode", title: "模式", kind: "string", level: "free" }],
 };
 
+const mcpServerInfo = {
+  serverId: "srv-1",
+  name: "本機工具",
+  transport: "stdio",
+  command: "node",
+  args: ["server.mjs"],
+  allowedHosts: ["example.test"],
+  enabled: true,
+  state: "ready",
+  createdAt: "2026-11-15T04:00:00.000Z",
+};
+
 const samples: Record<string, unknown> = {
   "card.changed": { cardId: "c1", change: "updated", revision: "r2", freshness: 80 },
   "context.changed": { sessionId: "s1", context: contextView },
@@ -123,6 +135,7 @@ const samples: Record<string, unknown> = {
     ],
   },
   "system.modules.changed": { module: moduleInfo },
+  "mcp.servers_changed": { server: mcpServerInfo, removed: false },
   "module.demo.changed": { data: { value: 1 }, schemaVersion: "1" },
 };
 
@@ -136,6 +149,7 @@ const payloadDefinitions: Record<string, string> = {
   "system.settings.changed": "SystemSettingsChangedEventPayload",
   "system.models.changed": "SystemModelsState",
   "system.modules.changed": "SystemModulesChangedEventPayload",
+  "mcp.servers_changed": "McpServersChangedEventPayload",
   "module.demo.changed": "ModuleEventPayload",
 };
 
@@ -203,6 +217,20 @@ describe("事件意圖對照", () => {
     expect(mapEventIntent({ kind: "module-changed", payload: { module: moduleInfo } })).toEqual({
       events: [
         { stream: "system", type: "system.modules.changed", payload: { module: moduleInfo } },
+      ],
+    });
+    expect(
+      mapEventIntent({
+        kind: "mcp-servers-changed",
+        payload: { server: mcpServerInfo, removed: true },
+      }),
+    ).toEqual({
+      events: [
+        {
+          stream: "system",
+          type: "mcp.servers_changed",
+          payload: { server: mcpServerInfo, removed: true },
+        },
       ],
     });
     expect(

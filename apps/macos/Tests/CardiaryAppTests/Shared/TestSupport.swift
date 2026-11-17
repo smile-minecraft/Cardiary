@@ -7,7 +7,7 @@ import Foundation
 actor FakeCardiaryService:
     ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService,
     CardService, ContextService, SessionManagementService, MediaImportService, NotificationService,
-    StorageService
+    StorageService, McpService
 {
     enum Failure: Error, Equatable {
         case send
@@ -32,6 +32,7 @@ actor FakeCardiaryService:
     private let failure: Failure?
     private var settingsItems: [SettingItem]
     private var modulesList: [ModuleInfo]
+    private var mcpServersList: [McpServerInfo]
     private var cards: [Card]
     private var context: ContextView
     private var storageUsageRows: [StorageCategoryUsage]
@@ -49,6 +50,12 @@ actor FakeCardiaryService:
     private(set) var pauseAllCalls = 0
     private(set) var settingChanges: [[SettingChange]] = []
     private(set) var moduleChanges: [(moduleId: String, enabled: Bool)] = []
+    private(set) var mcpAdds: [(name: String, transport: McpTransport, command: String?, args: [String]?, url: String?, allowedHosts: [String], clientRequestId: String?)] = []
+    private(set) var mcpRemoves: [String] = []
+    private(set) var mcpEnabled: [(serverId: String, enabled: Bool)] = []
+    private(set) var mcpAllowedHosts: [(serverId: String, hosts: [String])] = []
+    private(set) var mcpServerHandlerInstalled = false
+    private var mcpServerHandler: (@Sendable (McpServersChangedEventPayload) -> Void)?
     private(set) var cardListCalls: [(cursor: String?, limit: Int?)] = []
     private(set) var cardSearches: [String] = []
     private(set) var cardPatches: [(cardId: String, baseRevision: String, patch: CardPatch)] = []
@@ -77,6 +84,7 @@ actor FakeCardiaryService:
         modelsState: SystemModelsState = SystemModelsState(providers: [], roles: [], resolved: []),
         settings: [SettingItem] = [],
         modules: [ModuleInfo] = [],
+        mcpServers: [McpServerInfo] = [],
         cards: [Card] = [],
         context: ContextView? = nil,
         storageUsage: [StorageCategoryUsage] = [],
@@ -94,6 +102,7 @@ actor FakeCardiaryService:
         self.modelsState = modelsState
         self.settingsItems = settings
         self.modulesList = modules
+        self.mcpServersList = mcpServers
         self.cards = cards
         self.context = context ?? Fixtures.contextView()
         self.storageUsageRows = storageUsage
@@ -265,6 +274,97 @@ actor FakeCardiaryService:
     func pauseAllApprovals(reason: String) async throws {
         pauseAllCalls += 1
         if failure == .pause { throw Failure.pause }
+    }
+
+    // MARK: - McpService
+
+    func listMcpServers() async throws -> McpServersListResponsePayload {
+        McpServersListResponsePayload(servers: mcpServersList)
+    }
+
+    func addMcpServer(
+        name: String,
+        transport: McpTransport,
+        command: String?,
+        args: [String]?,
+        url: String?,
+        allowedHosts: [String],
+        clientRequestId: String?
+    ) async throws -> McpServerAddResponsePayload {
+        mcpAdds.append((name, transport, command, args, url, allowedHosts, clientRequestId))
+        return McpServerAddResponsePayload(approvalId: "approval-mcp")
+    }
+
+    func removeMcpServer(serverId: String) async throws -> McpServerRemoveResponsePayload {
+        mcpRemoves.append(serverId)
+        return McpServerRemoveResponsePayload(serverId: serverId, removed: true)
+    }
+
+    func setMcpServerEnabled(
+        serverId: String,
+        enabled: Bool,
+        clientRequestId: String?
+    ) async throws -> McpServerSetEnabledResponsePayload {
+        mcpEnabled.append((serverId, enabled))
+        guard let index = mcpServersList.firstIndex(where: { $0.serverId == serverId }) else {
+            throw Failure.models
+        }
+        let current = mcpServersList[index]
+        let updated = McpServerInfo(
+            serverId: current.serverId,
+            name: current.name,
+            transport: current.transport,
+            command: current.command,
+            args: current.args,
+            url: current.url,
+            allowedHosts: current.allowedHosts,
+            enabled: enabled,
+            state: enabled ? .ready : .disabled,
+            failure: enabled ? nil : current.failure,
+            createdAt: current.createdAt,
+            updatedAt: current.updatedAt
+        )
+        mcpServersList[index] = updated
+        return McpServerSetEnabledResponsePayload(server: updated)
+    }
+
+    func setMcpServerAllowedHosts(
+        serverId: String,
+        allowedHosts: [String]
+    ) async throws -> McpServerAllowHostsResponsePayload {
+        mcpAllowedHosts.append((serverId, allowedHosts))
+        guard let index = mcpServersList.firstIndex(where: { $0.serverId == serverId }) else {
+            throw Failure.models
+        }
+        let current = mcpServersList[index]
+        let updated = McpServerInfo(
+            serverId: current.serverId,
+            name: current.name,
+            transport: current.transport,
+            command: current.command,
+            args: current.args,
+            url: current.url,
+            allowedHosts: allowedHosts,
+            enabled: current.enabled,
+            state: current.state,
+            failure: current.failure,
+            createdAt: current.createdAt,
+            updatedAt: current.updatedAt
+        )
+        mcpServersList[index] = updated
+        return McpServerAllowHostsResponsePayload(server: updated)
+    }
+
+    func setMcpServersChangedHandler(
+        _ handler: (@Sendable (McpServersChangedEventPayload) -> Void)?
+    ) async {
+        mcpServerHandler = handler
+        mcpServerHandlerInstalled = handler != nil
+    }
+
+    /// 從測試模擬事件到達；模型的事件處理應該更新資料。
+    func emitMcpServersChanged(_ payload: McpServersChangedEventPayload) {
+        mcpServerHandler?(payload)
     }
 
     // MARK: - CardService

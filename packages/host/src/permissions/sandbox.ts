@@ -1,4 +1,12 @@
-import { accessSync, constants, existsSync, realpathSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  lstatSync,
+  readdirSync,
+  realpathSync,
+  type Stats,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -67,6 +75,110 @@ const SENSITIVE_FOLDERS = [".ssh", ".aws", ".gnupg"] as const;
 
 /** 敏感讀取：單一檔案。 */
 const SENSITIVE_FILES = [".netrc", ".npmrc", ".pypirc"] as const;
+
+/**
+ * 受保護 inode 的別名：存在於可寫入區、卻和 `state/**` 的某個一般檔案共用
+ * inode。SBPL 只看路徑，這種別名能繞過寫入保護，所以要在啟動前擋下。
+ */
+export interface ProtectedAlias {
+  readonly path: string;
+  readonly dev: number;
+  readonly ino: number;
+}
+
+/** 別名掃描本身失敗（例如目錄讀不出來）；呼叫端必須 fail-closed。 */
+export class ProtectedAliasScanError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProtectedAliasScanError";
+  }
+}
+
+function isMissing(error: unknown): boolean {
+  return error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+function describeStatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function inodeKey(stat: Stats): string {
+  return `${stat.dev}:${stat.ino}`;
+}
+
+/**
+ * 只走一般檔案：遇到符號連結不跟隨，遇到讀不出來的目錄 fail-closed。
+ *
+ * `missingOk` 讓不存在的根目錄或競態消失的項目跳過；兩者都不是別名。
+ */
+function walkRegularFiles(
+  root: string,
+  onFile: (path: string, stat: Stats) => void,
+  missingOk: boolean,
+): void {
+  let stat: Stats;
+  try {
+    stat = lstatSync(root);
+  } catch (error) {
+    if (missingOk && isMissing(error)) return;
+    throw new ProtectedAliasScanError(`無法檢查路徑 ${root}：${describeStatError(error)}`);
+  }
+  if (stat.isSymbolicLink()) return;
+  if (stat.isFile()) {
+    onFile(root, stat);
+    return;
+  }
+  if (!stat.isDirectory()) return;
+
+  let entries: string[];
+  try {
+    entries = readdirSync(root);
+  } catch (error) {
+    if (missingOk && isMissing(error)) return;
+    throw new ProtectedAliasScanError(`無法讀取目錄 ${root}：${describeStatError(error)}`);
+  }
+  for (const entry of entries) {
+    walkRegularFiles(join(root, entry), onFile, true);
+  }
+}
+
+/**
+ * 找出 `workingDir` 與 `<folderRoot>/tmp` 底下指向 `<folderRoot>/state/**`
+ * 一般檔案的硬連結別名。
+ *
+ * 先對 state 做一次 inode 集合，再線性掃描可寫入區；只用 `lstat`，不跟隨符號
+ * 連結。state 不存在代表沒有保護檔案；任何讀取失敗都丟
+ * `ProtectedAliasScanError`，讓呼叫端 fail-closed，不要假裝掃描通過。
+ *
+ * 這是啟動前的快照：SBPL 只比對路徑，硬連結從可寫入的別名寫入可以繞過寫入
+ * 保護，所以先掃掉已存在的別名。掃描完成到 `sandbox-exec` 啟動子行程之間仍有
+ * 競爭危害，這段空窗攔不住新建立的別名；後果由核准綁定吸收：正本一旦被別名
+ * 改寫，啟動前與核准紀錄的內容比對就會失敗，伺服器照樣不啟動。
+ */
+export function findProtectedAliases(options: {
+  readonly workingDir: string;
+  readonly folderRoot: string;
+}): ProtectedAlias[] {
+  const stateInodes = new Set<string>();
+  walkRegularFiles(
+    join(options.folderRoot, "state"),
+    (_path, stat) => stateInodes.add(inodeKey(stat)),
+    true,
+  );
+  if (stateInodes.size === 0) return [];
+
+  const aliases: ProtectedAlias[] = [];
+  const seen = new Set<string>();
+  const collect = (path: string, stat: Stats): void => {
+    if (stat.nlink <= 1 || !stateInodes.has(inodeKey(stat)) || seen.has(path)) return;
+    seen.add(path);
+    aliases.push({ path, dev: stat.dev, ino: stat.ino });
+  };
+  // workingDir 通常在 tmp 底下，兩處都掃並用路徑去重，兼具通用性。
+  walkRegularFiles(options.workingDir, collect, true);
+  walkRegularFiles(join(options.folderRoot, "tmp"), collect, true);
+  return aliases;
+}
 
 /**
  * 建立 `run_command` 的 sandbox；平台不支援或 `sandbox-exec` 不可用時回
