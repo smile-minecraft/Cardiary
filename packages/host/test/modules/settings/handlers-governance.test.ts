@@ -1,3 +1,6 @@
+import { mkdir, readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 import type {
   ProtocolEventEmitter,
@@ -72,7 +75,7 @@ async function harness() {
       clientId,
     } as ProtocolRequestContext);
   };
-  return { call, events, settings, store, governance };
+  return { call, events, settings, store, governance, folder };
 }
 
 const localProvider = {
@@ -220,5 +223,157 @@ describe("批次一般設定的全有全無", () => {
     });
     expect(store.rows.size).toBe(0);
     expect(settings.get("notifications.systemCenter")).toBe(true);
+  });
+});
+
+describe("治理紀錄與套用結果的一致性", () => {
+  it("核准後引擎不採用時，不留下假的 applied 紀錄，設定也不生效", async () => {
+    const { call, settings, governance } = await harness();
+    await call("system.models.set", {
+      providers: [localProvider],
+      clientRequestId: "seed-providers",
+    });
+    const proposal = (await call(
+      "settings.propose_change",
+      {
+        key: "models.roles",
+        value: [{ ...mainRole, ref: { providerId: "local", modelId: "missing-model" } }],
+        clientRequestId: "prop-dangling",
+      },
+      "agent:agent-1",
+    )) as { change: { changeId: string } };
+
+    const error = await call("settings.change.decide", {
+      changeId: proposal.change.changeId,
+      decision: "approve",
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ProtocolHandlerError);
+    expect(error).toMatchObject({ code: "invalid_message" });
+    expect(settings.get("models.roles")).toEqual([]);
+    const record = governance
+      .changesFor("human")
+      .find((entry) => entry.changeId === proposal.change.changeId);
+    expect(record).toMatchObject({ status: "pending" });
+  });
+
+  it("核准後稽核寫入失敗時，紀錄維持 applied 與實際設定一致", async () => {
+    const { call, settings, governance, folder } = await harness();
+    await call("system.models.set", {
+      providers: [localProvider],
+      clientRequestId: "seed-providers",
+    });
+    const proposal = (await call(
+      "settings.propose_change",
+      { key: "models.roles", value: [mainRole], clientRequestId: "prop-audit-fail" },
+      "agent:agent-1",
+    )) as { change: { changeId: string } };
+    // 讓稽核檔變成目錄，appendFileSync 會擲出 EISDIR。
+    // 提議階段可能已寫過稽核行，先清掉再把路徑換成目錄。
+    await rm(join(folder.path, "state", "settings-audit.jsonl"), { force: true });
+    await mkdir(join(folder.path, "state", "settings-audit.jsonl"));
+
+    const error = await call("settings.change.decide", {
+      changeId: proposal.change.changeId,
+      decision: "approve",
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ProtocolHandlerError);
+    expect(error).toMatchObject({ code: "conflict" });
+    // 已套用的模型設定維持生效，紀錄維持 applied，兩者不會謊稱退回。
+    expect(settings.get("models.roles")).toEqual([mainRole]);
+    const record = governance
+      .changesFor("human")
+      .find((entry) => entry.changeId === proposal.change.changeId);
+    expect(record).toMatchObject({ status: "applied" });
+  });
+
+  it("治理紀錄寫入失敗時，模型退回原設定且不留變更紀錄", async () => {
+    const { call, settings, governance, folder } = await harness();
+    // 讓變更紀錄檔變成目錄，writeFileAtomic 的 rename 會擲出 EISDIR。
+    await mkdir(join(folder.path, "state", "settings-changes.json"), { recursive: true });
+
+    const error = await call("system.models.set", {
+      providers: [localProvider],
+      clientRequestId: "journal-fail",
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ProtocolHandlerError);
+    expect(error).toMatchObject({ code: "conflict" });
+    expect(settings.get("models.providers")).toEqual([]);
+    expect(governance.changesFor("human")).toEqual([]);
+    const state = (await call("system.models.get", {})) as {
+      resolved: Array<{ role: string; source: string }>;
+    };
+    expect(state.resolved.find((entry) => entry.role === "main")).toMatchObject({
+      source: "none",
+    });
+  });
+
+  it("治理稽核寫入失敗時，模型維持套用且紀錄維持 applied", async () => {
+    const { call, settings, governance, folder } = await harness();
+    await rm(join(folder.path, "state", "settings-audit.jsonl"), { force: true });
+    await mkdir(join(folder.path, "state", "settings-audit.jsonl"));
+
+    const error = await call("system.models.set", {
+      providers: [localProvider],
+      clientRequestId: "audit-fail",
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ProtocolHandlerError);
+    expect(error).toMatchObject({ code: "conflict" });
+    expect(settings.get("models.providers")).toMatchObject([localProvider]);
+    expect(governance.changesFor("human")).toMatchObject([
+      { key: "models.providers", status: "applied" },
+    ]);
+  });
+
+  it("批次套用時變更紀錄寫入失敗，整批退回原值且一筆都不生效", async () => {
+    const { call, settings, governance, folder } = await harness();
+    await mkdir(join(folder.path, "state", "settings-changes.json"), { recursive: true });
+
+    const error = await call("system.settings.set", {
+      changes: [
+        { key: "context.reserveTokens", value: 10_000 },
+        { key: "models.summary.maxOutputTokens", value: 8_000 },
+      ],
+      clientRequestId: "batch-journal-fail",
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ProtocolHandlerError);
+    expect(error).toMatchObject({ code: "conflict" });
+    expect(settings.get("context.reserveTokens")).toBe(8_192);
+    expect(settings.get("models.summary.maxOutputTokens")).toBe(4_096);
+    expect(governance.changesFor("human")).toEqual([]);
+  });
+
+  it("同一 clientRequestId 重放模型設定不會留下重複紀錄", async () => {
+    const { call, governance } = await harness();
+    await call("system.models.set", {
+      providers: [localProvider],
+      clientRequestId: "replay",
+    });
+    await call("system.models.set", {
+      providers: [localProvider],
+      clientRequestId: "replay",
+    });
+    const records = governance
+      .changesFor("human")
+      .filter((entry) => entry.key === "models.providers");
+    expect(records).toHaveLength(1);
+  });
+
+  it("代理被拒的模型設定留下一行稽核拒絕紀錄", async () => {
+    const { call, folder } = await harness();
+    await call(
+      "system.models.set",
+      { providers: [localProvider], clientRequestId: "agent-denied" },
+      "agent:agent-1",
+    ).catch((caught: unknown) => caught);
+    const lines = await readFile(join(folder.path, "state", "settings-audit.jsonl"), "utf8").catch(
+      () => "",
+    );
+    const denied = lines
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { outcome: string; actor: string });
+    expect(denied).toContainEqual(
+      expect.objectContaining({ actor: "agent:agent-1", outcome: "denied" }),
+    );
   });
 });

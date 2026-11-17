@@ -49,6 +49,18 @@ export interface ChangeResult {
   readonly applied: boolean;
 }
 
+export interface RecordBatchInput {
+  readonly key: string;
+  readonly value: JSONValue;
+  readonly actor: GovernanceActor;
+  readonly clientRequestId?: string;
+}
+
+export interface RecordBatchResult {
+  readonly applied: SettingChangeRecord[];
+  readonly pending: SettingChangeRecord[];
+}
+
 export type GovernanceErrorCode =
   "permission_denied" | "not_found" | "conflict" | "invalid_message";
 
@@ -194,6 +206,121 @@ export class SettingsGovernance {
       ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
     });
     return { change: record, applied: true };
+  }
+
+  /**
+   * 批次把「呼叫方已經套用」的多筆變更一次落盤。
+   *
+   * 與 `change()` 不同：這裡不重寫設定值，呼叫方自行負責設定寫入
+   * （例如引擎已套用模型設定，或批次已以同一個交易寫入儲存區）。
+   * 多筆變更共用單一個正本檔寫入（先寫暫存檔再改名），要嘛全部落盤、
+   * 要嘛一筆都不落盤。任一鍵不允許時整批拒絕並逐筆留稽核，不寫任何紀錄。
+   * 寫入失敗時，呼叫方應依 `changesFor()` 判斷已落盤的鍵並決定要不要退回設定；
+   * 若寫入成功但後續稽核失敗，紀錄已落盤，呼叫方應保留套用並回報稽核缺漏。
+   */
+  recordBatch(inputs: readonly RecordBatchInput[]): RecordBatchResult {
+    if (inputs.length === 0) return { applied: [], pending: [] };
+    // 第一步：分級整批檢查；任何一鍵不過，整批不落盤。
+    const prepared = inputs.map((input) => {
+      const tier = this.tierOf(input.key);
+      const decision = decideSettingAction(tier, input.actor.kind, "change");
+      return {
+        input,
+        tier,
+        allowed: decision.allowed,
+        effect: decision.effect === "propose" ? ("propose" as const) : ("apply" as const),
+      };
+    });
+    for (const { input, tier, allowed } of prepared) {
+      if (!allowed) {
+        this.auditDenied(input.actor, "change", tier, input.key);
+        throw new SettingsGovernanceError(
+          "permission_denied",
+          input.actor.kind === "agent"
+            ? "設定不存在，或代理沒有權限變更。"
+            : "這個設定不能透過這條路徑變更。",
+        );
+      }
+    }
+    // 第二步：逐鍵冪等；已命中的原樣回傳，不重複落盤。
+    const fresh: Array<{
+      input: RecordBatchInput;
+      tier: SettingTier;
+      effect: "apply" | "propose";
+      idempotencyKey?: string;
+    }> = [];
+    const replayed: SettingChangeRecord[] = [];
+    for (const { input, tier, effect } of prepared) {
+      const idempotencyKey =
+        input.clientRequestId === undefined
+          ? undefined
+          : `${actorText(input.actor)}:${input.clientRequestId}`;
+      if (idempotencyKey !== undefined) {
+        const previous = this.#idempotency.get(idempotencyKey);
+        if (previous !== undefined) {
+          replayed.push(previous);
+          continue;
+        }
+      }
+      fresh.push({
+        input,
+        tier,
+        effect,
+        ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+      });
+    }
+    // 第三步：所有新紀錄共用一次正本檔寫入；寫入失敗時正本檔維持原樣。
+    const proposedAt = this.#now().toISOString();
+    const built = fresh.map((entry) => ({
+      entry,
+      record: {
+        changeId: newId("chg"),
+        key: entry.input.key,
+        value: entry.input.value,
+        tier: entry.tier,
+        status: entry.effect === "propose" ? ("pending" as const) : ("applied" as const),
+        proposedBy: actorText(entry.input.actor),
+        proposedAt,
+      },
+    }));
+    if (built.length > 0) {
+      this.#persist([...built.map(({ record }) => record), ...this.#changes]);
+      for (const { entry, record } of built) {
+        this.#audit({
+          actor: actorText(entry.input.actor),
+          action: "change",
+          tier: record.tier,
+          outcome: record.status === "applied" ? "applied" : "pending",
+          changeId: record.changeId,
+          key: record.key,
+        });
+        if (entry.idempotencyKey !== undefined) {
+          this.#idempotency.set(entry.idempotencyKey, record);
+        }
+      }
+    }
+    const all = [...replayed, ...built.map(({ record }) => record)];
+    return {
+      applied: all.filter((record) => record.status === "applied"),
+      pending: all.filter((record) => record.status === "pending"),
+    };
+  }
+
+  /** 政策層直接拒絕時留下的稽核痕跡（不寫變更紀錄）。 */
+  auditDenied(
+    actor: GovernanceActor,
+    action: "change" | "propose" | "decide",
+    tier: SettingTier,
+    key?: string,
+  ): void {
+    const visible = key === undefined ? undefined : visibleKey(tier, actor.kind, key);
+    this.#audit({
+      actor: actorText(actor),
+      action,
+      tier,
+      outcome: "denied",
+      ...(visible === undefined ? {} : { key: visible }),
+    });
   }
 
   /** 只有人可以核准或拒絕待決提議；核准前後的值都不變。 */
