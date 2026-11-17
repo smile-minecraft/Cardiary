@@ -25,6 +25,14 @@ public enum L10n {
         case menuFolderSection
         case menuServiceSection
 
+        case menuEdit
+        case menuUndo
+        case menuRedo
+        case menuCut
+        case menuCopy
+        case menuPaste
+        case menuSelectAll
+
         case serviceIdle
         case serviceStarting
         case serviceRunning
@@ -120,6 +128,13 @@ public enum L10n {
         .menuQuit: "結束 Cardiary",
         .menuFolderSection: "資料夾",
         .menuServiceSection: "背景服務",
+        .menuEdit: "編輯",
+        .menuUndo: "復原",
+        .menuRedo: "重做",
+        .menuCut: "剪下",
+        .menuCopy: "複製",
+        .menuPaste: "貼上",
+        .menuSelectAll: "全選",
 
         .serviceIdle: "未啟動",
         .serviceStarting: "啟動中…",
@@ -173,6 +188,13 @@ public enum L10n {
         .menuQuit: "Quit Cardiary",
         .menuFolderSection: "Folder",
         .menuServiceSection: "Background Service",
+        .menuEdit: "Edit",
+        .menuUndo: "Undo",
+        .menuRedo: "Redo",
+        .menuCut: "Cut",
+        .menuCopy: "Copy",
+        .menuPaste: "Paste",
+        .menuSelectAll: "Select All",
 
         .serviceIdle: "Not started",
         .serviceStarting: "Starting…",
