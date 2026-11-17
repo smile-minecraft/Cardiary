@@ -3,7 +3,11 @@ import { Writable } from "node:stream";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ModuleActivationContext, ProtocolEventIntent, SettingChange } from "@cardiary/module-api";
+import type {
+  ModuleActivationContext,
+  ProtocolEventIntent,
+  SettingChange,
+} from "@cardiary/module-api";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SpawnRegistry } from "../../host/src/spawn/wrapper.js";
 import {
@@ -90,8 +94,10 @@ function createFakeSpawn(): {
     spawn(options: { stdio?: readonly unknown[] }): FakeChild {
       const stdout = new EventEmitter();
       const stderr = new EventEmitter();
-      let resolveExit: (info: { code: number | null; signal: NodeJS.Signals | null }) => void =
-        () => undefined;
+      let resolveExit: (info: {
+        code: number | null;
+        signal: NodeJS.Signals | null;
+      }) => void = () => undefined;
       const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
         (resolve) => {
           resolveExit = resolve;
@@ -374,7 +380,6 @@ describe("retrieval 模組的可觀察狀態", () => {
       (status) => status.state === "building",
     );
     expect(building).toMatchObject({ state: "building", fallback: "fts", total: 3 });
-
 
     // 放行，直到 ready。
     fixture.fakeSpawn.release();

@@ -24,7 +24,8 @@ import type { SpawnRegistry } from "../../host/src/spawn/wrapper.js";
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
-function newUlid(offset = 0): string {  let time = BigInt(Date.now() + offset);
+function newUlid(offset = 0): string {
+  let time = BigInt(Date.now() + offset);
   const timePart = new Array<string>(10);
   for (let index = 9; index >= 0; index -= 1) {
     timePart[index] = CROCKFORD[Number(time & 31n)] as string;
@@ -248,7 +249,8 @@ describe("向量索引的跨重啟整合", () => {
     expect(vectorCount(second.storage.cache, "model-a@1")).toBe(0);
     expect(
       statuses.some(
-        (status) => status.state === "building" && status.fallback === "fts" && status.total === count,
+        (status) =>
+          status.state === "building" && status.fallback === "fts" && status.total === count,
       ),
     ).toBe(true);
 
@@ -259,9 +261,7 @@ describe("向量索引的跨重啟整合", () => {
     expect(after.items.map((item) => item.card.cardId)).toEqual(
       baseline.items.map((item) => item.card.cardId),
     );
-    expect(after.items.map((item) => item.score)).toEqual(
-      baseline.items.map((item) => item.score),
-    );
+    expect(after.items.map((item) => item.score)).toEqual(baseline.items.map((item) => item.score));
     expect(statuses.at(-1)?.state).toBe("ready");
     expect(progress.some((p) => p.phase === "index" && p.completed === count)).toBe(true);
   });
@@ -319,10 +319,6 @@ describe("向量索引的跨重啟整合", () => {
     expect(after.items.map((item) => item.card.cardId)).toEqual(
       baseline.items.map((item) => item.card.cardId),
     );
-    expect(after.items.map((item) => item.score)).toEqual(
-      baseline.items.map((item) => item.score),
-    );
+    expect(after.items.map((item) => item.score)).toEqual(baseline.items.map((item) => item.score));
   });
 });
-
-

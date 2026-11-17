@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SpawnRegistry } from "../../host/src/spawn/wrapper.js";
-import {
-  CardVectors,
-  type RetrievalStatus,
-} from "../../host/src/modules/retrieval/vectors.js";
+import { CardVectors, type RetrievalStatus } from "../../host/src/modules/retrieval/vectors.js";
 
 describe("向量檢索的同意邊界", () => {
   it("未同意時不建立子行程、不讀寫索引，refresh 只回報 disabled", async () => {
@@ -32,9 +29,7 @@ describe("向量檢索的同意邊界", () => {
     expect(await vectors.search({ query: "任意" })).toEqual([]);
     expect(opened).toBe(0);
     expect(spawned).toBe(0);
-    expect(statuses).toEqual([
-      { state: "disabled", reason: "consent-required", fallback: "fts" },
-    ]);
+    expect(statuses).toEqual([{ state: "disabled", reason: "consent-required", fallback: "fts" }]);
     vectors.stop();
   });
 });

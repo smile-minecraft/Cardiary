@@ -8,7 +8,10 @@ import { createTempRoot } from "../helpers/temp.js";
 
 const MODEL = "model-a@1";
 
-function setup(): { root: ReturnType<typeof createTempRoot>; db: ReturnType<typeof openCacheDatabase>["db"] } {
+function setup(): {
+  root: ReturnType<typeof createTempRoot>;
+  db: ReturnType<typeof openCacheDatabase>["db"];
+} {
   const root = createTempRoot("card-vector-usage");
   mkdirSync(join(root.folder, "cache"), { recursive: true });
   const { db } = openCacheDatabase({ filePath: join(root.folder, "cache", "index.sqlite") });
@@ -76,7 +79,6 @@ describe("向量快取容量淘汰", () => {
       const store = new CardVectorStore(db, () => now);
       store.selectModel(MODEL);
       store.put("A", "rev-1", MODEL, vector(0.1), now);
-      const oneCard = store.estimateBytes();
       store.evictToFit(0, now);
       expect(store.evictedRevisions().size).toBe(1);
       now += 100;

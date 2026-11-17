@@ -225,8 +225,7 @@ export class CardVectors implements VectorSource {
     const byId = new Map(stored.map((row) => [row.cardId, row]));
     const missing = rows.filter(
       (row) =>
-        byId.get(row.cardId)?.revision !== row.revision &&
-        evicted.get(row.cardId) !== row.revision,
+        byId.get(row.cardId)?.revision !== row.revision && evicted.get(row.cardId) !== row.revision,
     );
     return { index, store, rows, stored, missing };
   }
@@ -299,7 +298,11 @@ export class CardVectors implements VectorSource {
     const loaded = typeof record.loaded === "number" ? record.loaded : undefined;
     const total = typeof record.total === "number" ? record.total : undefined;
     if (loaded === undefined || total === undefined || total <= 0) return;
-    this.#onProgress?.({ phase: "download", completed: Math.floor(loaded), total: Math.floor(total) });
+    this.#onProgress?.({
+      phase: "download",
+      completed: Math.floor(loaded),
+      total: Math.floor(total),
+    });
   }
 
   #emitStatus(status: RetrievalStatus): void {
