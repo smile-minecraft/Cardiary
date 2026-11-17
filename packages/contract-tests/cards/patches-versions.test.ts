@@ -84,9 +84,7 @@ describe("補丁與版本清單", () => {
         () => client.frames.filter((frame) => frame.type === "approval.requested").length > index,
         10000,
       );
-      const approval = client.frames.filter((frame) => frame.type === "approval.requested")[
-        index
-      ]!;
+      const approval = client.frames.filter((frame) => frame.type === "approval.requested")[index]!;
       const approvalId = (approval.payload as { approvalId: string }).approvalId;
       await request(client, "approval.decide", { approvalId, optionId: "approve" });
     }
@@ -107,16 +105,13 @@ describe("補丁與版本清單", () => {
     expect(firstPatches.patches).toHaveLength(2);
     expect(firstVersions.versions).toHaveLength(1);
     expect(firstVersions.versions[0]!.kind).toBe("create");
-    const secondPatches = await request<{ patches: unknown[] }>(
-      client,
-      "card.patches.list",
-      { cardId, status: "pending" },
-    );
-    const secondVersions = await request<{ versions: unknown[] }>(
-      client,
-      "card.versions.list",
-      { cardId },
-    );
+    const secondPatches = await request<{ patches: unknown[] }>(client, "card.patches.list", {
+      cardId,
+      status: "pending",
+    });
+    const secondVersions = await request<{ versions: unknown[] }>(client, "card.versions.list", {
+      cardId,
+    });
     expect(secondPatches.patches).toHaveLength(2);
     expect(secondVersions.versions).toHaveLength(1);
 
@@ -148,11 +143,10 @@ describe("補丁與版本清單", () => {
       patchId: bySummary("kept-pending"),
       clientRequestId: "reject-patch-list",
     });
-    const pendingAfterReject = await request<{ patches: unknown[] }>(
-      client,
-      "card.patches.list",
-      { cardId, status: "pending" },
-    );
+    const pendingAfterReject = await request<{ patches: unknown[] }>(client, "card.patches.list", {
+      cardId,
+      status: "pending",
+    });
     const rejected = await request<{ patches: Array<{ summary: string }> }>(
       client,
       "card.patches.list",
@@ -179,10 +173,6 @@ describe("補丁與版本清單", () => {
       "card.versions.list",
       { cardId },
     );
-    expect(finalVersions.versions.map((item) => item.kind)).toEqual([
-      "create",
-      "patch",
-      "restore",
-    ]);
+    expect(finalVersions.versions.map((item) => item.kind)).toEqual(["create", "patch", "restore"]);
   }, 40000);
 });
