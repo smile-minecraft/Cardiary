@@ -123,6 +123,7 @@ public final class AgentModel: ObservableObject {
     /// 是否拿過主機的完整清單。事件可能先到，但沒有快照就不知道還有哪些會話。
     @Published public private(set) var isKnown = false
     @Published public private(set) var decidingIds: Set<String> = []
+    @Published public private(set) var isStarting = false
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var noticeMessage: String?
 
@@ -194,6 +195,70 @@ public final class AgentModel: ObservableObject {
         update(sessions: nil)
         errorMessage = nil
         noticeMessage = nil
+    }
+
+    /// 啟動外部代理。先在本機檢查工作目錄，避免送出注定被主機拒絕的請求。
+    /// 回傳是否成功，讓表單只在成功時清空。
+    @discardableResult
+    public func start(
+        agentKind: AgentKind,
+        workingDirectory: String,
+        prompt: String?
+    ) async -> Bool {
+        let directory = workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPrompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalPrompt = trimmedPrompt?.isEmpty == true ? nil : trimmedPrompt
+        guard !directory.isEmpty else {
+            errorMessage = AppL10n.text(.agentStartInvalidDirectory, language: language)
+            return false
+        }
+        guard let agents else {
+            errorMessage = AppL10n.text(.agentServiceUnavailable, language: language)
+            return false
+        }
+        guard !isStarting else { return false }
+
+        isStarting = true
+        defer { isStarting = false }
+        do {
+            _ = try await agents.startAgent(
+                agentKind: agentKind,
+                workingDirectory: directory,
+                prompt: finalPrompt,
+                clientRequestId: UUID().uuidString
+            )
+            errorMessage = nil
+            noticeMessage = AppL10n.text(.agentStartedNotice, language: language)
+            await reload()
+            return true
+        } catch {
+            errorMessage = AppL10n.format(
+                .conversationError,
+                value: errorText(error),
+                language: language
+            )
+            return false
+        }
+    }
+
+    /// 停止外部代理；審批還沒決定時，主機會一併撤回，行程也會被收拾乾淨。
+    public func stop(_ session: AgentSessionPresentation) async {
+        guard let agents else {
+            errorMessage = AppL10n.text(.agentServiceUnavailable, language: language)
+            return
+        }
+        do {
+            _ = try await agents.stopAgent(agentSessionId: session.agentSessionId)
+            errorMessage = nil
+            noticeMessage = AppL10n.text(.agentStoppedNotice, language: language)
+            await reload()
+        } catch {
+            errorMessage = AppL10n.format(
+                .conversationError,
+                value: errorText(error),
+                language: language
+            )
+        }
     }
 
     public func approve(_ session: AgentSessionPresentation) async {

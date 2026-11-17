@@ -19,6 +19,8 @@ actor FakeCardiaryService:
         case storageUsage
         case storagePreview
         case storageApply
+        case agentStart
+        case agentStop
     }
 
     private var listPages: [SessionListResponsePayload]
@@ -73,6 +75,13 @@ actor FakeCardiaryService:
     private(set) var storageUsageCalls = 0
     private(set) var storagePreviewCategories: [[String]] = []
     private(set) var storageApplyCategories: [[String]] = []
+    private(set) var agentStartCalls: [(
+        agentKind: AgentKind,
+        workingDirectory: String,
+        prompt: String?,
+        clientRequestId: String?
+    )] = []
+    private(set) var agentStopCalls: [String] = []
 
     init(
         sessions: [SessionSummary] = [],
@@ -374,6 +383,26 @@ actor FakeCardiaryService:
 
     func listAgents() async throws -> AgentListResponsePayload {
         AgentListResponsePayload(agents: agentSessions)
+    }
+
+    func startAgent(
+        agentKind: AgentKind,
+        workingDirectory: String,
+        prompt: String?,
+        clientRequestId: String?
+    ) async throws -> AgentStartResponsePayload {
+        if failure == .agentStart { throw Failure.agentStart }
+        agentStartCalls.append((agentKind, workingDirectory, prompt, clientRequestId))
+        return AgentStartResponsePayload(
+            agentSessionId: "agent-started",
+            approvalId: "start-approval"
+        )
+    }
+
+    func stopAgent(agentSessionId: String) async throws -> AgentStopResponsePayload {
+        if failure == .agentStop { throw Failure.agentStop }
+        agentStopCalls.append(agentSessionId)
+        return AgentStopResponsePayload(agentSessionId: agentSessionId, stopped: true)
     }
 
     // MARK: - CardService

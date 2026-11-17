@@ -95,6 +95,17 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case agentPermissionTitle
     case agentProgressStep
     case agentServiceUnavailable
+    case agentStartTitle
+    case agentStartKind
+    case agentStartDirectory
+    case agentStartPrompt
+    case agentStartPromptPlaceholder
+    case agentStartAction
+    case agentStartNeedsApproval
+    case agentStartInvalidDirectory
+    case agentStartedNotice
+    case agentStopAction
+    case agentStoppedNotice
     case connectionConnecting
     case connectionDisconnected
     case connectionRetry

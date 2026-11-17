@@ -13,7 +13,11 @@ final class AgentStringCatalogTests: XCTestCase {
         .agentStatusStopped, .agentStatusFailed,
         .agentResultUnknown, .agentResultUnknownHelp,
         .agentWorkingDirectory, .agentPermissionTitle,
-        .agentProgressStep, .agentServiceUnavailable
+        .agentProgressStep, .agentServiceUnavailable,
+        .agentStartTitle, .agentStartKind, .agentStartDirectory,
+        .agentStartPrompt, .agentStartPromptPlaceholder, .agentStartAction,
+        .agentStartNeedsApproval, .agentStartInvalidDirectory, .agentStartedNotice,
+        .agentStopAction, .agentStoppedNotice
     ]
 
     func testEveryAgentKeyHasBothLanguages() {
@@ -42,6 +46,12 @@ final class AgentStringCatalogTests: XCTestCase {
             AppL10n.format(.agentWorkingDirectory, value: "/tmp/work", language: .en),
             "Working directory: /tmp/work"
         )
+        XCTAssertEqual(AppL10n.text(.agentStartTitle, language: .zhHant), "啟動外部代理")
+        XCTAssertEqual(AppL10n.text(.agentStartTitle, language: .en), "Start an external agent")
+        XCTAssertEqual(AppL10n.text(.agentStartAction, language: .zhHant), "啟動")
+        XCTAssertEqual(AppL10n.text(.agentStartAction, language: .en), "Start")
+        XCTAssertEqual(AppL10n.text(.agentStopAction, language: .zhHant), "停止")
+        XCTAssertEqual(AppL10n.text(.agentStopAction, language: .en), "Stop")
     }
 
     func testKindAndStatusTextFollowLanguage() {

@@ -272,9 +272,16 @@ public protocol NotificationService: Sendable {
     func createCardFromNotification(notificationId: String) async throws -> NotificationCreateCardResponsePayload
 }
 
-/// 外部代理的會話清單與事件串流；view model 只依賴這個介面。
+/// 外部代理的會話清單、事件串流與啟停；view model 只依賴這個介面。
 public protocol AgentService: Sendable {
     func listAgents() async throws -> AgentListResponsePayload
+    func startAgent(
+        agentKind: AgentKind,
+        workingDirectory: String,
+        prompt: String?,
+        clientRequestId: String?
+    ) async throws -> AgentStartResponsePayload
+    func stopAgent(agentSessionId: String) async throws -> AgentStopResponsePayload
 }
 
 /// 配對核准與裝置管理：全部走殼的私有控制通道，不在客戶端協定上。

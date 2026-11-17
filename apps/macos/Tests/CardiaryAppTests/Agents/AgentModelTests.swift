@@ -150,4 +150,118 @@ final class AgentModelTests: XCTestCase {
 
         XCTAssertEqual(model.errorMessage, AppL10n.text(.agentServiceUnavailable))
     }
+
+    // MARK: - 啟動
+
+    func testStartSendsKindDirectoryPromptAndRequestId() async {
+        let service = FakeCardiaryService()
+        let model = AgentModel()
+        model.attach(service: service, approvals: service)
+
+        let started = await model.start(
+            agentKind: .claudeCode,
+            workingDirectory: "/repo/with spaces",
+            prompt: "  修正登入錯誤  "
+        )
+
+        XCTAssertTrue(started)
+        let calls = await service.agentStartCalls
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls[0].agentKind, .claudeCode)
+        XCTAssertEqual(calls[0].workingDirectory, "/repo/with spaces")
+        XCTAssertEqual(calls[0].prompt, "修正登入錯誤")
+        XCTAssertFalse(calls[0].clientRequestId?.isEmpty ?? true)
+        XCTAssertEqual(model.noticeMessage, AppL10n.text(.agentStartedNotice))
+        XCTAssertNil(model.errorMessage)
+        XCTAssertTrue(model.isKnown)
+    }
+
+    func testStartDropsBlankPromptAndRejectsEmptyDirectory() async {
+        let service = FakeCardiaryService()
+        let model = AgentModel()
+        model.attach(service: service, approvals: service)
+
+        let blankPrompt = await model.start(
+            agentKind: .opencode,
+            workingDirectory: "  /work  ",
+            prompt: "   "
+        )
+        XCTAssertTrue(blankPrompt)
+        var calls = await service.agentStartCalls
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls[0].workingDirectory, "/work")
+        XCTAssertNil(calls[0].prompt)
+
+        let emptyDirectory = await model.start(
+            agentKind: .opencode,
+            workingDirectory: "   ",
+            prompt: "做事"
+        )
+        XCTAssertFalse(emptyDirectory)
+        calls = await service.agentStartCalls
+        XCTAssertEqual(calls.count, 1, "空目錄不該送出請求")
+        XCTAssertEqual(model.errorMessage, AppL10n.text(.agentStartInvalidDirectory))
+    }
+
+    func testFailedStartKeepsFormAndShowsError() async {
+        let service = FakeCardiaryService(failure: .agentStart)
+        let model = AgentModel()
+        model.attach(service: service, approvals: service)
+
+        let started = await model.start(
+            agentKind: .opencode,
+            workingDirectory: "/work",
+            prompt: nil
+        )
+
+        XCTAssertFalse(started)
+        XCTAssertNotNil(model.errorMessage)
+        XCTAssertNil(model.noticeMessage)
+    }
+
+    func testStartWithoutServiceReportsUnavailable() async {
+        let model = AgentModel()
+
+        let started = await model.start(
+            agentKind: .opencode,
+            workingDirectory: "/work",
+            prompt: nil
+        )
+
+        XCTAssertFalse(started)
+        XCTAssertEqual(model.errorMessage, AppL10n.text(.agentServiceUnavailable))
+    }
+
+    // MARK: - 停止
+
+    func testStopSendsSessionId() async {
+        let service = FakeCardiaryService(agentSessions: [Fixtures.agentInfo(id: "agent-x")])
+        let model = AgentModel()
+        model.attach(service: service, approvals: service)
+        await model.reload()
+
+        await model.stop(model.sessions[0])
+
+        let calls = await service.agentStopCalls
+        XCTAssertEqual(calls, ["agent-x"])
+        XCTAssertEqual(model.noticeMessage, AppL10n.text(.agentStoppedNotice))
+        XCTAssertNil(model.errorMessage)
+    }
+
+    func testFailedStopShowsError() async {
+        let service = FakeCardiaryService(
+            agentSessions: [Fixtures.agentInfo(id: "agent-x")],
+            failure: .agentStop
+        )
+        let model = AgentModel()
+        model.attach(service: service, approvals: service)
+        await model.reload()
+
+        await model.stop(model.sessions[0])
+
+        let calls = await service.agentStopCalls
+        XCTAssertTrue(calls.isEmpty)
+        XCTAssertNotNil(model.errorMessage)
+        XCTAssertNil(model.noticeMessage)
+    }
 }

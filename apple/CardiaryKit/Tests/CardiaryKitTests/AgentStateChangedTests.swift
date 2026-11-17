@@ -27,6 +27,110 @@ final class AgentStateChangedTests: XCTestCase {
         XCTAssertEqual(event.payload.pendingPermission?.approvalId, "approval-1")
     }
 
+    // MARK: - 客戶端啟停請求
+
+    private let clientInfo = ClientInfo(
+        name: "Cardiary macOS",
+        version: "0.1.0",
+        platform: .macos,
+        instanceId: "inst_agents"
+    )
+
+    private func makeClient(queue: TransportQueue) -> CardiaryClient {
+        let configuration = CardiaryClient.Configuration(
+            endpoint: URL(string: "ws://127.0.0.1:1/v1/ws")!,
+            clientToken: "client-token",
+            client: clientInfo,
+            reconnect: ReconnectPolicy(baseDelay: .milliseconds(10), maxDelay: .milliseconds(20)),
+            subscribeActiveSessions: false
+        )
+        return CardiaryClient(configuration: configuration) { _ in queue.next() }
+    }
+
+    private func connect(client: CardiaryClient, transport: FakeServerTransport) async throws {
+        await client.start()
+        let hello = JSONFixture.decode(try await transport.nextSent())
+        await transport.push(
+            JSONFixture.helloResponse(
+                replyTo: try XCTUnwrap(hello["id"] as? String),
+                epoch: "epoch_agents"
+            )
+        )
+        let subscribe = JSONFixture.decode(try await transport.nextSent())
+        await transport.push(
+            JSONFixture.systemSubscribeResponse(
+                replyTo: try XCTUnwrap(subscribe["id"] as? String),
+                seq: 5,
+                epoch: "epoch_agents",
+                resyncRequired: false
+            )
+        )
+    }
+
+    func testStartAgentSendsAgentStartAndDecodesApproval() async throws {
+        let queue = TransportQueue()
+        let transport = FakeServerTransport()
+        queue.append(transport)
+        let client = makeClient(queue: queue)
+        try await connect(client: client, transport: transport)
+
+        let task = Task {
+            try await client.startAgent(
+                agentKind: .claudeCode,
+                workingDirectory: "/repo",
+                prompt: "修正登入",
+                clientRequestId: "req_1"
+            )
+        }
+        let sent = JSONFixture.decode(try await transport.nextSent())
+        XCTAssertEqual(sent["type"] as? String, "agent.start")
+        let payload = try XCTUnwrap(sent["payload"] as? [String: Any])
+        XCTAssertEqual(payload["agentKind"] as? String, "claude-code")
+        XCTAssertEqual(payload["workingDirectory"] as? String, "/repo")
+        XCTAssertEqual(payload["prompt"] as? String, "修正登入")
+        XCTAssertEqual(payload["clientRequestId"] as? String, "req_1")
+
+        await transport.push(JSONFixture.string([
+            "v": 1,
+            "kind": "response",
+            "replyTo": try XCTUnwrap(sent["id"] as? String),
+            "type": "agent.start",
+            "payload": ["agentSessionId": "agent-9", "approvalId": "approval-9"],
+        ]))
+        let response = try await task.value
+        XCTAssertEqual(response.agentSessionId, "agent-9")
+        XCTAssertEqual(response.approvalId, "approval-9")
+        await client.stop()
+    }
+
+    func testStopAgentSendsAgentStopAndDecodesStopped() async throws {
+        let queue = TransportQueue()
+        let transport = FakeServerTransport()
+        queue.append(transport)
+        let client = makeClient(queue: queue)
+        try await connect(client: client, transport: transport)
+
+        let task = Task {
+            try await client.stopAgent(agentSessionId: "agent-9")
+        }
+        let sent = JSONFixture.decode(try await transport.nextSent())
+        XCTAssertEqual(sent["type"] as? String, "agent.stop")
+        let payload = try XCTUnwrap(sent["payload"] as? [String: Any])
+        XCTAssertEqual(payload["agentSessionId"] as? String, "agent-9")
+
+        await transport.push(JSONFixture.string([
+            "v": 1,
+            "kind": "response",
+            "replyTo": try XCTUnwrap(sent["id"] as? String),
+            "type": "agent.stop",
+            "payload": ["agentSessionId": "agent-9", "stopped": true],
+        ]))
+        let response = try await task.value
+        XCTAssertEqual(response.agentSessionId, "agent-9")
+        XCTAssertTrue(response.stopped)
+        await client.stop()
+    }
+
     // MARK: - 測試資料
 
     private func decodeAgentStateChanged(stream: String, seq: Int) throws -> ServerFrame {
