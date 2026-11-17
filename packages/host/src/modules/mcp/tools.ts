@@ -212,9 +212,27 @@ async function toOutcome(
   result: McpCallResult,
 ): Promise<ToolOutcome> {
   if (result.isError) {
-    return { ok: false, message: result.text.length > 0 ? result.text : "MCP 工具回報失敗" };
+    const visibleText = textFromContent(result.content);
+    if (visibleText.length > 0) {
+      return { ok: false, message: visibleText };
+    }
+    // 錯誤訊息不能夾帶 UI resource 的 HTML；沒有 UI resource 時才沿用原本的 text。
+    return {
+      ok: false,
+      message:
+        inlineUiResource(result.content) === null && result.text.length > 0
+          ? result.text
+          : "MCP 工具回報失敗",
+    };
   }
-  const content: ToolContent[] = [{ type: "text", text: result.text }];
+  const hasInlineUi = inlineUiResource(result.content) !== null;
+  const visibleText = textFromContent(result.content);
+  // 有 UI resource 時，模型只看 text 區塊；HTML 只出現在 metadata.data.html。
+  const content: ToolContent[] = hasInlineUi
+    ? visibleText.length > 0
+      ? [{ type: "text", text: visibleText }]
+      : []
+    : [{ type: "text", text: result.text }];
 
   // 工具結果自帶的 resource 優先；沒有才看工具描述的 _meta 要不要讀 ui:// 資源。
   let resource = inlineUiResource(result.content);
@@ -266,6 +284,19 @@ async function toOutcome(
       data: { html, allowedHosts: allowedHostsFrom(resource._meta) },
     },
   };
+}
+
+/** 只取 text 區塊的文字，以換行 join；其餘區塊（含 UI resource）不進模型可見文字。 */
+function textFromContent(content: readonly unknown[]): string {
+  return content
+    .map((entry) => {
+      if (isPlainObject(entry) && entry.type === "text" && typeof entry.text === "string") {
+        return entry.text;
+      }
+      return null;
+    })
+    .filter((value): value is string => value !== null)
+    .join("\n");
 }
 
 /** 工具結果 content 裡第一個 MIME 符合的 resource。 */

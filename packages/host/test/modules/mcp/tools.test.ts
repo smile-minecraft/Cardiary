@@ -291,4 +291,49 @@ describe("MCP 工具結果的 UI 介面透傳", () => {
     const outcome = await invoke(bundle);
     expect(outcome).toEqual({ ok: false, message: "工具壞了" });
   });
+
+  it("inline resource 的 HTML 不進模型可見文字，只出現在 metadata.data.html", async () => {
+    const resource = {
+      uri: "ui://app/view.html",
+      mimeType: MIME,
+      text: "<h1>SECRET_HTML</h1>",
+    };
+    const content = [
+      { type: "text", text: "工具輸出" },
+      { type: "resource", resource },
+    ];
+    // 與 normalizeCallResult 相同的形狀：text 欄位含非 text 區塊的 JSON.stringify。
+    const callResult: McpCallResult = {
+      content,
+      isError: false,
+      text: ["工具輸出", JSON.stringify(content[1])].join("\n"),
+    };
+    const { bundle } = setup({ callResult });
+
+    const outcome = await invoke(bundle);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.content).toEqual([{ type: "text", text: "工具輸出" }]);
+    expect(JSON.stringify(outcome.content)).not.toContain("SECRET_HTML");
+    expect(metadataOf(outcome)?.data).toMatchObject({ html: "<h1>SECRET_HTML</h1>" });
+  });
+
+  it("isError 且 content 只有 UI resource 時，message 不含 HTML", async () => {
+    const resource = {
+      uri: "ui://app/view.html",
+      mimeType: MIME,
+      text: "<h1>SECRET_HTML</h1>",
+    };
+    const content = [{ type: "resource", resource }];
+    const callResult: McpCallResult = {
+      content,
+      isError: true,
+      text: JSON.stringify(content[0]),
+    };
+    const { bundle } = setup({ callResult });
+
+    const outcome = await invoke(bundle);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.message).toBe("MCP 工具回報失敗");
+    expect(outcome.message).not.toContain("SECRET_HTML");
+  });
 });
