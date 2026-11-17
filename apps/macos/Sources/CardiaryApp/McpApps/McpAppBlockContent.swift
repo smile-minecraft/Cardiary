@@ -8,8 +8,9 @@ import Foundation
 /// `bar`、`table` 已經是這種做法；MCP App 沿用同一個通道，不新增協定欄位。
 ///
 /// 內容由 MCP 伺服器的 `ui://` 資源而來（詳見 `docs/spikes/external-agents.md`
-/// 第 6 節：MIME `text/html;profile=mcp-app`）。主機端目前還沒把資源 Html 透傳
-/// 到 `stream.ui`（`mcp/tools.ts` 的 `toOutcome` 只回文字），那是另一筆工作的範圍；
+/// 第 6 節：MIME `text/html;profile=mcp-app`）。主機端會從工具結果自帶的
+/// resource，或工具描述 `_meta.ui.resourceUri` 所指的 `ui://` 資源讀取 HTML，
+/// 通過 MIME 與大小檢查後，以 `stream.ui renderer=mcp.app` 送到客戶端；
 /// 這一層只負責「當內容以這個 renderer 送來時，安全地嵌入式呈現」。
 public enum McpAppBlockContent {
     /// 只有這個 renderer 會被當成可嵌入的 MCP App。

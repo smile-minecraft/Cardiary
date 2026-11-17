@@ -34,6 +34,15 @@ const TOOLS: McpToolDescriptor[] = [
   { name: "delete_file", description: "刪除資料" },
 ];
 
+const TOOLS_WITH_META: McpToolDescriptor[] = [
+  {
+    name: "safe_lookup",
+    description: "安全查詢",
+    inputSchema: { type: "object" },
+    meta: { ui: { resourceUri: "ui://widget" } },
+  },
+];
+
 const roots: string[] = [];
 const storages: Storage[] = [];
 
@@ -61,9 +70,10 @@ function openStorage(): { root: string; storage: Storage; bindings: McpServerApp
 class CountingClient {
   listCalls = 0;
   readonly calls: string[] = [];
+  readonly readCalls: string[] = [];
   readonly factory: McpClientFactory;
 
-  constructor(tools: McpToolDescriptor[]) {
+  constructor(tools: McpToolDescriptor[], readResult: unknown = { contents: [] }) {
     const client: McpClient = {
       listTools: async () => {
         this.listCalls += 1;
@@ -77,6 +87,10 @@ class CountingClient {
           text: "ok",
         };
         return result;
+      },
+      readResource: async (uri: string) => {
+        this.readCalls.push(uri);
+        return readResult;
       },
       close: async () => {},
     };
@@ -208,6 +222,66 @@ describe("MCP 工具快取", () => {
     expect(result.ok).toBe(true);
     expect(second.listCalls).toBe(before);
     expect(toolNamesOf(secondBundles.at(-1)!)).toContain("mcp.local.safe_lookup");
+    await secondHandle.dispose();
+  });
+
+  it("重啟後從快取載入的工具定義仍拿得到 meta，call 會讀取 ui:// 資源", async () => {
+    const { root, storage, bindings } = openStorage();
+    const store = new McpServerStore(storage.layout);
+    const record = await store.add(INPUT);
+    bindings.approve(record);
+
+    const first = new CountingClient(TOOLS_WITH_META);
+    const firstBundles: ToolBundleDraft[] = [];
+    const firstHandle = await activateMcpModule(makeContext(root, firstBundles), {
+      store,
+      engine: makeEngine(),
+      clientFactory: first.factory,
+      folderRoot: root,
+      registry: storage.registry,
+      bindings,
+    });
+    await firstHandle.settled();
+    await toolIn(firstBundles.at(-1)!, "mcp.local.list_tools").execute({}, {} as never);
+    await firstHandle.dispose();
+
+    const second = new CountingClient(TOOLS_WITH_META, {
+      contents: [
+        {
+          uri: "ui://widget",
+          mimeType: "text/html;profile=mcp-app",
+          text: "<h1>widget</h1>",
+        },
+      ],
+    });
+    const secondBundles: ToolBundleDraft[] = [];
+    const secondHandle = await activateMcpModule(makeContext(root, secondBundles), {
+      store,
+      engine: makeEngine(),
+      clientFactory: second.factory,
+      folderRoot: root,
+      registry: storage.registry,
+      bindings,
+    });
+    await secondHandle.settled();
+
+    const before = second.listCalls;
+    const listResult = await toolIn(secondBundles.at(-1)!, "mcp.local.list_tools").execute(
+      {},
+      {} as never,
+    );
+    expect(listResult.ok).toBe(true);
+    // 工具清單來自快取，沒有再向伺服器要。
+    expect(second.listCalls).toBe(before);
+
+    const outcome = await toolIn(secondBundles.at(-1)!, "mcp.local.safe_lookup").execute(
+      {},
+      {} as never,
+    );
+    expect(outcome.ok).toBe(true);
+    // meta 從快取還原後，call 找得到描述綁定的 ui:// 資源並讀取它。
+    expect(second.readCalls).toEqual(["ui://widget"]);
+    expect((outcome.metadata as Record<string, unknown> | undefined)?.renderer).toBe("mcp.app");
     await secondHandle.dispose();
   });
 
