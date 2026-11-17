@@ -339,10 +339,10 @@ async function makeHarness(options?: {
   return { service, registry, approvals, paths, workingDirectory, events, logs };
 }
 
-/** 等到假代理服務端寫出該次權限回覆的紀錄。 */
-async function waitForReplyLog(logFile: string): Promise<void> {
+/** 等到假代理服務端寫出該次決定的終局紀錄（核准為 executed，拒絕為 denied）。 */
+async function waitForOutcomeLog(logFile: string, event: "executed" | "denied"): Promise<void> {
   await eventually(async () =>
-    (await readAgentLog(logFile)).some((entry) => entry.event === "permission-reply"),
+    (await readAgentLog(logFile)).some((entry) => entry.event === event),
   );
 }
 
@@ -535,7 +535,7 @@ describe.skipIf(process.platform !== "darwin")("外部代理權限回覆的主�
     expect(existsSync(agent.markerFile)).toBe(false);
 
     approvals.approve(toolEntry.approvalId);
-    await waitForReplyLog(agent.logFile);
+    await waitForOutcomeLog(agent.logFile, "executed");
 
     const log = await readAgentLog(agent.logFile);
     expect(tokenReads).toBe(0);
@@ -592,7 +592,7 @@ describe.skipIf(process.platform !== "darwin")("外部代理權限回覆的主�
     expect(existsSync(agent.markerFile)).toBe(false);
 
     approvals.deny(toolEntry.approvalId);
-    await waitForReplyLog(agent.logFile);
+    await waitForOutcomeLog(agent.logFile, "denied");
 
     const log = await readAgentLog(agent.logFile);
     const reply = log.find((entry) => entry.event === "permission-reply")!;
@@ -677,7 +677,7 @@ describe.skipIf(process.platform !== "darwin")("外部代理權限回覆的主�
 
       if (testCase.decision === "approve") approvals.approve(toolEntry.approvalId);
       else approvals.deny(toolEntry.approvalId);
-      await waitForReplyLog(agent.logFile);
+      await waitForOutcomeLog(agent.logFile, testCase.expectMarker ? "executed" : "denied");
 
       const log = await readAgentLog(agent.logFile);
       const reply = log.find((entry) => entry.event === "permission-reply")!;
