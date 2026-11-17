@@ -24,7 +24,7 @@ function fixture(): {
   cleanups.push(() => storage.close());
   cleanups.push(() => rmSync(temp.root, { recursive: true, force: true }));
   return {
-    schedules: new ScheduleStore(storage.state),
+    schedules: new ScheduleStore(storage.state, { now: () => FIXED_NOW }),
     notifications: new NotificationStore(storage.state),
     storage,
   };
