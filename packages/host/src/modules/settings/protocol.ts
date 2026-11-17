@@ -297,6 +297,26 @@ function asProtocolError(error: unknown): unknown {
   return error;
 }
 
+/**
+ * `recordBatch` 前的變更紀錄識別快照。
+ *
+ * 失敗後不能用「同一個鍵已有 applied 紀錄」判斷本次是否落盤：同一個鍵
+ * 以前成功寫過，舊紀錄會被誤當成本次的新紀錄，於是保留新值卻沒有對應的
+ * 變更紀錄。只有呼叫後才出現的 changeId 才算這次寫入的紀錄。
+ */
+function changeIds(governance: SettingsGovernance, actor: GovernanceActor): Set<string> {
+  return new Set(governance.changesFor(actor.kind).map((record) => record.changeId));
+}
+
+/** 呼叫 `recordBatch` 後才出現的紀錄；先前就有的紀錄不算本次落盤。 */
+function recordsAddedSince(
+  governance: SettingsGovernance,
+  actor: GovernanceActor,
+  before: ReadonlySet<string>,
+): SettingChangeRecord[] {
+  return governance.changesFor(actor.kind).filter((record) => !before.has(record.changeId));
+}
+
 async function setModels(
   request: ProtocolRequestContext,
   runtime: ModelRuntime,
@@ -363,24 +383,26 @@ async function setModels(
       });
     }
     if (batch.length > 0) {
+      const before = changeIds(governance, actor);
       try {
         governance.recordBatch(batch);
       } catch {
-        // 治理紀錄沒落盤：依紀錄實際狀態決定要不要把模型退回原設定。
-        const journal = governance.changesFor(actor.kind);
-        const missing = batch
-          .map((entry) => entry.key)
-          .filter(
-            (key) => !journal.some((record) => record.key === key && record.status === "applied"),
-          );
+        // 治理紀錄沒落盤：只有這次才出現的紀錄才算本次落盤；同一個鍵
+        // 先前的 applied 紀錄屬於更早的變更，不能拿來證明這次寫成功。
+        const landed = new Set(
+          recordsAddedSince(governance, actor, before)
+            .filter((record) => record.status === "applied")
+            .map((record) => record.key),
+        );
+        const missing = batch.map((entry) => entry.key).filter((key) => !landed.has(key));
         if (missing.length === 0) {
-          // 紀錄已全部落盤（例如稽核寫入失敗）：模型與紀錄一致，保留套用。
+          // 本次紀錄已落盤（例如稽核寫入失敗）：模型與紀錄一致，保留套用。
           throw new ProtocolHandlerError(
             "conflict",
-            "模型設定已套用且寫入變更紀錄，但稽核紀錄不完整；請檢查磁碟後再設定一次。",
+            "模型設定已套用且本次變更紀錄已落盤，但稽核紀錄不完整；請檢查磁碟後再設定一次。",
           );
         }
-        // 只退回沒有紀錄的鍵，避免把已落盤的 applied 變成假紀錄。
+        // 只退回本次沒有紀錄的鍵，已落盤的 applied 不會被退回成假紀錄。
         const rollbackInput: { providers?: JSONValue; roles?: JSONValue } = {};
         if (missing.includes(MODEL_SETTING_KEYS.providers) && previous.providers !== undefined) {
           rollbackInput.providers = previous.providers;
@@ -523,6 +545,7 @@ function setSettings(
       actor,
       clientRequestId: `${requestId}:${change.index}`,
     }));
+    const before = changeIds(governance, actor);
     try {
       const { pending } = governance.recordBatch(batch);
       if (pending.length > 0) {
@@ -530,20 +553,25 @@ function setSettings(
         approvalId = pending[0]?.changeId;
       }
     } catch {
-      // 紀錄沒落盤：依紀錄實際狀態決定要不要退回儲存區。
-      const journal = governance.changesFor(actor.kind);
-      const hasRecord = (status: "applied" | "pending", key: string): boolean =>
-        journal.some((record) => record.key === key && record.status === status);
+      // 紀錄沒落盤：只有這次才出現的紀錄才算本次落盤；先前同鍵的
+      // applied 紀錄不能證明這次寫成功，否則會保留新值卻沒有紀錄。
+      const fresh = recordsAddedSince(governance, actor, before);
+      const landedApplied = new Set(
+        fresh.filter((record) => record.status === "applied").map((record) => record.key),
+      );
+      const landedPending = new Set(
+        fresh.filter((record) => record.status === "pending").map((record) => record.key),
+      );
       const missingAppliedKeys = applyItems
-        .filter((change) => !hasRecord("applied", change.key))
+        .filter((change) => !landedApplied.has(change.key))
         .map((change) => change.key)
         .filter((key, at, keys) => keys.indexOf(key) === at);
-      const missingPending = proposeItems.filter((change) => !hasRecord("pending", change.key));
+      const missingPending = proposeItems.filter((change) => !landedPending.has(change.key));
       if (missingAppliedKeys.length === 0 && missingPending.length === 0) {
-        // 紀錄已全部落盤（例如稽核寫入失敗）：儲存區與紀錄一致，保留套用。
+        // 本次紀錄已全部落盤（例如稽核寫入失敗）：儲存區與紀錄一致，保留套用。
         throw new ProtocolHandlerError(
           "conflict",
-          "設定已套用且寫入變更紀錄，但稽核紀錄不完整；請檢查磁碟後再試一次。",
+          "設定已套用且本次變更紀錄已落盤，但稽核紀錄不完整；請檢查磁碟後再試一次。",
         );
       }
       // 只退回沒有紀錄的鍵，已落盤的 applied 不會被退回成假紀錄。

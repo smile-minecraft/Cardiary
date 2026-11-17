@@ -286,6 +286,79 @@ describe("治理紀錄與套用結果的一致性", () => {
     expect(record).toMatchObject({ status: "applied" });
   });
 
+  it("第二次變更的變更紀錄寫入失敗時，模型退回本次之前的值，舊紀錄不作數", async () => {
+    const { call, settings, governance, folder } = await harness();
+    // 先成功寫入一筆：這個鍵已經有一筆 applied 紀錄，
+    // 舊的 applied 紀錄不是這次寫入的證明。
+    await call("system.models.set", {
+      providers: [localProvider],
+      clientRequestId: "seed-providers",
+    });
+    expect(settings.get("models.providers")).toMatchObject([localProvider]);
+
+    // 讓變更紀錄檔變成目錄，writeFileAtomic 的 rename 會擲出 EISDIR。
+    await rm(join(folder.path, "state", "settings-changes.json"));
+    await mkdir(join(folder.path, "state", "settings-changes.json"), { recursive: true });
+
+    const changedProvider = { ...localProvider, displayName: "本機（第二次）" };
+    const error = await call("system.models.set", {
+      providers: [changedProvider],
+      clientRequestId: "journal-fail-second",
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ProtocolHandlerError);
+    expect(error).toMatchObject({ code: "conflict" });
+    // 本次沒有新落盤的紀錄，模型退回呼叫前的值，不能保留新值。
+    expect(settings.get("models.providers")).toMatchObject([localProvider]);
+    // 變更紀錄維持呼叫前的那一筆，journal 不變。
+    const records = governance.changesFor("human");
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      key: "models.providers",
+      status: "applied",
+      value: [localProvider],
+    });
+    const state = (await call("system.models.get", {})) as {
+      providers: Array<{ displayName: string }>;
+    };
+    expect(state.providers[0]?.displayName).toBe("本機");
+  });
+
+  it("批次第二次變更的變更紀錄寫入失敗時，整批退回且 journal 不變", async () => {
+    const { call, settings, governance, folder } = await harness();
+    // 先成功寫入一筆：notifications.systemCenter 已有一筆 applied 紀錄。
+    await call("system.settings.set", {
+      changes: [{ key: "notifications.systemCenter", value: false }],
+      clientRequestId: "seed-setting",
+    });
+    expect(settings.get("notifications.systemCenter")).toBe(false);
+
+    // 讓變更紀錄檔變成目錄，writeFileAtomic 的 rename 會擲出 EISDIR。
+    await rm(join(folder.path, "state", "settings-changes.json"));
+    await mkdir(join(folder.path, "state", "settings-changes.json"), { recursive: true });
+
+    const error = await call("system.settings.set", {
+      changes: [
+        { key: "notifications.systemCenter", value: true },
+        { key: "context.reserveTokens", value: 10_000 },
+      ],
+      clientRequestId: "batch-journal-fail-second",
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ProtocolHandlerError);
+    expect(error).toMatchObject({ code: "conflict" });
+    // 本次沒有新落盤的紀錄：含已有 applied 紀錄的鍵在內，整批退回。
+    expect(settings.get("notifications.systemCenter")).toBe(false);
+    expect(settings.get("context.reserveTokens")).toBe(8_192);
+    const records = governance.changesFor("human");
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      key: "notifications.systemCenter",
+      status: "applied",
+      value: false,
+    });
+  });
+
   it("治理紀錄寫入失敗時，模型退回原設定且不留變更紀錄", async () => {
     const { call, settings, governance, folder } = await harness();
     // 讓變更紀錄檔變成目錄，writeFileAtomic 的 rename 會擲出 EISDIR。
