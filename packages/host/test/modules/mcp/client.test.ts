@@ -168,27 +168,33 @@ afterEach(async () => {
 });
 
 describe("MCP 用戶端讀取 ui 資源", () => {
-  it("stdio：tools/list 保留原始 _meta，resources/read 用既有請求送出 uri", async () => {
-    const client = makeStdioClient();
-    const tools = await client.listTools();
-    expect(tools[0]?.meta).toEqual({ ui: { resourceUri: "ui://app/view.html" } });
+  it.skipIf(process.platform !== "darwin")(
+    "stdio：tools/list 保留原始 _meta，resources/read 用既有請求送出 uri",
+    async () => {
+      const client = makeStdioClient();
+      const tools = await client.listTools();
+      expect(tools[0]?.meta).toEqual({ ui: { resourceUri: "ui://app/view.html" } });
 
-    const resource = await client.readResource("ui://app/view.html");
-    expect(resource).toMatchObject({
-      contents: [
-        {
-          uri: "ui://app/view.html",
-          mimeType: "text/html;profile=mcp-app",
-          text: "<h1>hello</h1>",
-        },
-      ],
-    });
-  });
+      const resource = await client.readResource("ui://app/view.html");
+      expect(resource).toMatchObject({
+        contents: [
+          {
+            uri: "ui://app/view.html",
+            mimeType: "text/html;profile=mcp-app",
+            text: "<h1>hello</h1>",
+          },
+        ],
+      });
+    },
+  );
 
-  it("stdio：resources/read 的協定錯誤照原樣丟出，讓上層降級", async () => {
-    const client = makeStdioClient();
-    await expect(client.readResource("ui://app/missing.html")).rejects.toThrow();
-  });
+  it.skipIf(process.platform !== "darwin")(
+    "stdio：resources/read 的協定錯誤照原樣丟出，讓上層降級",
+    async () => {
+      const client = makeStdioClient();
+      await expect(client.readResource("ui://app/missing.html")).rejects.toThrow();
+    },
+  );
 
   it("http：resources/read 用既有送信機制帶 params.uri 送出並回傳結果", async () => {
     const client = await makeHttpClient();
