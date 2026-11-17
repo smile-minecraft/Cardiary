@@ -859,6 +859,10 @@ public actor CardiaryClient {
             // 讓補送事件推進游標，否則全部會被當成重複。
             systemModel.adoptEpochOnly(subscribe.epoch)
         }
+        // 快照帶著主機現在的待決宿主審批（沒有對話的審批）。只替換
+        // sessionId 為空的項目，會話快照或事件帶進來的不動。
+        approvals.adoptSystemSnapshot(subscribe.pendingApprovals)
+        publishApprovals()
 
         if configuration.subscribeActiveSessions || !subscribedSessionIds.isEmpty {
             await subscribeActiveSessions(on: connection, epoch: subscribe.epoch)

@@ -129,6 +129,21 @@ public struct ApprovalCounter: Equatable, Sendable {
         }
     }
 
+    /// 套用 system 快照的待決宿主審批。宿主審批的 sessionId 是空字串；
+    /// 會話快照或會話事件帶進來的項目不受影響。快照是主機的現況：沒有
+    /// 待決宿主審批時，就清掉本地留著的那些空 sessionId 項目（可能已被
+    /// 其他客戶端決定，或是逾時作廢）。欄位不存在（補送而非快照）時不動。
+    public mutating func adoptSystemSnapshot(_ requests: [ApprovalRequest]?) {
+        guard let requests else { return }
+        let stale = pending.filter { $0.value.sessionId.isEmpty }.map(\.key)
+        for id in stale {
+            pending.removeValue(forKey: id)
+        }
+        for request in requests where request.sessionId.isEmpty {
+            pending[request.approvalId] = request
+        }
+    }
+
     /// 套用會話快照的待審批。快照是主機的現況：這個會話沒有待審批時，
     /// 就清掉本地留著的那一筆（可能已被其他客戶端決定）。
     public mutating func adoptSnapshot(_ request: ApprovalRequest?, sessionId: String) {

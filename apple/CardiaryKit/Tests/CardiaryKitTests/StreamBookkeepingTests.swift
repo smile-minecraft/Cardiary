@@ -142,6 +142,36 @@ final class StreamBookkeepingTests: XCTestCase {
         XCTAssertEqual(Set(counter.requests.map(\.approvalId)), ["appr_3", "appr_other_session"])
     }
 
+    func testApprovalCounterAdoptsSystemSnapshotForHostApprovals() throws {
+        var counter = ApprovalCounter()
+        counter.apply(try decodeApprovalRequested(approvalId: "appr_session"))
+        counter.apply(try decodeApprovalRequested(approvalId: "appr_host_stale", sessionId: ""))
+
+        // 補送而非快照：欄位不存在，本地項目不動。
+        counter.adoptSystemSnapshot(nil)
+        XCTAssertEqual(Set(counter.requests.map(\.approvalId)), ["appr_session", "appr_host_stale"])
+
+        // 快照是主機現況：只替換空 sessionId（宿主審批），會話項目保留。
+        let hostApproval = try JSONDecoder().decode(
+            ApprovalRequest.self,
+            from: JSONSerialization.data(withJSONObject: [
+                "approvalId": "appr_host_new",
+                "sessionId": "",
+                "turnId": "",
+                "title": "允許新增 MCP 伺服器",
+                "scope": ["kind": "settings_change", "target": "mcp"],
+                "options": [["id": "approve", "label": "核准", "effect": "approve"]],
+                "requestedAt": "2026-11-14T10:00:03Z",
+            ])
+        )
+        counter.adoptSystemSnapshot([hostApproval])
+        XCTAssertEqual(Set(counter.requests.map(\.approvalId)), ["appr_session", "appr_host_new"])
+
+        // 主機快照沒有待決宿主審批：清掉本地留著的空 sessionId 項目。
+        counter.adoptSystemSnapshot([])
+        XCTAssertEqual(counter.requests.map(\.approvalId), ["appr_session"])
+    }
+
     // MARK: - 測試資料
 
     private func decodeStatus(
