@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { manifest as boards } from "../../src/modules/boards/manifest.js";
 import { manifest as cards } from "../../src/modules/cards/manifest.js";
 import { manifest as context } from "../../src/modules/context/manifest.js";
 import { manifest as dealing } from "../../src/modules/dealing/manifest.js";
@@ -8,6 +9,8 @@ import { manifest as lifecycle } from "../../src/modules/lifecycle/manifest.js";
 import { manifest as localTools } from "../../src/modules/local-tools/manifest.js";
 import { manifest as media } from "../../src/modules/media/manifest.js";
 import { manifest as memory } from "../../src/modules/memory/manifest.js";
+// retrieval 沒有獨立的 manifest.ts，manifest 內聯在 hostModule 裡。
+import { hostModule as retrieval } from "../../src/modules/retrieval/index.js";
 import { manifest as scheduler } from "../../src/modules/scheduler/manifest.js";
 import { manifest as settings } from "../../src/modules/settings/manifest.js";
 import { manifest as storage } from "../../src/modules/storage/manifest.js";
@@ -19,6 +22,7 @@ import {
 } from "../../src/settings/catalog.js";
 
 const MANIFESTS = [
+  boards,
   cards,
   context,
   dealing,
@@ -27,6 +31,7 @@ const MANIFESTS = [
   localTools,
   media,
   memory,
+  retrieval.manifest,
   scheduler,
   settings,
   storage,

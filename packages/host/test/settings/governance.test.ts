@@ -5,7 +5,7 @@ import { FolderLayout } from "@cardiary/storage";
 import { describe, expect, it } from "vitest";
 
 import { SettingsGovernance, SettingsGovernanceError } from "../../src/settings/governance.js";
-import { HUMAN_ONLY_SETTING_KEYS } from "../../src/settings/catalog.js";
+import { HUMAN_ONLY_SETTING_KEYS, SETTING_DEFINITIONS } from "../../src/settings/catalog.js";
 import { settingsService, MemorySettingsStore } from "../models/support.js";
 import { makeFolder } from "../helpers.js";
 
@@ -90,7 +90,10 @@ describe("設定分級治理", () => {
   });
 
   // 所有 human-only 鍵逐項檢查：代理看不到、讀不到，也提議不了，錯誤訊息不含鍵名。
-  it.each(HUMAN_ONLY_SETTING_KEYS.map((key) => [key] as const))(
+  const HUMAN_ONLY_DEFINITIONS = SETTING_DEFINITIONS.filter(
+    (definition) => definition.level === "human-only",
+  );
+  it.each(HUMAN_ONLY_DEFINITIONS.map((definition) => [definition.key] as const))(
     "human-only 鍵 %s 對代理完全不可見且拒絕變更",
     async (key) => {
       const { governance } = await harness();
@@ -109,9 +112,19 @@ describe("設定分級治理", () => {
       expect(error).toBeInstanceOf(SettingsGovernanceError);
       expect((error as Error).message).not.toContain(key);
       expect((error as SettingsGovernanceError).code).toBe("permission_denied");
+      // human-only 的紀錄會對代理隱藏，所以 agent 的空清單不足以證明沒有寫入；
+      // 人類看得到完整紀錄，拒絕後人類也應該看到零筆。
       expect(governance.changesFor("agent")).toEqual([]);
+      expect(governance.changesFor("human")).toEqual([]);
     },
   );
+
+  it("HUMAN_ONLY_SETTING_KEYS 與設定目錄中的 human-only 鍵完全相等", () => {
+    const fromDefinitions = SETTING_DEFINITIONS.filter(
+      (definition) => definition.level === "human-only",
+    ).map((definition) => definition.key);
+    expect([...HUMAN_ONLY_SETTING_KEYS].sort()).toEqual([...fromDefinitions].sort());
+  });
 
   it("代理看不到 human-only，也提議不了，錯誤訊息不含鍵名", async () => {
     const { governance } = await harness();
@@ -134,6 +147,7 @@ describe("設定分級治理", () => {
     }
 
     expect(governance.changesFor("agent")).toEqual([]);
+    expect(governance.changesFor("human")).toEqual([]);
   });
 
   it("待決提議寫進 state 正本，重啟後仍然存在", async () => {

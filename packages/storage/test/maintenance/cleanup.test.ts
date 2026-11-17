@@ -225,7 +225,11 @@ describe("符號連結與執行中的暫存", () => {
 });
 
 describe("清除後重啟", () => {
-  it("清除可重建的索引後，關閉再重開，卡片仍可讀取且索引可重建", () => {
+  it("清除可重建的索引後關閉再重開，索引表可重新寫入", () => {
+    // indexedRecord 是測試手工建好的紀錄，直接交給 CardIndexStore.rebuild；
+    // 這裡沒有從 cards/ 掃描檔案重建索引。檔案掃描重建由
+    // packages/host/test/modules/cards/library.test.ts 與
+    // packages/contract-tests/cards/cards.test.ts 覆蓋。
     const temp = createTempRoot("cleanup-restart");
     cleanups.push(temp.cleanup);
 
