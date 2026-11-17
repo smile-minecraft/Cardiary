@@ -54,6 +54,13 @@ export interface ApprovalRequestDraft {
   readonly toolCallId?: ToolCallId;
   /** 外部代理的獨立審批，不與對話識別碼混用。 */
   readonly externalAgent?: { readonly sessionId: string; readonly requestId: string };
+  /**
+   * 不屬於任何對話或外部代理的宿主動作。
+   *
+   * 帶這個欄位時，審批只綁定 `requestedBy` 的宿主元件與 `requestId`，
+   * 不要求工具名稱；詳見 `computeHostApprovalKey`。
+   */
+  readonly hostApproval?: { readonly component: string; readonly requestId: string };
   readonly action: ApprovalAction;
   readonly risk: ApprovalRisk;
   readonly requestedBy: ApprovalRequester;

@@ -16,7 +16,7 @@ import type {
 } from "../approval.js";
 import type { ApprovalRequestId } from "../ids.js";
 import type { Clock, Unsubscribe } from "../runtime.js";
-import { computeApprovalKey, computeExternalAgentApprovalKey } from "./canonical.js";
+import { computeApprovalKey, computeExternalAgentApprovalKey, computeHostApprovalKey } from "./canonical.js";
 import { engineError } from "./errors.js";
 
 interface Waiter {
@@ -63,44 +63,7 @@ export class ApprovalServiceImpl implements ApprovalService {
   }
 
   async request(draft: ApprovalRequestDraft): Promise<ApprovalRequest> {
-    const toolName =
-      draft.action.toolName ??
-      (draft.requestedBy.kind === "tool" ? draft.requestedBy.toolName : undefined);
-    if (toolName === undefined || toolName.length === 0) {
-      throw engineError("invalid-request", "工具審批必須帶工具名稱");
-    }
-    const external = draft.externalAgent;
-    let approvalKey: string;
-    if (external !== undefined) {
-      if (
-        !external.sessionId ||
-        !external.requestId ||
-        draft.requestedBy.kind !== "agent" ||
-        draft.requestedBy.agentId !== external.sessionId ||
-        draft.conversationId !== undefined ||
-        draft.turnId !== undefined
-      ) {
-        throw engineError("invalid-request", "外部代理審批必須帶一致的工作階段與請求識別碼");
-      }
-      approvalKey = computeExternalAgentApprovalKey({
-        sessionId: external.sessionId,
-        requestId: external.requestId,
-        toolName,
-        payload: draftPayload(draft) as never,
-      });
-    } else {
-      if (draft.conversationId === undefined || draft.turnId === undefined) {
-        throw engineError("invalid-request", "對話審批必須帶 conversationId 與 turnId");
-      }
-      approvalKey = computeApprovalKey({
-        scope: "tool",
-        conversationId: draft.conversationId,
-        turnId: draft.turnId,
-        toolName,
-        payload: draftPayload(draft) as never,
-      });
-    }
-
+    const { approvalKey, toolName } = this.#approvalSource(draft);
     const inFlight = this.#byKey.get(approvalKey);
     if (inFlight !== undefined) {
       return inFlight;
@@ -114,10 +77,90 @@ export class ApprovalServiceImpl implements ApprovalService {
     }
   }
 
+  /** 依來源決定去重鍵；宿主、外部代理、一般對話三條路互不相通。 */
+  #approvalSource(draft: ApprovalRequestDraft): {
+    readonly approvalKey: string;
+    readonly toolName?: string;
+  } {
+    if (draft.hostApproval !== undefined) {
+      return this.#hostSource(draft, draft.hostApproval);
+    }
+    const toolName =
+      draft.action.toolName ??
+      (draft.requestedBy.kind === "tool" ? draft.requestedBy.toolName : undefined);
+    if (toolName === undefined || toolName.length === 0) {
+      throw engineError("invalid-request", "工具審批必須帶工具名稱");
+    }
+    const external = draft.externalAgent;
+    if (external !== undefined) {
+      if (
+        !external.sessionId ||
+        !external.requestId ||
+        draft.requestedBy.kind !== "agent" ||
+        draft.requestedBy.agentId !== external.sessionId ||
+        draft.conversationId !== undefined ||
+        draft.turnId !== undefined
+      ) {
+        throw engineError("invalid-request", "外部代理審批必須帶一致的工作階段與請求識別碼");
+      }
+      return {
+        toolName,
+        approvalKey: computeExternalAgentApprovalKey({
+          sessionId: external.sessionId,
+          requestId: external.requestId,
+          toolName,
+          payload: draftPayload(draft) as never,
+        }),
+      };
+    }
+    if (draft.conversationId === undefined || draft.turnId === undefined) {
+      throw engineError("invalid-request", "對話審批必須帶 conversationId 與 turnId");
+    }
+    return {
+      toolName,
+      approvalKey: computeApprovalKey({
+        scope: "tool",
+        conversationId: draft.conversationId,
+        turnId: draft.turnId,
+        toolName,
+        payload: draftPayload(draft) as never,
+      }),
+    };
+  }
+
+  /** 宿主審批不要求工具名稱；綁定元件、請求識別碼與正規化輸入。 */
+  #hostSource(
+    draft: ApprovalRequestDraft,
+    host: { readonly component: string; readonly requestId: string },
+  ): { readonly approvalKey: string } {
+    if (
+      host.component.length === 0 ||
+      host.requestId.length === 0 ||
+      draft.requestedBy.kind !== "host" ||
+      draft.requestedBy.component !== host.component ||
+      draft.conversationId !== undefined ||
+      draft.turnId !== undefined ||
+      draft.externalAgent !== undefined
+    ) {
+      throw engineError(
+        "invalid-request",
+        "宿主審批必須由一致的宿主元件提出，且不帶對話、回合或外部代理識別碼",
+      );
+    }
+    return {
+      approvalKey: computeHostApprovalKey({
+        component: host.component,
+        requestId: host.requestId,
+        actionKind: draft.action.kind,
+        payload: draftPayload(draft) as never,
+      }),
+    };
+  }
+
   async #record(
     draft: ApprovalRequestDraft,
     approvalKey: string,
-    toolName: string,
+    toolName?: string,
   ): Promise<ApprovalRequest> {
     const now = this.#clock.now();
     const timeoutMs = draft.timeoutMs === undefined ? DEFAULT_TIMEOUT_MS : draft.timeoutMs;
@@ -127,7 +170,10 @@ export class ApprovalServiceImpl implements ApprovalService {
       status: "pending",
       requestedAt: now.toISOString(),
       expiresAt,
-      draft: { ...draft, action: { ...draft.action, toolName } },
+      draft: {
+        ...draft,
+        action: toolName === undefined ? draft.action : { ...draft.action, toolName },
+      },
       approvalKey,
     };
 

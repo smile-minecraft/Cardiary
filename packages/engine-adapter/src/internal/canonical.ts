@@ -55,6 +55,23 @@ export function computeExternalAgentApprovalKey(input: {
   return createHash("sha256").update(material, "utf8").digest("hex");
 }
 
+/** 宿主審批使用獨立命名空間，避免與對話鍵或外部代理鍵碰撞。 */
+export function computeHostApprovalKey(input: {
+  readonly component: string;
+  readonly requestId: string;
+  readonly actionKind: string;
+  readonly payload: JsonValue;
+}): string {
+  const material = canonicalJson([
+    "cardiary.approval.host.v1",
+    input.component,
+    input.requestId,
+    input.actionKind,
+    input.payload,
+  ]);
+  return createHash("sha256").update(material, "utf8").digest("hex");
+}
+
 function compareUtf8(left: string, right: string): number {
   return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
 }
