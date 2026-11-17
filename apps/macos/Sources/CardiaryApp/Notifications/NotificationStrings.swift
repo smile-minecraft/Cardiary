@@ -21,6 +21,50 @@ public enum NotificationString: String, CaseIterable, Sendable {
     case notificationLoading
     case notificationRefresh
     case notificationOpenConversation
+    case notificationTabNotifications
+    case notificationTabSchedules
+    case notificationAddToConversation
+    case notificationChooseConversationTitle
+    case notificationConversationEmpty
+    case notificationAddedToConversation
+    case schedulerTitle
+    case schedulerEmpty
+    case schedulerName
+    case schedulerKind
+    case schedulerKindOnce
+    case schedulerKindDaily
+    case schedulerKindInterval
+    case schedulerKindHeartbeat
+    case schedulerOnceAt
+    case schedulerDailyTime
+    case schedulerEveryMinutes
+    case schedulerTask
+    case schedulerTaskAgent
+    case schedulerTaskDistillation
+    case schedulerTaskPrompt
+    case schedulerPromptPlaceholder
+    case schedulerCreate
+    case schedulerPause
+    case schedulerResume
+    case schedulerDelete
+    case schedulerNextRun
+    case schedulerLastRun
+    case schedulerRunCount
+    case schedulerStatusOK
+    case schedulerStatusSilent
+    case schedulerStatusNotify
+    case schedulerStatusError
+    case notificationScheduleCreated
+    case notificationSchedulePaused
+    case notificationScheduleResumed
+    case notificationScheduleDeleted
+    case notificationScheduleInvalidName
+    case notificationScheduleInvalidTime
+    case notificationScheduleInvalidInterval
+    case notificationScheduleInvalidPrompt
+    case notificationScheduleSpecOnce
+    case notificationScheduleSpecDaily
+    case notificationScheduleSpecEvery
 }
 
 /// 通知介面的字串查詢。
@@ -92,6 +136,50 @@ enum NotificationStringTables {
             "notificationLoading": "正在載入通知…",
             "notificationRefresh": "重新整理",
             "notificationOpenConversation": "開啟對話",
+            "notificationTabNotifications": "通知",
+            "notificationTabSchedules": "排程",
+            "notificationAddToConversation": "加入對話",
+            "notificationChooseConversationTitle": "選擇要加入的對話",
+            "notificationConversationEmpty": "沒有可加入的對話，請先建立一個對話。",
+            "notificationAddedToConversation": "已加入「{value}」。",
+            "schedulerTitle": "排程",
+            "schedulerEmpty": "還沒有排程。建立後會照時間執行。",
+            "schedulerName": "名稱",
+            "schedulerKind": "觸發方式",
+            "schedulerKindOnce": "一次",
+            "schedulerKindDaily": "每天",
+            "schedulerKindInterval": "固定間隔",
+            "schedulerKindHeartbeat": "心跳檢查",
+            "schedulerOnceAt": "執行時間（2026-01-01T10:00:00+08:00）",
+            "schedulerDailyTime": "每日時間（04:00）",
+            "schedulerEveryMinutes": "間隔（分鐘）",
+            "schedulerTask": "任務",
+            "schedulerTaskAgent": "背景代理",
+            "schedulerTaskDistillation": "每日蒸餾",
+            "schedulerTaskPrompt": "提示詞",
+            "schedulerPromptPlaceholder": "描述這次要代理做的事",
+            "schedulerCreate": "建立排程",
+            "schedulerPause": "暫停",
+            "schedulerResume": "恢復",
+            "schedulerDelete": "刪除",
+            "schedulerNextRun": "下次執行：{value}",
+            "schedulerLastRun": "上次執行：{value}",
+            "schedulerRunCount": "已執行 {count} 次",
+            "schedulerStatusOK": "成功",
+            "schedulerStatusSilent": "無事",
+            "schedulerStatusNotify": "已通知",
+            "schedulerStatusError": "失敗",
+            "notificationScheduleCreated": "已建立排程。",
+            "notificationSchedulePaused": "已暫停排程。",
+            "notificationScheduleResumed": "已恢復排程。",
+            "notificationScheduleDeleted": "已刪除排程。",
+            "notificationScheduleInvalidName": "請先填排程名稱。",
+            "notificationScheduleInvalidTime": "時間格式不對，照畫面上的範例再填一次。",
+            "notificationScheduleInvalidInterval": "心跳檢查與固定間隔至少要 5 分鐘。",
+            "notificationScheduleInvalidPrompt": "背景代理的提示詞不能留空。",
+            "notificationScheduleSpecOnce": "一次：{value}",
+            "notificationScheduleSpecDaily": "每天 {value}",
+            "notificationScheduleSpecEvery": "每隔 {value} 分鐘",
         ],
         .en: [
             "notificationTitle": "Notifications",
@@ -111,6 +199,50 @@ enum NotificationStringTables {
             "notificationLoading": "Loading notifications…",
             "notificationRefresh": "Refresh",
             "notificationOpenConversation": "Open conversation",
+            "notificationTabNotifications": "Notifications",
+            "notificationTabSchedules": "Schedules",
+            "notificationAddToConversation": "Add to conversation",
+            "notificationChooseConversationTitle": "Choose a conversation",
+            "notificationConversationEmpty": "No conversations yet. Create one first.",
+            "notificationAddedToConversation": "Added to “{value}”.",
+            "schedulerTitle": "Schedules",
+            "schedulerEmpty": "No schedules yet. Created ones run on time.",
+            "schedulerName": "Name",
+            "schedulerKind": "Trigger",
+            "schedulerKindOnce": "Once",
+            "schedulerKindDaily": "Daily",
+            "schedulerKindInterval": "Interval",
+            "schedulerKindHeartbeat": "Heartbeat",
+            "schedulerOnceAt": "Run at (2026-01-01T10:00:00+08:00)",
+            "schedulerDailyTime": "Daily time (04:00)",
+            "schedulerEveryMinutes": "Interval (minutes)",
+            "schedulerTask": "Task",
+            "schedulerTaskAgent": "Background agent",
+            "schedulerTaskDistillation": "Daily distillation",
+            "schedulerTaskPrompt": "Prompt",
+            "schedulerPromptPlaceholder": "Describe what the agent should do",
+            "schedulerCreate": "Create schedule",
+            "schedulerPause": "Pause",
+            "schedulerResume": "Resume",
+            "schedulerDelete": "Delete",
+            "schedulerNextRun": "Next run: {value}",
+            "schedulerLastRun": "Last run: {value}",
+            "schedulerRunCount": "{count} runs",
+            "schedulerStatusOK": "OK",
+            "schedulerStatusSilent": "Nothing to report",
+            "schedulerStatusNotify": "Notified",
+            "schedulerStatusError": "Failed",
+            "notificationScheduleCreated": "Schedule created.",
+            "notificationSchedulePaused": "Schedule paused.",
+            "notificationScheduleResumed": "Schedule resumed.",
+            "notificationScheduleDeleted": "Schedule deleted.",
+            "notificationScheduleInvalidName": "Enter a schedule name first.",
+            "notificationScheduleInvalidTime": "The time format is wrong; match the example above.",
+            "notificationScheduleInvalidInterval": "Heartbeat and interval schedules need at least 5 minutes.",
+            "notificationScheduleInvalidPrompt": "The background agent prompt can't be empty.",
+            "notificationScheduleSpecOnce": "Once: {value}",
+            "notificationScheduleSpecDaily": "Daily at {value}",
+            "notificationScheduleSpecEvery": "Every {value} minutes",
         ],
     ]
 }

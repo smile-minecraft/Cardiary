@@ -112,6 +112,96 @@ final class NotificationModelTests: XCTestCase {
         XCTAssertEqual(model.totalUnread, 0)
     }
 
+    func testLoadConversationsListsRecentSessions() async {
+        let fake = FakeNotificationAndContextService()
+        await fake.setSessions([
+            SessionSummary(
+                id: "session-1",
+                title: "晚餐聊聊",
+                status: .idle,
+                createdAt: "2026-01-01T00:00:00Z",
+                updatedAt: "2026-01-01T00:00:00Z",
+                messageCount: 3
+            ),
+        ])
+        let model = makeModel()
+        model.attach(service: fake)
+
+        await model.loadConversations()
+
+        XCTAssertEqual(model.conversations.map(\.id), ["session-1"])
+    }
+
+    func testAddToConversationCreatesCardThenAddsToSession() async {
+        let fake = FakeNotificationAndContextService()
+        await fake.setSessions([
+            SessionSummary(
+                id: "session-1",
+                title: "晚餐聊聊",
+                status: .idle,
+                createdAt: "2026-01-01T00:00:00Z",
+                updatedAt: "2026-01-01T00:00:00Z",
+                messageCount: 1
+            ),
+        ])
+        let model = makeModel()
+        model.attach(service: fake)
+        model.update(notifications: payload([record(id: "n-1")], unread: 1))
+
+        let ok = await model.addToConversation(
+            model.notifications[0],
+            sessionId: "session-1",
+            conversationTitle: "晚餐聊聊"
+        )
+
+        XCTAssertTrue(ok)
+        XCTAssertEqual(model.noticeMessage, "已加入「晚餐聊聊」。")
+        let added = await fake.addCardCalls
+        XCTAssertEqual(added.count, 1)
+        XCTAssertEqual(added.first?.sessionId, "session-1")
+        XCTAssertEqual(added.first?.cardId, "card-1")
+        XCTAssertEqual(model.notifications[0].cardId, "card-1")
+    }
+
+    func testPresentSystemNotificationShowsWhenEnabledAndAuthorized() async {
+        let center = FakeSystemCenter(authorize: true, failShow: false)
+        let settings = FakeSystemCenterSettings(enabled: true)
+        let model = makeModel()
+        model.attachSystemCenter(center)
+        model.attachSystemCenterSettings(settings)
+
+        await model.presentSystemNotification(for: NotificationPresentation(record: record()))
+
+        let shows = await center.showCalls
+        XCTAssertEqual(shows.map(\.id), ["n-1"])
+    }
+
+    func testPresentSystemNotificationSkipsWhenSettingDisabled() async {
+        let center = FakeSystemCenter(authorize: true, failShow: false)
+        let settings = FakeSystemCenterSettings(enabled: false)
+        let model = makeModel()
+        model.attachSystemCenter(center)
+        model.attachSystemCenterSettings(settings)
+
+        await model.presentSystemNotification(for: NotificationPresentation(record: record()))
+
+        let shows = await center.showCalls
+        XCTAssertTrue(shows.isEmpty)
+    }
+
+    func testPresentSystemNotificationSkipsWhenNotAuthorized() async {
+        let center = FakeSystemCenter(authorize: false, failShow: false)
+        let settings = FakeSystemCenterSettings(enabled: true)
+        let model = makeModel()
+        model.attachSystemCenter(center)
+        model.attachSystemCenterSettings(settings)
+
+        await model.presentSystemNotification(for: NotificationPresentation(record: record()))
+
+        let shows = await center.showCalls
+        XCTAssertTrue(shows.isEmpty)
+    }
+
     func testCreateCardSetsCardIdAndDeduplicates() async {
         let fake = FakeNotificationService()
         let model = makeModel()
@@ -167,7 +257,7 @@ private actor FakeNotificationService: NotificationService {
         all: Bool?
     ) async throws -> NotificationMarkReadResponsePayload {
         markReadCalls.append((ids, all))
-        // 兩則通知標一則已讀後，主机回報的全域未讀數是 1。
+        // 兩則通知標一則已讀後，主機回報的全域未讀數是 1。
         return NotificationMarkReadResponsePayload(updated: ids?.count ?? 2, totalUnread: 1)
     }
 
@@ -190,6 +280,174 @@ private actor FakeNotificationService: NotificationService {
             deduped: false
         )
     }
+}
+
+private actor FakeNotificationAndContextService: NotificationService, ContextService,
+    ConversationService
+{
+    private(set) var addCardCalls: [(sessionId: String, cardId: String)] = []
+    private(set) var createCardCalls: [String] = []
+    private var sessions: [SessionSummary] = []
+
+    func setSessions(_ list: [SessionSummary]) { sessions = list }
+
+    func listNotifications(
+        limit: Int?,
+        before: String?,
+        unreadOnly: Bool?
+    ) async throws -> NotificationListResponsePayload {
+        NotificationListResponsePayload(notifications: [], totalUnread: 0)
+    }
+
+    func markNotificationsRead(
+        ids: [String]?,
+        all: Bool?
+    ) async throws -> NotificationMarkReadResponsePayload {
+        NotificationMarkReadResponsePayload(updated: ids?.count ?? 0, totalUnread: 0)
+    }
+
+    func createCardFromNotification(
+        notificationId: String
+    ) async throws -> NotificationCreateCardResponsePayload {
+        createCardCalls.append(notificationId)
+        return NotificationCreateCardResponsePayload(
+            card: CardSummary(
+                cardId: "card-1",
+                kind: .note,
+                title: "每日摘要",
+                tags: ["通知"],
+                persona: "default",
+                createdAt: "2026-01-01T00:00:00Z",
+                freshness: 100,
+                lifecycle: .live
+            ),
+            deduped: false
+        )
+    }
+
+    func getContext(sessionId: String) async throws -> ContextGetResponsePayload {
+        ContextGetResponsePayload(context: contextView(sessionId: sessionId))
+    }
+
+    func addCardToContext(
+        sessionId: String,
+        cardId: String
+    ) async throws -> ContextAddCardResponsePayload {
+        addCardCalls.append((sessionId, cardId))
+        return ContextAddCardResponsePayload(context: contextView(sessionId: sessionId))
+    }
+
+    func removeCardFromContext(
+        sessionId: String,
+        cardId: String
+    ) async throws -> ContextRemoveCardResponsePayload {
+        ContextRemoveCardResponsePayload(context: contextView(sessionId: sessionId))
+    }
+
+    func compactContext(
+        sessionId: String,
+        instructions: String?
+    ) async throws -> ContextCompactResponsePayload {
+        ContextCompactResponsePayload(sessionId: sessionId, scheduled: true)
+    }
+
+    func listSessions(cursor: String?, limit: Int?) async throws -> SessionListResponsePayload {
+        SessionListResponsePayload(sessions: sessions, nextCursor: nil)
+    }
+
+    func createSession(
+        clientRequestId: String,
+        title: String?
+    ) async throws -> SessionCreateResponsePayload {
+        SessionCreateResponsePayload(session: sessions.first ?? SessionSummary(
+            id: "session-default",
+            title: title ?? "預設對話",
+            status: .idle,
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            messageCount: 0
+        ))
+    }
+
+    func getHistory(
+        sessionId: String,
+        cursor: String?,
+        limit: Int?
+    ) async throws -> SessionGetHistoryResponsePayload {
+        SessionGetHistoryResponsePayload(entries: [], nextCursor: nil)
+    }
+
+    func sendMessage(
+        sessionId: String,
+        text: String,
+        delivery: DeliveryMode,
+        clientMessageId: String?
+    ) async throws -> SessionSendMessageResponsePayload {
+        SessionSendMessageResponsePayload(
+            sessionId: sessionId,
+            userMessageId: clientMessageId ?? "msg-1",
+            turnId: "turn-1",
+            disposition: .started
+        )
+    }
+
+    func interruptSession(
+        sessionId: String,
+        reason: String?
+    ) async throws -> SessionInterruptResponsePayload {
+        SessionInterruptResponsePayload(sessionId: sessionId, interrupted: true)
+    }
+
+    func subscribeSession(
+        sessionId: String,
+        historyLimit: Int?
+    ) async throws -> SessionSubscribeResponsePayload {
+        SessionSubscribeResponsePayload(
+            sessionId: sessionId,
+            stream: "session:\(sessionId)",
+            seq: 1,
+            epoch: "epoch-1",
+            resyncRequired: false
+        )
+    }
+
+    func unsubscribeSession(sessionId: String) async {}
+
+    private func contextView(sessionId: String) -> ContextView {
+        ContextView(
+            sessionId: sessionId,
+            version: 1,
+            entries: [],
+            usedTokens: 0,
+            budgetTokens: 1000,
+            contextWindow: 2000,
+            compactionThreshold: 0.75
+        )
+    }
+}
+
+private actor FakeSystemCenter: NotificationSystemCenter {
+    private(set) var showCalls: [(id: String, title: String, body: String)] = []
+    private let authorize: Bool
+    private let failShow: Bool
+
+    init(authorize: Bool, failShow: Bool) {
+        self.authorize = authorize
+        self.failShow = failShow
+    }
+
+    func requestAuthorization() async -> Bool { authorize }
+
+    func show(id: String, title: String, body: String) async throws {
+        if failShow { throw FakeError.failed }
+        showCalls.append((id, title, body))
+    }
+}
+
+private actor FakeSystemCenterSettings: NotificationSystemCenterSettings {
+    private let enabled: Bool
+    init(enabled: Bool) { self.enabled = enabled }
+    func isEnabled() async throws -> Bool { enabled }
 }
 
 private enum FakeError: LocalizedError {

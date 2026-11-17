@@ -14,7 +14,6 @@ public final class SchedulerModel: ObservableObject {
     @Published public private(set) var busyIds: Set<String> = []
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var noticeMessage: String?
-    @Published public var draft = SchedulerDraft()
     @Published public private(set) var isCreating = false
 
     private var service: (any SchedulerAdminService)?
@@ -52,14 +51,14 @@ public final class SchedulerModel: ObservableObject {
         }
     }
 
-    /// 驗證表單並建立排程；成功後清空表單。
+    /// 驗證表單並建立排程。
     @discardableResult
-    public func create() async -> Bool {
+    public func create(_ draft: SchedulerDraft) async -> Bool {
         guard let service else {
             errorMessage = NotificationL10n.text(.notificationServiceUnavailable, language: language)
             return false
         }
-        guard let problem = validationProblem() else {
+        guard let problem = validationProblem(draft) else {
             isCreating = true
             defer { isCreating = false }
             do {
@@ -75,7 +74,6 @@ public final class SchedulerModel: ObservableObject {
                 )
                 schedules.insert(created, at: 0)
                 isKnown = true
-                draft = SchedulerDraft()
                 noticeMessage = NotificationL10n.text(.notificationScheduleCreated, language: language)
                 errorMessage = nil
                 return true
@@ -171,10 +169,10 @@ public final class SchedulerModel: ObservableObject {
 
     public func statusDescription(_ schedule: CardiarySchedule) -> String? {
         switch schedule.lastStatus {
-        case "ok": return NotificationL10n.text(.notificationScheduleStatusOK, language: language)
-        case "silent": return NotificationL10n.text(.notificationScheduleStatusSilent, language: language)
-        case "notify": return NotificationL10n.text(.notificationScheduleStatusNotify, language: language)
-        case "error": return NotificationL10n.text(.notificationScheduleStatusError, language: language)
+        case "ok": return NotificationL10n.text(.schedulerStatusOK, language: language)
+        case "silent": return NotificationL10n.text(.schedulerStatusSilent, language: language)
+        case "notify": return NotificationL10n.text(.schedulerStatusNotify, language: language)
+        case "error": return NotificationL10n.text(.schedulerStatusError, language: language)
         case nil: return nil
         default: return schedule.lastStatus
         }
@@ -182,12 +180,12 @@ public final class SchedulerModel: ObservableObject {
 
     public func taskDescription(_ schedule: CardiarySchedule) -> String {
         if schedule.isDistillation {
-            return NotificationL10n.text(.notificationScheduleTaskDistillation, language: language)
+            return NotificationL10n.text(.schedulerTaskDistillation, language: language)
         }
         return schedule.taskPrompt ?? ""
     }
 
-    private func validationProblem() -> String? {
+    private func validationProblem(_ draft: SchedulerDraft) -> String? {
         let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
         if name.isEmpty {
             return NotificationL10n.text(.notificationScheduleInvalidName, language: language)

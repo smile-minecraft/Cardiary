@@ -1,9 +1,11 @@
 import CardiaryKit
 import SwiftUI
 
-/// 通知流：未讀計數、標已讀、轉卡，以及即時事件的更新。
+/// 通知畫面：通知流與排程管理共用左側欄的一格。
 public struct NotificationListView: View {
     @ObservedObject var model: NotificationModel
+    @State private var tab: ScreenTab = .notifications
+    @State private var addingToConversation: NotificationPresentation?
 
     public init(model: NotificationModel) {
         self.model = model
@@ -14,6 +16,43 @@ public struct NotificationListView: View {
             HStack {
                 Text(NotificationL10n.text(.notificationTitle))
                     .font(.cardiary(.title3, weight: .semibold))
+                Spacer()
+                ThemeSegmented(
+                    selection: $tab,
+                    options: [
+                        (.notifications, NotificationL10n.text(.notificationTabNotifications)),
+                        (.schedules, NotificationL10n.text(.notificationTabSchedules)),
+                    ]
+                )
+            }
+
+            switch tab {
+            case .notifications:
+                notificationsPanel
+            case .schedules:
+                SchedulerView(model: model.scheduler)
+            }
+        }
+        .padding(DesignTokens.spacingM)
+        .sheet(item: $addingToConversation) { item in
+            NotificationConversationPicker(
+                item: item,
+                model: model
+            ) { sessionId, title in
+                Task {
+                    let ok = await model.addToConversation(item, sessionId: sessionId, conversationTitle: title)
+                    if ok {
+                        addingToConversation = nil
+                    }
+                }
+            }
+        }
+        .task { await model.reload() }
+    }
+
+    private var notificationsPanel: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
+            HStack {
                 if model.totalUnread > 0 {
                     ThemeChip(
                         text: NotificationL10n.count(.notificationUnread, count: model.totalUnread),
@@ -50,7 +89,9 @@ public struct NotificationListView: View {
                 ScrollView {
                     LazyVStack(spacing: DesignTokens.spacingS) {
                         ForEach(model.notifications) { item in
-                            NotificationRow(item: item, model: model)
+                            NotificationRow(item: item, model: model) {
+                                addingToConversation = $0
+                            }
                         }
                     }
                 }
@@ -63,14 +104,18 @@ public struct NotificationListView: View {
                 Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.sageInk)
             }
         }
-        .padding(DesignTokens.spacingM)
-        .task { await model.reload() }
+    }
+
+    private enum ScreenTab: Hashable {
+        case notifications
+        case schedules
     }
 }
 
 private struct NotificationRow: View {
     let item: NotificationPresentation
     @ObservedObject var model: NotificationModel
+    let onAddToConversation: (NotificationPresentation) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -92,6 +137,12 @@ private struct NotificationRow: View {
                 .font(.cardiary(.caption))
                 .foregroundStyle(Palette.inkSecondary)
                 .lineLimit(3)
+            if let source = item.sourceScheduleId, !source.isEmpty {
+                Text(NotificationL10n.format(.notificationSourceSchedule, value: source, language: nil))
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkTertiary)
+                    .lineLimit(1)
+            }
 
             HStack(spacing: DesignTokens.spacingS) {
                 if item.isUnread {
@@ -115,6 +166,13 @@ private struct NotificationRow: View {
                 }
                 .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .purple))
                 .disabled(item.cardId != nil || model.actingIds.contains(item.notificationId))
+                Button {
+                    onAddToConversation(item)
+                } label: {
+                    Label(NotificationL10n.text(.notificationAddToConversation), systemImage: "text.bubble")
+                }
+                .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
+                .disabled(model.actingIds.contains(item.notificationId))
             }
         }
         .padding(DesignTokens.spacingM)
