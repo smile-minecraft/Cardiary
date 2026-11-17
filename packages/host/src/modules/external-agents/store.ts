@@ -6,8 +6,8 @@
  * 啟動時清空。任何檔案刪除只發生在這兩個目錄之下。
  */
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { readdir, readFile, rm, stat, mkdir, writeFile, rename } from "node:fs/promises";
+import { existsSync, type Dirent, type Stats } from "node:fs";
+import { readdir, readFile, rm, stat, mkdir, writeFile, rename, lstat } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { homedir } from "node:os";
 
@@ -17,6 +17,7 @@ import {
   isAgentCacheStale,
   markUnknownAfterRestart,
   type ExternalAgentSessionRecord,
+  type ExternalAgentOutsideWriteEntry,
   type ExternalAgentUsage,
 } from "@cardiary/domain";
 
@@ -150,6 +151,87 @@ export async function computeUsage(paths: AgentStoragePaths): Promise<ExternalAg
     outsideEntries.push({ path, bytes: exists ? await dirBytes(path) : 0, exists });
   }
   return { cacheBytes, tempBytes, outsideEntries };
+}
+
+/** 資料夾外寫入候選相對 home 的區段；與 legacy outsideWriteCandidates 位置相同。 */
+function outsideWriteRelativeSegments(): readonly (readonly string[])[] {
+  return [
+    [".claude", "projects"],
+    [".claude", "backups"],
+    [".claude", "plugins"],
+    ["Library", "Caches", "claude-cli-nodejs"],
+  ];
+}
+
+type MeasuredBytes =
+  | { readonly status: "measured"; readonly bytes: number }
+  | { readonly status: "absent" }
+  | { readonly status: "unavailable" };
+
+/**
+ * 逐層 lstat 量測一個相對 home 的候選，只讀 metadata、不追 symlink、不讀內容。
+ * 候選根可測得不存在回 absent；任一層 symlink、權限不足或量不完整回 unavailable。
+ */
+async function measureBytes(home: string, relative: readonly string[]): Promise<MeasuredBytes> {
+  let current = home;
+  let lastStat: Stats | undefined;
+  for (const segment of relative) {
+    current = join(current, segment);
+    try {
+      lastStat = await lstat(current);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") return { status: "absent" };
+      return { status: "unavailable" };
+    }
+    if (lastStat.isSymbolicLink()) return { status: "unavailable" };
+  }
+
+  // relative 非空，迴圈至少執行一次。
+  if (lastStat === undefined) return { status: "unavailable" };
+  if (lastStat.isFile()) return { status: "measured", bytes: lastStat.size };
+  if (!lastStat.isDirectory()) return { status: "unavailable" };
+
+  let entries: readonly Dirent[];
+  try {
+    entries = await readdir(current, { withFileTypes: true });
+  } catch {
+    return { status: "unavailable" };
+  }
+
+  let total = 0;
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) return { status: "unavailable" };
+    const child = await measureBytes(current, [entry.name]);
+    // 子項在掃描中消失（absent）也算量不完整，不回部分和。
+    if (child.status !== "measured") return { status: "unavailable" };
+    total += child.bytes;
+  }
+  return { status: "measured", bytes: total };
+}
+
+/**
+ * 量測 Claude Code 在 Cardiary 資料夾外的四個寫入位置。與 legacy
+ * `computeUsage`／`dirBytes` 用途隔離，不量 cacheBytes／tempBytes。
+ */
+export async function computeOutsideWrites(
+  home: string,
+): Promise<readonly ExternalAgentOutsideWriteEntry[]> {
+  const results: ExternalAgentOutsideWriteEntry[] = [];
+  for (const relative of outsideWriteRelativeSegments()) {
+    const measured = await measureBytes(home, relative);
+    const base = { path: join(home, ...relative), tool: "claude-code" as const };
+    if (measured.status === "unavailable") {
+      results.push({ ...base, status: "unavailable" });
+    } else {
+      results.push({
+        ...base,
+        status: measured.status,
+        bytes: measured.status === "absent" ? 0 : measured.bytes,
+      });
+    }
+  }
+  return results;
 }
 
 /** 刪除 tmp/agents 底下的工作目錄；回傳實際刪除的目錄數。 */

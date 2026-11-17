@@ -12821,6 +12821,14 @@ public struct NotificationMarkReadResponsePayload: Codable, Equatable, Sendable 
     }
 }
 
+// MARK: - OutsideWriteStatus
+
+public enum OutsideWriteStatus: String, Codable, Equatable, Sendable, CaseIterable {
+    case measured = "measured"
+    case absent = "absent"
+    case unavailable = "unavailable"
+}
+
 // MARK: - PairedDevice
 
 public struct PairedDevice: Codable, Equatable, Sendable {
@@ -19045,6 +19053,56 @@ public struct StorageCleanupTarget: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - StorageOutsideWriteEntry
+
+public struct StorageOutsideWriteEntry: Codable, Equatable, Sendable {
+    public let path: String
+    public let tool: String
+    public let bytes: Int?
+    public let status: OutsideWriteStatus
+
+    public init(
+        path: String,
+        tool: String,
+        bytes: Int? = nil,
+        status: OutsideWriteStatus
+    ) {
+        self.path = path
+        self.tool = tool
+        self.bytes = bytes
+        self.status = status
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case path = "path"
+        case tool = "tool"
+        case bytes = "bytes"
+        case status = "status"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let path = try container.decode(String.self, forKey: .path)
+        let tool = try container.decode(String.self, forKey: .tool)
+        let bytes = try container.decodeIfPresent(Int.self, forKey: .bytes)
+        let status = try container.decode(OutsideWriteStatus.self, forKey: .status)
+        self.init(
+            path: path,
+            tool: tool,
+            bytes: bytes,
+            status: status
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encode(tool, forKey: .tool)
+        try container.encodeIfPresent(bytes, forKey: .bytes)
+        try container.encode(status, forKey: .status)
+    }
+}
+
 // MARK: - StorageUsageCategory
 
 public enum StorageUsageCategory: String, Codable, Equatable, Sendable, CaseIterable {
@@ -19200,28 +19258,35 @@ public struct StorageUsageResponse: Codable, Equatable, Sendable {
 
 public struct StorageUsageResponsePayload: Codable, Equatable, Sendable {
     public let usage: [StorageCategoryUsage]
+    public let outsideWrites: [StorageOutsideWriteEntry]?
 
     public init(
-        usage: [StorageCategoryUsage]
+        usage: [StorageCategoryUsage],
+        outsideWrites: [StorageOutsideWriteEntry]? = nil
     ) {
         self.usage = usage
+        self.outsideWrites = outsideWrites
     }
 
     private enum CodingKeys: String, CodingKey {
         case usage = "usage"
+        case outsideWrites = "outsideWrites"
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let usage = try container.decode([StorageCategoryUsage].self, forKey: .usage)
+        let outsideWrites = try container.decodeIfPresent([StorageOutsideWriteEntry].self, forKey: .outsideWrites)
         self.init(
-            usage: usage
+            usage: usage,
+            outsideWrites: outsideWrites
         )
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(usage, forKey: .usage)
+        try container.encodeIfPresent(outsideWrites, forKey: .outsideWrites)
     }
 }
 

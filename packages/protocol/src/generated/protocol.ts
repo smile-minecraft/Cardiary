@@ -391,6 +391,10 @@ export type SettingChangeStatus = "pending" | "applied" | "rejected";
 export type StorageUsageCategory =
   "cards" | "assets" | "cache" | "state" | "logs" | "tmp" | "shellState";
 /**
+ * 資料夾外寫入的量測結果；measured 有可信 bytes，absent 的 bytes 為 0，unavailable 省略 bytes、不可報 0。
+ */
+export type OutsideWriteStatus = "measured" | "absent" | "unavailable";
+/**
  * 協定層級的錯誤碼。
  */
 export type ErrorCode =
@@ -5497,6 +5501,10 @@ export interface StorageUsageResponsePayload {
    * 依類別列出用量。
    */
   usage: StorageCategoryUsage[];
+  /**
+   * 選用：代理在 Cardiary 資料夾外的寫入明細；模組未啟用或量測失敗時省略，不報 0。
+   */
+  outsideWrites?: StorageOutsideWriteEntry[];
 }
 export interface StorageCategoryUsage {
   category: StorageUsageCategory;
@@ -5508,6 +5516,21 @@ export interface StorageCategoryUsage {
    * 這個類別可安全釋放的位元組數；cards、assets、state、shellState 是正本或由殼管理，固定為 0。
    */
   cleanableBytes: number;
+}
+export interface StorageOutsideWriteEntry {
+  /**
+   * 候選位置的完整路徑。
+   */
+  path: string;
+  /**
+   * 寫入這位置的代理工具；目前是 claude-code，日後可擴充其他工具。
+   */
+  tool: string;
+  /**
+   * 量得的位元組數；absent 為 0，unavailable 省略這個欄位。
+   */
+  bytes?: number;
+  status: OutsideWriteStatus;
 }
 /**
  * 預覽結果；先確認這個內容再執行 storage.cleanup.apply。

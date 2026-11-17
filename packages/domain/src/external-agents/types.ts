@@ -128,3 +128,22 @@ export interface ExternalAgentUsageEntry {
   readonly bytes: number;
   readonly exists: boolean;
 }
+
+/**
+ * 資料夾外寫入的量測結果。
+ * - `measured`：成功量得，`bytes` 是可信的整數。
+ * - `absent`：可測得候選不存在，`bytes` 為 0。
+ * - `unavailable`：權限不足、symlink 或量不完整；省略 `bytes`，不可報 0。
+ */
+export type OutsideWriteStatus = "measured" | "absent" | "unavailable";
+
+/**
+ * 資料夾外單一候選位置的明細。與 legacy `ExternalAgentUsageEntry` 用途隔離，
+ * 不互相轉換；直接送進 storage 協定的選用 `outsideWrites` 欄位。
+ */
+export interface ExternalAgentOutsideWriteEntry {
+  readonly path: string;
+  readonly tool: "claude-code";
+  readonly bytes?: number;
+  readonly status: OutsideWriteStatus;
+}

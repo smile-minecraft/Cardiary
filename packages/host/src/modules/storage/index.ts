@@ -1,7 +1,11 @@
 import type { HostModule, ModuleActivationContext } from "@cardiary/module-api";
 import { StorageCleanup } from "@cardiary/storage";
 
-import { HOST_SERVICE_NAMES, type CardEnvironment } from "../contract.js";
+import {
+  HOST_SERVICE_NAMES,
+  type CardEnvironment,
+  type ExternalAgentsUsageService,
+} from "../contract.js";
 import type { SpawnRegistry } from "../../spawn/wrapper.js";
 import type { BrokerClient } from "../../control/broker.js";
 import { manifest } from "./manifest.js";
@@ -27,5 +31,12 @@ async function activate(context: ModuleActivationContext): Promise<void> {
     cleanup,
     protocol: context.services.protocol,
     ...(broker === undefined ? {} : { shellState: () => broker.shellState() }),
+    outsideWrites: async () => {
+      const usage = context.services.host.get<ExternalAgentsUsageService>(
+        HOST_SERVICE_NAMES.externalAgentsUsage,
+      );
+      if (usage === undefined) return undefined;
+      return usage.outsideWrites();
+    },
   });
 }

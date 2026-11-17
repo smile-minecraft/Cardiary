@@ -40,6 +40,9 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   context.services.host.provide(HOST_SERVICE_NAMES.externalAgentsPause, {
     pauseAll: (reason: string) => service.pauseAll(reason),
   });
+  context.services.host.provide(HOST_SERVICE_NAMES.externalAgentsUsage, {
+    outsideWrites: () => service.outsideWrites(),
+  });
   await service.startupCleanup();
   active = service;
 }

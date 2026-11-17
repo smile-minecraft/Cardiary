@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import type { ExternalAgentOutsideWriteEntry } from "@cardiary/domain";
 import type { ProtocolEventEmitter, ProtocolRequestContext } from "@cardiary/module-api";
 import { Storage, StorageCleanup } from "@cardiary/storage";
 
@@ -15,7 +16,10 @@ afterEach(() => {
   while (cleanups.length > 0) cleanups.pop()?.();
 });
 
-function harness(shellState?: () => Promise<{ usedBytes: number; limitBytes: number }>): {
+function harness(
+  shellState?: () => Promise<{ usedBytes: number; limitBytes: number }>,
+  outsideWrites?: () => Promise<readonly ExternalAgentOutsideWriteEntry[] | undefined>,
+): {
   call(type: string, payload?: Record<string, unknown>): Promise<unknown>;
   layout: Storage["layout"];
   storage: Storage;
@@ -43,6 +47,7 @@ function harness(shellState?: () => Promise<{ usedBytes: number; limitBytes: num
     cleanup,
     protocol,
     ...(shellState === undefined ? {} : { shellState }),
+    ...(outsideWrites === undefined ? {} : { outsideWrites }),
   });
   return {
     storage,
@@ -97,6 +102,52 @@ describe("storage 協定", () => {
       throw new Error("控制通道中斷");
     }).call("storage.usage")) as { usage: Array<{ category: string; bytes: number }> };
     expect(failing.usage.find((item) => item.category === "shellState")?.bytes).toBe(0);
+  });
+
+  it("注入 outsideWrites 時回傳明細，七類 usage 不變", async () => {
+    const injected: readonly ExternalAgentOutsideWriteEntry[] = [
+      { path: "/home/u/.claude/projects", tool: "claude-code", status: "measured", bytes: 4096 },
+      { path: "/home/u/.claude/backups", tool: "claude-code", status: "absent", bytes: 0 },
+      { path: "/home/u/.claude/plugins", tool: "claude-code", status: "unavailable" },
+    ];
+    const { call } = harness(undefined, async () => injected);
+    const response = (await call("storage.usage")) as {
+      usage: Array<{ category: string }>;
+      outsideWrites?: readonly ExternalAgentOutsideWriteEntry[];
+    };
+    expect(response.outsideWrites).toEqual(injected);
+    expect(response.usage.map((item) => item.category)).toEqual([
+      "cards",
+      "assets",
+      "cache",
+      "state",
+      "logs",
+      "tmp",
+      "shellState",
+    ]);
+  });
+
+  it("沒有注入 outsideWrites 時省略欄位，不回空陣列或 0", async () => {
+    const response = (await harness().call("storage.usage")) as Record<string, unknown>;
+    expect("outsideWrites" in response).toBe(false);
+  });
+
+  it("outsideWrites 擲錯時省略欄位，其餘用量仍回", async () => {
+    const response = (await harness(undefined, async () => {
+      throw new Error("量測失敗");
+    }).call("storage.usage")) as {
+      usage: Array<{ category: string }>;
+      outsideWrites?: unknown;
+    };
+    expect("outsideWrites" in response).toBe(false);
+    expect(response.usage).toHaveLength(7);
+  });
+
+  it("outsideWrites 回 undefined（模組未啟用）時省略欄位", async () => {
+    const response = (await harness(undefined, async () => undefined).call(
+      "storage.usage",
+    )) as Record<string, unknown>;
+    expect("outsideWrites" in response).toBe(false);
   });
 
   it("拒絕正本類別、殼狀態與沒有預覽的執行", async () => {

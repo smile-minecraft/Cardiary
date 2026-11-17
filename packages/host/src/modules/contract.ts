@@ -1,4 +1,10 @@
-import type { AssetStore, CardIndex, CardService, EmotionState } from "@cardiary/domain";
+import type {
+  AssetStore,
+  CardIndex,
+  CardService,
+  EmotionState,
+  ExternalAgentOutsideWriteEntry,
+} from "@cardiary/domain";
 import type {
   ApprovalActionKind,
   ApprovalDecision,
@@ -73,6 +79,8 @@ export const HOST_SERVICE_NAMES = {
   agentApprovals: "agentApprovals",
   /** 外部代理的緊急暫停；由外部代理模組提供，閘道在 `approval.pause_all` 時取。 */
   externalAgentsPause: "externalAgentsPause",
+  /** 外部代理資料夾外寫入的量測；由外部代理模組提供，storage 模組取用。 */
+  externalAgentsUsage: "externalAgentsUsage",
 } as const;
 
 /** 服務名稱的聯集；`modules.md` 第 5 節那張表。 */
@@ -161,6 +169,7 @@ export interface HostServiceTypeMap {
   boards: BoardsService;
   agentApprovals: AgentApprovalsService;
   externalAgentsPause: ExternalAgentsPauseService;
+  externalAgentsUsage: ExternalAgentsUsageService;
 }
 
 /**
@@ -171,6 +180,16 @@ export interface HostServiceTypeMap {
  */
 export interface ExternalAgentsPauseService {
   pauseAll(reason: string): Promise<void>;
+}
+
+/**
+ * 外部代理資料夾外寫入的量測入口；服務名稱 `externalAgentsUsage`。
+ *
+ * storage 模組只依賴這個方法，不碰 legacy 的 cacheBytes／tempBytes。
+ * 未啟用外部代理模組時服務不存在，storage 據此省略選用欄位。
+ */
+export interface ExternalAgentsUsageService {
+  outsideWrites(): Promise<readonly ExternalAgentOutsideWriteEntry[]>;
 }
 
 /**

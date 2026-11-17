@@ -6,6 +6,7 @@
  * 佇列。所有子行程都經 `SpawnRegistry` + `sandbox-exec` 啟動；沙盒不可用時
  * 一律拒絕啟動（fail closed）。
  */
+import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import type { Readable } from "node:stream";
@@ -37,6 +38,7 @@ import type { AgentApprovalsService } from "../contract.js";
 import {
   agentStoragePaths,
   clearScratch,
+  computeOutsideWrites,
   computeUsage,
   ensureSessionDirs,
   homeDir,
@@ -464,6 +466,14 @@ export class ExternalAgentsService {
   /** `module.external-agents.usage` 的資料來源；含資料夾外的 Claude 固定目錄。 */
   async usage(): Promise<Awaited<ReturnType<typeof computeUsage>>> {
     return computeUsage(this.#storage);
+  }
+
+  /**
+   * `storage.usage` 的選用 `outsideWrites` 資料來源；只量測四個資料夾外位置，
+   * 不碰 legacy 的 cacheBytes／tempBytes。home 優先用建構時注入的 fixture。
+   */
+  async outsideWrites(): Promise<Awaited<ReturnType<typeof computeOutsideWrites>>> {
+    return computeOutsideWrites(this.#deps.homeDir ?? homedir());
   }
 
   /**

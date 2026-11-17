@@ -3459,6 +3459,24 @@ add(
 );
 
 add(
+  "OutsideWriteStatus",
+  stringEnum(
+    ["measured", "absent", "unavailable"],
+    "資料夾外寫入的量測結果；measured 有可信 bytes，absent 的 bytes 為 0，unavailable 省略 bytes、不可報 0。",
+  ),
+);
+
+add(
+  "StorageOutsideWriteEntry",
+  objectOf("StorageOutsideWriteEntry", ["path", "tool", "status"], {
+    path: str("候選位置的完整路徑。"),
+    tool: str("寫入這位置的代理工具；目前是 claude-code，日後可擴充其他工具。"),
+    bytes: int("量得的位元組數；absent 為 0，unavailable 省略這個欄位。", { minimum: 0 }),
+    status: ref("OutsideWriteStatus"),
+  }),
+);
+
+add(
   "StorageUsageRequestPayload",
   objectOf("StorageUsageRequestPayload", [], {}, "讀取各類別的儲存用量；不需要參數。"),
 );
@@ -3467,6 +3485,10 @@ add(
   "StorageUsageResponsePayload",
   objectOf("StorageUsageResponsePayload", ["usage"], {
     usage: arrayOf(ref("StorageCategoryUsage"), "依類別列出用量。"),
+    outsideWrites: arrayOf(
+      ref("StorageOutsideWriteEntry"),
+      "選用：代理在 Cardiary 資料夾外的寫入明細；模組未啟用或量測失敗時省略，不報 0。",
+    ),
   }),
 );
 
