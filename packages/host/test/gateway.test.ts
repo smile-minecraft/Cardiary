@@ -408,8 +408,14 @@ describe("協定閘道", () => {
   it("排程背景對話的審批請求標明來源排程，一般會話不帶", async () => {
     const host = await boot({
       scripts: [
-        [{ kind: "tool", toolName: "demo.echo", input: { text: "排程輸出" } }, { kind: "text", text: "完成" }],
-        [{ kind: "tool", toolName: "demo.echo", input: { text: "一般輸出" } }, { kind: "text", text: "完成" }],
+        [
+          { kind: "tool", toolName: "demo.echo", input: { text: "排程輸出" } },
+          { kind: "text", text: "完成" },
+        ],
+        [
+          { kind: "tool", toolName: "demo.echo", input: { text: "一般輸出" } },
+          { kind: "text", text: "完成" },
+        ],
       ],
     });
     const client = await helloClient(host);
