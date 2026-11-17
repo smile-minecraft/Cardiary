@@ -108,7 +108,7 @@ export interface ExternalAgentSessionRecord {
   /** 客戶端給的冪等鍵；重送同一個 id 只會啟動一次。 */
   readonly clientRequestId?: string | undefined;
   /**
-   * 代理子行程的身分；終態之後或代理結束之後清空。
+   * 代理子行程的身分；確認行程結束後清空。
    * 主機服務在啟動時讀這個欄位，找出上一次強制結束時留下的行程。
    */
   readonly child?: ExternalAgentChildProcess | undefined;

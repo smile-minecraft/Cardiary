@@ -409,4 +409,138 @@ describe.skipIf(process.platform !== "darwin")("外部代理主動重啟清理�
     // 暫存區清空。
     expect(await readdir(join(paths.tmp, "agents"))).toEqual([]);
   }, 30_000);
+
+  it("忽略 SIGTERM 的孤兒在第一次啟動無法確認結束時保留身分，第二次啟動能補殺收斂", async () => {
+    const { paths, approvals } = await makeHarness();
+    const storage = agentStoragePaths(paths);
+    const spawn = new SpawnRegistry();
+    // 真的行程且忽略 SIGTERM，第二次清理時必須靠 SIGKILL 結束。
+    const child = spawn.spawn({
+      command: process.execPath,
+      args: [
+        "-e",
+        "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => undefined, 1000);",
+      ],
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    children.push(child);
+    await new Promise<void>((resolve) => child.stdout?.once("data", () => resolve()));
+    const identity = await describeProcess(child.pid);
+    expect(identity).not.toBeNull();
+
+    const agentSessionId = "agent_orphan_retry";
+    await writeRecord(storage, {
+      agentSessionId,
+      agentKind: "opencode",
+      workingDirectory: paths.root,
+      startedAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+      status: "running",
+      completedSteps: 1,
+      lastEventSeq: 3,
+      pendingPermission: null,
+      resultUnknown: false,
+      child: identity ?? undefined,
+    });
+
+    // 第一次啟動：預算已用盡，無法確認行程結束。
+    const first = new ExternalAgentsService({
+      paths,
+      spawn,
+      approvals,
+      emitState: () => undefined,
+      now: () => NOW,
+      homeDir: join(paths.root, "home"),
+      timeouts: {
+        termGraceMs: 20,
+        killGraceMs: 20,
+        exitTaskTimeoutMs: 50,
+        startupCleanupBudgetMs: 0,
+      },
+    });
+    expect((await first.startupCleanup()).orphaned).toBe(1);
+    expect(processAlive(child.pid)).toBe(true);
+    const afterFirst = await readRecord(storage, agentSessionId);
+    expect(afterFirst).toMatchObject({ status: "failed", resultUnknown: true });
+    // 關鍵：終止沒確認，child 身分必須留著，否則下次認不出來、補殺不了。
+    expect(afterFirst?.child).toEqual(identity);
+
+    // 第二次啟動使用新的服務實例，從磁碟重讀並補殺同一個孤兒。
+    const second = new ExternalAgentsService({
+      paths,
+      spawn,
+      approvals,
+      emitState: () => undefined,
+      now: () => NOW,
+      homeDir: join(paths.root, "home"),
+      timeouts: {
+        termGraceMs: 100,
+        killGraceMs: 100,
+        exitTaskTimeoutMs: 100,
+        startupCleanupBudgetMs: 3000,
+      },
+    });
+    await second.startupCleanup();
+    await eventually(async () => !processAlive(child.pid));
+    expect((await child.exited).signal).toBe("SIGKILL");
+    const afterSecond = await readRecord(storage, agentSessionId);
+    expect(afterSecond?.child).toBeUndefined();
+  }, 30_000);
+
+  it("PID 重用時不殺到現在佔著該 PID 的行程，只清掉過期身分", async () => {
+    const { paths, approvals } = await makeHarness();
+    const storage = agentStoragePaths(paths);
+    const spawn = new SpawnRegistry();
+    const child = spawn.spawn({
+      command: process.execPath,
+      args: ["-e", "setInterval(() => undefined, 1000)"],
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    children.push(child);
+    const identity = await describeProcess(child.pid);
+    expect(identity).not.toBeNull();
+    expect(processAlive(child.pid)).toBe(true);
+
+    const agentSessionId = "agent_pid_reuse";
+    await writeRecord(storage, {
+      agentSessionId,
+      agentKind: "opencode",
+      workingDirectory: paths.root,
+      startedAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+      status: "running",
+      completedSteps: 1,
+      lastEventSeq: 3,
+      pendingPermission: null,
+      resultUnknown: false,
+      // 同一個 PID，但啟動時間對不上：這是 PID 重用，不能殺現在的行程。
+      child: {
+        pid: child.pid,
+        processGroupId: identity?.processGroupId ?? child.pid,
+        startedAt: "WRONG-START-TIME",
+      },
+    });
+
+    const service = new ExternalAgentsService({
+      paths,
+      spawn,
+      approvals,
+      emitState: () => undefined,
+      now: () => NOW,
+      homeDir: join(paths.root, "home"),
+      timeouts: {
+        termGraceMs: 20,
+        killGraceMs: 20,
+        exitTaskTimeoutMs: 50,
+        startupCleanupBudgetMs: 500,
+      },
+    });
+    await service.startupCleanup();
+
+    // 真正佔著這個 PID 的行程不能被殺；只是把過期身分清掉並標結果未知。
+    expect(processAlive(child.pid)).toBe(true);
+    const record = await readRecord(storage, agentSessionId);
+    expect(record).toMatchObject({ status: "failed", resultUnknown: true });
+    expect(record?.child).toBeUndefined();
+  }, 30_000);
 });

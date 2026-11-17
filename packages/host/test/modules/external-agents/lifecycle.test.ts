@@ -162,6 +162,45 @@ function spawnReturning(child: ManagedChild): SpawnRegistry {
   return { spawn: () => child } as unknown as SpawnRegistry;
 }
 
+/**
+ * 可以從測試主動結束的行程替身。
+ * 用來模擬「終態已寫入但行程還活著，之後行程才自己結束」的路徑：
+ * 這時 #onExit 必須把追蹤表清掉，否則該筆永久留在 #live。
+ */
+function controlledChild(): ManagedChild & {
+  finish(): void;
+  readonly signals: NodeJS.Signals[];
+} {
+  let running = true;
+  let resolveExited!: (exit: { code: number | null; signal: NodeJS.Signals | null }) => void;
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+    resolveExited = resolve;
+  });
+  const signals: NodeJS.Signals[] = [];
+  const child = {
+    pid: 888_888,
+    get running() {
+      return running;
+    },
+    exited,
+    write: () => undefined,
+    writeThenCloseInput: async () => undefined,
+    closeInput: () => undefined,
+    signal: (sig: NodeJS.Signals) => signals.push(sig),
+    stdout: null,
+    stderr: null,
+    finish() {
+      running = false;
+      resolveExited({ code: 0, signal: null });
+    },
+    signals,
+  };
+  return child as unknown as ManagedChild & {
+    finish(): void;
+    readonly signals: NodeJS.Signals[];
+  };
+}
+
 describe("外部代理行程生命週期", () => {
   it("子行程關閉 stdin 後仍存活，writeThenCloseInput 不會拋未捕捉例外也不會卡住", async () => {
     const registry = new SpawnRegistry();
@@ -274,4 +313,52 @@ describe("外部代理行程生命週期", () => {
       expect((await service.list())[0]?.status).toBe("stopped");
     },
   );
+
+  it.skipIf(process.platform !== "darwin")(
+    "終態保留的行程在自行結束後從追蹤表移除，不長期累積",
+    async () => {
+      const controlled = controlledChild();
+      const { service, approvals, workingDirectory } = await makeService({
+        spawn: spawnReturning(controlled),
+      });
+
+      const started = await service.start({ agentKind: "opencode", workingDirectory });
+      approvals.approve(started.approvalId);
+      await eventually(async () => (await service.list())[0]?.status === "running");
+
+      // SIGKILL 也殺不掉：stop 回傳後行程仍活著，刻意保留在 #live 供補殺。
+      await withTimeout(service.stop(started.agentSessionId), 2_000, "第一次 stop 卡住");
+      expect(service.trackedLiveSessionIds()).toContain(started.agentSessionId);
+
+      // 行程之後自己結束，#onExit 必須把這筆從 #live 移除。
+      controlled.finish();
+      await eventually(
+        async () => !service.trackedLiveSessionIds().includes(started.agentSessionId),
+        1_000,
+      );
+      expect(service.trackedLiveSessionIds()).not.toContain(started.agentSessionId);
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin")("pauseAll 對終態但仍活著的行程會補殺", async () => {
+    const signals: NodeJS.Signals[] = [];
+    const child = unkillableChild(signals);
+    const { service, approvals, workingDirectory } = await makeService({
+      spawn: spawnReturning(child),
+    });
+
+    const started = await service.start({ agentKind: "opencode", workingDirectory });
+    approvals.approve(started.approvalId);
+    await eventually(async () => (await service.list())[0]?.status === "running");
+
+    // 先把紀錄推到終態但行程還活著（保留在 #live）。
+    await withTimeout(service.stop(started.agentSessionId), 2_000, "stop 卡住");
+    const before = signals.filter((s) => s === "SIGKILL").length;
+    expect(before).toBeGreaterThan(0);
+    expect(service.trackedLiveSessionIds()).toContain(started.agentSessionId);
+
+    // pauseAll 走終態分支，也必須對還活著的 child 再補殺一次。
+    await withTimeout(service.pauseAll("測試暫停"), 2_000, "pauseAll 卡住");
+    expect(signals.filter((s) => s === "SIGKILL").length).toBeGreaterThan(before);
+  });
 });

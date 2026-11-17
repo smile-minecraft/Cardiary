@@ -431,6 +431,16 @@ export class ExternalAgentsService {
     return computeUsage(this.#storage);
   }
 
+  /**
+   * 還在 `#live` 中被追蹤的行程 id；診斷與測試用。
+   *
+   * 行程結束且紀錄進入終態後，對應的 id 不應再出現在這裡。對外公開只是為了
+   * 讓回歸測試直接檢查追蹤表，不必用 list() 或 emitState 間接猜測。
+   */
+  trackedLiveSessionIds(): readonly string[] {
+    return [...this.#live.keys()];
+  }
+
   /** 緊急全部暫停：撤回等待中的審批並中止代理，避免核准後才冒出新行程。 */
   async pauseAll(reason: string): Promise<void> {
     for (const [agentSessionId, live] of this.#live) {
@@ -879,6 +889,9 @@ export class ExternalAgentsService {
       };
       live.record = updated;
       await writeRecord(this.#storage, updated);
+    }
+    if (isTerminalAgentStatus(live.record.status)) {
+      this.#live.delete(agentSessionId);
     }
     await removeScratch(this.#storage, agentSessionId);
   }

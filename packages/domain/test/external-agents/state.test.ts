@@ -129,4 +129,14 @@ describe("applyAgentEvent", () => {
     const done: ExternalAgentSessionRecord = { ...running, status: "completed" };
     expect(markUnknownAfterRestart(done, start)).toBe(done);
   });
+
+  it("重啟時保留還沒確認結束的行程身分，讓下次啟動能再認出並補殺", () => {
+    const child = { pid: 4242, processGroupId: 4242, startedAt: "Thu Jan  1 00:00:00 2026" };
+    const running: ExternalAgentSessionRecord = { ...baseRecord(), child };
+    const restarted = markUnknownAfterRestart(running, start);
+    expect(restarted.status).toBe("failed");
+    expect(restarted.resultUnknown).toBe(true);
+    // 結果未知不代表行程已結束；身分必須留著，重試才能收斂。
+    expect(restarted.child).toEqual(child);
+  });
 });

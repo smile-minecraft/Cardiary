@@ -161,8 +161,9 @@ export function markStopped(
 /**
  * 主機服務重啟後對未完成 session 的處置。
  *
- * 執行中的工具中斷後拿不到供應商的續跑保證，而且子行程已經被殺掉，
+ * 執行中的工具中斷後拿不到供應商的續跑保證，
  * 所以標記為 `failed` 並說明結果未知；已完成的步驟不會重跑。
+ * 尚未確認結束的子行程身分由呼叫端保留，供下次啟動時清理。
  */
 export function markUnknownAfterRestart(
   record: ExternalAgentSessionRecord,
@@ -174,7 +175,6 @@ export function markUnknownAfterRestart(
     status: "failed",
     resultUnknown: true,
     pendingPermission: null,
-    child: undefined,
     message: "主機重啟，未完成的步驟結果未知",
     updatedAt: now.toISOString(),
     lastEventSeq: record.lastEventSeq + 1,
