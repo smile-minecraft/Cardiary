@@ -1,8 +1,16 @@
 import type { ProtocolRequestContext, ProtocolEventEmitter } from "@cardiary/module-api";
-import type { JSONObject, JSONValue, SettingItem } from "@cardiary/protocol";
+import type { JSONObject, JSONValue, SettingChangeRecord, SettingItem } from "@cardiary/protocol";
+
+import { decideSettingAction } from "@cardiary/domain";
 
 import { ProtocolHandlerError } from "../contract.js";
-import { ModelSettingsError, type ModelRuntime } from "../../models/index.js";
+import {
+  ModelSettingsError,
+  normalizeSetInput,
+  readProviders,
+  readRoles,
+  type ModelRuntime,
+} from "../../models/index.js";
 import { MODEL_SETTING_KEYS } from "../../models/types.js";
 import type { SettingsGovernance, GovernanceActor } from "../../settings/index.js";
 import { SettingsGovernanceError } from "../../settings/index.js";
@@ -31,7 +39,7 @@ export function registerSettingsProtocol(options: SettingsProtocolOptions): void
       case "system.models.get":
         return runtime.state as unknown as JSONValue;
       case "system.models.set":
-        return setModels(request, runtime);
+        return setModels(request, runtime, settings, options.governance);
       default:
         throw new ProtocolHandlerError("not_found", `主機不支援 ${request.type}。`);
     }
@@ -52,12 +60,14 @@ export function registerSettingsProtocol(options: SettingsProtocolOptions): void
     }
   });
   if (options.governance !== undefined) {
-    registerTieredSettings(options.governance, protocol, options.now);
+    registerTieredSettings(options.governance, runtime, settings, protocol, options.now);
   }
 }
 
 function registerTieredSettings(
   governance: SettingsGovernance,
+  runtime: ModelRuntime,
+  settings: SettingsService,
   protocol: ProtocolEventEmitter,
   now: () => Date,
 ): void {
@@ -71,7 +81,7 @@ function registerTieredSettings(
       case "settings.changes.list":
         return { changes: governance.changesFor(actor.kind) } as unknown as JSONValue;
       case "settings.change.decide":
-        return decideChange(request, governance, protocol, actor, now);
+        return decideChange(request, governance, settings, runtime, protocol, actor, now);
       default:
         throw new ProtocolHandlerError("not_found", `主機不支援 ${request.type}。`);
     }
@@ -122,13 +132,15 @@ function proposeChange(
   }
 }
 
-function decideChange(
+async function decideChange(
   request: ProtocolRequestContext,
   governance: SettingsGovernance,
+  settings: SettingsService,
+  runtime: ModelRuntime,
   protocol: ProtocolEventEmitter,
   actor: GovernanceActor,
   now: () => Date,
-): JSONValue {
+): Promise<JSONValue> {
   const payload = requireObject(request.payload);
   if (typeof payload.changeId !== "string" || payload.changeId.length === 0) {
     throw new ProtocolHandlerError("invalid_message", "changeId 必須是非空字串。", {
@@ -140,8 +152,72 @@ function decideChange(
       field: "decision",
     });
   }
+  const isModelKey = (key: string): boolean =>
+    key === MODEL_SETTING_KEYS.providers || key === MODEL_SETTING_KEYS.roles;
+  let pending: SettingChangeRecord | undefined;
+  if (payload.decision === "approve") {
+    // 核准模型設定前先檢查形狀；不合法就不寫入任何東西。
+    pending = governance
+      .changesFor(actor.kind)
+      .find((entry) => entry.changeId === payload.changeId && entry.status === "pending");
+    if (pending !== undefined && isModelKey(pending.key)) {
+      try {
+        normalizeSetInput(
+          {
+            ...(pending.key === MODEL_SETTING_KEYS.providers
+              ? { providers: pending.value }
+              : { providers: undefined }),
+            ...(pending.key === MODEL_SETTING_KEYS.roles
+              ? { roles: pending.value }
+              : { roles: undefined }),
+            currentProviders: readProviders(settings.get(MODEL_SETTING_KEYS.providers)),
+            currentRoles: readRoles(settings.get(MODEL_SETTING_KEYS.roles)),
+          },
+          // 聚合平台的模型清單要等引擎重新設定時才抓得到，這裡只驗形狀。
+          { validateReferences: false },
+        );
+      } catch (error) {
+        if (error instanceof ModelSettingsError) {
+          throw new ProtocolHandlerError("invalid_message", error.message, {
+            field: error.field,
+          });
+        }
+        throw error;
+      }
+    }
+  }
+  const previous =
+    pending !== undefined && isModelKey(pending.key) ? settings.get(pending.key) : undefined;
   try {
     const result = governance.decide(payload.changeId, payload.decision, actor);
+    if (result.status === "applied" && payload.decision === "approve" && isModelKey(result.key)) {
+      // 核准模型設定時把值同步進引擎；引擎不採用時退回核准前的值。
+      try {
+        await runtime.apply(
+          result.key === MODEL_SETTING_KEYS.providers
+            ? { providers: result.value }
+            : { roles: result.value },
+          actorText(actor),
+        );
+      } catch (error) {
+        try {
+          if (previous !== undefined) {
+            settings.set({ key: result.key, value: previous, actor: "system:rollback" });
+          }
+        } catch {
+          throw new ProtocolHandlerError(
+            "conflict",
+            "核准已寫入，但引擎不採用這份模型設定，且退回原值也失敗了；請以 system.models.set 重新設定模型。",
+          );
+        }
+        if (error instanceof ModelSettingsError) {
+          throw new ProtocolHandlerError("invalid_message", error.message, {
+            field: error.field,
+          });
+        }
+        throw error;
+      }
+    }
     if (result.status === "applied") {
       const item = governance.itemFor(result.key);
       if (item !== undefined) {
@@ -183,6 +259,8 @@ function asProtocolError(error: unknown): unknown {
 async function setModels(
   request: ProtocolRequestContext,
   runtime: ModelRuntime,
+  settings: SettingsService,
+  governance: SettingsGovernance | undefined,
 ): Promise<JSONValue> {
   const payload = requireObject(request.payload);
   requireClientRequestId(payload);
@@ -191,20 +269,48 @@ async function setModels(
       field: "providers",
     });
   }
+  const actor = actorOf(request);
+  if (actor.kind === "agent") {
+    // 模型設定在核准前對引擎生效太重，approval 等級必須經人類核准。
+    throw new ProtocolHandlerError(
+      "permission_denied",
+      "代理不能直接套用模型設定；請先以 settings.propose_change 提出，由人類核准。",
+    );
+  }
   try {
     const state = await runtime.apply(
       {
         ...(payload.providers === undefined ? {} : { providers: payload.providers }),
         ...(payload.roles === undefined ? {} : { roles: payload.roles }),
       },
-      `user:${request.clientId}`,
+      actorText(actor),
     );
+    if (governance !== undefined) {
+      // approval 等級也要留下治理紀錄；值以寫入後的設定為準。
+      for (const key of [MODEL_SETTING_KEYS.providers, MODEL_SETTING_KEYS.roles] as const) {
+        const included =
+          key === MODEL_SETTING_KEYS.providers
+            ? payload.providers !== undefined
+            : payload.roles !== undefined;
+        if (!included) continue;
+        const value = settings.get(key);
+        if (value === undefined) continue;
+        governance.change({
+          key,
+          value,
+          actor,
+          clientRequestId: `${String(payload.clientRequestId)}:${
+            key === MODEL_SETTING_KEYS.providers ? "providers" : "roles"
+          }`,
+        });
+      }
+    }
     return state as unknown as JSONValue;
   } catch (error) {
     if (error instanceof ModelSettingsError) {
       throw new ProtocolHandlerError("invalid_message", error.message, { field: error.field });
     }
-    throw error;
+    throw asProtocolError(error);
   }
 }
 
@@ -224,9 +330,8 @@ function setSettings(
     });
   }
   const actor = actorOf(request);
-  const applied: SettingItem[] = [];
-  let requiresApproval = false;
-  let approvalId: string | undefined;
+  // 第一階段：驗證整批，不寫任何東西；任何一筆不過，整批不生效。
+  const validated: Array<{ key: string; value: JSONValue }> = [];
   for (const [index, change] of changes.entries()) {
     if (typeof change !== "object" || change === null || Array.isArray(change)) {
       throw new ProtocolHandlerError("invalid_message", `changes[${index}] 必須是物件。`, {
@@ -251,21 +356,40 @@ function setSettings(
       });
     }
     validateValue(key, entry.value, `changes[${index}].value`);
+    if (governance !== undefined) {
+      // 分級在寫入前先擋掉整批；代理沒有權限的鍵直接拒絕。
+      const decision = decideSettingAction(governance.tierOf(key), actor.kind, "change");
+      if (!decision.allowed) {
+        throw new ProtocolHandlerError(
+          "permission_denied",
+          actor.kind === "agent"
+            ? "設定不存在，或代理沒有權限變更。"
+            : "這個設定不能透過這條路徑變更。",
+        );
+      }
+    }
+    validated.push({ key, value: entry.value as JSONValue });
+  }
+  // 第二階段：整批套用；中途失敗可能留下部分變更（見 PR 說明的已知限制）。
+  const applied: SettingItem[] = [];
+  let requiresApproval = false;
+  let approvalId: string | undefined;
+  for (const [index, change] of validated.entries()) {
     if (governance === undefined) {
       applied.push(
-        settings.set({ key, value: entry.value as JSONValue, actor: actorText(actor) }).item,
+        settings.set({ key: change.key, value: change.value, actor: actorText(actor) }).item,
       );
       continue;
     }
     try {
       const result = governance.change({
-        key,
-        value: entry.value as JSONValue,
+        key: change.key,
+        value: change.value,
         actor,
         clientRequestId: `${String(payload.clientRequestId)}:${index}`,
       });
       if (result.applied) {
-        const item = settings.list().find((candidate) => candidate.key === key);
+        const item = settings.list().find((candidate) => candidate.key === change.key);
         if (item !== undefined) applied.push(item);
       } else {
         requiresApproval = true;
