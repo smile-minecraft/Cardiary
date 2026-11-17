@@ -17,44 +17,76 @@ export interface SettingDefinition {
   readonly defaultValue?: unknown;
 }
 
-export const HUMAN_ONLY_SETTING_KEYS = [
-  "permissions.mode",
-  "permissions.hardRules",
-  "permissions.allowlist",
-  "boards.agentMode",
-  "boards.operationPermissions",
-  "folder.location",
-  "secrets.keys",
-  "network.allowedHosts",
-] as const;
-
-const HUMAN_ONLY_TITLES: Record<(typeof HUMAN_ONLY_SETTING_KEYS)[number], string> = {
-  "permissions.mode": "權限模式",
-  "permissions.hardRules": "硬規則",
-  "permissions.allowlist": "白名單",
-  "boards.agentMode": "白板與代理模式",
-  "boards.operationPermissions": "白板操作權",
-  "folder.location": "資料夾位置",
-  "secrets.keys": "API 金鑰",
-  "network.allowedHosts": "網域 allowlist",
-};
-
-export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
-  ...HUMAN_ONLY_SETTING_KEYS.map((key) => ({
-    key,
-    level: "human-only" as const,
-    title: HUMAN_ONLY_TITLES[key],
+/**
+ * human-only 設定的唯一來源：鍵、標題、說明與預設值放在一起。
+ * 對外鍵清單與 SETTING_DEFINITIONS 都從這裡推導，避免兩份清單漂移。
+ */
+const HUMAN_ONLY_DEFINITIONS = [
+  {
+    key: "permissions.mode",
+    title: "權限模式",
     description: "僅限人類；代理讀不到，也不能修改或提議。",
     defaultValue: null,
-  })),
+  },
+  {
+    key: "permissions.hardRules",
+    title: "硬規則",
+    description: "僅限人類；代理讀不到，也不能修改或提議。",
+    defaultValue: null,
+  },
+  {
+    key: "permissions.allowlist",
+    title: "白名單",
+    description: "僅限人類；代理讀不到，也不能修改或提議。",
+    defaultValue: null,
+  },
+  {
+    key: "boards.agentMode",
+    title: "白板與代理模式",
+    description: "僅限人類；代理讀不到，也不能修改或提議。",
+    defaultValue: null,
+  },
+  {
+    key: "boards.operationPermissions",
+    title: "白板操作權",
+    description: "僅限人類；代理讀不到，也不能修改或提議。",
+    defaultValue: null,
+  },
+  {
+    key: "folder.location",
+    title: "資料夾位置",
+    description: "僅限人類；代理讀不到，也不能修改或提議。",
+    defaultValue: null,
+  },
+  {
+    key: "secrets.keys",
+    title: "API 金鑰",
+    description: "僅限人類；代理讀不到，也不能修改或提議。",
+    defaultValue: null,
+  },
+  {
+    key: "network.allowedHosts",
+    title: "網域 allowlist",
+    description: "僅限人類；代理讀不到，也不能修改或提議。",
+    defaultValue: null,
+  },
   {
     key: "retrieval.allowModelDownload",
-    level: "human-only",
     title: "允許下載本機嵌入模型",
     description:
       "允許下載本機嵌入模型（約 600 MB，存在資料夾的 cache/）。未同意前不啟用向量檢索：檢索狀態為「向量檢索未啟用：尚未同意下載模型」。",
     defaultValue: false,
   },
+] as const;
+
+type HumanOnlySettingKey = (typeof HUMAN_ONLY_DEFINITIONS)[number]["key"];
+
+export const HUMAN_ONLY_SETTING_KEYS: readonly HumanOnlySettingKey[] = HUMAN_ONLY_DEFINITIONS.map(
+  (definition) => definition.key,
+);
+
+export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
+  ...HUMAN_ONLY_DEFINITIONS.map((definition) => ({ ...definition, level: "human-only" as const })),
   {
     key: "context.compactionThreshold",
     level: "free",
