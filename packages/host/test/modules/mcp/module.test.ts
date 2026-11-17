@@ -16,7 +16,6 @@ import type {
 } from "../../../src/modules/mcp/client.js";
 import { toolNamesOf } from "../../../src/modules/mcp/tools.js";
 import { openMcpApprovals } from "./helpers.js";
-import { waitUntil } from "../../helpers.js";
 
 const INPUT = {
   name: "Local",
@@ -55,6 +54,7 @@ function makeFolder(): string {
 
 class FakeApprovals {
   readonly calls: unknown[] = [];
+  readonly withdrawals: Array<{ id: string; reason: string }> = [];
   readonly #waiters = new Map<string, (resolution: Record<string, unknown>) => void>();
   readonly #seeded: Array<Record<string, unknown>> = [];
   #count = 0;
@@ -64,7 +64,19 @@ class FakeApprovals {
   }
 
   async listPending(): Promise<Array<Record<string, unknown>>> {
-    return [...this.#seeded];
+    return this.#seeded.filter((request) => request["status"] === "pending");
+  }
+
+  async withdraw(id: string, reason: string): Promise<void> {
+    const seeded = this.#seeded.find((request) => request["id"] === id);
+    if (seeded !== undefined) {
+      seeded["status"] = "withdrawn";
+    }
+    this.withdrawals.push({ id, reason });
+  }
+
+  statusOf(id: string): unknown {
+    return this.#seeded.find((request) => request["id"] === id)?.["status"];
   }
 
   async request(draft: unknown): Promise<{ id: string }> {
@@ -233,8 +245,8 @@ describe("MCP 模組的審批與工具註冊", () => {
       folderRoot: root,
       bindings,
     });
-    // 等重接排上等待者；沒有等就直接決定，決定會被丟掉、settled 會一直等。
-    await waitUntil(() => approvals.waiting().includes("approval-resumed"), 5000);
+    // activate 回傳前已等 resumePendingAdds 掛好等待者，不需要再輪詢。
+    expect(approvals.waiting()).toContain("approval-resumed");
 
     approvals.decide("approval-resumed", "approved");
     await handle.settled();
@@ -276,11 +288,17 @@ describe("MCP 模組的審批與工具註冊", () => {
       bindings: openMcpApprovals(),
     });
 
-    // 無效列沒有被重新掛上，settled() 應立即返回，不留下資料的正本寫入。
+    // activate 回傳前已等 resumePendingAdds 跑完：無效列不會重新掛上，
+    // settled() 立即返回，不留下正本寫入。
     await handle.settled();
 
     expect(await store.list()).toEqual([]);
     expect(bundles).toEqual([]);
+    expect(approvals.statusOf("approval-broken")).toBe("withdrawn");
+    expect(approvals.withdrawals).toContainEqual({
+      id: "approval-broken",
+      reason: "MCP 設定內容無效",
+    });
     await handle.dispose();
   });
 
