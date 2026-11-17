@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyAgentEvent,
   attachPermissionApproval,
+  markStopped,
   markUnknownAfterRestart,
   nextEventSeq,
   type ExternalAgentSessionRecord,
@@ -138,5 +139,36 @@ describe("applyAgentEvent", () => {
     expect(restarted.resultUnknown).toBe(true);
     // 結果未知不代表行程已結束；身分必須留著，重試才能收斂。
     expect(restarted.child).toEqual(child);
+  });
+
+  it("使用者停止時保留還沒確認結束的行程身分，讓下次啟動能再認出並補殺", () => {
+    const child = { pid: 5252, processGroupId: 5252, startedAt: "Thu Jan  1 00:00:01 2026" };
+    const running: ExternalAgentSessionRecord = { ...baseRecord(), child };
+    const stopped = markStopped(running, "使用者停止", start);
+    expect(stopped.status).toBe("stopped");
+    // 狀態機不知道行程是否真的死了；清 child 是已確認退出的 host 路徑的責任。
+    // 在這裡清掉會讓 stop() 寫到磁碟，重啟後認不出還活著的孤兒。
+    expect(stopped.child).toEqual(child);
+  });
+
+  it("完成與失敗事件本身不假設行程已結束，保留 child 由 host 收尾時清", () => {
+    const child = { pid: 6262, processGroupId: 6262, startedAt: "Thu Jan  1 00:00:02 2026" };
+    const running: ExternalAgentSessionRecord = { ...baseRecord(), child };
+    const completed = applyAgentEvent(
+      running,
+      { kind: "completed", message: "完成" },
+      nextEventSeq(running),
+      start,
+    ).record;
+    expect(completed.status).toBe("completed");
+    expect(completed.child).toEqual(child);
+    const failed = applyAgentEvent(
+      running,
+      { kind: "failed", message: "失敗" },
+      nextEventSeq(running),
+      start,
+    ).record;
+    expect(failed.status).toBe("failed");
+    expect(failed.child).toEqual(child);
   });
 });

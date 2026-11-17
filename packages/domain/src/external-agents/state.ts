@@ -94,7 +94,6 @@ export function applyAgentEvent(
           status: "completed",
           message: event.message,
           pendingPermission: null,
-          child: undefined,
           progress: record.progress
             ? {
                 ...record.progress,
@@ -112,7 +111,6 @@ export function applyAgentEvent(
           status: "failed",
           message: event.message,
           pendingPermission: null,
-          child: undefined,
         },
         applied: true,
       };
@@ -140,6 +138,10 @@ export function clearPermission(record: ExternalAgentSessionRecord): ExternalAge
  *
  * 已完成的步驟保留；待核准的權限請求由主機層撤回（這裡只清空紀錄上的
  * `pendingPermission`，真正的審批由呼叫端撤回）。
+ *
+ * 這裡不碰 `child`：狀態機不知道行程是否真的結束。stop 的終止是有限時等待，
+ * 可能殺不掉行程；清掉身分會讓重啟後認不出還活著的孤兒。清 child 是已確認
+ * 退出的 host 路徑（`#onExit`、`startupCleanup`）的責任。
  */
 export function markStopped(
   record: ExternalAgentSessionRecord,
@@ -152,7 +154,6 @@ export function markStopped(
     status: "stopped",
     message,
     pendingPermission: null,
-    child: undefined,
     updatedAt: now.toISOString(),
     lastEventSeq: record.lastEventSeq + 1,
   };

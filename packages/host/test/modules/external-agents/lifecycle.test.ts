@@ -11,11 +11,20 @@ import type {
 } from "../../../src/modules/contract.js";
 import { ExternalAgentsService } from "../../../src/modules/external-agents/service.js";
 import { agentStoragePaths, readRecord } from "../../../src/modules/external-agents/store.js";
-import { SpawnRegistry, type ManagedChild } from "../../../src/spawn/wrapper.js";
+import { describeProcess, SpawnRegistry, type ManagedChild } from "../../../src/spawn/wrapper.js";
 
 const NOW = new Date("2026-05-01T00:00:00.000Z");
 const roots: string[] = [];
 const children: ManagedChild[] = [];
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 afterEach(async () => {
   for (const child of children.splice(0)) {
@@ -144,9 +153,9 @@ async function makeService(options?: {
 }
 
 /** 永不結束的行程替身，模擬忽略 SIGKILL、真的殺不掉的行程。 */
-function unkillableChild(signals?: NodeJS.Signals[]): ManagedChild {
+function unkillableChild(signals?: NodeJS.Signals[], pid = 999_999_999): ManagedChild {
   return {
-    pid: 999_999_999,
+    pid,
     running: true,
     exited: new Promise<never>(() => undefined),
     write: () => undefined,
@@ -163,11 +172,41 @@ function spawnReturning(child: ManagedChild): SpawnRegistry {
 }
 
 /**
+ * 用真的 detached 行程取得一個有效 pid 與身分。
+ * 假行程帶著這個 pid，`#spawnAgent` 內的 `describeProcess` 才會拿到真實身分寫到磁碟，
+ * 讓「磁碟是否保留 child」的斷言有意義。
+ */
+async function spawnRealIdentity(options?: { readonly ignoreSigterm?: boolean }): Promise<{
+  readonly pid: number;
+  readonly identity: NonNullable<Awaited<ReturnType<typeof describeProcess>>>;
+}> {
+  const spawn = new SpawnRegistry();
+  const script = options?.ignoreSigterm
+    ? "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => undefined, 1000);"
+    : "setInterval(() => undefined, 1000);";
+  const real = spawn.spawn({
+    command: process.execPath,
+    args: ["-e", script],
+    stdio: options?.ignoreSigterm ? ["ignore", "pipe", "ignore"] : ["ignore", "ignore", "ignore"],
+  });
+  children.push(real);
+  if (options?.ignoreSigterm && real.stdout) {
+    await new Promise<void>((resolve) => real.stdout?.once("data", () => resolve()));
+  }
+  const identity = await describeProcess(real.pid);
+  expect(identity).not.toBeNull();
+  return {
+    pid: real.pid,
+    identity: identity as NonNullable<Awaited<ReturnType<typeof describeProcess>>>,
+  };
+}
+
+/**
  * 可以從測試主動結束的行程替身。
  * 用來模擬「終態已寫入但行程還活著，之後行程才自己結束」的路徑：
- * 這時 #onExit 必須把追蹤表清掉，否則該筆永久留在 #live。
+ * 這時 #onExit 必須把追蹤表清掉，並清掉磁碟上的 child 身分。
  */
-function controlledChild(): ManagedChild & {
+function controlledChild(pid = 888_888): ManagedChild & {
   finish(): void;
   readonly signals: NodeJS.Signals[];
 } {
@@ -178,7 +217,7 @@ function controlledChild(): ManagedChild & {
   });
   const signals: NodeJS.Signals[] = [];
   const child = {
-    pid: 888_888,
+    pid,
     get running() {
       return running;
     },
@@ -361,4 +400,111 @@ describe("外部代理行程生命週期", () => {
     await withTimeout(service.pauseAll("測試暫停"), 2_000, "pauseAll 卡住");
     expect(signals.filter((s) => s === "SIGKILL").length).toBeGreaterThan(before);
   });
+
+  it.skipIf(process.platform !== "darwin")(
+    "stop 殺不掉行程時，磁碟保留可重試的 child 身分",
+    async () => {
+      // 用假行程帶著真實 pid，讓 #spawnAgent 寫出真的 child 身分到磁碟；
+      // 假行程永遠不結束，模擬 SIGKILL 也殺不掉、stop 無法確認死亡。
+      const { pid, identity } = await spawnRealIdentity();
+      const signals: NodeJS.Signals[] = [];
+      const child = unkillableChild(signals, pid);
+      const { service, paths, approvals, workingDirectory } = await makeService({
+        spawn: spawnReturning(child),
+      });
+      const storage = agentStoragePaths(paths);
+
+      const started = await service.start({ agentKind: "opencode", workingDirectory });
+      approvals.approve(started.approvalId);
+      await eventually(
+        async () =>
+          (await readRecord(storage, started.agentSessionId))?.status === "running" &&
+          (await readRecord(storage, started.agentSessionId))?.child !== undefined,
+      );
+
+      await withTimeout(service.stop(started.agentSessionId), 2_000, "stop 卡住");
+      expect(signals.filter((s) => s === "SIGKILL").length).toBeGreaterThan(0);
+
+      const stored = await readRecord(storage, started.agentSessionId);
+      expect(stored?.status).toBe("stopped");
+      // 關鍵：行程沒確認死亡，狀態轉換不能把 child 清掉。清了就認不出孤兒、補殺不了。
+      expect(stored?.child).toEqual(identity);
+    },
+    15_000,
+  );
+
+  it.skipIf(process.platform !== "darwin")(
+    "行程在 stop 之後真的結束時，#onExit 清掉磁碟上的 child 身分並移除 live",
+    async () => {
+      const { pid, identity } = await spawnRealIdentity();
+      const controlled = controlledChild(pid);
+      const { service, paths, approvals, workingDirectory } = await makeService({
+        spawn: spawnReturning(controlled),
+      });
+      const storage = agentStoragePaths(paths);
+
+      const started = await service.start({ agentKind: "opencode", workingDirectory });
+      approvals.approve(started.approvalId);
+      await eventually(
+        async () => (await readRecord(storage, started.agentSessionId))?.child !== undefined,
+      );
+
+      // stop 無法確認行程結束：磁碟保留 child，live 也保留。
+      await withTimeout(service.stop(started.agentSessionId), 2_000, "stop 卡住");
+      expect((await readRecord(storage, started.agentSessionId))?.child).toEqual(identity);
+      expect(service.trackedLiveSessionIds()).toContain(started.agentSessionId);
+
+      // 行程之後自己真的結束，確認退出的 host 路徑才清 child。
+      controlled.finish();
+      await eventually(
+        async () => (await readRecord(storage, started.agentSessionId))?.child === undefined,
+        2_000,
+      );
+      expect(service.trackedLiveSessionIds()).not.toContain(started.agentSessionId);
+    },
+    15_000,
+  );
+
+  it.skipIf(process.platform !== "darwin")(
+    "重啟後 startupCleanup 用 stop 保留的身分補殺孤兒，並在確認後清掉 child",
+    async () => {
+      // 真的行程忽略 SIGTERM：stop 送的假訊號殺不掉它，磁碟必須保留身分。
+      const { pid, identity } = await spawnRealIdentity({ ignoreSigterm: true });
+      const child = unkillableChild(undefined, pid);
+      const { service, paths, approvals, workingDirectory } = await makeService({
+        spawn: spawnReturning(child),
+      });
+      const storage = agentStoragePaths(paths);
+
+      const started = await service.start({ agentKind: "opencode", workingDirectory });
+      approvals.approve(started.approvalId);
+      await eventually(
+        async () => (await readRecord(storage, started.agentSessionId))?.child !== undefined,
+      );
+      await withTimeout(service.stop(started.agentSessionId), 2_000, "stop 卡住");
+      // stop 沒確認死亡，孤兒還活著，child 身分留在磁碟上。
+      expect((await readRecord(storage, started.agentSessionId))?.child).toEqual(identity);
+      expect(processAlive(pid)).toBe(true);
+
+      // 新的服務實例從磁碟重讀，用保留的身分真的補殺孤兒。
+      const restarted = new ExternalAgentsService({
+        paths,
+        spawn: neverSpawns,
+        approvals,
+        emitState: () => undefined,
+        now: () => NOW,
+        homeDir: join(paths.root, "home"),
+        timeouts: {
+          termGraceMs: 20,
+          killGraceMs: 100,
+          exitTaskTimeoutMs: 100,
+          startupCleanupBudgetMs: 3000,
+        },
+      });
+      await restarted.startupCleanup();
+      await eventually(async () => !processAlive(pid), 5_000);
+      expect((await readRecord(storage, started.agentSessionId))?.child).toBeUndefined();
+    },
+    20_000,
+  );
 });
