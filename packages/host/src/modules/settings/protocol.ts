@@ -221,9 +221,20 @@ async function decideChange(
       throw error;
     }
   }
+  // 模型鍵核准時，儲存區裡已經是套用正規化後的值（`runtime.apply` 寫入）；
+  // `decide` 只把待決提議標成已套用，紀錄以儲存區裡的正規化值為準，不覆蓋回去。
+  const appliedModelValue =
+    applyModel && pending !== undefined && isModelKey(pending.key)
+      ? settings.get(pending.key)
+      : undefined;
   let result: SettingChangeRecord;
   try {
-    result = governance.decide(payload.changeId, payload.decision, actor);
+    result = governance.decide(
+      payload.changeId,
+      payload.decision,
+      actor,
+      appliedModelValue === undefined ? {} : { appliedValue: appliedModelValue },
+    );
   } catch (error) {
     // 模型已套用、治理紀錄卻沒寫出去：依紀錄實際狀態決定要不要退回模型。
     if (previous === undefined) {

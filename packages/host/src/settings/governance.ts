@@ -323,11 +323,19 @@ export class SettingsGovernance {
     });
   }
 
-  /** 只有人可以核准或拒絕待決提議；核准前後的值都不變。 */
+  /**
+   * 只有人可以核准或拒絕待決提議。
+   *
+   * 核准時預設把待決提議的值寫回設定。呼叫方已經透過其他路徑寫入正規化後的
+   * 值時（例如模型設定），用 `options.appliedValue` 傳入：這裡就不再重寫設定，
+   * 紀錄以 `appliedValue` 為準。待決提議的原始值只留在 propose 階段，核准不會
+   * 把它當作正本覆蓋回儲存區。
+   */
   decide(
     changeId: string,
     decision: "approve" | "reject",
     actor: GovernanceActor,
+    options: { readonly appliedValue?: JSONValue } = {},
   ): SettingChangeRecord {
     const canDecide = decideSettingAction("approval", actor.kind, "decide");
     if (!canDecide.allowed) {
@@ -349,14 +357,17 @@ export class SettingsGovernance {
     }
     const decidedAt = this.#now().toISOString();
     if (decision === "approve") {
-      this.#settings.set({
-        key: current.key,
-        value: current.value,
-        actor: actorText(actor),
-      });
+      const appliedValue = options.appliedValue ?? current.value;
+      if (options.appliedValue === undefined) {
+        this.#settings.set({
+          key: current.key,
+          value: current.value,
+          actor: actorText(actor),
+        });
+      }
       return this.#recordApplied({
         key: current.key,
-        value: current.value,
+        value: appliedValue,
         tier: current.tier,
         proposedBy: current.proposedBy,
         proposedAt: current.proposedAt,

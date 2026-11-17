@@ -10,6 +10,7 @@ import type {
 import type { JsonValue } from "@cardiary/engine-adapter";
 
 import { FolderLayout } from "@cardiary/storage";
+import type { ModelInfo } from "@cardiary/protocol";
 import { ModelRuntime } from "../../../src/models/runtime.js";
 import { registerSettingsProtocol } from "../../../src/modules/settings/protocol.js";
 import { ProtocolHandlerError } from "../../../src/modules/contract.js";
@@ -30,7 +31,7 @@ import {
  */
 const NOW = () => new Date("2026-11-15T00:00:00.000Z");
 
-async function harness() {
+async function harness(fetchModels?: () => Promise<readonly ModelInfo[]>) {
   const engine = await openEngine();
   const store = new MemorySettingsStore(NOW);
   const settings = settingsService(store);
@@ -38,6 +39,7 @@ async function harness() {
     engine,
     settings,
     credentials: credentialsMissing(),
+    ...(fetchModels === undefined ? {} : { fetchModels }),
   });
   const folder = await makeFolder();
   const layout = new FolderLayout(folder.path);
@@ -429,6 +431,72 @@ describe("治理紀錄與套用結果的一致性", () => {
       .changesFor("human")
       .filter((entry) => entry.key === "models.providers");
     expect(records).toHaveLength(1);
+  });
+
+  it("核准 models 留空的聚合供應商提議後，重建 ModelRuntime 仍已設定", async () => {
+    const fetchedModels: ModelInfo[] = [
+      { modelId: "agg-model", contextWindow: 32_768, input: ["text"] },
+    ];
+    const aggregator = {
+      providerId: "agg",
+      kind: "aggregator",
+      displayName: "聚合",
+      baseUrl: "https://agg.invalid/v1",
+      models: fetchedModels,
+    };
+    const mainModelRole = {
+      role: "main",
+      mode: "model",
+      ref: { providerId: "agg", modelId: "agg-model" },
+    };
+    const { call, settings, governance } = await harness(async () => fetchedModels);
+    await call("system.models.set", {
+      providers: [aggregator],
+      roles: [mainModelRole],
+      clientRequestId: "seed",
+    });
+    // 代理提議同一個供應商，只改顯示名稱、models 留空（等主機重新抓）。
+    await call(
+      "settings.propose_change",
+      {
+        key: "models.providers",
+        value: [{ ...aggregator, displayName: "聚合改", models: [] }],
+        clientRequestId: "propose-display",
+      },
+      "agent:agent-1",
+    );
+    const pending = governance
+      .changesFor("human")
+      .find((entry) => entry.key === "models.providers" && entry.status === "pending");
+    if (pending === undefined) throw new Error("找不到待決提議");
+    await call("settings.change.decide", {
+      changeId: pending.changeId,
+      decision: "approve",
+    });
+    // 紀錄與儲存區以正規化後的值為準，不再留下 models: []。
+    const stored = settings.get("models.providers") as Array<{
+      displayName?: string;
+      models: unknown;
+      credentialRef?: string;
+    }>;
+    expect(stored[0]).toMatchObject({
+      displayName: "聚合改",
+      models: fetchedModels,
+      credentialRef: "cardiary/provider/agg",
+    });
+    // 用同一份儲存區重建 ModelRuntime：configured() 仍為 true，main 解析得到模型。
+    const restarted = new ModelRuntime({
+      engine: await openEngine(),
+      settings,
+      credentials: credentialsMissing(),
+      fetchModels: async () => fetchedModels,
+    });
+    await restarted.initialize();
+    expect(restarted.configured()).toBe(true);
+    expect(restarted.role("main").ref).toEqual({
+      providerId: "agg",
+      modelId: "agg-model",
+    });
   });
 
   it("代理被拒的模型設定留下一行稽核拒絕紀錄", async () => {
