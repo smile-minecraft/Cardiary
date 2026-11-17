@@ -52,9 +52,22 @@ describe("核心組排序", () => {
 });
 
 describe("日期鍵", () => {
-  it("以 UTC 日期作為人格＋日期鍵的一天；格式不合法回 null", () => {
-    expect(coreDayKey("2026-11-16T04:00:00.000Z")).toBe("2026-11-16");
+  it("以在地時區的日曆日作為人格＋日期鍵的一天；格式不合法回 null", () => {
+    expect(coreDayKey("2026-11-16T04:00:00.000Z", "Asia/Taipei")).toBe("2026-11-16");
     expect(coreDayKey("not-a-date")).toBeNull();
+  });
+
+  it("台灣凌晨跨日：UTC 還是前一天，本機已經是隔天", () => {
+    // 2026-11-16 00:30 台灣（UTC 2026-11-15 16:30）
+    const instant = "2026-11-15T16:30:00.000Z";
+    expect(coreDayKey(instant, "Asia/Taipei")).toBe("2026-11-16");
+    expect(coreDayKey(instant, "UTC")).toBe("2026-11-15");
+  });
+
+  it("台灣正午：兩個時區同一天", () => {
+    const instant = "2026-11-16T04:00:00.000Z";
+    expect(coreDayKey(instant, "Asia/Taipei")).toBe("2026-11-16");
+    expect(coreDayKey(instant, "UTC")).toBe("2026-11-16");
   });
 });
 

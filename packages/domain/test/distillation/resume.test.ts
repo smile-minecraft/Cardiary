@@ -115,6 +115,37 @@ describe("續跑去重鍵", () => {
   });
 });
 
+describe("同批次續跑（內容雜湊）", () => {
+  const query = { batchId: "dst_batch_1", itemKey: "01SRC:merge:0", sourceCardId: "01SRC" };
+
+  it("同 itemKey 但內容雜湊改變：不跳過，視為新單元", () => {
+    const records = [
+      record({ itemKey: "01SRC:merge:0", status: "done", contentHash: "hash-a" }),
+    ];
+    expect(shouldSkipUnit(records, { ...query, contentHash: "hash-a" })).toBe(true);
+    expect(shouldSkipUnit(records, { ...query, contentHash: "hash-b" })).toBe(false);
+    expect(findBatchUnit(records, { ...query, contentHash: "hash-b" })).toBeUndefined();
+    expect(findBatchUnit(records, { ...query, contentHash: "hash-a" })?.status).toBe("done");
+  });
+
+  it("failed 的單元當日不重跑；extract（無雜湊）以 itemKey 比對", () => {
+    const failed = [
+      record({ itemKey: "01SRC:merge:0", status: "failed", contentHash: "hash-a" }),
+    ];
+    expect(shouldSkipUnit(failed, { ...query, contentHash: "hash-a" })).toBe(true);
+    const extract = [
+      record({ itemKey: "01SRC:extract", phase: "extract", status: "failed" }),
+    ];
+    expect(
+      shouldSkipUnit(extract, {
+        batchId: "dst_batch_1",
+        itemKey: "01SRC:extract",
+        sourceCardId: "01SRC",
+      }),
+    ).toBe(true);
+  });
+});
+
 describe("跨批次去重", () => {
   it("不同批次、相同內容雜湊：命中先前完成且未復原的產出", () => {
     const records = [
@@ -195,6 +226,42 @@ describe("跨批次去重", () => {
     });
     expect(hit?.outputCardId).toBe("01A");
     expect(hit?.persona).toBe("default");
+  });
+
+  it("輸出卡已被取代：不得跨批次合併", () => {
+    const records = [
+      record({
+        batchId: "dst_batch_1",
+        contentHash: "hash-a",
+        outputCardId: "01OUT",
+        outputCardSuperseded: true,
+      }),
+    ];
+    expect(
+      findCrossBatchMatch(records, {
+        persona: "default",
+        contentHash: "hash-a",
+        excludeBatchId: "dst_batch_2",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("輸出卡已刪除：不得跨批次合併", () => {
+    const records = [
+      record({
+        batchId: "dst_batch_1",
+        contentHash: "hash-a",
+        outputCardId: "01OUT",
+        outputCardDeleted: true,
+      }),
+    ];
+    expect(
+      findCrossBatchMatch(records, {
+        persona: "default",
+        contentHash: "hash-a",
+        excludeBatchId: "dst_batch_2",
+      }),
+    ).toBeUndefined();
   });
 
   it("planResume 分列 done 與 failed", () => {
