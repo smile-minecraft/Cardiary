@@ -6,8 +6,8 @@ import XCTest
 
 @testable import CardiaryApp
 
-/// 驗收 #5 的關鍵差異證據：既有 `testWebViewCannotReadHostProtocolResponse`
-/// 只靠 CORS 讓頁面讀不到回應，無法證明「沒有有效 Token 的請求不會被 host 當成
+/// 這則測試補上既有 `testWebViewCannotReadHostProtocolResponse` 只靠 CORS 的缺口：
+/// CORS 讓頁面讀不到回應，無法證明「沒有有效 Token 的請求不會被 host 當成
 /// 有效控制請求」。這裡改用真的 host gateway + 真的 WKWebView（產品同一份
 /// `McpAppWebView.makeConfiguration`），讓頁面自己開 WebSocket 送一個控制請求，
 /// 直接觀察 host 回傳的錯誤訊框——完全不經過 CORS。

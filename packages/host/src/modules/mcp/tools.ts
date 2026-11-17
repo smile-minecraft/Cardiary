@@ -228,10 +228,12 @@ async function toOutcome(
   const hasInlineUi = inlineUiResource(result.content) !== null;
   const visibleText = textFromContent(result.content);
   // 有 UI resource 時，模型只看 text 區塊；HTML 只出現在 metadata.data.html。
+  // content 只有 UI resource 而沒有 text 區塊時，仍回一個非空的占位文字，
+  // 避免模型端收到空的 tool_result。
   const content: ToolContent[] = hasInlineUi
     ? visibleText.length > 0
       ? [{ type: "text", text: visibleText }]
-      : []
+      : [{ type: "text", text: "（此工具結果是 MCP App 介面，已顯示在畫面上。）" }]
     : [{ type: "text", text: result.text }];
 
   // 工具結果自帶的 resource 優先；沒有才看工具描述的 _meta 要不要讀 ui:// 資源。

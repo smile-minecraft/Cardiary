@@ -317,6 +317,37 @@ describe("MCP 工具結果的 UI 介面透傳", () => {
     expect(metadataOf(outcome)?.data).toMatchObject({ html: "<h1>SECRET_HTML</h1>" });
   });
 
+  it("成功且 content 只有 UI resource、沒有 text 時，content 非空且不含 HTML", async () => {
+    const resource = {
+      uri: "ui://app/view.html",
+      mimeType: MIME,
+      text: "<!doctype html><html><body>SECRET_HTML</body></html>",
+    };
+    // 與 normalizeCallResult 相同的形狀：text 欄位含非 text 區塊的 JSON.stringify。
+    const callResult: McpCallResult = {
+      content: [{ type: "resource", resource }],
+      isError: false,
+      text: JSON.stringify({ type: "resource", resource }),
+    };
+    const { bundle } = setup({ callResult });
+
+    const outcome = await invoke(bundle);
+    expect(outcome.ok).toBe(true);
+    const content = outcome.content ?? [];
+    expect(content.length).toBeGreaterThan(0);
+    for (const block of content) {
+      if (block.type === "text") {
+        expect(block.text.length).toBeGreaterThan(0);
+      }
+    }
+    const visible = JSON.stringify(content);
+    expect(visible).not.toContain("<html");
+    expect(visible).not.toContain("SECRET_HTML");
+    expect(metadataOf(outcome)?.data).toMatchObject({
+      html: "<!doctype html><html><body>SECRET_HTML</body></html>",
+    });
+  });
+
   it("isError 且 content 只有 UI resource 時，message 不含 HTML", async () => {
     const resource = {
       uri: "ui://app/view.html",
