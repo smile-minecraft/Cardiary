@@ -1,5 +1,7 @@
-import { writeFileSync, utimesSync } from "node:fs";
+import { readdirSync, writeFileSync, utimesSync } from "node:fs";
+import { spawn } from "node:child_process";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -158,4 +160,110 @@ describe("BoardFileStore", () => {
     expect(store.cleanupTempFiles()).toEqual([`.tmp-${board.id}.aaaaaaaa.tmp`]);
     expect(store.read(board.id)?.board).toEqual(board);
   });
+  it("寫入大檔中途 SIGKILL，重開後檔案是完整舊版或完整新版，暫存檔可清", async () => {
+    const { temp, store } = setup("boards-crash");
+    const board = sampleBoard();
+    store.write(board);
+
+    const itemCount = 60_000;
+    const filesUrl = pathToFileURL(
+      path.join(import.meta.dirname, "../../dist/boards/files.js"),
+    ).href;
+    const pathsUrl = pathToFileURL(path.join(import.meta.dirname, "../../dist/paths.js")).href;
+    const script = path.join(temp.root, "crash-writer.mjs");
+    writeFileSync(
+      script,
+      `import { BoardFileStore } from ${JSON.stringify(filesUrl)};
+import { FolderLayout } from ${JSON.stringify(pathsUrl)};
+const layout = new FolderLayout(process.env.CARDIARY_CRASH_ROOT);
+const store = new BoardFileStore({ layout });
+const count = Number(process.env.CARDIARY_CRASH_ITEMS);
+const items = [];
+for (let index = 1; index <= count; index += 1) {
+  const id = "01" + String(index).padStart(24, "0");
+  items.push({
+    id,
+    cardId: id,
+    position: { x: index, y: index },
+    size: { width: 1, height: 1 },
+    pinned: false,
+    origin: "canvas",
+  });
+}
+const board = {
+  schema: 1,
+  id: process.env.CARDIARY_CRASH_BOARD,
+  title: "崩潰測試",
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-02T00:00:00.000Z",
+  items,
+  inbox: [],
+  edges: [],
+  groups: [],
+};
+store.write(board);
+process.exit(0);
+`,
+    );
+
+    let killedWhileWriting = false;
+    for (let attempt = 0; attempt < 5 && !killedWhileWriting; attempt += 1) {
+      // 每次嘗試前把檔案還原成舊版，讓「舊版」與「新版」都是已知內容。
+      store.write(board);
+      const child = spawn(process.execPath, [script], {
+        env: {
+          ...process.env,
+          CARDIARY_CRASH_ROOT: temp.folder,
+          CARDIARY_CRASH_BOARD: board.id,
+          CARDIARY_CRASH_ITEMS: String(itemCount),
+        },
+        stdio: "ignore",
+      });
+      killedWhileWriting = await new Promise<boolean>((resolve) => {
+        const started = Date.now();
+        const timer = setInterval(() => {
+          if (child.exitCode !== null) {
+            clearInterval(timer);
+            resolve(false);
+            return;
+          }
+          const names = readdirSync(store.directory);
+          if (names.some((name) => name.startsWith(".tmp-"))) {
+            child.kill("SIGKILL");
+            clearInterval(timer);
+            resolve(true);
+            return;
+          }
+          if (Date.now() - started > 30_000) {
+            child.kill("SIGKILL");
+            clearInterval(timer);
+            resolve(false);
+          }
+        }, 1);
+      });
+      await new Promise((resolve) => child.once("exit", resolve));
+    }
+
+    expect(killedWhileWriting).toBe(true);
+
+    const loaded = store.read(board.id)?.board;
+    expect(loaded?.id).toBe(board.id);
+    if (loaded?.updatedAt === board.updatedAt) {
+      expect(loaded.items).toEqual(board.items);
+    } else {
+      expect(loaded?.updatedAt).toBe("2026-01-02T00:00:00.000Z");
+      expect(loaded?.items).toHaveLength(itemCount);
+    }
+
+    const leftovers = readdirSync(store.directory).filter((name) => name.startsWith(".tmp-"));
+    for (const name of leftovers) {
+      const file = path.join(store.directory, name);
+      utimesSync(file, new Date(clockMs - 3_600_001), new Date(clockMs - 3_600_001));
+    }
+    if (leftovers.length > 0) {
+      expect(store.cleanupTempFiles()).toEqual(leftovers);
+    }
+    expect(readdirSync(store.directory).some((name) => name.startsWith(".tmp-"))).toBe(false);
+    expect(store.read(board.id)?.board.updatedAt).toBe(loaded?.updatedAt);
+  }, 30_000);
 });

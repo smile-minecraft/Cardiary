@@ -1,4 +1,4 @@
-import { computeFreshness, type FreshnessState } from "@cardiary/domain";
+import { FRESHNESS_MAX, computeFreshness, type FreshnessState } from "@cardiary/domain";
 
 import type { Database } from "../db.js";
 import { nowIso } from "../util.js";
@@ -36,6 +36,7 @@ interface CardStateRow {
   readonly freshness: number;
   readonly freshness_at: string;
   readonly pinned: number;
+  readonly pinned_at: string | null;
   readonly lifecycle: string;
 }
 
@@ -176,6 +177,13 @@ export class FreshnessStore {
     return 100;
   }
 
+  /** 目前狀態庫裡標記為釘選的卡片識別碼，給啟動校正比對白板正本。 */
+  listPinned(): string[] {
+    return this.#db
+      .all<{ card_id: string }>("SELECT card_id FROM card_state WHERE pinned = 1 ORDER BY card_id")
+      .map((row) => row.card_id);
+  }
+
   /** 建立卡片時補狀態列；已存在時不動新鮮度。 */
   ensure(cardId: string, persona = "default"): void {
     const now = nowIso(this.#now);
@@ -188,6 +196,35 @@ export class FreshnessStore {
       now,
       now,
     );
+  }
+
+  /**
+   * 同步白板釘選狀態；呼叫端只知道「任一白板釘選」的結果。
+   *
+   * 釘選期間新鮮度固定 100；取消釘選時把 100 與當下的時間留下來，之後
+   * 從這裡恢復衰減。狀態沒變就不寫，避免每次存白板都把未釘選卡片的
+   * 衰減錨點往後推。
+   */
+  setPinned(cardId: string, pinned: boolean): void {
+    this.#db.transaction(() => {
+      this.ensure(cardId);
+      const row = this.#row(cardId);
+      if (row === undefined) return;
+      if (!pinned && row.pinned === 0) return;
+      if (pinned && row.pinned === 1 && row.pinned_at !== null) return;
+      const at = nowIso(this.#now);
+      this.#db.run(
+        `UPDATE card_state
+         SET pinned = ?, pinned_at = ?, freshness = ?, freshness_at = ?, updated_at = ?
+         WHERE card_id = ?`,
+        pinned ? 1 : 0,
+        pinned ? at : null,
+        FRESHNESS_MAX,
+        at,
+        at,
+        cardId,
+      );
+    });
   }
 
   /**
@@ -285,7 +322,7 @@ export class FreshnessStore {
 
   #row(cardId: string): CardStateRow | undefined {
     return this.#db.get<CardStateRow>(
-      "SELECT freshness, freshness_at, pinned, lifecycle FROM card_state WHERE card_id = ?",
+      "SELECT freshness, freshness_at, pinned, pinned_at, lifecycle FROM card_state WHERE card_id = ?",
       cardId,
     );
   }

@@ -316,4 +316,60 @@ describe("新鮮度狀態", () => {
     expect(fixture.freshness.get(cardId).freshness).toBe(0);
     expect(readFileSync(file)).toEqual(before);
   });
+  it("釘選與取消釘選同步 card_state，取消後從 100 恢復衰減", () => {
+    const fixture = makeFixture();
+    const cardId = "01FRESHNESS000000000000020";
+
+    fixture.freshness.ensure(cardId);
+    // 先讓卡片進入衰減狀態，確認釘選會把分數拉回 100。
+    fixture.storage.state.run(
+      "UPDATE card_state SET freshness = 30, freshness_at = ? WHERE card_id = ?",
+      T0,
+      cardId,
+    );
+
+    fixture.freshness.setPinned(cardId, true);
+    const pinned = fixture.freshness.get(cardId);
+    expect(pinned.pinned).toBe(true);
+    expect(pinned.freshness).toBe(100);
+    expect(pinned.freshnessAt).toBe(T0);
+    const pinnedRow = fixture.storage.state.get<{ pinned: number; pinned_at: string | null }>(
+      "SELECT pinned, pinned_at FROM card_state WHERE card_id = ?",
+      cardId,
+    );
+    expect(pinnedRow?.pinned).toBe(1);
+    expect(pinnedRow?.pinned_at).toBe(T0);
+
+    fixture.clock.now = new Date(addDaysIso(T0, 90));
+    expect(fixture.freshness.recompute(cardId)).toBe(100);
+
+    fixture.freshness.setPinned(cardId, false);
+    const unpinned = fixture.freshness.get(cardId);
+    expect(unpinned.pinned).toBe(false);
+    expect(unpinned.freshness).toBe(100);
+    expect(unpinned.freshnessAt).toBe(addDaysIso(T0, 90));
+    const unpinnedRow = fixture.storage.state.get<{ pinned_at: string | null }>(
+      "SELECT pinned_at FROM card_state WHERE card_id = ?",
+      cardId,
+    );
+    expect(unpinnedRow?.pinned_at).toBeNull();
+
+    fixture.clock.now = new Date(addDaysIso(T0, 120));
+    expect(fixture.freshness.recompute(cardId)).toBeCloseTo(50, 6);
+  });
+
+  it("重複寫入相同的釘選狀態不重置 freshness_at", () => {
+    const fixture = makeFixture();
+    const cardId = "01FRESHNESS000000000000021";
+    fixture.freshness.ensure(cardId);
+    fixture.clock.now = new Date(addDaysIso(T0, 10));
+
+    fixture.freshness.setPinned(cardId, false);
+    fixture.freshness.setPinned(cardId, true);
+    fixture.freshness.setPinned(cardId, true);
+
+    const first = fixture.freshness.get(cardId);
+    expect(first.pinned).toBe(true);
+    expect(first.freshnessAt).toBe(addDaysIso(T0, 10));
+  });
 });

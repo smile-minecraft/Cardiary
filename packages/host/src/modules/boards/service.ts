@@ -1,6 +1,7 @@
 import {
   assertValidBoard,
   createBoard,
+  listPinnedCardIds,
   newCardId,
   projectCard,
   unprojectCard,
@@ -30,6 +31,13 @@ export interface BoardCardGateway {
     readonly body: string;
     readonly sources?: readonly string[];
   }): Promise<{ readonly cardId: string }>;
+}
+
+/** 釘選同步：白板是正本，卡片狀態只是鏡射。 */
+export interface BoardPinStore {
+  setPinned(cardId: string, pinned: boolean): void | Promise<void>;
+  /** 目前狀態庫標記為釘選的卡片識別碼；啟動校正要用。 */
+  listPinned(): readonly string[] | Promise<readonly string[]>;
 }
 
 export interface CreateCardOnBoardInput {
@@ -75,6 +83,7 @@ export class BoardService {
     private readonly now: () => Date,
     private readonly emit: (event: BoardChangedEvent) => void,
     private readonly cards: BoardCardGateway | undefined = undefined,
+    private readonly pins: BoardPinStore | undefined = undefined,
   ) {}
 
   list(): BoardDocument[] {
@@ -108,7 +117,8 @@ export class BoardService {
 
   /** 以 `expectedUpdatedAt` 做單寫者比對；版本過期回 conflict，不覆寫。 */
   save(input: BoardDocument, expectedUpdatedAt: string): Promise<BoardDocument> {
-    return this.#exclusive(() => {
+    return this.#exclusive(async () => {
+      const pinnedBefore = this.#pinnedCardIds();
       const existing = this.get(input.id);
       if (existing.updatedAt !== expectedUpdatedAt) {
         throw new ProtocolHandlerError("conflict", "白板已被其他視窗修改。", { boardId: input.id });
@@ -121,22 +131,27 @@ export class BoardService {
       };
       assertValidBoard({ board });
       this.store.write(board, { expectedUpdatedAt });
+      await this.#syncPinned(pinnedBefore);
       this.emit({ boardId: board.id, change: "updated", board });
       return board;
     });
   }
 
   delete(id: string): Promise<boolean> {
-    return this.#exclusive(() => {
+    return this.#exclusive(async () => {
+      const pinnedBefore = this.#pinnedCardIds();
       const deleted = this.store.remove(id);
-      if (deleted) this.emit({ boardId: id, change: "deleted" });
-      return deleted;
+      if (!deleted) return false;
+      await this.#syncPinned(pinnedBefore);
+      this.emit({ boardId: id, change: "deleted" });
+      return true;
     });
   }
 
   /** 投影既有卡片；同一個 itemId 重送回傳目前的結果。 */
   project(input: ProjectCardOnBoardInput): Promise<BoardDocument> {
     return this.#exclusive(async () => {
+      const pinnedBefore = this.#pinnedCardIds();
       const board = this.get(input.boardId);
       if (findItem(board, input.itemId) !== undefined) return board;
       const cards = this.#requireCards();
@@ -148,6 +163,7 @@ export class BoardService {
       const current = this.get(input.boardId);
       const projected = this.#projectOnto(current, input);
       this.store.write(projected, { expectedUpdatedAt: current.updatedAt });
+      await this.#syncPinned(pinnedBefore);
       this.emit({
         boardId: projected.id,
         change: "updated",
@@ -160,7 +176,8 @@ export class BoardService {
 
   /** 取消投影；畫布與收件區的項目都能移除，連帶移除參照它的連線。 */
   unproject(boardId: string, itemId: string): Promise<BoardDocument> {
-    return this.#exclusive(() => {
+    return this.#exclusive(async () => {
+      const pinnedBefore = this.#pinnedCardIds();
       const board = this.get(boardId);
       const item = findItem(board, itemId);
       if (item === undefined) {
@@ -171,6 +188,7 @@ export class BoardService {
       }
       const next = unprojectCard({ board, itemId, now: this.#nextTimestamp(board) });
       this.store.write(next, { expectedUpdatedAt: board.updatedAt });
+      await this.#syncPinned(pinnedBefore);
       this.emit({ boardId, change: "updated", board: next, cardIds: [item.cardId] });
       return next;
     });
@@ -184,6 +202,7 @@ export class BoardService {
    */
   createCard(input: CreateCardOnBoardInput): Promise<CreatedCardProjection> {
     return this.#exclusive(async () => {
+      const pinnedBefore = this.#pinnedCardIds();
       const board = this.get(input.boardId);
       const existing = findItem(board, input.itemId);
       if (existing !== undefined) {
@@ -207,6 +226,7 @@ export class BoardService {
         projectedBy: input.projectedBy,
       });
       this.store.write(projected, { expectedUpdatedAt: current.updatedAt });
+      await this.#syncPinned(pinnedBefore);
       this.emit({
         boardId: projected.id,
         change: "updated",
@@ -223,6 +243,43 @@ export class BoardService {
     });
   }
 
+  /** 白板是目前唯一決定「卡片是否釘選」的地方；從所有白板檔算出目前釘選的卡片。 */
+  #pinnedCardIds(): Set<string> {
+    const boards = this.store.list().map((entry) => entry.board);
+    return new Set(listPinnedCardIds(boards));
+  }
+
+  /**
+   * 啟動校正：白板是正本，把卡片狀態鏡射到與白板一致。
+   *
+   * 白板有釘選、狀態沒有的，標記為釘選；狀態釘選、白板沒有的，取消釘選。
+   * 白板檔讀不出來時讓啟動失敗，不要猜測後把卡片解除釘選。
+   */
+  async reconcilePins(): Promise<void> {
+    if (this.pins === undefined) return;
+    const pinned = this.#pinnedCardIds();
+    const statePinned = new Set(await this.pins.listPinned());
+    const affected = new Set([...pinned, ...statePinned]);
+    for (const cardId of affected) {
+      await this.pins.setPinned(cardId, pinned.has(cardId));
+    }
+  }
+
+  /**
+   * 寫入後同步釘選。對受影響的卡片（寫入前釘選的或寫入後釘選的）無條件
+   * 呼叫 `setPinned`：白板檔寫入成功但同步中斷時，重試會從新檔重算集合，
+   * 差異會是空的，所以不能只同步差異。`setPinned` 對狀態已一致的卡片
+   * 會早退，重送安全。
+   */
+  async #syncPinned(before: ReadonlySet<string>): Promise<void> {
+    if (this.pins === undefined) return;
+    const after = this.#pinnedCardIds();
+    const affected = new Set([...before, ...after]);
+    for (const cardId of affected) {
+      await this.pins.setPinned(cardId, after.has(cardId));
+    }
+  }
+
   #projectOnto(board: BoardDocument, input: ProjectCardOnBoardInput): BoardDocument {
     return projectCard({
       board,
@@ -235,7 +292,6 @@ export class BoardService {
     });
   }
 
-  /** 收件區項目的移除；領域層的 `unprojectCard` 只認畫布項目。 */
   /** 版本一定要前進：同一毫秒內連續寫入也要產生不同版本。 */
   #nextTimestamp(board: BoardDocument): string {
     const previous = Date.parse(board.updatedAt);
