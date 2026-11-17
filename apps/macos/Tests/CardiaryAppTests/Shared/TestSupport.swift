@@ -39,6 +39,7 @@ actor FakeCardiaryService:
     private var cards: [Card]
     private var context: ContextView
     private var storageUsageRows: [StorageCategoryUsage]
+    private var storageOutsideWrites: [StorageOutsideWriteEntry]?
     private let storagePreviewPayload: StorageCleanupPreviewResponsePayload?
     private let storageApplyPayload: StorageCleanupApplyResponsePayload?
     private var agentSessions: [AgentSessionInfo]
@@ -96,6 +97,11 @@ actor FakeCardiaryService:
         failure = newFailure
     }
 
+    /// 測試中切換外部明細，用來驗證從有欄位重載到舊版缺欄位時會清掉舊資料。
+    func setStorageOutsideWrites(_ entries: [StorageOutsideWriteEntry]?) {
+        storageOutsideWrites = entries
+    }
+
     init(
         sessions: [SessionSummary] = [],
         listPages: [SessionListResponsePayload] = [],
@@ -111,6 +117,7 @@ actor FakeCardiaryService:
         cards: [Card] = [],
         context: ContextView? = nil,
         storageUsage: [StorageCategoryUsage] = [],
+        storageOutsideWrites: [StorageOutsideWriteEntry]? = nil,
         storagePreview: StorageCleanupPreviewResponsePayload? = nil,
         storageApply: StorageCleanupApplyResponsePayload? = nil,
         agentSessions: [AgentSessionInfo] = [],
@@ -133,6 +140,7 @@ actor FakeCardiaryService:
         self.cards = cards
         self.context = context ?? Fixtures.contextView()
         self.storageUsageRows = storageUsage
+        self.storageOutsideWrites = storageOutsideWrites
         self.storagePreviewPayload = storagePreview
         self.storageApplyPayload = storageApply
         self.agentSessions = agentSessions
@@ -654,7 +662,10 @@ actor FakeCardiaryService:
     func getStorageUsage() async throws -> StorageUsageResponsePayload {
         storageUsageCalls += 1
         if failure == .storageUsage { throw Failure.storageUsage }
-        return StorageUsageResponsePayload(usage: storageUsageRows)
+        return StorageUsageResponsePayload(
+            usage: storageUsageRows,
+            outsideWrites: storageOutsideWrites
+        )
     }
 
     func previewStorageCleanup(

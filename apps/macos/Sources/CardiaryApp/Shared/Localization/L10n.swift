@@ -237,6 +237,11 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case storageCleanupNothing
     case storageCleanupPreview
     case storageCleanupTitle
+    case storageOutsideAbsent
+    case storageOutsideToolClaudeCode
+    case storageOutsideUnavailable
+    case storageOutsideWritesNote
+    case storageOutsideWritesTitle
     case storagePreviewItems
     case storagePreviewTotal
     case storageShellStateNote

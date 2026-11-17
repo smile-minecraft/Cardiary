@@ -37,6 +37,7 @@ public enum StorageCleanupCategory: String, CaseIterable, Sendable {
 @MainActor
 public final class StorageSettingsModel: ObservableObject {
     @Published public private(set) var usage: [StorageCategoryUsage] = []
+    @Published public private(set) var outsideWrites: [StorageOutsideWriteEntry] = []
     @Published public private(set) var selected: Set<StorageCleanupCategory> = []
     @Published public private(set) var preview: StorageCleanupPreviewResponsePayload?
     @Published public private(set) var isLoading = false
@@ -62,6 +63,7 @@ public final class StorageSettingsModel: ObservableObject {
     public func detach() {
         service = nil
         usage = []
+        outsideWrites = []
         selected = []
         preview = nil
         previewCategories = []
@@ -75,7 +77,9 @@ public final class StorageSettingsModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            usage = try await service.getStorageUsage().usage
+            let response = try await service.getStorageUsage()
+            usage = response.usage
+            outsideWrites = response.outsideWrites ?? []
             errorMessage = nil
         } catch {
             errorMessage = SettingsMessages.error(error, language: language)
@@ -181,6 +185,35 @@ public final class StorageSettingsModel: ObservableObject {
 
     public static func formattedBytes(_ bytes: Int) -> String {
         bytes.formatted(.byteCount(style: .file))
+    }
+
+    /// 外部明細的大小文字。未知大小不能報 0：absent 顯示不存在，
+    /// unavailable 或 measured 缺 bytes 顯示無法取得大小。
+    public static func outsideWriteSize(
+        _ entry: StorageOutsideWriteEntry,
+        language: AppLanguage? = nil
+    ) -> String {
+        switch entry.status {
+        case .measured:
+            guard let bytes = entry.bytes else {
+                return AppL10n.text(.storageOutsideUnavailable, language: language)
+            }
+            return formattedBytes(bytes)
+        case .absent:
+            return AppL10n.text(.storageOutsideAbsent, language: language)
+        case .unavailable:
+            return AppL10n.text(.storageOutsideUnavailable, language: language)
+        }
+    }
+
+    /// 外部明細的工具名稱。目前只有 Claude Code 有對應文案，其照原字串顯示。
+    public static func outsideWriteToolName(
+        _ tool: String,
+        language: AppLanguage? = nil
+    ) -> String {
+        tool == "claude-code"
+            ? AppL10n.text(.storageOutsideToolClaudeCode, language: language)
+            : tool
     }
 
     /// 固定順序，讓請求和訊息可預期。

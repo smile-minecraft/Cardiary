@@ -27,6 +27,7 @@ struct StorageSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignTokens.spacingL) {
                 usageSection
+                outsideWritesSection
                 cleanupSection
 
                 if let error = model.errorMessage {
@@ -89,6 +90,46 @@ struct StorageSettingsView: View {
                 .font(.cardiary(.callout))
                 .monospacedDigit()
                 .foregroundStyle(Palette.inkSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: 資料夾外的工具寫入（唯讀明細，不進七類加總與清理）
+
+    @ViewBuilder
+    private var outsideWritesSection: some View {
+        if !model.outsideWrites.isEmpty {
+            SettingsSection(title: .storageOutsideWritesTitle, suit: .club) {
+                VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
+                    VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
+                        ForEach(model.outsideWrites, id: \.path) { entry in
+                            outsideWriteRow(entry)
+                        }
+                    }
+                    Text(AppL10n.text(.storageOutsideWritesNote))
+                        .font(.cardiary(.caption2))
+                        .foregroundStyle(Palette.inkTertiary)
+                }
+            }
+        }
+    }
+
+    private func outsideWriteRow(_ entry: StorageOutsideWriteEntry) -> some View {
+        VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
+            HStack(spacing: DesignTokens.spacingS) {
+                Text(StorageSettingsModel.outsideWriteToolName(entry.tool))
+                    .font(.cardiary(.callout))
+                Spacer()
+                Text(StorageSettingsModel.outsideWriteSize(entry))
+                    .font(.cardiary(.callout))
+                    .monospacedDigit()
+                    .foregroundStyle(Palette.inkSecondary)
+            }
+            Text(entry.path)
+                .font(.cardiary(.caption2))
+                .foregroundStyle(Palette.inkTertiary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
