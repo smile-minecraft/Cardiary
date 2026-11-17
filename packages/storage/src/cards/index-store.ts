@@ -84,6 +84,14 @@ CREATE TABLE IF NOT EXISTS vec_cards (
   card_id TEXT PRIMARY KEY, model TEXT NOT NULL, revision TEXT NOT NULL, vector BLOB NOT NULL
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS vec_cards_usage (
+  card_id TEXT PRIMARY KEY, last_used_at INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS vec_cards_evicted (
+  card_id TEXT PRIMARY KEY, revision TEXT NOT NULL, evicted_at INTEGER NOT NULL
+) STRICT;
+
 CREATE VIRTUAL TABLE IF NOT EXISTS fts_cards USING fts5 (
   card_id UNINDEXED,
   title,
