@@ -15,13 +15,23 @@ CARDIARY_RETRIEVAL_BENCH=1 npx vitest run packages/contract-tests/retrieval/perf
 - 暖身 3 次 + 正式 50 次，每次查詢 `RetrievalService.search({ query: "手寫字" }, "search")`
 - 斷言 `p95 < 250 ms`；斷言不通過測試就不會綠
 
-閒置 RSS（真實子行程、真實模型）：
+閒置 RSS（真實子行程、真實模型；腳本在 repo 裡，量測的是產品路徑）：
 
 ```sh
-node /path/to/measure-embedder-rss.mjs
+pnpm build
+node packages/host/scripts/measure-embedder-rss.mjs --cache /tmp/cardiary-rss
 ```
 
-`LocalEmbedder` 以 `dist/modules/retrieval/embedding-worker.js` 啟動子行程，`HF_HOME` 指向一個臨時目錄，其中 `models/onnx-community/Qwen3-Embedding-0.6B-ONNX` 是 symlink 到 `~/Library/Caches/cardiary-embedding-spike/hf/onnx-community/Qwen3-Embedding-0.6B-ONNX`（M2 spike 留下的 585 MB q8 ONNX 權重，沒有為了這次量測重新下載）。指令送出一句話嵌入，之後不用子行程，每 20 秒查一次 `ps` 的 RSS，直到子行程自行結束。這是對設計第 7 章第 6 項「閒置後 RSS 回到 150 MB 以下」的實測——設計靠的是閒置 10 分鐘後 `LocalEmbedder` 把子行程 SIGTERM 掉。
+`packages/host/scripts/measure-embedder-rss.mjs` 用 `host/dist` 的 `LocalEmbedder` 與 `SpawnRegistry`，子行程就是 `dist/modules/retrieval/embedding-worker.js`；依序嵌入 8 句中文卡片文字，每 250 ms 用 `ps -axo pid=,rss=,command=` 量子行程 RSS，記錄峰值與嵌入完成後的 RSS，然後等閒置退出（產品的閒置計時器是 10 分鐘；`--idle-wait-ms` 預設 660 秒），最後再印一行 JSON：`embedMs`、`peakRssMb`、`afterEmbedRssMb`、`afterUnloadRssMb`、`unloadedAfterMs`、`parentRssMb`。`--texts N` 可改卡片句數，`--keep` 保留暫存 cache，`--cache <dir>` 指定 cache（省略時自建暫存目錄並在結束後刪掉）。
+
+第一次執行會下載模型（約 625 MB，`HF_HOME` 指向 `<cache>/models`）。要沿用 M2 spike 留下的權重，可以先讓 `<cache>/models` 指到 spike 的 `hf/`（沒有為了這次量測重新下載）：
+
+```sh
+mkdir -p /tmp/cardiary-rss
+ln -s "$HOME/Library/Caches/cardiary-embedding-spike/hf" /tmp/cardiary-rss/models
+node packages/host/scripts/measure-embedder-rss.mjs --cache /tmp/cardiary-rss --keep
+```
+
 
 ## 量測環境
 
@@ -56,44 +66,77 @@ node /path/to/measure-embedder-rss.mjs
 
 設計目標：閒置後回到 150 MB 以下；設計上靠閒置 10 分鐘後 `LocalEmbedder` 把子行程 SIGTERM 掉，不是讓模型常駐在記憶體裡。
 
-這次用真實子行程跑到子行程自己退出（沒有把 spike 的數字搬過來；下面每個數字都是這次實跑的輸出）：
+這次用 repo 裡的 `packages/host/scripts/measure-embedder-rss.mjs` 實跑到子行程自己退出（沒有把 spike 的數字搬過來；下面每個數字都是這次實跑的輸出）。腳本走產品路徑（`host/dist` 的 `LocalEmbedder`、閒置計時器與 `SpawnRegistry`），父程序等子行程退出後印一行 JSON。
 
-- 模型：`onnx-community/Qwen3-Embedding-0.6B-ONNX` 的 `model_quantized.onnx`（585 MB q8），`HF_HOME` 指向臨時目錄，`models/onnx-community` 是 symlink 到 `~/Library/Caches/cardiary-embedding-spike/hf/onnx-community/Qwen3-Embedding-0.6B-ONNX`（spike 留下的權重，這次沒有重新下載）
+- 模型：`onnx-community/Qwen3-Embedding-0.6B-ONNX`（q8），`HF_HOME` 指向 `<cache>/models`；`models` 是 symlink 到 `~/Library/Caches/cardiary-embedding-spike/hf`（spike 留下的權重，這次沒有重新下載），`--cache /tmp/cardiary-rss-m2`
 - 機器：Apple M4、32 GB、macOS 27.2、Node v26.13.1
-- 過程與數字：
-  - 子行程啟動到第一句「手寫字練習的實際量測句子」嵌入完成共約 **1009 秒**（含模型載入；CPU 與其他重度程序共用，這個數字只記錄這次不複製，當時系統上還有其他重節點程序）
-  - 第一句完成、1 秒內：`rss_mb=1484`；20 秒後升到 1995，之後穩定在 **1993–1995 MB**，一直到閒置約 220 秒
-  - 閒置約 220 秒後開始緩慢下降：1832 → 1803 → 1442 → 1065 → 903 → 815 → 722 MB；最後停在 **721–722 MB**（約 t=+1549s 起）
-  - t=+1609s（嵌入完成後 600 秒）：`LocalEmbedder` 閒置超時、對子行程（含 process group）送 SIGTERM，子行程退出，`ps` 查不到該 PID，RSS = 0
+- 指令：
+
+```sh
+pnpm build
+node packages/host/scripts/measure-embedder-rss.mjs --cache /tmp/cardiary-rss-m2 --texts 8 --keep
+```
+
+- 實跑（2026-11-18，日誌在 `/tmp/cardiary-rss-run2.log`）：
+  - 8 句嵌入 **1644 ms** 完成，模型載入約 2 秒（沿用 spike 權重）
+  - 嵌入完成：峰值 **2366.5 MB**；嵌入後直接量測 **2369.9 MB**（高於 250 ms 取樣的峰值）
+  - 閒置逐步下降（每 30 秒一行）：60s 2366.5 → 90s 1813.6 → 150–240s 約 1770 → 270s 1137.2 → **330s 起 499.7，之後一直到 600s 約 499.5**
+  - 閒置滿 10 分鐘後 `LocalEmbedder` 送出 SIGTERM，子行程退出，`unloadedAfterMs = 600731`（約 10 分鐘閒置計時器如預期），之後 `ps` 量到 RSS = 0，父程序 RSS 172 MB
+  - 最終一行 JSON：`{"cache":"/tmp/cardiary-rss-m2","texts":8,"embedMs":1644,"peakRssMb":2366.5,"afterEmbedRssMb":2369.9,"afterUnloadRssMb":0,"unloadedAfterMs":600731,"idleWaitMs":660000,"parentRssMb":172}`
+- 同一天同一支腳本先前也實跑過一輪（日誌在 `/tmp/cardiary-rss-run.log`，那輪腳本的 `embedMs` 不小心記成含閒置等待的總時間，已修正；嵌入本身約 **1409 ms**）：峰值 **2696.1 MB**，閒置逐步下降，510–570 秒起停在 **64.2 MB**，同樣閒置滿 10 分鐘後 SIGTERM 退出（`unloadedAfterMs = 600189`，`afterUnloadRssMb = 0`）
 - 解釋：
-  - 在 10 分鐘閒置等待期間，記憶體**沒有**降到 150 MB 以下；最後階段停在 ~721 MB
-  - 設計第 7 章第 6 項「閒置後 RSS 回到 150 MB 以下（子行程退出即成立）」只在子行程退出那一刻成立（退出後 RSS = 0）；閒置期間記憶體仍然是數百 MB 到 1.9 GB
-  - 閒置期間緩慢下降是 ONNX 執行期在回收，不是 Cardiary 主動卸載；要讓閒置期間 RSS 真的小於 150 MB，需要子行程內主動釋放 ONNX session／權重或延後載入，這牽涉到下一次查詢的重新載入成本與多少常駐記憶體是可接受的，這次沒有動
+  - 設計第 7 章第 6 項「閒置後 RSS 回到 150 MB 以下（子行程退出即成立）」在兩輪實跑中都成立：子行程在閒置計時器到期後被 `LocalEmbedder` SIGTERM，退出後 RSS = 0
+  - 閒置「等待期間」的 RSS 兩輪差異很大：一輪停在約 500 MB（330 秒到退出），一輪降到 64 MB；兩者都是 ONNX 執行期自己回收，不是 Cardiary 主動卸載。閒置期間是否小於 150 MB 不保證；要穩定低於 150 MB 需要子行程內主動釋放 ONNX session／權重或延後載入，牽涉到重新載入成本與可接受的常駐記憶體，這次沒有動
+  - 閒置計時器這次修的是一個真的 bug：先前的 `embed()` 只 `clearTimeout(this.#idle)`，沒有把 `#idle` 設回 `undefined`，第二次嵌入後 `#idle` 永遠不是 `undefined`，閒置計時器就不會再排定；現在 `packages/host/test/modules/retrieval/embedder.test.ts` 以連續兩次嵌入後快轉 10 分鐘斷言 SIGTERM 與 `exited` 解析為 `{ code: null, signal: "SIGTERM" }`，這次實跑也實際觀察到子行程退出
 - 目標「閒置後 RSS < 150 MB」：
-  - 若把「閒置後」解讀為「退出後」：成立（RSS = 0）
-  - 若解讀為「閒置等待期間」：不成立，實測 ~721–1995 MB
+  - 若把「閒置後」解讀為「退出後」：成立（RSS = 0，兩輪皆然）
+  - 若解讀為「閒置等待期間」：不一定（兩輪分別約 500 MB 與 64 MB）
   - 後續工作：在 `LocalEmbedder` 閒置期間主動釋放 ONNX session，或在子行程內實作記憶體上限；兩者都要先決定「閒置後第一次查詢的延遲可以接受到多少」
 
-## 2 GB 容量上限的現況
+## 2 GB 容量上限
 
-`CardVectorStore.estimateBytes()` 現在只算 `vec_cards` 列（向量位元組 + 文字欄位 + 每列 30 位元組的標頭）；`evictToFit(2GB)` 也只用這個值判斷要淘汰多少。以下不算進去：
+已實作。上限 2 GB（`VECTOR_CACHE_MAX_BYTES`）以**整個 `cache/`** 的實際檔案大小為準，不再是只算 `vec_cards`。`packages/host/src/modules/retrieval/cache-usage.ts` 的 `measureCache()` 遞迴量測 `cache/` 下的一般檔案，跳過符號連結與讀不到的目錄：
 
-- `cache/models` 下的模型權重（spike 留下的 q8 權重約 585 MB；同一台機器的 spike 快取目錄約 1.1 GB）
-- `vec_cards_usage`、`vec_cards_evicted` 兩張附屬表
-- 卡片縮圖、原始附件、`cache/index.sqlite` 本身與它的側車檔
+- `cache/models/` → `modelBytes`（模型權重）
+- `cache/thumbs/` → `thumbBytes`（卡片縮圖）
+- 其餘（`index.sqlite` 主檔、`-wal`／`-shm`、`tmp/` 下載暫存）→ `indexBytes`
+- `totalBytes` = 以上三者加總；`vectorsBytes` 是向量列的估算值（`CardVectorStore.estimateBytes()`，實際存在 `index.sqlite`）
 
-換模型時 `CardVectorStore.selectModel()` 會把 `vec_cards`、`vec_cards_usage`、`vec_cards_evicted` 全部刪掉並寫入 meta，但**不會**清掉 `cache/models` 下上一個模型的權重檔；`LocalEmbedder` 也不會主動刪舊模型目錄。所以「整個 cache 目錄不會超過 2 GB」在現況下不成立，只有「向量列 ≤ 2 GB」成立。
+`CardVectors` 在每次重建結束後、以及沒有重建進行時的 `refresh()` 都會套用上限：先扣掉「整個 cache 減去向量列」的非向量用量，剩下的給向量作 `evictToFit()` 的預算（LRU：`vec_cards_usage.last_used_at` 最舊的先淘汰）。也就是說**模型與縮圖會佔掉 2 GB 的額度**，向量被壓到多少就淘汰多少。
 
-這些缺口這次沒有修：
+模型與縮圖仍然不由向量模組淘汰：模型刪掉會再下載 625 MB，縮圖歸媒體模組管，淘汰順序牽涉到跨模組的權衡。這次做到的事：
 
-1. 容量上限要不要把 `cache/models`、縮圖、附屬表算進去，牽涉到「模型要不要常駐」、「淘汰順序」與「刪掉權重後重新下載的成本」，需要決定後才改
-2. 換模型時清掉舊權重：在 `selectModel` 或啟用處路徑上刪 `cache/models` 舊目錄會動到使用者資料目錄，需要先確認刪除語義與可還原性
-3. 縮圖與附件原本就不在 `vec_cards` 的容量模型裡，也不該由向量快取決定誰活誰死
+- 模型與縮圖計入 2 GB 的計算（不計入的話上限形同虛設）
+- 狀態誠實回報：`RetrievalStatus.cache` 帶 `totalBytes`／`maxBytes`／`overLimit`／`modelsBytes`／`thumbsBytes`／`indexBytes`／`vectorsBytes`。非向量檔案本身就超過上限時，向量全部淘汰也救不了，`overLimit` 會是 `true`，而不是假裝有壓回 2 GB
+- 切換索引模型時（`CardVectorStore.selectModel()` 回傳 `true`），`CardVectors` 會先停掉舊的嵌入子行程，再整個刪掉 `cache/models/`（舊模型的權重不再佔用量）；刪不掉只警告，不讓檢索失效
+- 被淘汰的卡由全文搜尋找到時會重新排入重建（`noteFullTextHits`，依 revision 只排有標記 `vec_cards_evicted` 的卡），所以淘汰不等於永久消失
 
-建議的後續工作：把容量統計改成整個 `cache/` 目錄（`walk` 後加總，或用 `statSync` 逐項）並明確定義附屬表與模型的配額；換模型流程改為「新模型下載完成後再淘汰舊權重」並保留回滾；縮圖/附件各自用自己的配額上限，與向量快取脫鉤。
+還沒做的事（超出這次範圍，一併記錄）：
+
+1. **縮圖的淘汰邏輯**：設計要求先淘汰最久未用的縮圖再整區重建索引；縮圖由媒體模組負責，需要跨模組決定配額與淘汰順序，這次只量測並回報用量，沒有實作縮圖 LRU
+2. **整區重建索引**：索引區本身超過上限時重建 `index.sqlite` 的流程沒有實作，目前只靠 `overLimit` 誠實回報
+3. **狀態顯示**：`RetrievalStatus.cache` 已經回到呼叫端（儲存空間面板可以顯示），但 `apps/macos` 的面板還沒接上這個欄位
+
+### 容量上限的測試
+
+- `packages/contract-tests/retrieval/cache.test.ts`：「容量上限把模型檔計入，超出預算時淘汰向量」——寫入 64 KB 假權重後以 `maxCacheBytes = indexBytes + 1` 重建，斷言三筆向量全被淘汰、`evicted` 標記為 3、`status.cache.modelsBytes === 65536`、`overLimit === true`（模型沒計入的話這個測試會紅）；「切換索引模型會清掉舊模型權重」——`refresh()` 後 `cache/models/` 不存在，新模型向量重建完成、舊模型列為 0
+- `packages/host/test/modules/retrieval/cache-usage.test.ts`：`measureCache()` 把模型、縮圖與索引側車檔分開計算
+
+
+## acceptance #1：240 卡樣本的命中率這輪沒有重跑
+
+`docs/design/m2-retrieval.md` 第 130 行的驗收條件要求 spike 240 張卡樣本、查詢前 20 名命中率 ≥ 1.00。這一輪沒有用真實模型重跑，原因：
+
+- 這次改動的是容量記帳、重建期間的查詢逾時、閒置計時器與淘汰重排，模型本身、查詢前綴與 240 卡／40 查詢的資料都沒有動
+- 重跑要在 spike 的 1.9 GB 模型快取上開一個真實 CPU 推論行程；這台機器同時間有其他重負載（閒置 RSS 實跑時系統 load average 約 4–7），實跑一次約需 10 分鐘以上而且容易被別的負載干擾——先前同一批刺探在重負載下連模型載入都花了 1009 秒
+- 把「這次沒量」寫成數字等於假裝驗收過了
+
+spike 當時留下的數字是 Qwen3-Embedding-0.6B 在這 240 張卡上的前 20 名命中率 1.00（`docs/spikes/embedding.md` 的召回表，40 個查詢），但**這一輪沒有重新驗證**。要補的話：`cd` 到主 checkout（`spikes/` 不進 repo），跑 `pnpm --filter @cardiary/spike-embedding recall`，結果寫回這份文件。
 
 ## 其餘這次沒做的事
 
 - Swift 測試（`pnpm test:swift`）沒跑
 - `verify_run` 伺服器證據：worktree 在專案目錄外時可能被 SmileWork 拒絕；這次以 `pnpm check` 的完整輸出與 commit 雜湊為準（見 commit 列表）
-- 閒置 RSS 已實跑到子行程退出（見上節）；閒置等待期間的 RSS 沒有小於 150 MB
+- 閒置 RSS 已實跑到子行程退出（見上節，兩輪）；閒置等待期間的 RSS 兩輪分別約 500 MB 與 64 MB，都不是 Cardiary 主動卸載，要穩定低於 150 MB 要在子行程內釋放 ONNX session
+- 縮圖的 LRU 淘汰與整區重建索引沒有實作（見「2 GB 容量上限」節）
+
