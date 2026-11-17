@@ -123,15 +123,16 @@ node packages/host/scripts/measure-embedder-rss.mjs --cache /tmp/cardiary-rss-m2
 - `packages/host/test/modules/retrieval/cache-usage.test.ts`：`measureCache()` 把模型、縮圖與索引側車檔分開計算
 
 
-## acceptance #1：240 卡樣本的命中率這輪沒有重跑
+## acceptance #1：240 卡樣本召回重跑
 
-`docs/design/m2-retrieval.md` 第 130 行的驗收條件要求 spike 240 張卡樣本、查詢前 20 名命中率 ≥ 1.00。這一輪沒有用真實模型重跑，原因：
+2026-11-18 在主 checkout 重跑 spike 的召回比較（`spikes/embedding`，`pnpm recall`），使用同一批 240 張卡與 40 個查詢、Qwen3-Embedding-0.6B：
 
-- 這次改動的是容量記帳、重建期間的查詢逾時、閒置計時器與淘汰重排，模型本身、查詢前綴與 240 卡／40 查詢的資料都沒有動
-- 重跑要在 spike 的 1.9 GB 模型快取上開一個真實 CPU 推論行程；這台機器同時間有其他重負載（閒置 RSS 實跑時系統 load average 約 4–7），實跑一次約需 10 分鐘以上而且容易被別的負載干擾——先前同一批刺探在重負載下連模型載入都花了 1009 秒
-- 把「這次沒量」寫成數字等於假裝驗收過了
+- `recall@20 = 1.00`、`recall@10 = 1.00`、`recall@5 = 0.975`、`MRR = 0.904`
+- 12 題改寫查詢：`recall@20 = 1.00`、`recall@10 = 1.00`、`recall@5 = 0.917`、`MRR = 0.764`
+- 查詢 p50 40.2 ms、p95 46.9 ms；單卡嵌入 p50 57.2 ms、p95 70.3 ms
+- 與 `docs/spikes/embedding.md` 的技術驗證數字一致，沒有低於原本的 `recall@20 = 1.00`
 
-spike 當時留下的數字是 Qwen3-Embedding-0.6B 在這 240 張卡上的前 20 名命中率 1.00（`docs/spikes/embedding.md` 的召回表，40 個查詢），但**這一輪沒有重新驗證**。要補的話：`cd` 到主 checkout（`spikes/` 不進 repo），跑 `pnpm --filter @cardiary/spike-embedding recall`，結果寫回這份文件。
+這次重跑的是 spike 的召回程式與同一批樣本，不是新產品檢索路徑的召回；產品路徑的延遲與容量行為由上面的 benchmark 與整合測試覆蓋。
 
 ## 其餘這次沒做的事
 
