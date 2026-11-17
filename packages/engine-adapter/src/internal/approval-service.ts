@@ -16,7 +16,11 @@ import type {
 } from "../approval.js";
 import type { ApprovalRequestId } from "../ids.js";
 import type { Clock, Unsubscribe } from "../runtime.js";
-import { computeApprovalKey, computeExternalAgentApprovalKey, computeHostApprovalKey } from "./canonical.js";
+import {
+  computeApprovalKey,
+  computeExternalAgentApprovalKey,
+  computeHostApprovalKey,
+} from "./canonical.js";
 import { engineError } from "./errors.js";
 
 interface Waiter {

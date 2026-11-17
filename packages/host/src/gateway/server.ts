@@ -1545,10 +1545,7 @@ export class Gateway {
       const request = update.request;
       if (request.draft.conversationId !== undefined) return;
       const projection = await this.#approvalProjection(request);
-      await this.#appendSystemEvent(
-        "approval.requested",
-        projection as unknown as JSONObject,
-      );
+      await this.#appendSystemEvent("approval.requested", projection as unknown as JSONObject);
       return;
     }
     const resolution = update.resolution;
