@@ -7,7 +7,7 @@ import type {
   ScheduleStore,
 } from "@cardiary/storage";
 import { addDaysIso, nowIso } from "@cardiary/storage";
-import type { ScheduleTask } from "@cardiary/domain";
+import { localDayKey, type ScheduleTask } from "@cardiary/domain";
 
 /** 排程 tick 的間隔；30 秒。 */
 export const SCHEDULER_TICK_MS = 30_000;
@@ -328,7 +328,7 @@ export class SchedulerService {
       return;
     }
     try {
-      const day = this.#now().toISOString().slice(0, 10);
+      const day = localDayKey(this.#now()) ?? this.#now().toISOString().slice(0, 10);
       await trigger.runForDay("default", day);
       this.#options.schedules.finishRun({ ...base, finishedAt, status: "ok" });
     } catch (error) {

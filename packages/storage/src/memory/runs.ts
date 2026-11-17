@@ -265,6 +265,9 @@ export class DistillationStore {
    *
    * 排除同一批次、已復原（`undone = 1`）、失敗與沒有輸出卡的紀錄；
    * 以 `output_card_id` 字典序最小者為決定性結果。
+   *
+   * 這裡看不到卡片現況；主機去重請用 {@link listCrossBatchMatches} 取得
+   * 全部候選，補上「已刪除／已被取代」旗標後再交給領域層決定。
    */
   findCrossBatchMatch(input: {
     readonly persona: string;
@@ -282,6 +285,32 @@ export class DistillationStore {
       input.excludeBatchId ?? "",
     );
     return row === undefined ? null : toItem(row);
+  }
+
+  /**
+   * 跨批次列出所有相同內容的已完成產物（去重候選）。
+   *
+   * 只做 SQL 能判斷的過濾（人格、雜湊、完成、有輸出卡、未復原、排除同一
+   * 批次）；輸出卡是否已刪除或被取代由呼叫端補上旗標，再交給領域層取決定性
+   * 結果。
+   */
+  listCrossBatchMatches(input: {
+    readonly persona: string;
+    readonly contentHash: string;
+    readonly excludeBatchId?: string;
+  }): DistillationItemRecord[] {
+    return this.#db
+      .all<ItemRow>(
+        `SELECT * FROM distillation_items
+          WHERE persona = ? AND content_hash = ? AND status = 'done'
+            AND output_card_id IS NOT NULL AND undone = 0
+            AND batch_id <> ?
+          ORDER BY output_card_id ASC, run_id ASC, item_key ASC`,
+        input.persona,
+        input.contentHash,
+        input.excludeBatchId ?? "",
+      )
+      .map(toItem);
   }
 
   /** 找出已標記復原的輸出卡；復原後續跑不得重建（設計 §4.4）。 */

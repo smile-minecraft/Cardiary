@@ -71,6 +71,15 @@ export class CardLifecycleStore {
     return row.lifecycle === "cold" ? "cold" : "live";
   }
 
+  /** 這張卡被哪張卡取代；沒有 `card_state` 列或未被取代回 `null`。 */
+  getSupersededBy(cardId: string): string | null {
+    const row = this.#db.get<{ superseded_by: string | null }>(
+      "SELECT superseded_by FROM card_state WHERE card_id = ?",
+      cardId,
+    );
+    return row?.superseded_by ?? null;
+  }
+
   /**
    * 挑選蒸餾候選：`live` 且新鮮度歸零的卡，回傳基本欄位給領域層過濾。
    *

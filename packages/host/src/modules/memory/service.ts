@@ -22,6 +22,8 @@ import {
   coreDayKey,
   estimateCoreMemoryTokens,
   extractItemKey,
+  findBatchUnit,
+  findCrossBatchMatch,
   judgeMemoryItem,
   memoryContentHash,
   mergeItemKey,
@@ -29,9 +31,11 @@ import {
   planMemoryCardDraft,
   resumeIntentDecision,
   selectDistillationCandidates,
+  shouldSkipUnit,
   validateDistillationOutput,
   CORE_TOKEN_BUDGET_DEFAULT,
   deterministicCardId,
+  type DistillationItemRecord as ResumeItemRecord,
   type DistillationSummaryItem,
   type MemoryJudge,
   type MemoryMergeVerdict,
@@ -45,7 +49,10 @@ import {
   DistillationStore,
   INTERRUPTION_THRESHOLD_MS,
 } from "@cardiary/storage";
-import type { DistillationRunRecord } from "@cardiary/storage";
+import type {
+  DistillationItemRecord as StoredItemRecord,
+  DistillationRunRecord,
+} from "@cardiary/storage";
 
 import { createModelAdapters, titleAndSummaryFromModel } from "./models.js";
 import { hashText, type MemoryCardWriter } from "./card-writer.js";
@@ -207,6 +214,42 @@ export class DistillationService {
     return this.#options.runs.getRun(run.runId) ?? run;
   }
 
+  #batchState(run: DistillationRunRecord): {
+    storage: readonly StoredItemRecord[];
+    records: readonly ResumeItemRecord[];
+  } {
+    const storage = this.#options.runs.listBatchItems(run.persona, run.runId);
+    return { storage, records: storage.map(toResumeRecord) };
+  }
+
+  /** 跨批次去重：補上輸出卡現況旗標，再交給領域層取決定性結果。 */
+  async #crossBatchMatch(
+    run: DistillationRunRecord,
+    contentHash: string,
+  ): Promise<ResumeItemRecord | undefined> {
+    const batchId = run.runId;
+    const candidates = this.#options.runs.listCrossBatchMatches({
+      persona: run.persona,
+      contentHash,
+      excludeBatchId: batchId,
+    });
+    const records: ResumeItemRecord[] = [];
+    for (const row of candidates) {
+      if (row.outputCardId === null) continue;
+      const card = await this.#options.cards.get(row.outputCardId);
+      records.push({
+        ...toResumeRecord(row),
+        outputCardDeleted: card === null,
+        outputCardSuperseded: this.#options.lifecycle.getSupersededBy(row.outputCardId) !== null,
+      });
+    }
+    return findCrossBatchMatch(records, {
+      persona: run.persona,
+      contentHash,
+      excludeBatchId: batchId,
+    });
+  }
+
   /** 步驟 1＋2：挑選候選並逐卡提煉（提煉結果先落地）。 */
   async #pick(
     run: DistillationRunRecord,
@@ -250,13 +293,19 @@ export class DistillationService {
     const card = await this.#options.cards.get(candidate.cardId);
     if (card === null) return;
 
-    // 步驟 2：提煉；已 done 的 extract 讀回 detail_json，不重跑模型。
-    const priorExtract = this.#options.runs.findBatchItem(run.persona, batchId, extractKey);
+    // 步驟 2：提煉；已完成或當日已放棄的 extract 不重跑模型。
+    const batch = this.#batchState(run);
+    const extractQuery = { batchId, itemKey: extractKey, sourceCardId: candidate.cardId };
     let extracted: readonly ExtractedMemoryItem[];
-    if (priorExtract?.status === "done" && priorExtract.detailJson !== null) {
-      const parsed = safeParse(priorExtract.detailJson);
+    if (shouldSkipUnit(batch.records, extractQuery)) {
+      const stored = batch.storage.find((row) => row.itemKey === extractKey);
+      const parsed =
+        stored?.status === "done" && stored.detailJson !== null
+          ? safeParse(stored.detailJson)
+          : null;
       const validation = validateDistillationOutput(parsed);
       if (!validation.ok) {
+        // failed／undone 的提煉單元當日不重跑，計入失敗統計。
         stats.failed += 1;
         return;
       }
@@ -338,15 +387,17 @@ export class DistillationService {
     const itemKey = mergeItemKey(candidate.cardId, index);
     const hash = memoryContentHash(item);
 
-    // 中斷續跑：已完成的 merge 跳過；跨批次相同內容不新建卡。
-    if (this.#options.runs.findBatchItem(run.persona, batchId, itemKey)?.status === "done") {
+    // 中斷續跑：已完成或當日已放棄的 merge 跳過；跨批次相同內容不新建卡。
+    const batch = this.#batchState(run);
+    const mergeQuery = { batchId, itemKey, sourceCardId: candidate.cardId, contentHash: hash };
+    const unit = findBatchUnit(batch.records, mergeQuery);
+    if (shouldSkipUnit(batch.records, mergeQuery)) {
+      if (unit?.status === "failed") {
+        stats.failed += 1;
+      }
       return;
     }
-    const cross = this.#options.runs.findCrossBatchMatch({
-      persona: run.persona,
-      contentHash: hash,
-      excludeBatchId: batchId,
-    });
+    const cross = await this.#crossBatchMatch(run, hash);
     if (cross?.outputCardId !== null && cross?.outputCardId !== undefined) {
       stats.merged += 1;
       items.push({
@@ -412,7 +463,7 @@ export class DistillationService {
     const bodyHash = hashText(draft.body);
     // 固定輸出卡 id：續跑意圖事先分配；同一 item 重跑得到相同 id。
     const outputCardId = deterministicCardId(`mem_${run.runId}_${index}_${hash.slice(0, 8)}`);
-    const priorIntent = this.#options.runs.findBatchItem(run.persona, batchId, itemKey);
+    const priorIntent = findBatchUnit(batch.records, mergeQuery);
     const existing = this.#options.writer.existing(outputCardId, bodyHash);
     const intent = resumeIntentDecision({
       done: priorIntent?.status === "done" && priorIntent.undone !== true,
@@ -681,6 +732,22 @@ export class DistillationService {
 
 function archiveKey(cardId: string): string {
   return `${cardId}:archive`;
+}
+
+/** 儲存層的單元列映射成領域層的續跑紀錄（`detailJson` 留給呼叫端自己讀）。 */
+function toResumeRecord(record: StoredItemRecord): ResumeItemRecord {
+  return {
+    runId: record.runId,
+    batchId: record.batchId,
+    persona: record.persona,
+    sourceCardId: record.sourceCardId,
+    itemKey: record.itemKey,
+    phase: record.phase,
+    status: record.status,
+    undone: record.undone,
+    ...(record.contentHash !== null ? { contentHash: record.contentHash } : {}),
+    ...(record.outputCardId !== null ? { outputCardId: record.outputCardId } : {}),
+  };
 }
 
 function stableJson(value: unknown): string {

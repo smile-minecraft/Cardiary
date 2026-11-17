@@ -7,7 +7,7 @@
  */
 
 import type { CardService, DistillationSummaryItem } from "@cardiary/domain";
-import { assertWellFormedItem, planUndoItem, type UndoPlan, type UndoStep } from "@cardiary/domain";
+import { assertWellFormedItem, localDayKey, planUndoItem, type UndoPlan, type UndoStep } from "@cardiary/domain";
 import type { JsonValue } from "@cardiary/engine-adapter";
 
 import { CardLifecycleStore, CoreMemoryStore, DistillationStore } from "@cardiary/storage";
@@ -42,7 +42,7 @@ export async function undoItem(
     return { ok: false, reason: "item-not-found" };
   }
 
-  const day = options.now().toISOString().slice(0, 10);
+  const day = localDayKey(options.now()) ?? options.now().toISOString().slice(0, 10);
   const daily = options.core.getDaily("default", day);
   const checked = assertWellFormedItem(item);
   const plan: UndoPlan = planUndoItem(checked, daily);

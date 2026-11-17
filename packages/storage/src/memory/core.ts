@@ -5,6 +5,8 @@
  * 必須在同一個資料庫交易裡完成，復原也遵守同一個人格與日期鍵。
  */
 
+import { localDayKey } from "@cardiary/domain";
+
 import type { Database, Queryable } from "../db.js";
 
 /** 核心組變更的來源。 */
@@ -158,10 +160,10 @@ export class CoreMemoryStore {
     return this.#db.run("DELETE FROM core_memory_daily WHERE day < ?", beforeDay).changes;
   }
 
-  /** 目前時間的日期鍵（UTC，與領域層 `coreDayKey` 一致）。 */
+  /** 目前時間的日期鍵（在地時區，與領域層 `coreDayKey` 一致）。 */
   today(persona: string): string {
     void persona;
-    return this.#now().toISOString().slice(0, 10);
+    return localDayKey(this.#now()) ?? this.#now().toISOString().slice(0, 10);
   }
 }
 

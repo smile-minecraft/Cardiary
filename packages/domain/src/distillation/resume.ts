@@ -5,8 +5,8 @@
  * 設計文件 m2-distillation.md §4 的續跑規則：
  * - 同批次：以 `(batch_id, source_card_id, content_hash)` 找意圖；已 `done`
  *   的單元跳過，不重跑模型、也不重寫卡片；
- * - 跨批次：同一人格分區查找相同 `content_hash` 的已完成產物；命中時記錄
- *   合併，不新建卡；
+ * - 跨批次：同一人格分區查找相同 `content_hash`、產物仍存活（未刪除、未被
+ *   `supersedes` 蓋過）的已完成單元；命中時記錄合併，不新建卡；
  * - 寫卡前先落地意圖（固定輸出卡 id）；重啟先檢查該 id 與雜湊：檔案存在且
  *   相符就補記完成，不存在就寫入，不相符則停止該項並通知、不覆寫；
  * - 使用者復原產出後留下已復原紀錄；續跑不得重建已刪除的卡；
@@ -32,6 +32,10 @@ export type ResumeItemStatus = "pending" | "done" | "failed";
 /**
  * 一筆持久保存的蒸餾單元；主機把 `distillation_items` 的列映成這個形狀。
  * `batchId` 首次建立後不變；`undone` 標記使用者已復原這一項的產物。
+ *
+ * `outputCardSuperseded` 與 `outputCardDeleted` 不是資料庫欄位，而是主機在
+ * 跨批次比對前依卡片現況補上的旗標：輸出卡已被另一張卡蓋過或已刪除時，
+ * 這一列不能再當成可合併的錨點。
  */
 export interface DistillationItemRecord {
   readonly runId: string;
@@ -49,6 +53,10 @@ export interface DistillationItemRecord {
   readonly status: ResumeItemStatus;
   /** 使用者已復原這一項的產出；復原後不重建。 */
   readonly undone?: boolean | undefined;
+  /** 輸出卡已被 `supersedes` 蓋過；不得再被跨批次去重引用。 */
+  readonly outputCardSuperseded?: boolean | undefined;
+  /** 輸出卡已刪除（卡片檔不存在）；不得再被跨批次去重引用。 */
+  readonly outputCardDeleted?: boolean | undefined;
 }
 
 /** 續跑去重鍵：批次 id＋來源卡 id＋內容雜湊。 */
@@ -56,37 +64,63 @@ export function buildResumeKey(batchId: string, sourceCardId: CardId, contentHas
   return `${batchId}:${sourceCardId}:${contentHash}`;
 }
 
+/** 同批次續跑查找的條件；`contentHash` 省略時只比對單元鍵。 */
+export interface BatchUnitQuery {
+  readonly batchId: string;
+  readonly itemKey: string;
+  readonly sourceCardId: CardId;
+  /** 內容雜湊；`extract` 尚未提煉時沒有。 */
+  readonly contentHash?: string | undefined;
+}
+
 /**
- * 同批次續跑：找出這個批次裡已完成或已失敗的同一個單元。
+ * 同批次續跑：找出這個批次裡同一個單元。
  *
- * 已 `done` 的單元直接跳過；已 `failed` 的單元當日不重跑（原卡留 `live`，
- * 隔日蒸餾再撿）。
+ * 有內容雜湊時以 `buildResumeKey`（批次 id＋來源卡 id＋雜湊）比對，同一個
+ * `itemKey` 但內容已改變就不算同一個單元；沒有雜湊的 `extract` 單元退回以
+ * `batchId`＋`itemKey` 比對。是否該跳過由 {@link shouldSkipUnit} 決定。
  */
 export function findBatchUnit(
   records: readonly DistillationItemRecord[],
-  query: { readonly batchId: string; readonly itemKey: string },
+  query: BatchUnitQuery,
 ): DistillationItemRecord | undefined {
+  if (query.contentHash === undefined) {
+    return records.find(
+      (record) => record.batchId === query.batchId && record.itemKey === query.itemKey,
+    );
+  }
+  const key = buildResumeKey(query.batchId, query.sourceCardId, query.contentHash);
   return records.find(
-    (record) => record.batchId === query.batchId && record.itemKey === query.itemKey,
+    (record) =>
+      record.itemKey === query.itemKey &&
+      record.contentHash !== undefined &&
+      buildResumeKey(record.batchId, record.sourceCardId, record.contentHash) === key,
   );
 }
 
 /**
- * 一張提煉項目的處理結論先不存在時，單元是不是已經完成、不必再動。
+ * 同一個單元已完成、當日已放棄或已被復原時，續跑不再動它。
+ *
+ * 已 `done` 與已復原的單元不重跑模型、也不重寫卡片；`failed` 的單元當日
+ * 不重跑（原卡留 `live`，隔日蒸餾再撿），呼叫端仍要把它計入失敗統計。
  */
 export function shouldSkipUnit(
   records: readonly DistillationItemRecord[],
-  query: { readonly batchId: string; readonly itemKey: string },
+  query: BatchUnitQuery,
 ): boolean {
   const unit = findBatchUnit(records, query);
-  return unit !== undefined && (unit.status === "done" || unit.undone === true);
+  return (
+    unit !== undefined &&
+    (unit.status === "done" || unit.status === "failed" || unit.undone === true)
+  );
 }
 
 /**
  * 跨批次去重：同一人格分區查找相同內容雜湊的已完成、有產出、
  * 尚未復原的單元。命中時呼叫端記錄「合併」而不新建卡。
  *
- * 不引用已復原（`undone`）或失敗的產物；同一批次的單元不在此查找
+ * 不引用已復原（`undone`）、已刪除（`outputCardDeleted`）、已被取代
+ * （`outputCardSuperseded`）或失敗的產物；同一批次的單元不在此查找
  * （同批次由 {@link findBatchUnit} 與意圖續跑處理）。多個命中時取
  * `outputCardId` 字典序最小者，保證決定性（ULID 前綴是毫秒時間，
  * 字典序單調）。
@@ -107,6 +141,8 @@ export function findCrossBatchMatch(
         record.status === "done" &&
         record.outputCardId !== undefined &&
         record.undone !== true &&
+        record.outputCardSuperseded !== true &&
+        record.outputCardDeleted !== true &&
         record.batchId !== query.excludeBatchId,
     )
     .sort((left, right) =>
