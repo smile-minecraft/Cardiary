@@ -132,6 +132,62 @@ async function expectInitAndListTools(started: { url: string; methods: string[] 
 }
 
 describe("HTTP MCP 初始化接受空 body 的通知回應", () => {
+  it("通知回應串流未結束時取消連線並繼續列出工具", async () => {
+    let signalClosed!: () => void;
+    const notificationClosed = new Promise<void>((resolve) => {
+      signalClosed = resolve;
+    });
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        const message = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          method: string;
+          id?: number;
+        };
+        if (message.method === "notifications/initialized") {
+          res.on("close", signalClosed);
+          res.writeHead(200, { "content-type": "text/event-stream" });
+          res.write("data: still open\n\n");
+          return;
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result:
+              message.method === "initialize"
+                ? { capabilities: {} }
+                : { tools: [{ name: "echo" }] },
+          }),
+        );
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    servers.push(server);
+    const port = (server.address() as AddressInfo).port;
+    const client = createMcpClient(httpRecord(`http://localhost:${port}/mcp`), {
+      folderRoot: "",
+      spawn: {} as never,
+      logger: { debug: () => undefined, warn: () => undefined },
+      requestTimeoutMs: 5_000,
+    });
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const [tools] = await Promise.race([
+        Promise.all([client.listTools(), notificationClosed]),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("通知串流未在一秒內關閉")), 1_000);
+        }),
+      ]);
+      expect(tools).toEqual([{ name: "echo" }]);
+    } finally {
+      clearTimeout(timer);
+      await client.close();
+    }
+  });
+
   for (const status of [202, 204, 200]) {
     it(`notifications/initialized 回 ${status} 空 body 時仍完成初始化並列出工具`, async () => {
       await expectInitAndListTools(await startMcpServer(status));

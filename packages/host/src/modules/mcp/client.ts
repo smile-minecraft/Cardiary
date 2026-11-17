@@ -157,15 +157,21 @@ class StdioMcpClient implements McpClient {
       this.#context.logger.debug(`MCP ${this.#server.serverId} stderr: ${chunk.toString("utf8")}`);
     });
     const rpc = new StdioRpc(child, this.#server.serverId);
+    // 從 spawn 起就持有 rpc：spawn 與這個指派之間沒有 await，close() 不會在
+    // 初始化途中交錯進來而看不到 child。初始化失敗時 catch 會清掉這個指派。
+    this.#rpc = rpc;
     try {
       await rpc.request("initialize", {
         protocolVersion: MCP_PROTOCOL_VERSION,
         capabilities: {},
         clientInfo: { name: "Cardiary", version: "0.1.0" },
       });
+      if (this.#closed) {
+        throw new McpClientError("closed", "MCP 用戶端已關閉");
+      }
       rpc.notify("notifications/initialized", {});
-      this.#rpc = rpc;
     } catch (error) {
+      if (this.#rpc === rpc) this.#rpc = null;
       rpc.dispose();
       await rpc.close();
       throw error instanceof McpClientError
@@ -213,6 +219,7 @@ class StdioRpc {
   #buffer = "";
   #nextId = 1;
   #closed = false;
+  #closing: Promise<void> | null = null;
 
   constructor(child: ReturnType<SpawnRegistry["spawn"]>, serverId: string) {
     this.#child = child;
@@ -253,14 +260,20 @@ class StdioRpc {
   }
 
   async close(): Promise<void> {
+    // 初始化失敗的 catch 與外層 close() 可能同時關同一個 rpc；重複呼叫要
+    // 共用同一次關行程，且等到 child 真正結束才回，避免留下孤兒。
+    if (this.#closing !== null) return this.#closing;
+    this.#closing = this.#doClose();
+    return this.#closing;
+  }
+
+  async #doClose(): Promise<void> {
     this.#child.closeInput();
     this.#child.signal("SIGTERM");
-    const exited = await Promise.race([
-      this.#child.exited.then(() => true),
-      delay(1_000).then(() => false),
-    ]);
-    if (!exited) {
+    const exited = await Promise.race([this.#child.exited, delay(1_000).then(() => null)]);
+    if (exited === null) {
       this.#child.signal("SIGKILL");
+      await this.#child.exited;
     }
   }
 

@@ -256,7 +256,7 @@ describe.skipIf(process.platform !== "darwin")("stdio MCP 的真正 sandbox-exec
 
     // 子行程真的對 host listener 發出 net.connect；沙盒下必須失敗。
     const result = writeResult(await mcp.callTool("net_connect", { host: "127.0.0.1", port }));
-    expect(result.ok, "沙盒下的 net.connect 應被拒").toBe(false);
+    expect(result, "沙盒下的 net.connect 應因權限被拒").toEqual({ ok: false, code: "EPERM" });
 
     // host 端另外驗證沒有收到任何連線，不只信子行程自報。
     expect(connections, "host 不應收到子行程的連線").toBe(0);
