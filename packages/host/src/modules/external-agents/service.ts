@@ -195,6 +195,9 @@ interface TrackedPermission {
   readonly replyToken: string;
   readonly toolName: string;
   readonly input: Record<string, unknown>;
+  /** OpenCode ACP 伺服器實際给的 optionId；回錯會被當成拒絕。 */
+  readonly allowOptionId?: string;
+  readonly denyOptionId?: string;
   resolved: boolean;
 }
 
@@ -762,7 +765,9 @@ export class ExternalAgentsService {
         this.#deps.openCodeModel ??
         process.env.CARDIARY_AGENT_OPENCODE_MODEL ??
         DEFAULT_OPENCODE_MODEL;
-      if (model.length > 0) child.write(encodeAcpSetModel(model));
+      if (model.length > 0 && live.acpSessionId) {
+        child.write(encodeAcpSetModel(model, live.acpSessionId));
+      }
       if (live.record.prompt && live.acpSessionId) {
         child.write(encodeAcpPrompt(live.acpSessionId, live.record.prompt));
         live.permissionPromptSent = true;
@@ -836,6 +841,8 @@ export class ExternalAgentsService {
         replyToken: event.replyToken,
         toolName: event.toolName,
         input: event.input,
+        ...(event.allowOptionId ? { allowOptionId: event.allowOptionId } : {}),
+        ...(event.denyOptionId ? { denyOptionId: event.denyOptionId } : {}),
         resolved: false,
       });
       await writeRecord(this.#storage, updated);
@@ -890,7 +897,12 @@ export class ExternalAgentsService {
             : "審批已撤回";
       const reply =
         live.record.agentKind === "opencode"
-          ? encodeAcpPermissionReply(tracked.replyToken, allow)
+          ? encodeAcpPermissionReply(
+              tracked.replyToken,
+              allow
+                ? (tracked.allowOptionId ?? "allow_once")
+                : (tracked.denyOptionId ?? "reject_once"),
+            )
           : encodeClaudePermissionReply(tracked.replyToken, allow ? "allow" : "deny", {
               ...(allow ? { updatedInput: tracked.input as JsonValue } : { message }),
             });

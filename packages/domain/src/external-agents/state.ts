@@ -83,6 +83,8 @@ export function applyAgentEvent(
             ...(event.description ? { description: event.description } : {}),
             input: event.input,
             replyToken: event.replyToken,
+            ...(event.allowOptionId ? { allowOptionId: event.allowOptionId } : {}),
+            ...(event.denyOptionId ? { denyOptionId: event.denyOptionId } : {}),
           },
         },
         applied: true,

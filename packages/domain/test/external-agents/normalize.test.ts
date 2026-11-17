@@ -51,7 +51,7 @@ describe("opencode acp normalization", () => {
     expect(classifyAcpLine("bun warning: hello").kind).toBe("ignored");
   });
 
-  it("把 session/request_permission 轉成待核准事件", () => {
+  it("把 session/request_permission 轉成待核准事件，並記下伺服器實際的 optionId", () => {
     const events = normalizeAcpLine(
       JSON.stringify({
         jsonrpc: "2.0",
@@ -63,6 +63,11 @@ describe("opencode acp normalization", () => {
             title: "git status",
             rawInput: { command: "git status" },
           },
+          options: [
+            { optionId: "once", kind: "allow_once", name: "Allow once" },
+            { optionId: "always", kind: "allow_always", name: "Always allow" },
+            { optionId: "reject", kind: "reject_once", name: "Reject" },
+          ],
         },
       }),
     );
@@ -72,6 +77,8 @@ describe("opencode acp normalization", () => {
       toolName: "shell",
       replyToken: "41",
       requestKey: "opencode:41",
+      allowOptionId: "once",
+      denyOptionId: "reject",
     });
   });
 

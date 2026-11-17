@@ -82,6 +82,19 @@ function normalizeAcpPermission(frame: AcpJsonRpcRequest): NormalizedAgentEvent 
     asObject(toolCall.rawInput) ?? asObject(toolCall.input) ?? (toolCall as ExternalAgentJson);
   const description = asString(toolCall.title) ?? asString(toolCall.description) ?? undefined;
   const requestKey = `opencode:${String(frame.id)}`;
+  // OpenCode 2.2.7 的 options[].optionId 是 once/always/reject，kind 才是 allow_once 等。
+  // 一定要回伺服器實際给的 optionId；用 kind 字串會被當成拒絕，整回合取消。
+  const options = Array.isArray(params.options) ? params.options : [];
+  const findOptionId = (wantedKind: string): string | undefined => {
+    for (const option of options) {
+      const obj = asObject(option);
+      if (!obj || asString(obj.kind) !== wantedKind) continue;
+      return asString(obj.optionId) ?? undefined;
+    }
+    return undefined;
+  };
+  const allowOptionId = findOptionId("allow_once");
+  const denyOptionId = findOptionId("reject_once");
   return {
     kind: "permission",
     toolName,
@@ -89,6 +102,8 @@ function normalizeAcpPermission(frame: AcpJsonRpcRequest): NormalizedAgentEvent 
     ...(description ? { description } : {}),
     requestKey,
     replyToken: String(frame.id),
+    ...(allowOptionId ? { allowOptionId } : {}),
+    ...(denyOptionId ? { denyOptionId } : {}),
   };
 }
 

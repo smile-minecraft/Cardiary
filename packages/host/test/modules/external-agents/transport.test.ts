@@ -8,6 +8,7 @@ import {
   encodeAcpInitialize,
   encodeAcpPermissionReply,
   encodeAcpPrompt,
+  encodeAcpSetModel,
   encodeClaudePermissionReply,
   encodeClaudeUser,
   resolveAgentCommand,
@@ -92,16 +93,31 @@ describe("供應商協定訊息編碼", () => {
     });
   });
 
-  it("ACP 權限回覆保留原本的請求 id 與選項語意", () => {
-    expect(parse(encodeAcpPermissionReply("42", true))).toEqual({
+  it("ACP set_model 必須帶 sessionId，否則 OpenCode 回 Invalid params", () => {
+    expect(parse(encodeAcpSetModel("opencode/iceman-free", "sess_9"))).toEqual({
+      jsonrpc: "2.0",
+      id: ACP_IDS.setModel,
+      method: "session/set_config_option",
+      params: {
+        sessionId: "sess_9",
+        configId: "model",
+        value: "opencode/iceman-free",
+      },
+    });
+  });
+
+  it("ACP 權限回覆用伺服器實際给的 optionId，不是 kind 字串", () => {
+    // OpenCode 2.2.7 回的 optionId 是 once/always/reject，kind 才是 allow_once 等。
+    // 回錯 optionId 會讓 OpenCode 當成拒絕，整回合被取消。
+    expect(parse(encodeAcpPermissionReply("42", "once"))).toEqual({
       jsonrpc: "2.0",
       id: "42",
-      result: { outcome: { outcome: "selected", optionId: "allow_once" } },
+      result: { outcome: { outcome: "selected", optionId: "once" } },
     });
-    expect(parse(encodeAcpPermissionReply(42, false))).toEqual({
+    expect(parse(encodeAcpPermissionReply(42, "reject"))).toEqual({
       jsonrpc: "2.0",
       id: 42,
-      result: { outcome: { outcome: "selected", optionId: "reject_once" } },
+      result: { outcome: { outcome: "selected", optionId: "reject" } },
     });
   });
 

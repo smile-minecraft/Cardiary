@@ -52,6 +52,12 @@ export type NormalizedAgentEvent =
       readonly requestKey: string;
       /** 回應權限請求時要帶回去的值。 */
       readonly replyToken: string;
+      /**
+       * OpenCode ACP 決定選項的實際 optionId（開頭通常是 once/always/reject）。
+       * 不能自己用 kind 字串（allow_once 等）當 optionId，伺服器會當成拒絕。
+       */
+      readonly allowOptionId?: string;
+      readonly denyOptionId?: string;
     }
   | { readonly kind: "completed"; readonly message: string }
   | { readonly kind: "failed"; readonly message: string };
@@ -64,6 +70,8 @@ export interface PendingPermissionRequest {
   readonly description?: string | undefined;
   readonly input: ExternalAgentJson;
   readonly replyToken: string;
+  readonly allowOptionId?: string;
+  readonly denyOptionId?: string;
 }
 
 /**

@@ -109,12 +109,12 @@ export function encodeAcpSessionNew(cwd: string): string {
   })}\n`;
 }
 
-export function encodeAcpSetModel(model: string): string {
+export function encodeAcpSetModel(model: string, acpSessionId: string): string {
   return `${JSON.stringify({
     jsonrpc: "2.0",
     id: ACP_IDS.setModel,
     method: "session/set_config_option",
-    params: { configId: "model", value: model },
+    params: { sessionId: acpSessionId, configId: "model", value: model },
   })}\n`;
 }
 
@@ -135,12 +135,19 @@ export function encodeAcpCancel(acpSessionId: string): string {
   })}\n`;
 }
 
-/** ACP 對 `session/request_permission` 的回覆；`allow` 對應 allow_once，`deny` 對應 reject_once。 */
-export function encodeAcpPermissionReply(requestId: number | string, allow: boolean): string {
-  const outcome = allow
-    ? { outcome: "selected", optionId: "allow_once" }
-    : { outcome: "selected", optionId: "reject_once" };
-  return `${JSON.stringify({ jsonrpc: "2.0", id: requestId, result: { outcome } })}\n`;
+/**
+ * ACP 對 `session/request_permission` 的回覆。
+ *
+ * `optionId` 必須是伺服器在 options[] 裡實際給的值（OpenCode 2.2.7 是
+ * `once`/`always`/`reject`），不能用 `kind`（`allow_once` 等）代替，否則
+ * OpenCode 會當成拒絕，整回合以 stopReason=cancelled 結束。
+ */
+export function encodeAcpPermissionReply(requestId: number | string, optionId: string): string {
+  return `${JSON.stringify({
+    jsonrpc: "2.0",
+    id: requestId,
+    result: { outcome: { outcome: "selected", optionId } },
+  })}\n`;
 }
 
 // ---- Claude Code stream-json --------------------------------------------
