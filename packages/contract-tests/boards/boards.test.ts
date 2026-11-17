@@ -366,6 +366,7 @@ describe("白板協定", () => {
             toolName: "project_card_to_board",
             input: { boardId, cardId, itemId: newUlid() },
           },
+          { kind: "text", text: "投影完成。" },
         ],
         [
           {
@@ -373,6 +374,7 @@ describe("白板協定", () => {
             toolName: "project_card_to_board",
             input: { boardId, cardId, itemId: newUlid() },
           },
+          { kind: "text", text: "再投影一次。" },
         ],
       ],
     });

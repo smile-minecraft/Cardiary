@@ -2805,7 +2805,13 @@ function toolOutput(outcome: {
   readonly diagnostics?: readonly { readonly code: string }[];
 }): ToolOutput {
   if (!outcome.ok) {
-    return { text: outcome.message ?? "工具執行失敗" };
+    // Pi 轉接層的失敗結果把訊息放在唯一的 text 區塊；假引擎直接帶 `message`。
+    const detailed =
+      outcome.message ??
+      textOf(
+        (outcome.content ?? []) as readonly { readonly type: string; readonly text?: string }[],
+      );
+    return { text: detailed.length > 0 ? detailed : "工具執行失敗" };
   }
   const texts: string[] = [];
   let data: JSONValue | undefined;
@@ -2817,14 +2823,36 @@ function toolOutput(outcome: {
       data = content.value;
     }
   }
+  const text = texts.length > 0 ? texts.join("\n") : undefined;
+  if (data === undefined && texts.length === 1 && text !== undefined) {
+    // Pi Durable 的工具結果只接受文字與圖片，轉接層把 `json` 區塊序列化成
+    // JSON 文字；這裡把「輸出只有一段、整段就是 JSON 物件或陣列」的文字還原
+    // 成結構化資料，讓介面拿得到 `data`，`text` 保持原樣。混合文字與結構化
+    // 內容的輸出無法還原，維持只有 `text`。
+    const parsed = parseStructuredText(text);
+    if (parsed !== undefined) data = parsed;
+  }
   const truncated = (outcome.diagnostics ?? []).some(
     (diagnostic) => diagnostic.code === "output-truncated",
   );
   return {
-    ...(texts.length > 0 ? { text: texts.join("\n") } : {}),
+    ...(text === undefined ? {} : { text }),
     ...(data === undefined ? {} : { data }),
     ...(truncated ? { truncated: true } : {}),
   };
+}
+
+/** 整段文字是 JSON 物件或陣列時回傳解析結果；純量與其他文字不算結構化資料。 */
+function parseStructuredText(text: string): JSONValue | undefined {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    return parsed as JSONValue;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

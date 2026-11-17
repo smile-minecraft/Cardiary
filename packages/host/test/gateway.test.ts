@@ -1436,3 +1436,58 @@ describe("一律允許", () => {
     await client.close();
   });
 });
+
+describe("工具結果轉成協定輸出", () => {
+  async function runTool(host: TestHost): Promise<Record<string, unknown>> {
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    await subscribeSession(client, sessionId);
+    const send = client.request("session.send_message", {
+      sessionId,
+      text: "用工具",
+      delivery: "queue",
+    });
+    await client.waitForReply(send);
+    const requested = await client.waitForEvent("approval.requested");
+    const approvalId = (requested.payload as { approvalId: string }).approvalId;
+    const decide = client.request("approval.decide", { approvalId, optionId: "approve" });
+    await client.waitForReply(decide);
+    const result = await client.waitForEvent("stream.tool_result");
+    await client.close();
+    return result.payload as Record<string, unknown>;
+  }
+
+  it("只有一段 JSON 文字時還原成 data，text 保持原樣", async () => {
+    const host = await boot({
+      scripts: [
+        [
+          {
+            kind: "tool",
+            toolName: "demo.echo",
+            input: { text: '{"boardId":"b1","inboxSize":2}' },
+          },
+          { kind: "text", text: "完成" },
+        ],
+      ],
+    });
+    const payload = await runTool(host);
+    expect(payload.status).toBe("ok");
+    expect(payload.output).toEqual({
+      text: '{"boardId":"b1","inboxSize":2}',
+      data: { boardId: "b1", inboxSize: 2 },
+    });
+  });
+
+  it("純文字不是 JSON 時只留 text，不硬塞 data", async () => {
+    const host = await boot({
+      scripts: [
+        [
+          { kind: "tool", toolName: "demo.echo", input: { text: "不是 JSON 的結果" } },
+          { kind: "text", text: "完成" },
+        ],
+      ],
+    });
+    const payload = await runTool(host);
+    expect(payload.output).toEqual({ text: "不是 JSON 的結果" });
+  });
+});
