@@ -133,13 +133,16 @@ async function triggerDistillation(client: ProtocolClient): Promise<void> {
   });
 }
 
-async function boot(cards: readonly (readonly [string, string])[]): Promise<{
+async function boot(
+  cards: readonly (readonly [string, string])[],
+  options: Parameters<typeof spawnService>[0] = {},
+): Promise<{
   service: SpawnedService;
   client: ProtocolClient;
 }> {
   const folder = await makeFolder();
   await writeCards(folder, cards);
-  const service = await spawnService({ folder });
+  const service = await spawnService({ folder, ...options });
   services.push(service);
   const client = await connectAndHello(service);
   clients.push(client);
@@ -441,9 +444,11 @@ describe("每日蒸餾的協定契約", () => {
       },
       [sourceId],
     );
-    const { client } = await boot([
-      [sourceId, cardFile({ id: sourceId, title: "日常筆記", body: "週末想整理儲藏室。" })],
-    ]);
+    // 建立對話需要主力模型；Pi 組裝沒有設定模組的模型時，用腳本化模型接上。
+    const { client } = await boot(
+      [[sourceId, cardFile({ id: sourceId, title: "日常筆記", body: "週末想整理儲藏室。" })]],
+      { scripts: [[{ kind: "text", text: "好的" }]] },
+    );
 
     await triggerDistillation(client);
     const digest = await waitForDigest(client);

@@ -306,6 +306,10 @@ add(
     epoch: str("這個序號所屬的事件 epoch。與請求的 epoch 不同時，resyncRequired 一定是 true。"),
     resyncRequired: bool("是否附上完整快照；false 表示接下來只會補送 seq 之後的耐久事件。"),
     snapshot: ref("SystemStatus"),
+    pendingApprovals: arrayOf(
+      ref("ApprovalRequest"),
+      "目前待決的宿主審批（沒有對話的審批）。主機重啟後客戶端靠它重新看到仍可決定的審批；只在附上快照時出現。",
+    ),
   }),
 );
 

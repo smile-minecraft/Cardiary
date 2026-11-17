@@ -431,7 +431,8 @@ export class PersistentApprovalLedger implements ApprovalLedger {
       sessionId: request.draft.conversationId ?? null,
       turnId: request.draft.turnId ?? null,
       toolName: request.draft.action.toolName ?? null,
-      subjectId: null,
+      // `task` 列要求 subject_id 非空（storage 3.6）；宿主審批的請求識別碼作為主體。
+      subjectId: request.draft.hostApproval?.requestId ?? null,
       toolCallId: request.draft.toolCallId ?? null,
       actionKind: request.draft.action.kind,
       requestJson: JSON.stringify(request),

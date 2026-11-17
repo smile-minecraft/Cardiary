@@ -10,8 +10,15 @@
  * - 工具呼叫的永久禁止項在 `evaluateMcpToolPolicy` 擋一次，引擎的權限
  *   閘道另外會把未知的 `mcp.*` 工具當成需要人工審批。
  */
+import { randomUUID } from "node:crypto";
+
 import type { JsonValue, ToolBundleDraft } from "@cardiary/engine-adapter";
-import { McpConfigError, type McpServerInput, type McpServerRecord } from "@cardiary/domain";
+import {
+  McpConfigError,
+  validateMcpServerInput,
+  type McpServerInput,
+  type McpServerRecord,
+} from "@cardiary/domain";
 import type {
   HostModule,
   ModuleActivationContext,
@@ -415,6 +422,63 @@ export async function activateMcpModule(
     }
   };
 
+  const trackAdd = (approvalId: string, input: McpServerInput): void => {
+    const task = decideAdd(approvalId, input);
+    pendingAdds.set(approvalId, task);
+  };
+
+  /**
+   * 把驗證失敗的待決列 withdraw 收成 withdrawn，不留下永遠 pending 的列。
+   * withdraw 失敗只記錄：其他待決列照常重接，啟動也不因此失敗。
+   */
+  const withdrawInvalidPendingAdd = async (approvalId: string): Promise<void> => {
+    try {
+      await engine.approvals.withdraw(approvalId, "MCP 設定內容無效");
+    } catch (error) {
+      logger.warn("待決的 MCP 新增審批撤回失敗", {
+        approvalId,
+        message: describeError(error),
+      });
+    }
+  };
+
+  /**
+   * 重啟後把仍在 pending 的 MCP 新增審批重新掛回等待者。
+   *
+   * 審批列在 SQLite，等待中的 Promise 只在行程記憶體；不重新等待的話，
+   * 客戶端核准之後不會有人去寫正本。輸入跟著審批持久化在
+   * `action.toolInput`，這裡驗證後重建流程；驗證失敗的列 withdraw 收成
+   * withdrawn，不擋住其他待決列，也不留下永遠 pending 的列。
+   */
+  const resumePendingAdds = async (): Promise<void> => {
+    const pending = await engine.approvals.listPending();
+    for (const request of pending) {
+      if (disposed || pendingAdds.has(request.id)) continue;
+      if (request.draft.hostApproval?.component !== "mcp") continue;
+      if (request.draft.action.kind !== "module-enable") continue;
+      const raw: unknown = request.draft.action.toolInput;
+      if (raw === undefined || raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+        logger.warn("待決的 MCP 新增審批沒有可用的設定內容，不會重新等待", {
+          approvalId: request.id,
+        });
+        await withdrawInvalidPendingAdd(request.id);
+        continue;
+      }
+      let input: McpServerInput;
+      try {
+        input = validateMcpServerInput(raw as unknown as McpServerInput);
+      } catch (error) {
+        logger.warn("待決的 MCP 新增審批設定內容無效，不會重新等待", {
+          approvalId: request.id,
+          message: describeError(error),
+        });
+        await withdrawInvalidPendingAdd(request.id);
+        continue;
+      }
+      trackAdd(request.id, input);
+    }
+  };
+
   const controller: McpController = {
     async listServers(): Promise<McpServerInfo[]> {
       const records = await store.list();
@@ -427,9 +491,14 @@ export async function activateMcpModule(
           kind: "module-enable",
           summary: `新增 MCP 伺服器「${input.name}」`,
           details: describeTarget(input),
+          // 輸入跟著審批列持久化：主機重啟後要靠它重新等待、完成原本的新增。
+          // 內容與 details 相同（名稱、傳輸、目標、允許網域），不含任何秘密。
+          toolInput: input as unknown as JsonValue,
         },
         risk: "high",
         requestedBy: { kind: "host", component: "mcp" },
+        // 不屬於任何對話或外部代理；宿主審批只綁定元件與請求識別碼。
+        hostApproval: { component: "mcp", requestId: randomUUID() },
       });
       protocol.emit({
         kind: "notification",
@@ -437,8 +506,7 @@ export async function activateMcpModule(
         body: `要新增「${input.name}」；核准前不會啟動，也不會註冊任何工具。`,
         level: "warning",
       });
-      const task = decideAdd(approval.id, input);
-      pendingAdds.set(approval.id, task);
+      trackAdd(approval.id, input);
       return { approvalId: approval.id };
     },
 
@@ -528,6 +596,17 @@ export async function activateMcpModule(
   const protocolRegistration = registerMcpProtocol(protocol, controller);
 
   startAll();
+  // 等待者不在重啟後存活；把還在 pending 的新增審批重新接回，核准後才會
+  // 真的寫入正本。這條鏈刻意不等背景伺服器啟動：回傳前只需確保
+  // resumePendingAdds 已跑完、等待者已掛好，客戶端才不會比等待者先到。
+  // 不等使用者決定：上面的 catch 已把錯誤收成 warn，這個 await 不會讓
+  // 啟用失敗。
+  const resumeTask = resumePendingAdds().catch((error: unknown) => {
+    logger.warn("恢復待決的 MCP 新增審批失敗", { message: describeError(error) });
+  });
+  // settled() 仍同時等背景啟動與重接工作。
+  startupTask = Promise.all([startupTask, resumeTask]).then(() => undefined);
+  await resumeTask;
 
   return {
     controller,

@@ -98,6 +98,178 @@ describe("審批", () => {
     }
   });
 
+  it("宿主審批：成功建立、同請求 single-flight，不同 requestId 不去重", async () => {
+    const fixture = await createFixture();
+    try {
+      const draft = {
+        hostApproval: { component: "mcp", requestId: "host-1" },
+        action: {
+          kind: "module-enable" as const,
+          summary: "新增 MCP 伺服器「契約」",
+          details: [{ label: "指令", value: "/usr/bin/true" }],
+        },
+        risk: "high" as const,
+        requestedBy: { kind: "host" as const, component: "mcp" },
+      };
+      const first = await fixture.adapter.approvals.request(draft);
+      expect(first.status).toBe("pending");
+      expect(first.draft.action.toolName).toBeUndefined();
+      expect(first.approvalKey).toMatch(/^[0-9a-f]{64}$/);
+
+      // 同一個 requestId 與相同輸入：並行請求只留一筆，且拿到同一個識別碼。
+      const [left, right] = await Promise.all([
+        fixture.adapter.approvals.request(draft),
+        fixture.adapter.approvals.request({ ...draft }),
+      ]);
+      expect(left.id).toBe(first.id);
+      expect(right.id).toBe(first.id);
+
+      // 決定之後重建同一個請求：直接回已核准，不再建立 pending。
+      await fixture.adapter.approvals.decide({
+        requestId: first.id,
+        verdict: "approve",
+        decidedBy: { kind: "human", clientId: "test" },
+      });
+      const again = await fixture.adapter.approvals.request(draft);
+      expect(again.id).toBe(first.id);
+      expect(again.status).toBe("approved");
+
+      // 不同 requestId：不去重，建立新的 pending。
+      const other = await fixture.adapter.approvals.request({
+        ...draft,
+        hostApproval: { component: "mcp", requestId: "host-2" },
+      });
+      expect(other.id).not.toBe(first.id);
+      expect(other.status).toBe("pending");
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 20000);
+
+  it("宿主審批跨重啟仍待決：設定跟著審批持久化，決定後等待者讀到結果", async () => {
+    const ledger = createInMemoryApprovalLedger();
+    const toolInput = {
+      name: "Local",
+      transport: "stdio" as const,
+      command: "node",
+      args: ["server.js", "--port", "8931"],
+      allowedHosts: ["example.com"],
+    };
+    const draft = {
+      hostApproval: { component: "mcp", requestId: "host-restart" },
+      action: {
+        kind: "module-enable" as const,
+        summary: "新增 MCP 伺服器「Local」",
+        toolInput,
+      },
+      risk: "high" as const,
+      requestedBy: { kind: "host" as const, component: "mcp" },
+    };
+    const first = await createFixture({ ledger });
+    const request = await first.adapter.approvals.request(draft);
+    expect(request.draft.action.toolInput).toEqual(toolInput);
+    expect((await first.adapter.approvals.listPending()).map((entry) => entry.id)).toContain(
+      request.id,
+    );
+    const root = first.root;
+    // 模擬重啟：同一份 ledger，新的轉接層實例。
+    await first.close();
+    const second = await createFixture({ root, ledger });
+    try {
+      const restored = await second.adapter.approvals.listPending();
+      const entry = restored.find((candidate) => candidate.id === request.id);
+      expect(entry?.draft.action.toolInput).toEqual(toolInput);
+      const waiter = second.adapter.approvals.waitForDecision(request.id);
+      await second.adapter.approvals.decide({
+        requestId: request.id,
+        verdict: "approve",
+        decidedBy: { kind: "human", clientId: "test" },
+      });
+      const resolution = await waiter;
+      expect(resolution.outcome).toBe("approved");
+      expect(
+        (await second.adapter.approvals.listPending()).map((candidate) => candidate.id),
+      ).not.toContain(request.id);
+    } finally {
+      await second.cleanup();
+    }
+  }, 20000);
+
+  it("宿主審批：缺 component／requestId、元件不一致或帶對話／外部代理識別碼時拒絕", async () => {
+    const fixture = await createFixture();
+    try {
+      const draft = {
+        hostApproval: { component: "mcp", requestId: "reject-1" },
+        action: {
+          kind: "module-enable" as const,
+          summary: "新增 MCP 伺服器",
+        },
+        risk: "high" as const,
+        requestedBy: { kind: "host" as const, component: "mcp" },
+      };
+      // 缺 component／requestId。
+      await expect(
+        fixture.adapter.approvals.request({
+          ...draft,
+          hostApproval: { component: "", requestId: "reject-1" },
+        }),
+      ).rejects.toThrow();
+      await expect(
+        fixture.adapter.approvals.request({
+          ...draft,
+          hostApproval: { component: "mcp", requestId: "" },
+        }),
+      ).rejects.toThrow();
+      // hostApproval 的元件與提出者不一致。
+      await expect(
+        fixture.adapter.approvals.request({
+          ...draft,
+          hostApproval: { component: "other", requestId: "reject-1" },
+        }),
+      ).rejects.toThrow();
+      // 提出者不是宿主元件。
+      await expect(
+        fixture.adapter.approvals.request({
+          ...draft,
+          requestedBy: { kind: "tool", toolName: "shell" },
+        }),
+      ).rejects.toThrow();
+      // 宿主審批不帶對話：任何對話或回合識別碼都要拒絕。
+      await expect(
+        fixture.adapter.approvals.request({ ...draft, conversationId: "conv-1" }),
+      ).rejects.toThrow();
+      await expect(
+        fixture.adapter.approvals.request({
+          ...draft,
+          conversationId: "conv-1",
+          turnId: "turn_1",
+        }),
+      ).rejects.toThrow();
+      await expect(
+        fixture.adapter.approvals.request({ ...draft, turnId: "turn_1" }),
+      ).rejects.toThrow();
+      // 宿主審批不帶外部代理識別碼。
+      await expect(
+        fixture.adapter.approvals.request({
+          ...draft,
+          externalAgent: { sessionId: "agent-1", requestId: "permission:1" },
+        }),
+      ).rejects.toThrow();
+      // 一般對話路徑仍然要求工具名稱（模組動作沒有工具名稱，不能裝成對話審批）。
+      await expect(
+        fixture.adapter.approvals.request({
+          conversationId: "conv-1",
+          turnId: "turn_1",
+          action: draft.action,
+          risk: draft.risk,
+          requestedBy: draft.requestedBy,
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await fixture.cleanup();
+    }
+  }, 20000);
+
   it("核准後工具執行、拒絕後工具不執行", async () => {
     const counter = { runs: 0 };
     const fixture = await createFixture();

@@ -49,6 +49,12 @@ class FakeApprovals {
     return { id: `approval-${(this.#count += 1)}` };
   }
 
+  async listPending(): Promise<Array<Record<string, unknown>>> {
+    // 重接只會把 hostApproval 標記為 mcp 的 module-enable 審批掛回等待；
+    // 這個測試不重啟任何等待者，回傳空清單即可。
+    return [];
+  }
+
   waitForDecision(id: string): Promise<Record<string, unknown>> {
     return new Promise((resolve) => {
       this.#waiters.set(id, resolve);

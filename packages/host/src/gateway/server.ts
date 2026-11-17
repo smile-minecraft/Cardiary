@@ -3,7 +3,9 @@ import { createServer } from "node:http";
 import type { IncomingHttpHeaders, IncomingMessage, Server, ServerResponse } from "node:http";
 import type {
   ApprovalRequest as EngineApprovalRequest,
+  ApprovalUpdate as EngineApprovalUpdate,
   Clock,
+  Unsubscribe,
   EngineErrorCode,
   EngineErrorInfo,
   JsonValue as EngineJsonValue,
@@ -281,6 +283,8 @@ export class Gateway {
   #storageFailureHandler: ((detail: string) => void) | null = null;
   #storageFailed = false;
   #faultSkipComplete: boolean;
+  /** 宿主審批（沒有對話）轉成 system 串流事件的訂閱。 */
+  readonly #systemApprovals: Unsubscribe;
   readonly #remote: RemoteStack;
   readonly #staticHandler: StaticHandler | null;
   #http: Server | null = null;
@@ -311,6 +315,14 @@ export class Gateway {
     for (const [namespace, handler] of options.moduleHandlers ?? []) {
       this.#moduleHandlers.set(namespace, handler);
     }
+    // 宿主審批沒有會話可以搭車，直接訂閱審批服務：只把真正的宿主審批
+    // （requestedBy.kind === "host" 或帶 hostApproval）轉成 system 串流事件。
+    // external-agent 審批同樣沒有對話，但由外部代理面板處理，不進這條串流。
+    this.#systemApprovals = options.engine.approvals.subscribe((update) => {
+      void this.#handleSystemApprovalUpdate(update).catch((error: unknown) => {
+        this.#logger.error("系統審批事件落地失敗", { message: errorMessage(error) });
+      });
+    });
   }
 
   get port(): number {
@@ -581,6 +593,7 @@ export class Gateway {
     this.#closed = true;
     this.#stopped = true;
     this.#accepting = false;
+    this.#systemApprovals();
     if (this.#heartbeat) clearInterval(this.#heartbeat);
     for (const session of this.#sessions.values()) {
       session.closed = true;
@@ -1106,7 +1119,9 @@ export class Gateway {
           seq: boundary,
           epoch: this.epoch,
           resyncRequired,
-          ...(resyncRequired ? { snapshot } : {}),
+          ...(resyncRequired
+            ? { snapshot, pendingApprovals: await this.#pendingHostApprovals() }
+            : {}),
         },
       };
       await connection.send(frame);
@@ -1510,6 +1525,73 @@ export class Gateway {
     return stored;
   }
 
+  /** 落地一則 system 串流事件並廣播；沒有對話的審批走這條路。 */
+  async #appendSystemEvent(kind: string, payload: JSONObject): Promise<StoredEvent> {
+    const stored = await this.streamLog.append({
+      stream: "system",
+      kind,
+      payload,
+      at: this.#clock.now().toISOString(),
+    });
+    this.#broadcast(stored);
+    return stored;
+  }
+
+  /**
+   * 訂閱審批服務的入口：只轉送沒有對話的宿主審批。
+   *
+   * 會話審批（帶 conversationId）由會話事件的處理路徑送出；
+   * external-agent 審批也沒有對話，但屬於外部代理面板，兩者都在這裡略過，
+   * 避免客戶端收到兩份或收到沒有來源的審批。
+   */
+  async #handleSystemApprovalUpdate(update: EngineApprovalUpdate): Promise<void> {
+    if (update.kind === "requested") {
+      const request = update.request;
+      if (!this.#isHostApprovalRequest(request)) return;
+      const projection = await this.#approvalProjection(request);
+      await this.#appendSystemEvent("approval.requested", projection as unknown as JSONObject);
+      return;
+    }
+    const resolution = update.resolution;
+    if (!this.#isHostApprovalRequest(resolution.request)) return;
+    const gate = this.#pendingDecided.get(resolution.request.id);
+    // 同會話路徑：決定回應送出之後才送 approval.decided；事件發生在 decide()
+    // 內部，先讓出控制權避免卡住呼叫端。
+    if (gate) await gate.promise;
+    const always = this.#alwaysDecided.delete(resolution.request.id);
+    const decided = resolution.outcome === "approved" || resolution.outcome === "denied";
+    if (!decided) {
+      // expired／withdrawn 沒有對應的協定 effect；不送 approval.decided。
+      return;
+    }
+    const effect =
+      resolution.outcome === "approved" ? (always ? "approve_always" : "approve") : "reject";
+    const decidedByClient = resolution.decision?.decidedBy.clientId;
+    await this.#appendSystemEvent("approval.decided", {
+      approvalId: resolution.request.id,
+      sessionId: "",
+      effect,
+      decidedAt: resolution.decision?.decidedAt ?? this.#clock.now().toISOString(),
+      decidedBy:
+        decidedByClient === undefined
+          ? { kind: "system" }
+          : { kind: "client", clientId: decidedByClient },
+    });
+  }
+
+  /**
+   * 這筆審批是不是宿主審批：由主機元件提出、沒有對話。
+   *
+   * 只看 `conversationId` 不夠——外部代理的審批也沒有對話，但它有代理
+   * 面板自己的入口；再檢查提出者或 hostApproval 才能分辨。
+   */
+  #isHostApprovalRequest(request: EngineApprovalRequest): boolean {
+    return (
+      request.draft.conversationId === undefined &&
+      (request.draft.requestedBy.kind === "host" || request.draft.hostApproval !== undefined)
+    );
+  }
+
   async #flushAssistant(
     state: SessionState,
     stream: string,
@@ -1600,8 +1682,8 @@ export class Gateway {
       title: request.draft.action.summary,
       ...(summary === undefined || summary.length === 0 ? {} : { summary }),
       scope: {
-        kind: "tool_call",
-        target: request.draft.action.toolName ?? "tool",
+        kind: scopeKindOf(request.draft.action.kind),
+        target: scopeTargetOf(request),
         ...(request.draft.action.toolInput === undefined
           ? {}
           : { detail: toProtocolJson(request.draft.action.toolInput) }),
@@ -1643,6 +1725,29 @@ export class Gateway {
       return left.requestedAt.localeCompare(right.requestedAt);
     });
     return sorted[0] ?? null;
+  }
+
+  /**
+   * 重啟後仍可決定的宿主審批。
+   *
+   * 審批列在 SQLite，但訂閱只送即時事件；要求完整快照的客戶端（重開
+   * 應用程式或換 epoch）只拿得到快照，所以待決的宿主審批要跟著快照送。
+   * 已經過期的列不再列出，避免顯示一筆按了只會回「已過期」的審批；它們
+   * 的等待者在重接時會立刻收到 expired。順序與會話快照一致：先請求時間
+   * 再識別碼，多筆時畫面順序固定。
+   */
+  async #pendingHostApprovals(): Promise<ProtocolApprovalRequest[]> {
+    const now = this.#clock.now().getTime();
+    const pending = (await this.#options.engine.approvals.listPending()).filter(
+      (request) =>
+        this.#isHostApprovalRequest(request) &&
+        (request.expiresAt === null || Date.parse(request.expiresAt) > now),
+    );
+    const sorted = [...pending].sort((left, right) => {
+      if (left.requestedAt === right.requestedAt) return left.id.localeCompare(right.id);
+      return left.requestedAt.localeCompare(right.requestedAt);
+    });
+    return Promise.all(sorted.map((request) => this.#approvalProjection(request)));
   }
 
   async #sessionSnapshot(state: SessionState, historyLimit: number): Promise<SessionSnapshot> {
@@ -2789,6 +2894,21 @@ function toProtocolJson(value: EngineJsonValue): JSONValue {
   return result;
 }
 
+/** 動作種類對到協定 scope.kind；沒有工具的宿主動作不該裝成 tool_call。 */
+function scopeKindOf(kind: string): "tool_call" | "settings_change" | "schedule" {
+  if (kind === "tool-execution") return "tool_call";
+  if (kind === "schedule-create") return "schedule";
+  return "settings_change";
+}
+
+/** scope 的對象：工具名稱；宿主動作沒有工具時用元件名稱，其餘用動作種類。 */
+function scopeTargetOf(request: EngineApprovalRequest): string {
+  if (request.draft.action.toolName !== undefined) return request.draft.action.toolName;
+  const requestedBy = request.draft.requestedBy;
+  if (requestedBy.kind === "host") return requestedBy.component;
+  return request.draft.action.kind;
+}
+
 /** 設計定案：`turnId = "turn_" + 觸發訊息 ID`；沒有對照時由這裡還原。 */
 function deriveTriggerMessageId(turnId: string): string {
   return turnId.startsWith("turn_") ? turnId.slice(5) : turnId;
@@ -2805,7 +2925,13 @@ function toolOutput(outcome: {
   readonly diagnostics?: readonly { readonly code: string }[];
 }): ToolOutput {
   if (!outcome.ok) {
-    return { text: outcome.message ?? "工具執行失敗" };
+    // Pi 轉接層的失敗結果把訊息放在唯一的 text 區塊；假引擎直接帶 `message`。
+    const detailed =
+      outcome.message ??
+      textOf(
+        (outcome.content ?? []) as readonly { readonly type: string; readonly text?: string }[],
+      );
+    return { text: detailed.length > 0 ? detailed : "工具執行失敗" };
   }
   const texts: string[] = [];
   let data: JSONValue | undefined;
@@ -2817,14 +2943,36 @@ function toolOutput(outcome: {
       data = content.value;
     }
   }
+  const text = texts.length > 0 ? texts.join("\n") : undefined;
+  if (data === undefined && texts.length === 1 && text !== undefined) {
+    // Pi Durable 的工具結果只接受文字與圖片，轉接層把 `json` 區塊序列化成
+    // JSON 文字；這裡把「輸出只有一段、整段就是 JSON 物件或陣列」的文字還原
+    // 成結構化資料，讓介面拿得到 `data`，`text` 保持原樣。混合文字與結構化
+    // 內容的輸出無法還原，維持只有 `text`。
+    const parsed = parseStructuredText(text);
+    if (parsed !== undefined) data = parsed;
+  }
   const truncated = (outcome.diagnostics ?? []).some(
     (diagnostic) => diagnostic.code === "output-truncated",
   );
   return {
-    ...(texts.length > 0 ? { text: texts.join("\n") } : {}),
+    ...(text === undefined ? {} : { text }),
     ...(data === undefined ? {} : { data }),
     ...(truncated ? { truncated: true } : {}),
   };
+}
+
+/** 整段文字是 JSON 物件或陣列時回傳解析結果；純量與其他文字不算結構化資料。 */
+function parseStructuredText(text: string): JSONValue | undefined {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    return parsed as JSONValue;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

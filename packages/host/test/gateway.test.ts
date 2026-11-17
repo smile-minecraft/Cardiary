@@ -1436,3 +1436,192 @@ describe("一律允許", () => {
     await client.close();
   });
 });
+
+describe("工具結果轉成協定輸出", () => {
+  async function runTool(host: TestHost): Promise<Record<string, unknown>> {
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    await subscribeSession(client, sessionId);
+    const send = client.request("session.send_message", {
+      sessionId,
+      text: "用工具",
+      delivery: "queue",
+    });
+    await client.waitForReply(send);
+    const requested = await client.waitForEvent("approval.requested");
+    const approvalId = (requested.payload as { approvalId: string }).approvalId;
+    const decide = client.request("approval.decide", { approvalId, optionId: "approve" });
+    await client.waitForReply(decide);
+    const result = await client.waitForEvent("stream.tool_result");
+    await client.close();
+    return result.payload as Record<string, unknown>;
+  }
+
+  it("只有一段 JSON 文字時還原成 data，text 保持原樣", async () => {
+    const host = await boot({
+      scripts: [
+        [
+          {
+            kind: "tool",
+            toolName: "demo.echo",
+            input: { text: '{"boardId":"b1","inboxSize":2}' },
+          },
+          { kind: "text", text: "完成" },
+        ],
+      ],
+    });
+    const payload = await runTool(host);
+    expect(payload.status).toBe("ok");
+    expect(payload.output).toEqual({
+      text: '{"boardId":"b1","inboxSize":2}',
+      data: { boardId: "b1", inboxSize: 2 },
+    });
+  });
+
+  it("純文字不是 JSON 時只留 text，不硬塞 data", async () => {
+    const host = await boot({
+      scripts: [
+        [
+          { kind: "tool", toolName: "demo.echo", input: { text: "不是 JSON 的結果" } },
+          { kind: "text", text: "完成" },
+        ],
+      ],
+    });
+    const payload = await runTool(host);
+    expect(payload.output).toEqual({ text: "不是 JSON 的結果" });
+  });
+});
+
+describe("system stream 的宿主審批投影", () => {
+  function hostApprovalDraft(suffix: string) {
+    return {
+      action: {
+        kind: "module-enable" as const,
+        summary: `允許新增 MCP 伺服器「拒絕測試-${suffix}」`,
+        details: [{ label: "名稱", value: `拒絕測試-${suffix}` }],
+        toolInput: {
+          name: `拒絕測試-${suffix}`,
+          transport: "stdio",
+          command: "/usr/bin/true",
+          allowedHosts: [],
+        },
+      },
+      risk: "high" as const,
+      requestedBy: { kind: "host" as const, component: "mcp" },
+      hostApproval: { component: "mcp", requestId: `host-${suffix}-${Math.random()}` },
+    };
+  }
+
+  it("外部代理審批不進 system 串流；宿主審批拒絕後送出 effect=reject", async () => {
+    const host = await boot();
+    const client = await helloClient(host);
+    const subscribeId = client.request("system.subscribe", {});
+    await client.waitForReply(subscribeId);
+
+    const external = await host.host.engine.approvals.request({
+      externalAgent: { sessionId: "agent-1", requestId: "permission:1" },
+      action: {
+        kind: "tool-execution" as const,
+        summary: "外部代理工具呼叫",
+        toolName: "demo.echo",
+        toolInput: { text: "external" },
+      },
+      risk: "high" as const,
+      requestedBy: { kind: "agent" as const, agentId: "agent-1" },
+      timeoutMs: 60_000,
+    });
+
+    const hostApproval = await host.host.engine.approvals.request(hostApprovalDraft("exclude"));
+    const requested = await client.waitFor(
+      (frame) =>
+        frame.kind === "event" &&
+        frame.type === "approval.requested" &&
+        (frame.payload as { approvalId?: string }).approvalId === hostApproval.id,
+    );
+    expect((requested.payload as { sessionId?: string }).sessionId).toBe("");
+
+    // 等外部代理審批的處理結束之後再比對，避免假陰性。
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const leaked = client.frames.filter(
+      (frame) =>
+        frame.kind === "event" &&
+        (frame.payload as { approvalId?: string } | undefined)?.approvalId === external.id,
+    );
+    expect(leaked).toEqual([]);
+
+    const decideId = client.request("approval.decide", {
+      approvalId: hostApproval.id,
+      optionId: "deny",
+    });
+    await client.waitForReply(decideId);
+    const decided = await client.waitForEvent("approval.decided");
+    expect(decided.payload).toMatchObject({
+      approvalId: hostApproval.id,
+      sessionId: "",
+      effect: "reject",
+    });
+
+    // 外部代理審批決定後同樣不會出現在 system 串流。
+    await host.host.engine.approvals.decide({
+      requestId: external.id,
+      verdict: "deny",
+      decidedBy: { kind: "human", clientId: "test" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const leakedAfterDecision = client.frames.filter(
+      (frame) =>
+        frame.kind === "event" &&
+        (frame.payload as { approvalId?: string } | undefined)?.approvalId === external.id,
+    );
+    expect(leakedAfterDecision).toEqual([]);
+    await client.close();
+  });
+
+  it("system.subscribe 快照帶待決宿主審批、不列已過期；決定後清單為空", async () => {
+    const host = await boot();
+    const client = await helloClient(host);
+
+    const expiring = await host.host.engine.approvals.request({
+      ...hostApprovalDraft("expiring"),
+      timeoutMs: 5,
+    });
+    const pending = await host.host.engine.approvals.request(hostApprovalDraft("pending"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const subscribeId = client.request("system.subscribe", {});
+    const reply = await client.waitForReply(subscribeId);
+    const payload = reply.payload as {
+      resyncRequired?: boolean;
+      pendingApprovals?: Array<{
+        approvalId?: string;
+        sessionId?: string;
+        scope?: { kind?: string };
+      }>;
+    };
+    expect(payload.resyncRequired).toBe(true);
+    const ids = (payload.pendingApprovals ?? []).map((entry) => entry.approvalId);
+    expect(ids).toContain(pending.id);
+    expect(ids).not.toContain(expiring.id);
+    expect(
+      (payload.pendingApprovals ?? []).every(
+        (entry) => entry.sessionId === "" && entry.scope?.kind === "settings_change",
+      ),
+    ).toBe(true);
+
+    await client.waitForReply(
+      client.request("approval.decide", { approvalId: pending.id, optionId: "deny" }),
+    );
+    // 決定之後再要求快照：這筆不再列出。
+    const again = await helloClient(host);
+    const againSubscribe = again.request("system.subscribe", {});
+    const againReply = await again.waitForReply(againSubscribe);
+    const againPayload = againReply.payload as {
+      pendingApprovals?: Array<{ approvalId?: string }>;
+    };
+    expect((againPayload.pendingApprovals ?? []).map((entry) => entry.approvalId)).not.toContain(
+      pending.id,
+    );
+    await again.close();
+    await client.close();
+  });
+});

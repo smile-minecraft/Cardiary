@@ -427,6 +427,9 @@ describe("以 node 直接啟動的主機服務", () => {
         frame.type === "stream.turn_state" &&
         (frame.payload as { state: string }).state === "completed",
     );
+    // 回合完成後引擎才送耐久事件 context.changed（Pi 組裝的順序）；等它到齊
+    // 再取邊界，否則邊界會少算後續的耐久序號。
+    await first.waitForEvent("context.changed", 5000);
     const boundary = Math.max(
       ...first.frames
         .filter((frame) => frame.kind === "event" && typeof frame.seq === "number")
@@ -486,7 +489,7 @@ describe("以 node 直接啟動的主機服務", () => {
   it.skipIf(engineUnderTest() === "fake")(
     "重開服務後同一個資料夾續用，同一筆 clientRequestId 不會建立第二個對話",
     async () => {
-      const service = await boot();
+      const service = await boot({ scripts: [[{ kind: "text", text: "好" }]] });
       const first = await client(service);
       const created = first.request("session.create", { clientRequestId: "restart-1" });
       const createdReply = await first.waitForReply(created);
@@ -495,7 +498,11 @@ describe("以 node 直接啟動的主機服務", () => {
       await service.stop();
       services.splice(services.indexOf(service), 1);
 
-      const again = await spawnService({ demo: true, folder: service.folder });
+      const again = await spawnService({
+        demo: true,
+        folder: service.folder,
+        scripts: [[{ kind: "text", text: "好" }]],
+      });
       services.push(again);
       const connected = await client(again);
       const replay = connected.request("session.create", { clientRequestId: "restart-1" });
@@ -864,7 +871,10 @@ describe("複審非阻擋項", () => {
   });
 
   it("去重恢復：服務自己留下的 pending（resource_id 已寫）重送會補回應", async () => {
-    const service = await boot({ faultSkipDedupeComplete: true });
+    const service = await boot({
+      faultSkipDedupeComplete: true,
+      scripts: [[{ kind: "text", text: "好" }]],
+    });
     const connected = await client(service);
     const first = connected.request("session.create", { clientRequestId: "cr-pending" });
     const created = await connected.waitForReply(first);
