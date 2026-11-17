@@ -193,7 +193,7 @@ export function normalizeStreamJsonLine(line: string): NormalizedAgentEvent[] {
   if (type === "result") {
     const subtype = asString(obj.subtype);
     const result = asString(obj.result) ?? "";
-    if (subtype === "success") {
+    if (subtype === "success" && obj.is_error !== true) {
       return [{ kind: "completed", message: result ? `完成：${truncate(result, 80)}` : "完成" }];
     }
     return [

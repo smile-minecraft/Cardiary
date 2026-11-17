@@ -182,6 +182,36 @@ describe("claude stream-json normalization", () => {
       )[0],
     ).toMatchObject({ kind: "failed" });
   });
+
+  it("is_error 為 true 時即使 subtype 是 success 也算 failed，保留原始錯誤訊息", () => {
+    const events = normalizeStreamJsonLine(
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: true,
+        result: "Not logged in · Please run /login",
+      }),
+    );
+    expect(events[0]).toMatchObject({ kind: "failed" });
+    const message = (events[0] as { message: string }).message;
+    expect(message).toContain("Not logged in · Please run /login");
+    expect(message).not.toContain("完成");
+  });
+
+  it("is_error 為 true 但 result 為空時仍算 failed", () => {
+    const events = normalizeStreamJsonLine(
+      JSON.stringify({ type: "result", subtype: "success", is_error: true, result: "" }),
+    );
+    expect(events[0]).toMatchObject({ kind: "failed" });
+  });
+
+  it("is_error 為 false 的 success 正常算 completed", () => {
+    expect(
+      normalizeStreamJsonLine(
+        JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "做完" }),
+      ),
+    ).toEqual([{ kind: "completed", message: "完成：做完" }]);
+  });
 });
 
 describe("normalizeAgentLine dispatch", () => {
