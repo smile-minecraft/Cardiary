@@ -59,6 +59,7 @@ import type {
 import type {
   ReplaySafety,
   ToolBundle,
+  ToolBundlePin,
   ToolBundleState,
   ToolDiagnostic,
   ToolOutcome,
@@ -1225,11 +1226,11 @@ export class PiEngineAdapter implements EngineAdapter {
       if (meta === undefined) {
         throw engineError("conversation-not-found", `找不到對話 ${conversationId}`);
       }
-      meta.stagedUpdate = {
-        reason: update.reason,
-        systemContext: update.systemContext ?? null,
-        toolBundles: update.toolBundles === undefined ? null : ([...update.toolBundles] as never),
-      };
+      meta.stagedUpdate = mergeStagedUpdate(
+        { systemContext: meta.systemContext, toolBundles: meta.toolBundles },
+        meta.stagedUpdate,
+        update,
+      );
     }, BACKGROUND_CONTEXT);
     // 進行中的對話沒有回合在跑也要換版：等下一次壓縮出現時套用。
     void this.#watchForCompaction(conversationId);
@@ -1833,6 +1834,9 @@ export class PiEngineAdapter implements EngineAdapter {
         return;
       }
       current.stagedUpdate = null;
+      if (update.systemContext !== null) {
+        current.systemContext = update.systemContext;
+      }
       if (update.toolBundles !== null) {
         current.toolBundles = update.toolBundles as never;
       }
@@ -2310,6 +2314,68 @@ function emptyRoles(): ModelSettings["roles"] {
     writing: selection,
     "system-one": selection,
   };
+}
+
+type StagedUpdate = NonNullable<ConversationMeta["stagedUpdate"]>;
+
+/**
+ * 把一次預告合併到對話既有尚未套用的預告。
+ *
+ * 每個欄位獨立處理：呼叫端送了欄位，就拿它跟對話「已套用」的值比。相同代表
+ * 這個欄位回到現況，撤銷它先前的預告；不同才用新值覆蓋。沒送的欄位沿用先前
+ * 還沒套用的預告，所以工具組更新不會抹掉固定前綴更新，反之亦然。全數沒有
+ * 差異時回 `null`，壓縮就不會標記 `appliedUpdate`。
+ */
+function mergeStagedUpdate(
+  applied: { readonly systemContext: string; readonly toolBundles: readonly ToolBundlePin[] },
+  previous: ConversationMeta["stagedUpdate"],
+  update: ConversationUpdate,
+): StagedUpdate | null {
+  const systemContext = fieldAfterUpdate(
+    applied.systemContext,
+    previous?.systemContext ?? null,
+    update.systemContext,
+  );
+  const toolBundles = fieldAfterUpdate(
+    applied.toolBundles,
+    previous?.toolBundles ?? null,
+    update.toolBundles,
+    samePinSet,
+  );
+  if (systemContext === null && toolBundles === null) return null;
+  return {
+    reason: update.reason,
+    systemContext,
+    toolBundles: toolBundles === null ? null : [...toolBundles],
+  };
+}
+
+/**
+ * 算出一個欄位合併後的預告值；`null` 表示這個欄位沒有待套用的差異。
+ *
+ * 呼叫端沒送這個欄位時保留舊預告；送了就和已套用值比，相同撤銷、不同覆蓋。
+ */
+function fieldAfterUpdate<T>(
+  applied: T,
+  previous: T | null,
+  incoming: T | undefined,
+  equal: (left: T, right: T) => boolean = (left, right) => left === right,
+): T | null {
+  if (incoming === undefined) return previous;
+  return equal(incoming, applied) ? null : incoming;
+}
+
+/** 工具組用 bundleId 與 generation 的集合比對，順序不構成差異。 */
+function samePinSet(left: readonly ToolBundlePin[], right: readonly ToolBundlePin[]): boolean {
+  const keys = (pins: readonly ToolBundlePin[]): Set<string> =>
+    new Set(pins.map((pin) => `${pin.bundleId}@${pin.generation}`));
+  const leftKeys = keys(left);
+  const rightKeys = keys(right);
+  if (leftKeys.size !== rightKeys.size) return false;
+  for (const key of leftKeys) {
+    if (!rightKeys.has(key)) return false;
+  }
+  return true;
 }
 
 /** 轉接層對外是字串識別碼，引擎內部是數字；型別轉換只留在這裡。 */

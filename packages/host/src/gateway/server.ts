@@ -535,7 +535,7 @@ export class Gateway {
     // 直接取目前的工具組。任何一步失敗都只記診斷，不擋掉事件落地。
     if (intent.kind === "mcp-servers-changed") {
       try {
-        await this.#stageMcpBundleUpdates(intent.payload);
+        await this.#stageMcpBundleUpdates();
       } catch (error) {
         // 預告是附帶動作；失敗不能擋掉事件本身落地。
         this.#logger.warn("MCP 工具組變更預告失敗", { message: errorMessage(error) });
@@ -1966,31 +1966,18 @@ export class Gateway {
   /**
    * MCP 伺服器增刪時，把目前的工具組預告給已釘選 MCP 工具組的對話。
    *
-   * 只處理真的會換版的情況：對話沒釘 MCP、或目前工具組與它釘的一樣時
-   * 不預告，避免每次設定事件都讓壓縮多做一次無意義的換版。新對話不受
+   * 只篩掉沒釘 MCP 的對話；其餘對話一律預告目前的工具組，由引擎在套用時
+   * 判斷有沒有真正差異。引擎看得到尚未套用的更新，能正確處理「新增後又
+   * 移除」這類取消；閘道不能拿自己看到的已套用清單提前跳過。新對話不受
    * 影響，建立時直接取目前的工具組。
-   *
-   * 移除伺服器時，模組主機只會註銷工具定義，不一定即時把工具組從
-   * `activeToolBundles` 移除；所以另外用事件的 `removed` 與 `serverId`
-   * 排除被移除的那一組，確保預告的清單不含它。
    */
-  async #stageMcpBundleUpdates(payload: EngineJsonValue): Promise<void> {
+  async #stageMcpBundleUpdates(): Promise<void> {
     const conversations = await this.#options.engine.listConversations?.();
     if (conversations === undefined || conversations.length === 0) return;
-    const removedServerId = mcpRemovedServerId(payload);
-    const current = this.#pinnedToolBundles().filter(
-      (pin) => removedServerId === null || pin.bundleId !== `mcp:${removedServerId}`,
-    );
-    const currentKeys = new Set(current.map((pin) => `${pin.bundleId}@${pin.generation}`));
+    const current = this.#pinnedToolBundles();
     for (const conversation of conversations) {
       const pinned = conversation.toolBundles;
       if (!pinned.some((pin) => pin.bundleId.startsWith("mcp:"))) continue;
-      if (
-        pinned.length === current.length &&
-        pinned.every((pin) => currentKeys.has(`${pin.bundleId}@${pin.generation}`))
-      ) {
-        continue;
-      }
       try {
         await this.#options.engine.stageConversationUpdate(conversation.id, {
           reason: "module-reload",
@@ -2990,24 +2977,6 @@ function isEngineError(error: unknown): error is { code: EngineErrorCode; messag
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * 從 mcp.servers_changed 的 payload 取出被移除伺服器的 id。
- *
- * 事件是 JSON，欄位可能缺或型別不對；非移除事件回 `null`。在這裡檢查一次，
- * 之後只用确定的字串往下傳。
- */
-function mcpRemovedServerId(payload: EngineJsonValue): string | null {
-  if (typeof payload !== "object" || payload === null) return null;
-  const record = payload as Record<string, EngineJsonValue>;
-  if (Array.isArray(record) || record.removed !== true) return null;
-  const server = record.server;
-  if (typeof server !== "object" || server === null) return null;
-  const serverRecord = server as Record<string, EngineJsonValue>;
-  if (Array.isArray(serverRecord)) return null;
-  const serverId = serverRecord.serverId;
-  return typeof serverId === "string" ? serverId : null;
 }
 
 export type { GatewayLimits, StreamingMessage, ApprovalRequestedEvent, ToolPhase };

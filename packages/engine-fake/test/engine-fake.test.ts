@@ -219,6 +219,30 @@ async function openWithConversation(options?: HarnessOptions): Promise<{
   return { harness, conversationId };
 }
 
+/** 跑一回合，從提示快照讀出目前實際套用的固定前綴。 */
+async function appliedSystemContext(engine: FakeEngine, conversationId: string): Promise<string> {
+  const before = engine.readPromptLog(conversationId).length;
+  engine.enqueueScript([textStep("快照")]);
+  await engine.sendMessage({
+    conversationId,
+    content: [{ type: "text", text: "快照" }],
+    delivery: "queue",
+    sender: { kind: "human", clientId: "t" },
+  });
+  await waitFor(() => (engine.readPromptLog(conversationId).length > before ? true : null));
+  return engine.readPromptLog(conversationId).at(-1)?.systemContext ?? "";
+}
+
+/** 註冊工具組的新 generation，供釘選換版測試使用。 */
+async function registerGeneration(harness: Harness, generation: number): Promise<void> {
+  await harness.engine.tools.register({
+    bundleId: "demo",
+    label: "示範",
+    generation,
+    tools: defaultTools(harness.executed),
+  });
+}
+
 describe("假引擎", () => {
   it("逐筆簽發事件序號，並在超出緩衝時回報 gap", async () => {
     const { harness, conversationId } = await openWithConversation({ eventBufferSize: 2 });
@@ -728,6 +752,114 @@ describe("假引擎", () => {
     expect(compactions[1]?.kind === "conversation.compacted" && compactions[1].appliedUpdate).toBe(
       false,
     );
+  });
+
+  it("前綴 A→B 套用後再預告回 A，下次壓縮真的換回 A", async () => {
+    const { harness, conversationId } = await openWithConversation();
+    await harness.engine.stageConversationUpdate(conversationId, {
+      reason: "context-refresh",
+      systemContext: "前綴 B",
+    });
+    await harness.engine.compact(conversationId);
+    expect(await appliedSystemContext(harness.engine, conversationId)).toBe("前綴 B");
+
+    await harness.engine.stageConversationUpdate(conversationId, {
+      reason: "context-refresh",
+      systemContext: "測試用",
+    });
+    await harness.engine.compact(conversationId);
+    expect(await appliedSystemContext(harness.engine, conversationId)).toBe("測試用");
+  });
+
+  it("同一批預告中前綴 A→B→A 取消，壓縮不標記套用", async () => {
+    const { harness, conversationId } = await openWithConversation();
+    const events = watch(harness.engine, conversationId);
+    await harness.engine.stageConversationUpdate(conversationId, {
+      reason: "context-refresh",
+      systemContext: "前綴 B",
+    });
+    await harness.engine.stageConversationUpdate(conversationId, {
+      reason: "context-refresh",
+      systemContext: "測試用",
+    });
+    await harness.engine.compact(conversationId);
+    await harness.engine.compact(conversationId);
+    const compactions = events.filter((event) => event.kind === "conversation.compacted");
+    expect(
+      compactions.map((event) =>
+        event.kind === "conversation.compacted" ? event.appliedUpdate : null,
+      ),
+    ).toEqual([false, false]);
+    expect(await appliedSystemContext(harness.engine, conversationId)).toBe("測試用");
+  });
+
+  it("前綴與工具組以兩種先後順序預告，壓縮同時套用", async () => {
+    for (const contextFirst of [true, false]) {
+      const { harness, conversationId } = await openWithConversation();
+      await registerGeneration(harness, 2);
+      const prefixUpdate = {
+        reason: "module-reload" as const,
+        systemContext: "前綴 B",
+      };
+      const pinsUpdate = {
+        reason: "module-reload" as const,
+        toolBundles: [{ bundleId: "demo", generation: 2 }],
+      };
+      if (contextFirst) {
+        await harness.engine.stageConversationUpdate(conversationId, prefixUpdate);
+        await harness.engine.stageConversationUpdate(conversationId, pinsUpdate);
+      } else {
+        await harness.engine.stageConversationUpdate(conversationId, pinsUpdate);
+        await harness.engine.stageConversationUpdate(conversationId, prefixUpdate);
+      }
+      await harness.engine.compact(conversationId);
+      expect(await appliedSystemContext(harness.engine, conversationId)).toBe("前綴 B");
+      expect((await harness.engine.getConversation(conversationId))?.toolBundles).toEqual([
+        { bundleId: "demo", generation: 2 },
+      ]);
+      await harness.engine.close();
+    }
+  });
+
+  it("取消工具組預告但保留固定前綴", async () => {
+    const { harness, conversationId } = await openWithConversation();
+    await registerGeneration(harness, 2);
+    await harness.engine.stageConversationUpdate(conversationId, {
+      reason: "module-reload",
+      systemContext: "前綴 B",
+      toolBundles: [{ bundleId: "demo", generation: 2 }],
+    });
+    await harness.engine.stageConversationUpdate(conversationId, {
+      reason: "module-reload",
+      toolBundles: [{ bundleId: "demo", generation: 1 }],
+    });
+    await harness.engine.compact(conversationId);
+    expect(await appliedSystemContext(harness.engine, conversationId)).toBe("前綴 B");
+    expect((await harness.engine.getConversation(conversationId))?.toolBundles).toEqual([
+      { bundleId: "demo", generation: 1 },
+    ]);
+  });
+
+  it("重複預告相同的前綴與工具組不留下待套用更新", async () => {
+    const { harness, conversationId } = await openWithConversation();
+    const events = watch(harness.engine, conversationId);
+    await harness.engine.stageConversationUpdate(conversationId, {
+      reason: "module-reload",
+      systemContext: "測試用",
+      toolBundles: [{ bundleId: "demo", generation: 1 }],
+    });
+    await harness.engine.compact(conversationId);
+    await harness.engine.compact(conversationId);
+    const compactions = events.filter((event) => event.kind === "conversation.compacted");
+    expect(
+      compactions.map((event) =>
+        event.kind === "conversation.compacted" ? event.appliedUpdate : null,
+      ),
+    ).toEqual([false, false]);
+    expect(await appliedSystemContext(harness.engine, conversationId)).toBe("測試用");
+    expect((await harness.engine.getConversation(conversationId))?.toolBundles).toEqual([
+      { bundleId: "demo", generation: 1 },
+    ]);
   });
 
   it("子代理：上限 4、深度 1、blocking 與 background、列表不含支線", async () => {

@@ -146,8 +146,7 @@ describe("MCP 伺服器變更預告給進行中的對話", () => {
     const sessionId = await createSession(client);
     expect((await host.host.engine.getConversation(sessionId))?.toolBundles).toEqual([srv1, srv2]);
 
-    // 移除伺服器：真實的模組主機會保留舊的工具組釘選（只註銷工具定義），
-    // 所以這裡刻意不變動 modules.bundles，讓預告必須靠事件的 removed 排除它。
+    modules.bundles = [srv1];
     host.host.gateway.emitIntent(mcpChangedIntent("srv-2", true));
 
     await waitUntil(() => stage.mock.calls.some(([id]) => id === sessionId));
@@ -201,23 +200,134 @@ describe("MCP 伺服器變更預告給進行中的對話", () => {
     expect(stage.mock.calls.some(([id]) => id === localSession)).toBe(false);
   }, 15000);
 
-  it("工具組沒有變更時不會重複預告", async () => {
+  it("真實登錄表移除後，新對話與後續事件都不會取回已移除的工具組", async () => {
+    const host = await boot();
+    const modules = host.host.modules;
+    const captured: { remove?: () => Promise<void> } = {};
+    await modules.registry.load({
+      manifest: {
+        id: "test-mcp",
+        name: "test-mcp",
+        version: "1.0.0",
+        hostApiVersion: "1",
+        dependencies: [],
+        permissions: [],
+        settings: [],
+      },
+      activate(context) {
+        context.registerToolBundle({ bundleId: "mcp:srv-1", label: "一", tools: [] });
+        const removed = context.registerToolBundle({
+          bundleId: "mcp:srv-2",
+          label: "二",
+          tools: [],
+        });
+        captured.remove = () => removed.dispose();
+      },
+    });
+    await modules.registry.activate("test-mcp");
+    host.host.gateway.setModuleHost(modules);
+    const original = modules.activeToolBundles();
+    const remaining = original.filter((pin) => pin.bundleId === "mcp:srv-1");
+    expect(original).toHaveLength(2);
+    const client = await helloClient(host);
+    const oldSession = await createSession(client);
+    await captured.remove!();
+    const removedEvent = waitForMcpEvent(host);
+    host.host.gateway.emitIntent(mcpChangedIntent("srv-2", true));
+    await removedEvent;
+    const newSession = await createSession(client);
+    expect((await host.host.engine.getConversation(newSession))?.toolBundles).toEqual(remaining);
+    const laterEvent = waitForMcpEvent(host);
+    host.host.gateway.emitIntent(mcpChangedIntent("srv-1"));
+    await laterEvent;
+    await compact(host, oldSession);
+    expect((await host.host.engine.getConversation(oldSession))?.toolBundles).toEqual(remaining);
+  }, 15000);
+
+  it("新增後在壓縮前移除，不會套用已過時的預告", async () => {
+    const host = await boot();
+    const modules = new MutableModules();
+    const first = { bundleId: "mcp:srv-1", generation: 1 };
+    const second = { bundleId: "mcp:srv-2", generation: 1 };
+    modules.bundles = [first];
+    host.host.gateway.setModuleHost(modules);
+    const client = await helloClient(host);
+    const session = await createSession(client);
+    modules.bundles = [first, second];
+    const added = waitForMcpEvent(host);
+    host.host.gateway.emitIntent(mcpChangedIntent("srv-2"));
+    await added;
+    modules.bundles = [first];
+    const removed = waitForMcpEvent(host);
+    host.host.gateway.emitIntent(mcpChangedIntent("srv-2", true));
+    await removed;
+    await compact(host, session);
+    expect((await host.host.engine.getConversation(session))?.toolBundles).toEqual([first]);
+  }, 15000);
+
+  it("工具組沒有變更時，壓縮不標記套用且工具組不變", async () => {
     const host = await boot();
     const modules = new MutableModules();
     const srv1: ToolBundlePin = { bundleId: "mcp:srv-1", generation: 1 };
     modules.bundles = [srv1];
     host.host.gateway.setModuleHost(modules);
-    const stage = vi.spyOn(host.host.engine, "stageConversationUpdate");
 
     const client = await helloClient(host);
     const sessionId = await createSession(client);
+    const events = host.host.engine.subscribe({ conversationId: sessionId, afterSeq: 0 });
+    const compacted: Array<{ appliedUpdate: boolean }> = [];
+    void (async () => {
+      for await (const event of events.events) {
+        if (event.kind === "conversation.compacted") {
+          compacted.push({ appliedUpdate: event.appliedUpdate });
+        }
+      }
+    })();
 
-    // 清單沒變，只是收到一次事件（例如設定微調），不該讓對話多一次預告。
+    // 清單沒變，只是收到一次事件（例如設定微調）。引擎照樣收到預告，
+    // 但合併後沒有差異，不該留下待套用的更新。
     const landed = waitForMcpEvent(host);
     host.host.gateway.emitIntent(mcpChangedIntent("srv-1"));
     await landed;
-    await new Promise((resolve) => setImmediate(resolve));
+    await compact(host, sessionId);
+    await compact(host, sessionId);
 
-    expect(stage.mock.calls.some(([id]) => id === sessionId)).toBe(false);
+    expect(compacted.map((event) => event.appliedUpdate)).toEqual([false, false]);
+    expect((await host.host.engine.getConversation(sessionId))?.toolBundles).toEqual([srv1]);
+    events.close();
+  }, 15000);
+
+  it("工具組沒有變更時，先前預告的固定前綴仍能被壓縮套用", async () => {
+    const host = await boot();
+    const modules = new MutableModules();
+    const srv1: ToolBundlePin = { bundleId: "mcp:srv-1", generation: 1 };
+    modules.bundles = [srv1];
+    host.host.gateway.setModuleHost(modules);
+
+    const client = await helloClient(host);
+    const sessionId = await createSession(client);
+    const events = host.host.engine.subscribe({ conversationId: sessionId, afterSeq: 0 });
+    const compacted: Array<{ appliedUpdate: boolean }> = [];
+    void (async () => {
+      for await (const event of events.events) {
+        if (event.kind === "conversation.compacted") {
+          compacted.push({ appliedUpdate: event.appliedUpdate });
+        }
+      }
+    })();
+
+    // 先預告一個前綴更新，再送一次沒有工具組變更的事件；前綴不能被抹掉。
+    await host.host.engine.stageConversationUpdate(sessionId, {
+      reason: "context-refresh",
+      systemContext: "新的前綴",
+    });
+    const landed = waitForMcpEvent(host);
+    host.host.gateway.emitIntent(mcpChangedIntent("srv-1"));
+    await landed;
+    await compact(host, sessionId);
+
+    // 前綴預告還在，第一次壓縮就要套用；第二次沒有待套用更新。
+    expect(compacted.map((event) => event.appliedUpdate)).toEqual([true]);
+    events.close();
   }, 15000);
 });
