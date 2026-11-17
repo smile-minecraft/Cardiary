@@ -53,13 +53,15 @@ async function subscribe(connected: ProtocolClient, sessionId: string): Promise<
 }
 
 describe("以 node 直接啟動的主機服務", () => {
-  it("hello、系統訂閱與 schema 驗證；seq 從 1 開始", async () => {
+  it("hello、系統訂閱與 schema 驗證；seq 接續開機事件", async () => {
     const service = await boot();
     const connected = await client(service);
     const subscribeId = connected.request("system.subscribe", {});
     const reply = await connected.waitForReply(subscribeId);
     const payload = reply.payload as { seq: number; epoch: string; resyncRequired: boolean };
-    expect(payload.seq).toBe(1);
+    // 開機時事件的固定順序：seq 1 是主機啟動時落地的 system.status，
+    // seq 2 是檢索模組啟用時送出的 module.retrieval.status。
+    expect(payload.seq).toBe(2);
     expect(payload.resyncRequired).toBe(true);
     expect(payload.epoch).toBe(service.ready.epoch);
     expect(service.ready.clientPort).toBeGreaterThan(0);
