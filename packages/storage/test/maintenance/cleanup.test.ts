@@ -1,9 +1,19 @@
-import { existsSync, linkSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  CardFileStore,
   CardIndexStore,
   FolderLayout,
   StorageCleanup,
@@ -211,6 +221,73 @@ describe("符號連結與執行中的暫存", () => {
     cleanup.apply(["temp"]);
     expect(existsSync(layout.absolute("tmp/tmp-abc123/pi-output-session.log"))).toBe(true);
     expect(existsSync(layout.absolute("tmp/other.txt"))).toBe(false);
+  });
+});
+
+describe("清除後重啟", () => {
+  it("清除可重建的索引後，關閉再重開，卡片仍可讀取且索引可重建", () => {
+    const temp = createTempRoot("cleanup-restart");
+    cleanups.push(temp.cleanup);
+
+    const cardId = "01J00000000000000000000005";
+    const cardText = `---\nid: ${cardId}\n---\n\n重啟前寫下的卡片內容\n`;
+
+    const storage = openTestStorage(temp);
+    let storageOpen: Storage | undefined = storage;
+    cleanups.push(() => storageOpen?.close());
+
+    const files = new CardFileStore({ layout: storage.layout });
+    files.ensureDirectory();
+    files.write({ cardId, text: cardText });
+    const contentHash = createHash("sha256").update(cardText).digest("hex");
+    const fileStat = statSync(storage.layout.absolute(`cards/${cardId}.md`));
+    const indexedRecord = {
+      cardId,
+      path: `cards/${cardId}.md`,
+      mtimeMs: Math.trunc(fileStat.mtimeMs),
+      sizeBytes: fileStat.size,
+      contentHash,
+      indexedAt: "2026-11-15T00:00:00.000Z",
+      broken: false as const,
+      revision: "rev-1",
+      kind: "note",
+      title: "重啟測試",
+      body: "重啟前寫下的卡片內容",
+      tags: [],
+      sources: [],
+      links: [],
+      persona: "default",
+      createdAt: "2026-11-15T00:00:00.000Z",
+    };
+    const index = new CardIndexStore({ db: storage.cache });
+    index.upsert(indexedRecord);
+    expect(index.count()).toBe(1);
+
+    const cleanup = new StorageCleanup({
+      layout: storage.layout,
+      cache: () => storage.cache,
+    });
+    cleanup.preview(["indexes"]);
+    cleanup.apply(["indexes"]);
+    expect(storage.cache.countRows("card_index")).toBe(0);
+
+    storage.close();
+    storageOpen = undefined;
+
+    const reopened = openTestStorage(temp);
+    storageOpen = reopened;
+    try {
+      expect(reopened.folderState).toBe("ready");
+      const reopenedFiles = new CardFileStore({ layout: reopened.layout });
+      expect(reopenedFiles.read(cardId)?.text).toBe(cardText);
+      const reopenedIndex = new CardIndexStore({ db: reopened.cache });
+      expect(reopened.cache.countRows("card_index")).toBe(0);
+      reopenedIndex.rebuild([indexedRecord]);
+      expect(reopenedIndex.get(cardId)?.title).toBe("重啟測試");
+    } finally {
+      reopened.close();
+      storageOpen = undefined;
+    }
   });
 });
 

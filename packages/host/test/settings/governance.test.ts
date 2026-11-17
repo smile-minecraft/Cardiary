@@ -5,6 +5,7 @@ import { FolderLayout } from "@cardiary/storage";
 import { describe, expect, it } from "vitest";
 
 import { SettingsGovernance, SettingsGovernanceError } from "../../src/settings/governance.js";
+import { HUMAN_ONLY_SETTING_KEYS } from "../../src/settings/catalog.js";
 import { settingsService, MemorySettingsStore } from "../models/support.js";
 import { makeFolder } from "../helpers.js";
 
@@ -87,6 +88,30 @@ describe("設定分級治理", () => {
       governance.decide(result.change.changeId, "approve", { kind: "human", id: "device-1" }),
     ).toThrow(SettingsGovernanceError);
   });
+
+  // 所有 human-only 鍵逐項檢查：代理看不到、讀不到，也提議不了，錯誤訊息不含鍵名。
+  it.each(HUMAN_ONLY_SETTING_KEYS.map((key) => [key] as const))(
+    "human-only 鍵 %s 對代理完全不可見且拒絕變更",
+    async (key) => {
+      const { governance } = await harness();
+      expect(governance.listFor("agent").map((item) => item.key)).not.toContain(key);
+      expect(governance.listFor("human").map((item) => item.key)).toContain(key);
+      expect(governance.readFor(key, "agent")).toBeUndefined();
+
+      const error = (() => {
+        try {
+          governance.change({ key, value: true, actor: { kind: "agent", id: "conversation-1" } });
+        } catch (caught) {
+          return caught;
+        }
+        return null;
+      })();
+      expect(error).toBeInstanceOf(SettingsGovernanceError);
+      expect((error as Error).message).not.toContain(key);
+      expect((error as SettingsGovernanceError).code).toBe("permission_denied");
+      expect(governance.changesFor("agent")).toEqual([]);
+    },
+  );
 
   it("代理看不到 human-only，也提議不了，錯誤訊息不含鍵名", async () => {
     const { governance } = await harness();
