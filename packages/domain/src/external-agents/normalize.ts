@@ -1,5 +1,5 @@
 /**
- * 供應商協定（OpenCode ACP、Claude Code stream-json）與測試用假代理
+ * 供應商協定（OpenCode 與 Claude Code 的 ACP、舊版 Claude stream-json）與測試用假代理
  * 的正規化。只放純函式；沒有人認識主機、沒有檔案系統、沒有計時器。
  */
 import type { ExternalAgentJson, NormalizedAgentEvent } from "./types.js";
@@ -295,9 +295,8 @@ export function normalizeAgentLine(
 ): NormalizedAgentEvent[] {
   switch (kind) {
     case "opencode":
-      return normalizeAcpLine(line);
     case "claude-code":
-      return normalizeStreamJsonLine(line);
+      return normalizeAcpLine(line);
     case "fake":
       return normalizeFakeLine(line);
   }

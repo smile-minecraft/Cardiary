@@ -5,9 +5,10 @@ import { join } from "node:path";
 /**
  * 契約測試用的假代理。
  *
- * 假代理只說供應商真正的協定：opencode 說 ACP（JSON-RPC over NDJSON），
- * claude-code 說 stream-json。橋接層不認識「假的」格式，所以這組測試跑的
- * 是產品路徑：行程啟動、沙盒、訊息正規化、審批、狀態與清理。
+ * 假代理只說供應商真正的協定：opencode 與 claude-code 都說 ACP（JSON-RPC
+ * over NDJSON；Claude 走官方 claude-agent-acp adapter，也是標準 ACP）。
+ * 橋接層不認識「假的」格式，所以這組測試跑的是產品路徑：行程啟動、沙盒、
+ * 訊息正規化、審批、狀態與清理。
  *
  * 假代理把執行了什麼寫進工作目錄的 `agent.log`（沙盒只允許寫工作目錄與
  * 自己的暫存區），測試用它證明「動作有沒有真的執行」與「有沒有重跑」。
@@ -42,7 +43,12 @@ const plan = JSON.parse(readFileSync(new URL("./plan.json", import.meta.url), "u
 const log = (entry) => appendFileSync(plan.logFile, JSON.stringify({ at: Date.now(), ...entry }) + "\n");
 const send = (frame) => process.stdout.write(JSON.stringify(frame) + "\n");
 
-log({ event: "start", pid: process.pid, argv: process.argv.slice(2) });
+log({
+  event: "start",
+  pid: process.pid,
+  argv: process.argv.slice(2),
+  tokenPresent: Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN),
+});
 
 // 真正的 ACP／Claude Code 收到完成回應也不會自己退出，會等著處理下一輪。
 // 假代理也一樣：送完完成訊息就留著，由卡片這端關 stdin 來結束它。
@@ -74,14 +80,9 @@ function finish(stopReason) {
   stayAlive();
 }
 
-function claudeFinish(subtype, text) {
-  send({ type: "result", subtype, result: text, session_id: "sess_fake" });
-  log({ event: "completed" });
-  stayAlive();
-}
-
 async function runAcpPrompt() {
   log({ event: "prompt" });
+  const toolName = plan.kind === "claude-code" ? "Bash" : "bash";
   if (plan.mode === "fail") {
     process.stderr.write("假代理故意失敗\n");
     setTimeout(() => process.exit(3), 10);
@@ -112,7 +113,7 @@ async function runAcpPrompt() {
       params: {
         sessionId: "sess_fake",
         toolCall: {
-          toolName: "bash",
+          toolName,
           title: "執行 bash 指令",
           rawInput: { command: "touch marker" },
         },
@@ -132,7 +133,7 @@ async function runAcpPrompt() {
         params: {
           sessionId: "sess_fake",
           toolCall: {
-            toolName: "bash",
+            toolName,
             title: "執行 bash 指令 " + id,
             rawInput: { command: "touch marker-" + id },
           },
@@ -154,71 +155,35 @@ async function runAcpPrompt() {
   finish("end_turn");
 }
 
-async function runClaudePrompt() {
-  log({ event: "prompt" });
-  if (plan.mode === "fail") {
-    process.stderr.write("假代理故意失敗\n");
-    setTimeout(() => process.exit(3), 10);
-    return;
-  }
-  send({
-    type: "assistant",
-    message: { role: "assistant", content: [{ type: "text", text: "開始執行" }] },
-    session_id: "sess_fake",
-  });
-  if (plan.mode === "permission") {
-    send({
-      type: "control_request",
-      request_id: "perm_1",
-      request: {
-        subtype: "can_use_tool",
-        tool_name: "Bash",
-        input: { command: "touch marker" },
-        description: "執行 bash 指令",
-      },
-    });
-    const allowed = await waitPermission("perm_1");
-    log({ event: allowed ? "permission-allowed" : "permission-denied", id: "perm_1" });
-    if (allowed) writeFileSync(plan.markerFile, "executed\n");
-  }
-  if (plan.mode === "permission-pair") {
-    for (const id of ["perm_1", "perm_2"]) {
-      send({
-        type: "control_request",
-        request_id: id,
-        request: {
-          subtype: "can_use_tool",
-          tool_name: "Bash",
-          input: { command: "touch marker-" + id },
-          description: "執行 bash 指令 " + id,
-        },
-      });
-    }
-    const replies = await Promise.all([waitPermission("perm_1"), waitPermission("perm_2")]);
-    for (const [index, allowed] of replies.entries()) {
-      const id = index === 0 ? "perm_1" : "perm_2";
-      log({ event: allowed ? "permission-allowed" : "permission-denied", id });
-      if (allowed) writeFileSync(plan.markerFile + "-" + id, "executed\n");
-    }
-  }
-  if (plan.mode === "hang") {
-    log({ event: "hanging" });
-    setInterval(() => undefined, 1000);
-    return;
-  }
-  claudeFinish("success", "假代理完成");
-}
-
 function handleAcp(frame) {
   if (frame.method === "initialize") {
     send({ jsonrpc: "2.0", id: frame.id, result: { protocolVersion: 1, agentCapabilities: {} } });
     return;
   }
   if (frame.method === "session/new") {
-    send({ jsonrpc: "2.0", id: frame.id, result: { sessionId: "sess_fake" } });
+    send({
+      jsonrpc: "2.0",
+      id: frame.id,
+      result: {
+        sessionId: "sess_fake",
+        ...(plan.kind === "claude-code"
+          ? {
+              modes: {
+                currentModeId: "auto",
+                availableModes: [{ id: "default" }, { id: "auto" }],
+              },
+            }
+          : {}),
+      },
+    });
     return;
   }
   if (frame.method === "session/set_config_option") {
+    log({
+      event: "set-config",
+      configId: frame.params?.configId,
+      value: frame.params?.value,
+    });
     send({ jsonrpc: "2.0", id: frame.id, result: {} });
     return;
   }
@@ -241,34 +206,6 @@ function handleAcp(frame) {
   }
 }
 
-function handleClaude(frame) {
-  if (frame.type === "control_request" && frame.request?.subtype === "initialize") {
-    send({
-      type: "control_response",
-      response: { subtype: "success", request_id: frame.request_id, response: {} },
-    });
-    return;
-  }
-  if (frame.type === "control_request" && frame.request?.subtype === "interrupt") {
-    log({ event: "interrupt" });
-    if (plan.mode === "complete-stubborn") return;
-    setTimeout(() => process.exit(0), 10);
-    return;
-  }
-  if (
-    frame.type === "control_response" &&
-    (frame.response?.request_id === "perm_1" || frame.response?.request_id === "perm_2")
-  ) {
-    const allowed = frame.response?.response?.behavior === "allow";
-    log({ event: "permission-reply", id: frame.response.request_id, allowed });
-    resolvePermission(frame.response.request_id, allowed);
-    return;
-  }
-  if (frame.type === "user") {
-    void runClaudePrompt();
-  }
-}
-
 const lines = createInterface({ input: process.stdin });
 lines.on("line", (line) => {
   const text = line.trim();
@@ -280,8 +217,8 @@ lines.on("line", (line) => {
     log({ event: "bad-frame", text });
     return;
   }
-  if (plan.kind === "opencode") handleAcp(frame);
-  else handleClaude(frame);
+  // opencode 與 claude-code 都走 ACP 握手與 session/new。
+  handleAcp(frame);
 });
 lines.on("close", () => {
   log({ event: "stdin-closed" });

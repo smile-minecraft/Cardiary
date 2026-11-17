@@ -14,7 +14,7 @@ import { installFakeAgent, type FakeAgentMode } from "./fake-agent.js";
 
 /**
  * 外部代理的協定契約：對真的主機行程跑，代理是真的被 spawn 出來、
- * 被 sandbox-exec 包住、說真的供應商協定（ACP 或 stream-json）。
+ * 被 sandbox-exec 包住、說真的供應商協定（OpenCode 與 Claude 都走 ACP）。
  *
  * 核准與拒絕走 `approval.decide`；`agent.start` 的回應就帶啟動審批的 id，
  * 所以就算引擎不對「沒有會話的審批」發 `approval.requested`，客戶端仍能
@@ -63,7 +63,10 @@ async function bootWithAgent(options: {
   const env =
     options.kind === "opencode"
       ? { CARDIARY_AGENT_COMMAND_OPENCODE: agent.command }
-      : { CARDIARY_AGENT_COMMAND_CLAUDE_CODE: agent.command };
+      : {
+          CARDIARY_AGENT_COMMAND_CLAUDE_CODE: agent.command,
+          CARDIARY_CLAUDE_OAUTH_TOKEN: "sk-ant-test",
+        };
   const service = await spawnService({
     ...(options.folder === undefined ? {} : { folder: options.folder }),
     env,
@@ -533,6 +536,37 @@ describe.skipIf(!darwin)("外部代理契約", () => {
   );
 
   it(
+    "claude-code：核准後先設定 default 模式再送 prompt，權杖只注入行程環境",
+    async () => {
+      const { client, workingDirectory, agent } = await bootWithAgent({
+        kind: "claude-code",
+        mode: "complete",
+        steps: ["整理結果"],
+      });
+      const { agentSessionId, approvalId } = await startAgent(client, {
+        kind: "claude-code",
+        workingDirectory,
+        prompt: "整理這個資料夾",
+      });
+      await waitForState(client, agentSessionId, (state) => state.status === "waiting-approval");
+      await decide(client, approvalId, "approve");
+      await waitForState(client, agentSessionId, (state) => state.status === "stopped", 10_000);
+
+      const log = await agent.readLog();
+      const start = log.find((entry) => entry.event === "start");
+      expect(start?.tokenPresent).toBe(true);
+
+      const setConfigIndex = log.findIndex((entry) => entry.event === "set-config");
+      const promptIndex = log.findIndex((entry) => entry.event === "prompt");
+      expect(setConfigIndex).toBeGreaterThanOrEqual(0);
+      expect(promptIndex).toBeGreaterThanOrEqual(0);
+      expect(setConfigIndex).toBeLessThan(promptIndex);
+      expect(log[setConfigIndex]).toMatchObject({ configId: "mode", value: "default" });
+    },
+    TEST_TIMEOUT,
+  );
+
+  it(
     "opencode：權限請求轉成審批，核准後動作才執行",
     async () => {
       const { client, workingDirectory, markerFile, agent } = await bootWithAgent({
@@ -603,6 +637,70 @@ describe.skipIf(!darwin)("外部代理契約", () => {
       const log = await agent.readLog();
       expect(log.some((entry) => entry.event === "permission-denied")).toBe(true);
       await expect(readFile(markerFile, "utf8")).rejects.toThrow();
+    },
+    TEST_TIMEOUT,
+  );
+
+  it(
+    "claude-code：拒絕權限請求後工具不執行，也不會再問第二次",
+    async () => {
+      const { client, workingDirectory, markerFile, agent } = await bootWithAgent({
+        kind: "claude-code",
+        mode: "permission",
+        steps: ["寫入檔案"],
+      });
+      const { agentSessionId, approvalId } = await startAgent(client, {
+        kind: "claude-code",
+        workingDirectory,
+        prompt: "不要寫檔案",
+      });
+      await waitForState(client, agentSessionId, (state) => state.status === "waiting-approval");
+      await decide(client, approvalId, "approve");
+
+      const pending = await waitForState(
+        client,
+        agentSessionId,
+        (state) =>
+          state.pendingPermission !== undefined &&
+          state.pendingPermission.approvalId !== approvalId,
+      );
+      expect(pending.status).toBe("waiting-approval");
+      expect(pending.pendingPermission?.toolName).toBe("Bash");
+
+      const permissionApprovalId = pending.pendingPermission?.approvalId ?? "";
+      expect(permissionApprovalId).not.toBe("");
+      await decide(client, permissionApprovalId, "deny");
+
+      const resumed = await waitForState(
+        client,
+        agentSessionId,
+        (state) => state.message === "權限請求被拒絕：Bash",
+      );
+      expect(resumed.pendingPermission).toBeUndefined();
+      await waitForState(client, agentSessionId, (state) => state.status === "stopped", 10_000);
+
+      // 工具沒有執行：markerFile 不存在，且只有 denial 沒有 allow。
+      await expect(readFile(markerFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      const log = await agent.readLog();
+      expect(log.some((entry) => entry.event === "permission-denied")).toBe(true);
+      expect(log.some((entry) => entry.event === "permission-allowed")).toBe(false);
+      expect(log.filter((entry) => entry.event === "permission-reply")).toHaveLength(1);
+
+      // 沒有第二次權限請求：除了啟動審批與這一次工具權限，
+      // 沒有新的 pendingPermission 出現在任何狀態事件裡。
+      const known = new Set([approvalId, permissionApprovalId]);
+      const secondRequest = client.frames.find((frame) => {
+        if (
+          frame.kind !== "event" ||
+          frame.type !== "agent.state_changed" ||
+          (frame.payload as AgentStatePayload).agentSessionId !== agentSessionId
+        ) {
+          return false;
+        }
+        const next = (frame.payload as AgentStatePayload).pendingPermission;
+        return next !== undefined && !known.has(next.approvalId);
+      });
+      expect(secondRequest).toBeUndefined();
     },
     TEST_TIMEOUT,
   );

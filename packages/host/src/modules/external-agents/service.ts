@@ -14,6 +14,7 @@ import type { Readable } from "node:stream";
 import {
   applyAgentEvent,
   attachPermissionApproval,
+  type AcpJsonRpcResponse,
   classifyAcpLine,
   clearPermission,
   isTerminalAgentStatus,
@@ -21,7 +22,6 @@ import {
   markUnknownAfterRestart,
   nextEventSeq,
   normalizeAcpFrame,
-  normalizeStreamJsonLine,
   type ExternalAgentChildProcess,
   type ExternalAgentKind,
   type ExternalAgentSessionRecord,
@@ -52,6 +52,7 @@ import {
   writeRecord,
   type AgentStoragePaths,
 } from "./store.js";
+import { loadClaudeToken } from "./credentials.js";
 import {
   ACP_IDS,
   agentArgs,
@@ -61,13 +62,33 @@ import {
   encodeAcpPermissionReply,
   encodeAcpPrompt,
   encodeAcpSessionNew,
+  encodeAcpSetMode,
   encodeAcpSetModel,
-  encodeClaudeInitialize,
-  encodeClaudeInterrupt,
-  encodeClaudePermissionReply,
-  encodeClaudeUser,
   resolveAgentCommand,
+  resolveClaudeCliPath,
 } from "./transport.js";
+
+/**
+ * 子行程的 PATH：Finder 啟動的 App 只有精簡 PATH，補上常見 CLI 目錄。
+ * 保留原本順序，去掉空項與重複項，最後以 ":" 連接。
+ */
+function agentPathEnv(): string {
+  const parts = [
+    ...(process.env.PATH ?? "").split(":"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+  ];
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const part of parts) {
+    if (part.length === 0 || seen.has(part)) continue;
+    seen.add(part);
+    unique.push(part);
+  }
+  return unique.join(":");
+}
 
 /** 協定 `pendingPermission` 的投影形狀；list 與 state_changed 共用同一份。 */
 export interface PendingPermissionWire {
@@ -119,7 +140,7 @@ function projectPendingPermission(
     const label = record.agentKind === "opencode" ? "OpenCode" : "Claude Code";
     return {
       approvalId: record.startApprovalId,
-      toolName: record.agentKind === "opencode" ? "opencode-acp" : "claude-code-stream-json",
+      toolName: record.agentKind === "opencode" ? "opencode-acp" : "claude-code-acp",
       description: `啟動 ${label}：${record.workingDirectory}`,
     };
   }
@@ -180,6 +201,8 @@ export interface ExternalAgentsDeps {
   readonly homeDir?: string;
   /** OpenCode 的預設模型；spike 實測的免費模型，代理沒登入也能跑。 */
   readonly openCodeModel?: string;
+  /** Claude Code 的 OAuth 權杖；測試注入用，優先於環境變數與憑證檔。 */
+  readonly claudeToken?: string;
   /** 以下為測試可調的等待上限；正式環境用預設值。 */
   readonly timeouts?: {
     readonly cancelGraceMs?: number;
@@ -356,9 +379,7 @@ export class ExternalAgentsService {
         { label: "工作目錄", value: workingDirectory },
         { label: "任務", value: input.prompt ?? "（只啟動，不下任務）" },
       ],
-      ...(kind === "opencode"
-        ? { toolName: "opencode-acp" }
-        : { toolName: "claude-code-stream-json" }),
+      ...(kind === "opencode" ? { toolName: "opencode-acp" } : { toolName: "claude-code-acp" }),
       // 每個工作階段都是獨立的審批：同一個工具名稱不能讓後面的啟動沿用前面的決定。
       toolInput: { agentSessionId, workingDirectory },
       risk: "medium",
@@ -616,6 +637,29 @@ export class ExternalAgentsService {
       );
     }
     if (live.stopping) return;
+    // Claude 需要先拿到 OAuth 權杖才啟動；優先序測試注入 > 環境變數 > 憑證檔。
+    // 權杖只進子行程環境，不進紀錄、訊息或事件。
+    let claudeToken: string | null = null;
+    if (record.agentKind === "claude-code") {
+      claudeToken =
+        this.#deps.claudeToken ??
+        process.env.CARDIARY_CLAUDE_OAUTH_TOKEN ??
+        (await loadClaudeToken(this.#deps.paths));
+      if (!claudeToken) {
+        const updated: ExternalAgentSessionRecord = {
+          ...record,
+          status: "failed",
+          message: "Claude Code 需要授權權杖，請在設定中提供。",
+          startApprovalId: undefined,
+          updatedAt: this.#now().toISOString(),
+          lastEventSeq: record.lastEventSeq + 1,
+        };
+        live.record = updated;
+        await writeRecord(this.#storage, updated);
+        this.#emit(updated);
+        return;
+      }
+    }
     const sandbox = createCommandSandbox({
       workingDir: record.workingDirectory,
       folderRoot: this.#deps.paths.root,
@@ -646,7 +690,9 @@ export class ExternalAgentsService {
       env: agentEnv(record.agentKind, {
         home,
         tmpDir: scratchDir(this.#storage, agentSessionId),
-        pathEnv: process.env.PATH,
+        pathEnv: agentPathEnv(),
+        ...(claudeToken ? { credential: claudeToken } : {}),
+        claudeCliPath: process.env.CARDIARY_CLAUDE_CLI ?? resolveClaudeCliPath() ?? "claude",
       }),
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -670,12 +716,9 @@ export class ExternalAgentsService {
       return;
     }
 
-    if (record.agentKind === "opencode") {
-      child.write(encodeAcpInitialize());
-    } else {
-      child.write(encodeClaudeInitialize());
-      if (record.prompt) child.write(encodeClaudeUser(record.prompt));
-    }
+    // 兩種代理都先握手；Prompt 由 #onAcpResponse 的 sessionNew 回覆再送，
+    // 才不會在拿到 acpSessionId 之前就發 prompt。Claude 的 adapter 也是標準 ACP。
+    child.write(encodeAcpInitialize());
     // 記住行程的身分，之後重啟可以認出它；讀不到就回報並繼續啟動。
     const identity = await describeProcess(child.pid);
     if (identity === null) {
@@ -729,18 +772,14 @@ export class ExternalAgentsService {
   // ---- 訊息與事件 -------------------------------------------------------
 
   async #onLine(live: LiveSession, line: string): Promise<void> {
-    const kind = live.record.agentKind;
-    let events: readonly NormalizedAgentEvent[] = [];
-    if (kind === "opencode") {
-      const frame = classifyAcpLine(line);
-      if (frame.kind === "response") {
-        await this.#onAcpResponse(live, frame.frame.id, frame.frame.result ?? {}, line);
-        return;
-      }
-      events = normalizeAcpFrame(frame);
-    } else if (kind === "claude-code") {
-      events = normalizeStreamJsonLine(line);
+    // OpenCode 與 Claude Code 的 adapter 都講 ACP（JSON-RPC over NDJSON），
+    // 共用同一套分類、權限與回覆路徑。
+    const frame = classifyAcpLine(line);
+    if (frame.kind === "response") {
+      await this.#onAcpResponse(live, frame.frame.id, frame.frame, line);
+      return;
     }
+    const events = normalizeAcpFrame(frame);
     for (const event of events) {
       await this.#applyEvent(live, event);
     }
@@ -749,33 +788,97 @@ export class ExternalAgentsService {
   async #onAcpResponse(
     live: LiveSession,
     id: number | string,
-    result: Record<string, unknown>,
+    frame: AcpJsonRpcResponse,
     raw: string,
   ): Promise<void> {
     const child = live.child;
     if (!child || !child.running) return;
+    const result = (frame.result ?? {}) as Record<string, unknown>;
+    const error = frame.error;
+
     if (id === ACP_IDS.initialize) {
-      child.write(encodeAcpSessionNew(live.record.workingDirectory));
+      // 握手失敗就不能再往下送 session/new，直接記失敗，不要誤報完成。
+      if (error) {
+        await this.#applyEvent(live, {
+          kind: "failed",
+          message: `代理初始化失敗：${error.message}`,
+        });
+        return;
+      }
+      child.write(
+        encodeAcpSessionNew(live.record.workingDirectory, {
+          claudeCode: live.record.agentKind === "claude-code",
+        }),
+      );
       return;
     }
     if (id === ACP_IDS.sessionNew) {
+      if (error) {
+        await this.#applyEvent(live, {
+          kind: "failed",
+          message: `代理建立工作階段失敗：${error.message}`,
+        });
+        return;
+      }
       const sessionId = result.sessionId;
       live.acpSessionId = typeof sessionId === "string" ? sessionId : null;
-      const model =
-        this.#deps.openCodeModel ??
-        process.env.CARDIARY_AGENT_OPENCODE_MODEL ??
-        DEFAULT_OPENCODE_MODEL;
-      if (model.length > 0 && live.acpSessionId) {
-        child.write(encodeAcpSetModel(model, live.acpSessionId));
+      if (live.record.agentKind === "opencode") {
+        // Claude 的 adapter 有自己的模型設定；OpenCode 的模型 id 不能套過去。
+        // 沒有 acpSessionId 時不送 prompt，否則代理收不到也無法回 completion。
+        const model =
+          this.#deps.openCodeModel ??
+          process.env.CARDIARY_AGENT_OPENCODE_MODEL ??
+          DEFAULT_OPENCODE_MODEL;
+        if (model.length > 0 && live.acpSessionId) {
+          child.write(encodeAcpSetModel(model, live.acpSessionId));
+        }
+        if (live.record.prompt && live.acpSessionId) {
+          child.write(encodeAcpPrompt(live.acpSessionId, live.record.prompt));
+          live.permissionPromptSent = true;
+        }
+        return;
       }
-      if (live.record.prompt && live.acpSessionId) {
+      // Claude：先確認 adapter 有 default 權限模式，再設定模式。
+      // prompt 留到 setMode 成功的回應再送，避免代理還沒準備好就收到任務。
+      const modes = result.modes as { availableModes?: Array<{ id?: unknown }> } | undefined;
+      const availableModes = Array.isArray(modes?.availableModes) ? modes.availableModes : [];
+      if (!availableModes.some((mode) => mode?.id === "default")) {
+        await this.#applyEvent(live, {
+          kind: "failed",
+          message: "Claude Code adapter 沒有 default 權限模式，未送出任務。",
+        });
+        return;
+      }
+      if (live.acpSessionId) {
+        child.write(encodeAcpSetMode(live.acpSessionId, "default"));
+      }
+      return;
+    }
+    if (id === ACP_IDS.setMode) {
+      if (error) {
+        await this.#applyEvent(live, {
+          kind: "failed",
+          message: `Claude Code 權限模式設定失敗：${error.message}`,
+        });
+        return;
+      }
+      if (live.record.prompt && live.acpSessionId && !live.permissionPromptSent) {
         child.write(encodeAcpPrompt(live.acpSessionId, live.record.prompt));
         live.permissionPromptSent = true;
       }
       return;
     }
     if (id === 100) {
-      // ACP 的 session/prompt 回覆就是一輪的結束點。
+      // ACP 的 session/prompt 回覆就是一輪的結束點；JSON-RPC error 要當失敗，不能誤報完成。
+      if (error) {
+        if (!live.stopping) {
+          await this.#applyEvent(live, {
+            kind: "failed",
+            message: `代理執行失敗：${error.message}`,
+          });
+        }
+        return;
+      }
       let stopReason: string | undefined;
       try {
         stopReason = (JSON.parse(raw) as { result?: { stopReason?: string } }).result?.stopReason;
@@ -795,7 +898,8 @@ export class ExternalAgentsService {
       });
       return;
     }
-    // session/set_config_option 的回應（包括失敗）不需要動作；模型選不到也能繼續跑。
+    // OpenCode 模型設定（id=3）的回應不需要動作；模型選不到也能繼續跑。
+    // Claude 的模式設定（id=4）已在本函式前面的 setMode 分支處理。
   }
 
   async #applyEvent(live: LiveSession, event: NormalizedAgentEvent): Promise<void> {
@@ -889,24 +993,14 @@ export class ExternalAgentsService {
     }
     const child = live.child;
     if (child?.running) {
-      const message =
-        resolution.outcome === "denied"
-          ? "使用者拒絕了這個動作"
-          : resolution.outcome === "expired"
-            ? "審批逾時"
-            : "審批已撤回";
-      const reply =
-        live.record.agentKind === "opencode"
-          ? encodeAcpPermissionReply(
-              tracked.replyToken,
-              allow
-                ? (tracked.allowOptionId ?? "allow_once")
-                : (tracked.denyOptionId ?? "reject_once"),
-            )
-          : encodeClaudePermissionReply(String(tracked.replyToken), allow ? "allow" : "deny", {
-              ...(allow ? { updatedInput: tracked.input as JsonValue } : { message }),
-            });
-      child.write(reply);
+      // 兩種代理都走 ACP 的 request_permission 回覆；optionId 用伺服器實際給的值，
+      // 沒有則退回 kind，避免被當成拒絕。
+      child.write(
+        encodeAcpPermissionReply(
+          tracked.replyToken,
+          allow ? (tracked.allowOptionId ?? "allow_once") : (tracked.denyOptionId ?? "reject_once"),
+        ),
+      );
     }
     live.permissions.delete(requestKey);
   }
@@ -998,14 +1092,12 @@ export class ExternalAgentsService {
     const child = live.child;
     if (!child) return;
 
-    // cancel／interrupt 必須趁 stdin 還開著先送；等資料沖進管線後才關 stdin，
+    // cancel 必須趁 stdin 還開著先送；等資料沖進管線後才關 stdin，
     // 代理才會先讀到 cancel 才看到 EOF。配合的代理收到就自己結束；
-    // 不配合的（例如 complete-stubborn）被動等到下面的信號。
+    // 不配合的（例如 complete-stubborn）被動等到下面的信號。兩種代理都用 ACP cancel。
     let cancel: string | null = null;
-    if (live.record.agentKind === "opencode" && live.acpSessionId) {
+    if (live.acpSessionId) {
       cancel = encodeAcpCancel(live.acpSessionId);
-    } else if (live.record.agentKind === "claude-code") {
-      cancel = encodeClaudeInterrupt(`interrupt-${Date.now()}`);
     }
     await child.writeThenCloseInput(cancel);
     if (await this.#waitForExit(child, this.#cancelGraceMs)) {

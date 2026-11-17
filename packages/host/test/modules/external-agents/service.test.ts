@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import type { CardiaryPaths } from "@cardiary/module-api";
 import type { ExternalAgentSessionRecord } from "@cardiary/domain";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AgentApprovalRequestInput,
@@ -87,6 +87,14 @@ class FakeApprovals implements AgentApprovalsService {
         resolve: (outcome) => resolve(outcome),
       });
     });
+  }
+
+  /** 核准 pending 審批；必須等服務已進入 waitForDecision 才能呼叫。 */
+  approve(approvalId: string): void {
+    const entry = this.#pending.get(approvalId);
+    if (!entry) return;
+    entry.resolve({ outcome: "approved" });
+    this.#pending.delete(approvalId);
   }
 
   async withdraw(approvalId: string): Promise<void> {
@@ -255,7 +263,7 @@ describe.skipIf(process.platform !== "darwin")("外部代理啟動驗證", () =>
       requestId: "start",
       kind: "tool-execution",
       risk: "medium",
-      toolName: "claude-code-stream-json",
+      toolName: "claude-code-acp",
     });
     expect(approvals.requests[0]?.summary).toContain(workingDirectory);
     expect(events[0]).toMatchObject({
@@ -266,6 +274,37 @@ describe.skipIf(process.platform !== "darwin")("外部代理啟動驗證", () =>
     const stored = await readRecord(agentStoragePaths(paths), started.agentSessionId);
     expect(stored?.status).toBe("waiting-approval");
     expect(stored?.startApprovalId).toBe(started.approvalId);
+  });
+
+  it("Claude 沒有任何權杖來源時，核准啟動後直接失敗且不啟動行程", async () => {
+    vi.stubEnv("CARDIARY_CLAUDE_OAUTH_TOKEN", "");
+    try {
+      const { service, approvals, events, paths, workingDirectory } = await makeHarness();
+      const spawnSpy = vi.spyOn(neverSpawns, "spawn");
+
+      const started = await service.start({ agentKind: "claude-code", workingDirectory });
+
+      // 等到服務真的開始等審批（waitForDecision 會覆寫 pending entry），再核准。
+      await eventually(async () =>
+        events.some(
+          (event) =>
+            event.agentSessionId === started.agentSessionId && event.status === "waiting-approval",
+        ),
+      );
+      if (!started.approvalId) throw new Error("啟動應回傳審批 id");
+      approvals.approve(started.approvalId);
+
+      await eventually(async () => {
+        const record = await readRecord(agentStoragePaths(paths), started.agentSessionId);
+        return record?.status === "failed";
+      });
+      const failed = await readRecord(agentStoragePaths(paths), started.agentSessionId);
+      expect(failed?.message).toContain("權杖");
+      expect(spawnSpy).not.toHaveBeenCalled();
+      spawnSpy.mockRestore();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("同一個 clientRequestId 重送只建立一筆工作階段", async () => {
