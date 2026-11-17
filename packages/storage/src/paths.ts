@@ -1,6 +1,7 @@
 import {
   closeSync,
   constants,
+  fsyncSync,
   existsSync,
   fstatSync,
   lstatSync,
@@ -529,6 +530,7 @@ export function writeFileAtomic(layout: FolderLayout, absolutePath: string, cont
   );
   try {
     writeSync(fd, content, null, "utf8");
+    fsyncSync(fd);
   } finally {
     closeSync(fd);
   }

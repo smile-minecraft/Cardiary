@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 
@@ -8,6 +10,8 @@ import {
 } from "../src/modules/contract.js";
 import type { FakeModelStep } from "@cardiary/engine-fake";
 import { TestClient, startTestHost, waitUntil, type TestHost } from "./helpers.js";
+
+const MODULES_DIRECTORY = fileURLToPath(new URL("../dist/modules", import.meta.url));
 
 const hosts: TestHost[] = [];
 
@@ -1622,6 +1626,52 @@ describe("system stream 的宿主審批投影", () => {
       pending.id,
     );
     await again.close();
+    await client.close();
+  });
+
+  it("自填 agent: 前綴的 instanceId 不會變成代理；human-only 設定仍看得到", async () => {
+    const host = await boot({ modulesDirectory: MODULES_DIRECTORY });
+    const client = await TestClient.connect(host.url);
+    // 直接送 hello，自填 agent: 開頭的 instanceId；閘道只驗人類的 token，
+    // 身分由閘道指派，不會採用這個字串。
+    const helloReply = await client.waitForReply(
+      client.request("system.hello", {
+        protocol: { min: 1, max: 1 },
+        client: { name: "test", version: "0", platform: "other", instanceId: "agent:evil" },
+        auth: { token: host.token },
+      }),
+    );
+    expect(helloReply.kind).toBe("response");
+
+    const setReply = await client.waitForReply(
+      client.request("system.models.set", {
+        providers: [
+          {
+            providerId: "local",
+            kind: "local",
+            displayName: "本機",
+            baseUrl: "http://127.0.0.1:1/v1",
+            models: [{ modelId: "local-model", contextWindow: 32_768, input: ["text"] }],
+          },
+        ],
+        clientRequestId: "agent-prefix-1",
+      }),
+    );
+    expect(setReply.kind).toBe("response");
+
+    const changesReply = await client.waitForReply(client.request("settings.changes.list", {}));
+    const changes = (
+      changesReply.payload as {
+        changes: Array<{ key: string; proposedBy: string }>;
+      }
+    ).changes;
+    expect(changes.find((entry) => entry.key === "models.providers")?.proposedBy).toBe(
+      "user:agent:evil",
+    );
+
+    const settingsReply = await client.waitForReply(client.request("system.settings.get", {}));
+    const items = (settingsReply.payload as { settings: Array<{ key: string }> }).settings;
+    expect(items.map((entry) => entry.key)).toContain("permissions.mode");
     await client.close();
   });
 });

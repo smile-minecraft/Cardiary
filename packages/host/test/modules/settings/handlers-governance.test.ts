@@ -26,8 +26,9 @@ import {
 /**
  * 模型設定與批次一般設定的治理路徑。
  *
- * harness 直接呼叫處理器；`clientId` 以 `agent:` 開頭代表代理，其餘視為人。
- * `models.set` 的 actor 不再固定 `user:<clientId>`，必須跟著來源走。
+ * harness 直接呼叫處理器；沒有傳 `actor` 時代表未經閘道的測試呼叫，
+ * 會由模組當成人類。要模擬未經閘道的代理，傳 `{ kind: "agent", ... }`。
+ * `models.set` 的 actor 必須由閘道指派，模組不得自行從 clientId 推斷。
  */
 const NOW = () => new Date("2026-11-15T00:00:00.000Z");
 
@@ -63,7 +64,12 @@ async function harness(fetchModels?: () => Promise<readonly ModelInfo[]>) {
     now: NOW,
     governance,
   });
-  const call = async (type: string, payload: Record<string, unknown>, clientId = "device-1") => {
+  const call = async (
+    type: string,
+    payload: Record<string, unknown>,
+    clientId = "device-1",
+    actor?: ProtocolRequestContext["actor"],
+  ) => {
     const key = type.startsWith("system.models")
       ? "system.models"
       : type.startsWith("system.settings")
@@ -75,6 +81,7 @@ async function harness(fetchModels?: () => Promise<readonly ModelInfo[]>) {
       type,
       payload: payload as JsonValue,
       clientId,
+      ...(actor === undefined ? {} : { actor }),
     } as ProtocolRequestContext);
   };
   return { call, events, settings, store, governance, folder };
@@ -101,6 +108,7 @@ describe("模型設定的治理", () => {
       "system.models.set",
       { providers: [localProvider], clientRequestId: "agent-set" },
       "agent:agent-1",
+      { kind: "agent", id: "agent-1" },
     ).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ProtocolHandlerError);
     expect(error).toMatchObject({ code: "permission_denied" });
@@ -108,6 +116,46 @@ describe("模型設定的治理", () => {
     expect(settings.get("models.providers")).toEqual([]);
     expect(governance.changesFor("human")).toEqual([]);
     expect(governance.changesFor("agent")).toEqual([]);
+  });
+
+  it("身分只認 actor：clientId 沒有 agent: 前綴，代理一樣被拒", async () => {
+    const { call, settings, governance } = await harness();
+    const error = await call(
+      "system.models.set",
+      { providers: [localProvider], clientRequestId: "agent-plain-client" },
+      "device-1",
+      { kind: "agent", id: "agent-1" },
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ProtocolHandlerError);
+    expect(error).toMatchObject({ code: "permission_denied" });
+    expect(settings.get("models.providers")).toEqual([]);
+    expect(governance.changesFor("human")).toEqual([]);
+    // 代理看不到 human-only 的鍵。
+    const listed = (await call("settings.list", {}, "device-1", {
+      kind: "agent",
+      id: "agent-1",
+    })) as { settings: Array<{ key: string }> };
+    expect(listed.settings.map((entry) => entry.key)).not.toContain("permissions.mode");
+  });
+
+  it("沒有 actor 的 context 視為人類：clientId 的 agent: 前綴不構成代理", async () => {
+    const { call, governance } = await harness();
+    // 這個情境只會出現在單元測試直接呼叫處理器時；production 的 context
+    // 一律由閘道指派 actor。
+    const result = (await call(
+      "system.models.set",
+      { providers: [localProvider], clientRequestId: "prefix-is-not-identity" },
+      "agent:evil",
+    )) as { providers: Array<{ providerId: string }> };
+    expect(result.providers.map((entry) => entry.providerId)).toEqual(["local"]);
+    expect(governance.changesFor("human")[0]).toMatchObject({
+      key: "models.providers",
+      proposedBy: "user:agent:evil",
+    });
+    const listed = (await call("settings.list", {}, "agent:evil")) as {
+      settings: Array<{ key: string }>;
+    };
+    expect(listed.settings.map((entry) => entry.key)).toContain("permissions.mode");
   });
 
   it("人類直接設定模型仍可生效，並留下治理紀錄", async () => {
@@ -139,6 +187,7 @@ describe("模型設定的治理", () => {
       "settings.propose_change",
       { key: "models.roles", value: [mainRole], clientRequestId: "prop-1" },
       "agent:agent-1",
+      { kind: "agent", id: "agent-1" },
     )) as { change: { changeId: string; status: string } };
     expect(proposal.change.status).toBe("pending");
 
@@ -184,6 +233,7 @@ describe("批次一般設定的全有全無", () => {
         clientRequestId: "batch-agent",
       },
       "agent:agent-1",
+      { kind: "agent", id: "agent-1" },
     ).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ProtocolHandlerError);
     expect(error).toMatchObject({ code: "permission_denied" });
@@ -243,6 +293,7 @@ describe("治理紀錄與套用結果的一致性", () => {
         clientRequestId: "prop-dangling",
       },
       "agent:agent-1",
+      { kind: "agent", id: "agent-1" },
     )) as { change: { changeId: string } };
 
     const error = await call("settings.change.decide", {
@@ -268,6 +319,7 @@ describe("治理紀錄與套用結果的一致性", () => {
       "settings.propose_change",
       { key: "models.roles", value: [mainRole], clientRequestId: "prop-audit-fail" },
       "agent:agent-1",
+      { kind: "agent", id: "agent-1" },
     )) as { change: { changeId: string } };
     // 讓稽核檔變成目錄，appendFileSync 會擲出 EISDIR。
     // 提議階段可能已寫過稽核行，先清掉再把路徑換成目錄。
@@ -399,6 +451,59 @@ describe("治理紀錄與套用結果的一致性", () => {
     ]);
   });
 
+  it("稽核寫入失敗後重送同一個 clientRequestId 不會留下重複紀錄", async () => {
+    const { call, governance, settings, folder } = await harness();
+    const auditPath = join(folder.path, "state", "settings-audit.jsonl");
+    await rm(auditPath, { force: true });
+    await mkdir(auditPath);
+
+    const first = await call("system.models.set", {
+      providers: [localProvider],
+      clientRequestId: "audit-fail-replay",
+    }).catch((caught: unknown) => caught);
+    expect(first).toBeInstanceOf(ProtocolHandlerError);
+    expect(first).toMatchObject({ code: "conflict" });
+    expect(governance.changesFor("human")).toHaveLength(1);
+
+    // 稽核檔修好後重送：冪等鍵在紀錄落盤時已登記，重送只回放既有紀錄。
+    await rm(auditPath, { recursive: true, force: true });
+    await call("system.models.set", {
+      providers: [localProvider],
+      clientRequestId: "audit-fail-replay",
+    });
+    const records = governance
+      .changesFor("human")
+      .filter((entry) => entry.key === "models.providers");
+    expect(records).toHaveLength(1);
+    expect(settings.get("models.providers")).toMatchObject([localProvider]);
+  });
+
+  it("批次稽核寫入失敗後重送同一個 clientRequestId 不會留下重複紀錄", async () => {
+    const { call, governance, settings, folder } = await harness();
+    const auditPath = join(folder.path, "state", "settings-audit.jsonl");
+    await rm(auditPath, { force: true });
+    await mkdir(auditPath);
+
+    const first = await call("system.settings.set", {
+      changes: [{ key: "context.reserveTokens", value: 10_000 }],
+      clientRequestId: "batch-audit-fail-replay",
+    }).catch((caught: unknown) => caught);
+    expect(first).toBeInstanceOf(ProtocolHandlerError);
+    expect(first).toMatchObject({ code: "conflict" });
+    expect(governance.changesFor("human")).toHaveLength(1);
+
+    await rm(auditPath, { recursive: true, force: true });
+    await call("system.settings.set", {
+      changes: [{ key: "context.reserveTokens", value: 10_000 }],
+      clientRequestId: "batch-audit-fail-replay",
+    });
+    const records = governance
+      .changesFor("human")
+      .filter((entry) => entry.key === "context.reserveTokens");
+    expect(records).toHaveLength(1);
+    expect(settings.get("context.reserveTokens")).toBe(10_000);
+  });
+
   it("批次套用時變更紀錄寫入失敗，整批退回原值且一筆都不生效", async () => {
     const { call, settings, governance, folder } = await harness();
     await mkdir(join(folder.path, "state", "settings-changes.json"), { recursive: true });
@@ -464,6 +569,7 @@ describe("治理紀錄與套用結果的一致性", () => {
         clientRequestId: "propose-display",
       },
       "agent:agent-1",
+      { kind: "agent", id: "agent-1" },
     );
     const pending = governance
       .changesFor("human")
@@ -505,6 +611,7 @@ describe("治理紀錄與套用結果的一致性", () => {
       "system.models.set",
       { providers: [localProvider], clientRequestId: "agent-denied" },
       "agent:agent-1",
+      { kind: "agent", id: "agent-1" },
     ).catch((caught: unknown) => caught);
     const lines = await readFile(join(folder.path, "state", "settings-audit.jsonl"), "utf8").catch(
       () => "",

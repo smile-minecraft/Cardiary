@@ -182,6 +182,9 @@ export class SettingsGovernance {
         proposedAt: this.#now().toISOString(),
       };
       this.#persist([change, ...this.#changes]);
+      // 正本檔落盤後立即登記冪等鍵：即使稽核失敗，重送也會命中既有紀錄，
+      // 不會重複落盤。
+      if (idempotencyKey !== undefined) this.#idempotency.set(idempotencyKey, change);
       this.#audit({
         actor: actorText(input.actor),
         action: "propose",
@@ -190,7 +193,6 @@ export class SettingsGovernance {
         changeId: change.changeId,
         key: input.key,
       });
-      if (idempotencyKey !== undefined) this.#idempotency.set(idempotencyKey, change);
       return { change, applied: false };
     }
 
@@ -285,6 +287,13 @@ export class SettingsGovernance {
     }));
     if (built.length > 0) {
       this.#persist([...built.map(({ record }) => record), ...this.#changes]);
+      // 正本檔落盤後立即登記冪等鍵：稽核失敗時批次仍視為已落盤，呼叫方重送
+      // 會命中既有紀錄，不會重複寫入。
+      for (const { entry, record } of built) {
+        if (entry.idempotencyKey !== undefined) {
+          this.#idempotency.set(entry.idempotencyKey, record);
+        }
+      }
       for (const { entry, record } of built) {
         this.#audit({
           actor: actorText(entry.input.actor),
@@ -294,9 +303,6 @@ export class SettingsGovernance {
           changeId: record.changeId,
           key: record.key,
         });
-        if (entry.idempotencyKey !== undefined) {
-          this.#idempotency.set(entry.idempotencyKey, record);
-        }
       }
     }
     const all = [...replayed, ...built.map(({ record }) => record)];
@@ -417,6 +423,10 @@ export class SettingsGovernance {
       ...(input.decidedAt === undefined ? {} : { decidedAt: input.decidedAt }),
     };
     this.#persist([record, ...this.#changes.filter((entry) => entry.changeId !== record.changeId)]);
+    // 正本檔落盤後立即登記冪等鍵：即使稽核失敗，重送也會命中既有紀錄。
+    if (input.idempotencyKey !== undefined) {
+      this.#idempotency.set(input.idempotencyKey, record);
+    }
     this.#audit({
       actor: input.actor,
       action: input.action,
@@ -425,9 +435,6 @@ export class SettingsGovernance {
       changeId: record.changeId,
       key: input.key,
     });
-    if (input.idempotencyKey !== undefined) {
-      this.#idempotency.set(input.idempotencyKey, record);
-    }
     return record;
   }
 

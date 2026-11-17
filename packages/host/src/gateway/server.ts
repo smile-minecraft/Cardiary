@@ -1018,11 +1018,15 @@ export class Gateway {
     }
     const sessionId =
       typeof request.payload.sessionId === "string" ? request.payload.sessionId : undefined;
+    const clientInstanceId = connection.clientInstanceId || connection.id;
     const context: ProtocolRequestContext = {
       type: request.type,
       payload: request.payload as EngineJsonValue,
       ...(sessionId === undefined ? {} : { sessionId }),
-      clientId: connection.clientInstanceId || connection.id,
+      // 閘道目前只接受人類（殼層 client token 或遠端裝置 token），沒有代理
+      // 連線；身分一律由這裡指派，客戶端自填的 instanceId 只當顯示用。
+      actor: { kind: "human", id: clientInstanceId },
+      clientId: clientInstanceId,
     };
     try {
       const result = await modules.dispatchProtocol(context);

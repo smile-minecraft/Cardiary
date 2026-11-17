@@ -290,9 +290,10 @@ async function decideChange(
 }
 
 function actorOf(request: ProtocolRequestContext): GovernanceActor {
-  if (request.clientId.startsWith("agent:")) {
-    return { kind: "agent", id: request.clientId.slice(6) };
-  }
+  if (request.actor !== undefined) return request.actor;
+  // 沒有 actor 代表請求不是經由閘道進來（例如單元測試直接呼叫處理器）。
+  // 這時用 clientId 當人類身分；clientId 是客戶端自填的字串，production
+  // 路徑一律由閘道指派 actor，不會靠它變成代理或繞過 human-only。
   return { kind: "human", id: request.clientId };
 }
 
