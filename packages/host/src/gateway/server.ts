@@ -3,7 +3,9 @@ import { createServer } from "node:http";
 import type { IncomingHttpHeaders, IncomingMessage, Server, ServerResponse } from "node:http";
 import type {
   ApprovalRequest as EngineApprovalRequest,
+  ApprovalUpdate as EngineApprovalUpdate,
   Clock,
+  Unsubscribe,
   EngineErrorCode,
   EngineErrorInfo,
   JsonValue as EngineJsonValue,
@@ -281,6 +283,8 @@ export class Gateway {
   #storageFailureHandler: ((detail: string) => void) | null = null;
   #storageFailed = false;
   #faultSkipComplete: boolean;
+  /** 宿主審批（沒有對話）轉成 system 串流事件的訂閱。 */
+  readonly #systemApprovals: Unsubscribe;
   readonly #remote: RemoteStack;
   readonly #staticHandler: StaticHandler | null;
   #http: Server | null = null;
@@ -311,6 +315,13 @@ export class Gateway {
     for (const [namespace, handler] of options.moduleHandlers ?? []) {
       this.#moduleHandlers.set(namespace, handler);
     }
+    // 宿主審批沒有會話可以搭車，直接訂閱審批服務：不帶對話的
+    // requested／resolved 轉成 system 串流事件，兩條串流的客戶端都會收到。
+    this.#systemApprovals = options.engine.approvals.subscribe((update) => {
+      void this.#handleSystemApprovalUpdate(update).catch((error: unknown) => {
+        this.#logger.error("系統審批事件落地失敗", { message: errorMessage(error) });
+      });
+    });
   }
 
   get port(): number {
@@ -581,6 +592,7 @@ export class Gateway {
     this.#closed = true;
     this.#stopped = true;
     this.#accepting = false;
+    this.#systemApprovals();
     if (this.#heartbeat) clearInterval(this.#heartbeat);
     for (const session of this.#sessions.values()) {
       session.closed = true;
@@ -1510,6 +1522,62 @@ export class Gateway {
     return stored;
   }
 
+  /** 落地一則 system 串流事件並廣播；沒有對話的審批走這條路。 */
+  async #appendSystemEvent(kind: string, payload: JSONObject): Promise<StoredEvent> {
+    const stored = await this.streamLog.append({
+      stream: "system",
+      kind,
+      payload,
+      at: this.#clock.now().toISOString(),
+    });
+    this.#broadcast(stored);
+    return stored;
+  }
+
+  /**
+   * 訂閱審批服務的入口：只轉送沒有對話的宿主審批。
+   *
+   * 會話審批（帶 conversationId）由會話事件的處理路徑送出，
+   * 這裡略過，避免客戶端收到兩份。
+   */
+  async #handleSystemApprovalUpdate(update: EngineApprovalUpdate): Promise<void> {
+    if (update.kind === "requested") {
+      const request = update.request;
+      if (request.draft.conversationId !== undefined) return;
+      const projection = await this.#approvalProjection(request);
+      await this.#appendSystemEvent(
+        "approval.requested",
+        projection as unknown as JSONObject,
+      );
+      return;
+    }
+    const resolution = update.resolution;
+    if (resolution.request.draft.conversationId !== undefined) return;
+    const gate = this.#pendingDecided.get(resolution.request.id);
+    // 同會話路徑：決定回應送出之後才送 approval.decided；事件發生在 decide()
+    // 內部，先讓出控制權避免卡住呼叫端。
+    if (gate) await gate.promise;
+    const always = this.#alwaysDecided.delete(resolution.request.id);
+    const decided = resolution.outcome === "approved" || resolution.outcome === "denied";
+    if (!decided) {
+      // expired／withdrawn 沒有對應的協定 effect；不送 approval.decided。
+      return;
+    }
+    const effect =
+      resolution.outcome === "approved" ? (always ? "approve_always" : "approve") : "reject";
+    const decidedByClient = resolution.decision?.decidedBy.clientId;
+    await this.#appendSystemEvent("approval.decided", {
+      approvalId: resolution.request.id,
+      sessionId: "",
+      effect,
+      decidedAt: resolution.decision?.decidedAt ?? this.#clock.now().toISOString(),
+      decidedBy:
+        decidedByClient === undefined
+          ? { kind: "system" }
+          : { kind: "client", clientId: decidedByClient },
+    });
+  }
+
   async #flushAssistant(
     state: SessionState,
     stream: string,
@@ -1600,8 +1668,8 @@ export class Gateway {
       title: request.draft.action.summary,
       ...(summary === undefined || summary.length === 0 ? {} : { summary }),
       scope: {
-        kind: "tool_call",
-        target: request.draft.action.toolName ?? "tool",
+        kind: scopeKindOf(request.draft.action.kind),
+        target: scopeTargetOf(request),
         ...(request.draft.action.toolInput === undefined
           ? {}
           : { detail: toProtocolJson(request.draft.action.toolInput) }),
@@ -2787,6 +2855,21 @@ function toProtocolJson(value: EngineJsonValue): JSONValue {
     result[key] = toProtocolJson(item as EngineJsonValue);
   }
   return result;
+}
+
+/** 動作種類對到協定 scope.kind；沒有工具的宿主動作不該裝成 tool_call。 */
+function scopeKindOf(kind: string): "tool_call" | "settings_change" | "schedule" {
+  if (kind === "tool-execution") return "tool_call";
+  if (kind === "schedule-create") return "schedule";
+  return "settings_change";
+}
+
+/** scope 的對象：工具名稱；宿主動作沒有工具時用元件名稱，其餘用動作種類。 */
+function scopeTargetOf(request: EngineApprovalRequest): string {
+  if (request.draft.action.toolName !== undefined) return request.draft.action.toolName;
+  const requestedBy = request.draft.requestedBy;
+  if (requestedBy.kind === "host") return requestedBy.component;
+  return request.draft.action.kind;
 }
 
 /** 設計定案：`turnId = "turn_" + 觸發訊息 ID`；沒有對照時由這裡還原。 */

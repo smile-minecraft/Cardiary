@@ -26,6 +26,8 @@ async function listServers(): Promise<Record<string, unknown>[]> {
 beforeAll(async () => {
   service = await spawnService();
   client = await connectAndHello(service);
+  const subscribe = client.request("system.subscribe", {});
+  await client.waitForReply(subscribe);
 }, 20_000);
 
 afterAll(async () => {
@@ -44,11 +46,31 @@ describe("MCP 伺服器審批契約", () => {
     const addReply = await client.waitForReply(addId);
     const approvalId = (addReply.payload as { approvalId: string }).approvalId;
     expect(approvalId).toBeTruthy();
+
+    // 核准前客戶端要在 system 串流上看到 approval.requested；MCP 清單是空的。
+    const requested = await client.waitFor(
+      (frame) =>
+        frame.kind === "event" &&
+        frame.type === "approval.requested" &&
+        (frame.payload as { approvalId?: string }).approvalId === approvalId,
+      5000,
+    );
+    expect((requested.payload as { scope?: { kind?: string } }).scope?.kind).toBe(
+      "settings_change",
+    );
     expect(await listServers()).toEqual([]);
 
     await client.waitForReply(
       client.request("approval.decide", { approvalId, optionId: "approve" }),
     );
+    const decided = await client.waitFor(
+      (frame) =>
+        frame.kind === "event" &&
+        frame.type === "approval.decided" &&
+        (frame.payload as { approvalId?: string }).approvalId === approvalId,
+      5000,
+    );
+    expect(decided.payload).toMatchObject({ sessionId: "", effect: "approve" });
 
     let servers: Record<string, unknown>[] = [];
     for (let attempt = 0; attempt < 50 && servers.length === 0; attempt += 1) {

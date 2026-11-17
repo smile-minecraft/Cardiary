@@ -10,6 +10,8 @@
  * - 工具呼叫的永久禁止項在 `evaluateMcpToolPolicy` 擋一次，引擎的權限
  *   閘道另外會把未知的 `mcp.*` 工具當成需要人工審批。
  */
+import { randomUUID } from "node:crypto";
+
 import type { JsonValue, ToolBundleDraft } from "@cardiary/engine-adapter";
 import { McpConfigError, type McpServerInput, type McpServerRecord } from "@cardiary/domain";
 import type {
@@ -430,6 +432,8 @@ export async function activateMcpModule(
         },
         risk: "high",
         requestedBy: { kind: "host", component: "mcp" },
+        // 不屬於任何對話或外部代理；宿主審批只綁定元件與請求識別碼。
+        hostApproval: { component: "mcp", requestId: randomUUID() },
       });
       protocol.emit({
         kind: "notification",
