@@ -36,11 +36,23 @@ public struct UiBlockPresentation: Equatable, Sendable {
     public let id: String
     public let renderer: String
     public let data: JSONValue
+    /// 產生這份內容的工具。工具結果送達（或回合結束）前不掛載網頁。
+    public let sourceToolCallId: String?
+    /// 來源串流是否完成。只有完成才把 HTML 掛進 WebView。
+    public let isReady: Bool
 
-    public init(id: String, renderer: String, data: JSONValue) {
+    public init(
+        id: String,
+        renderer: String,
+        data: JSONValue,
+        sourceToolCallId: String? = nil,
+        isReady: Bool = true
+    ) {
         self.id = id
         self.renderer = renderer
         self.data = data
+        self.sourceToolCallId = sourceToolCallId
+        self.isReady = isReady
     }
 }
 
@@ -355,16 +367,33 @@ public final class ConversationModel: ObservableObject {
                 tool.outputText = output
                 tool.diagnosticCount = payload.diagnostics.count
             }
+            // 工具結果送達就代表串流完成；把綁在這個工具上的 UI 區塊標為可掛載。
+            markUiReady(toolCallId: payload.toolCallId)
 
         case .streamTurnStateEvent(let event):
             activeTurn = event.payload
+            // 回合結束也是一道保險：即使工具結果事件漏接，完成的回合不該留著空白佔位。
+            if event.payload.state == .completed || event.payload.state == .failed {
+                markUiReady(turnId: event.payload.turnId)
+            }
 
         case .streamUiEvent(let event):
             let payload = event.payload
             let id = "ui:\(payload.toolCallId ?? payload.turnId):\(payload.renderer):\(items.count)"
+            // 只有 MCP App 會掛載 WebView，才需要等串流完成。原生 renderer 立即顯示。
+            let isApp = payload.renderer == McpAppBlockContent.renderer
+            let ready = !isApp
+                || toolIsComplete(toolCallId: payload.toolCallId)
+                || (payload.toolCallId == nil && turnIsComplete(turnId: payload.turnId))
             upsert(ConversationItem(
                 id: id,
-                kind: .ui(UiBlockPresentation(id: id, renderer: payload.renderer, data: payload.data))
+                kind: .ui(UiBlockPresentation(
+                    id: id,
+                    renderer: payload.renderer,
+                    data: payload.data,
+                    sourceToolCallId: payload.toolCallId,
+                    isReady: ready
+                ))
             ))
 
         case .approvalRequestedEvent(let event):
@@ -429,6 +458,46 @@ public final class ConversationModel: ObservableObject {
         guard case .tool(var tool) = items[index].kind else { return }
         update(&tool)
         items[index].kind = .tool(tool)
+    }
+
+    private func toolIsComplete(toolCallId: String?) -> Bool {
+        guard let toolCallId else { return false }
+        return items.contains { item in
+            if case .tool(let tool) = item.kind {
+                return tool.toolCallId == toolCallId && tool.status == .complete
+            }
+            return false
+        }
+    }
+
+    private func turnIsComplete(turnId: String) -> Bool {
+        guard let activeTurn, activeTurn.turnId == turnId else { return false }
+        return [.completed, .failed, .interrupted].contains(activeTurn.state)
+    }
+
+    /// 把綁在同一個工具（或回合）上的 UI 區塊標為可掛載。
+    private func markUiReady(toolCallId: String? = nil, turnId: String? = nil) {
+        for index in items.indices {
+            guard case .ui(let block) = items[index].kind, !block.isReady else { continue }
+            let matches: Bool
+            if let toolCallId {
+                matches = block.sourceToolCallId == toolCallId
+            } else if let turnId {
+                matches = block.sourceToolCallId == nil && block.id.hasPrefix("ui:\(turnId):")
+            } else {
+                matches = false
+            }
+            if matches {
+                let ready = UiBlockPresentation(
+                    id: block.id,
+                    renderer: block.renderer,
+                    data: block.data,
+                    sourceToolCallId: block.sourceToolCallId,
+                    isReady: true
+                )
+                items[index].kind = .ui(ready)
+            }
+        }
     }
 
     private func prepend(_ entries: [TranscriptEntry]) {

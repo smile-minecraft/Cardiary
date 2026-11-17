@@ -31,23 +31,28 @@ public struct McpAppWebView: NSViewRepresentable {
     /// 串流是否完成。回去之前不載入 HTML，只留空容器當占位；完成後才掛載內容。
     /// 預設 `true` 讓既有呼叫端行為不變。
     public let isReady: Bool
+    /// 頁面回報內容高度時呼叫；原生這側據此調整容器高度，避免固定空白或截斷。
+    public let onHeightChange: ((CGFloat) -> Void)?
 
     public init(
         html: String,
         allowedHosts: [String],
         context: McpAppHostContext,
-        isReady: Bool = true
+        isReady: Bool = true,
+        onHeightChange: ((CGFloat) -> Void)? = nil
     ) {
         self.html = html
         self.allowedHosts = allowedHosts
         self.context = context
         self.isReady = isReady
+        self.onHeightChange = onHeightChange
     }
 
     public func makeCoordinator() -> Coordinator {
         Coordinator(
             policy: McpAppNavigationPolicy(allowedHosts: allowedHosts),
-            context: context
+            context: context,
+            onHeightChange: onHeightChange
         )
     }
 
@@ -62,6 +67,7 @@ public struct McpAppWebView: NSViewRepresentable {
 
     public func updateNSView(_ container: McpAppContainerView, context swiftContext: Context) {
         swiftContext.coordinator.updateContext(context)
+        swiftContext.coordinator.onHeightChange = onHeightChange
         // 與 makeNSView 走同一個入口：串流中不載入，完成後且 HTML 不同才載入。
         swiftContext.coordinator.loadIfReady(html: html, isReady: isReady, in: container.webView)
     }
@@ -87,7 +93,42 @@ public struct McpAppWebView: NSViewRepresentable {
             contentWorld: .page,
             name: messageHandlerName
         )
+        // 在頁面自己的 world 觀察內容高度，變化時回報給殼。放在文件尾執行，
+        // 此時 documentElement 已存在；重複高度不回報，避免無限迴圈。
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: Self.heightObserverScript(handlerName: messageHandlerName),
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        ))
         return configuration
+    }
+
+    /// 頁面這側的高度觀測：先送一次目前高度，之後用 `ResizeObserver` 追蹤
+    /// `documentElement`。`ResizeObserver` 不存在時（舊 WebKit）退回輪詢。
+    static func heightObserverScript(handlerName: String) -> String {
+        """
+        (function () {
+          var handler = window.webkit && window.webkit.messageHandlers &&
+            window.webkit.messageHandlers[\(McpAppScript.literal(handlerName))];
+          if (!handler) { return; }
+          var last = -1;
+          function report() {
+            var element = document.documentElement;
+            var height = Math.ceil(element ? element.scrollHeight : 0);
+            if (height > 0 && height !== last) {
+              last = height;
+              handler.postMessage({ type: 'height', height: height });
+            }
+          }
+          report();
+          if (typeof ResizeObserver !== 'undefined') {
+            new ResizeObserver(report).observe(document.documentElement);
+          } else {
+            setInterval(report, 200);
+          }
+          window.addEventListener('load', report);
+        })();
+        """
     }
 
     /// 把資料寫進 DOM 的指令碼。在專屬 content world 執行，頁面只讀得到結果。
@@ -117,10 +158,18 @@ public struct McpAppWebView: NSViewRepresentable {
         private weak var webView: WKWebView?
         private(set) var context: McpAppHostContext
         private(set) var loadedHTML: String?
+        /// 頁面回報高度的去抖結果；只有变化才往外送。
+        private(set) var contentHeight: CGFloat?
+        var onHeightChange: ((CGFloat) -> Void)?
 
-        init(policy: McpAppNavigationPolicy, context: McpAppHostContext) {
+        init(
+            policy: McpAppNavigationPolicy,
+            context: McpAppHostContext,
+            onHeightChange: ((CGFloat) -> Void)? = nil
+        ) {
             self.policy = policy
             self.context = context
+            self.onHeightChange = onHeightChange
         }
 
         /// 只有串流完成、且這份 HTML 還沒載入過才載入。`makeNSView` 和
@@ -134,6 +183,7 @@ public struct McpAppWebView: NSViewRepresentable {
         func load(html: String, in webView: WKWebView) {
             self.webView = webView
             loadedHTML = html
+            contentHeight = nil
             webView.loadHTMLString(html, baseURL: nil)
         }
 
@@ -200,6 +250,12 @@ public struct McpAppWebView: NSViewRepresentable {
             switch parsed {
             case .ready:
                 deliverContext()
+            case .height(let height):
+                // 同一高度重複回報不往外送，避免 SwiftUI 無謂重排。
+                if contentHeight != height {
+                    contentHeight = height
+                    onHeightChange?(height)
+                }
             }
         }
     }

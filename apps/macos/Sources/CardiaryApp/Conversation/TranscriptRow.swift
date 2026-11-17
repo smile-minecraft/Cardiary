@@ -3,6 +3,8 @@ import SwiftUI
 
 /// 對話流的一列：使用者訊息、助理訊息、工具呼叫或結構化資料。
 struct TranscriptRow: View {
+    /// 目前的深淺色配置，交给嵌入的 MCP App 作為主題。
+    @Environment(\.colorScheme) private var colorScheme
     let item: ConversationItem
     /// 只有最後一則使用者訊息會帶非 nil 的重送動作；`isResending` 進行中時按鈕顯示明確狀態。
     let resendAction: (() -> Void)?
@@ -72,7 +74,7 @@ struct TranscriptRow: View {
                 .padding(.leading, DesignTokens.assistantIndent)
 
         case .ui(let block):
-            UiBlockView(block: block)
+            UiBlockView(block: block, colorScheme: colorScheme)
                 .padding(.leading, DesignTokens.assistantIndent)
         }
     }
@@ -217,11 +219,46 @@ struct ToolCallRow: View {
 /// `stream.ui` 的結構化資料。已知的 renderer 用原生元件畫，其餘顯示原始資料。
 struct UiBlockView: View {
     let block: UiBlockPresentation
+    let colorScheme: ColorScheme
+
+    /// Html 內容高度：頁面回報多少就用多少，至少留一個最小高度避免閃爍。
+    @State private var contentHeight: CGFloat = 120
+
+    /// 只有內容能被解析成 MCP App、且串流完成才掛載 WebView。
+    private var app: McpAppBlockContent.Parsed? {
+        McpAppBlockContent.parse(renderer: block.renderer, data: block.data)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
             ThemeChip(text: block.renderer, tone: .purple, systemImage: "chart.bar.fill")
 
+            if block.isReady, let app {
+                McpAppSurface(
+                    html: app.html,
+                    allowedHosts: app.allowedHosts,
+                    theme: colorScheme == .dark ? .dark : .light,
+                    height: $contentHeight
+                )
+            } else {
+                fallback
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .themeBlock(Palette.surface, radius: DesignTokens.cardRadius)
+    }
+
+    /// 網頁內容還沒準備好或不是 MCP App 時，顯示原本的原生呈現。
+    @ViewBuilder
+    private var fallback: some View {
+        if !block.isReady && app != nil {
+            HStack(spacing: DesignTokens.spacingS) {
+                SuitLoader(size: 7)
+                Text(AppL10n.text(.conversationStreaming))
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
+            }
+        } else {
             switch block.renderer {
             case "bar", "bars":
                 bars
@@ -233,8 +270,6 @@ struct UiBlockView: View {
                     .textSelection(.enabled)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .themeBlock(Palette.surface, radius: DesignTokens.cardRadius)
     }
 
     /// `{ "items": [{ "label": "...", "value": 0.4 }] }` 或 `[{...}]`。
