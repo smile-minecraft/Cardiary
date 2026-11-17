@@ -4,7 +4,7 @@ import XCTest
 @testable import CardiaryApp
 
 /// 產品接線的掛載時機：MCP App 區塊在串流完成前不掛起，完成才載入，
-/// 同一份內容重複送達也不产生第二個 WebView。這是對話模型這一側的開關；
+/// 同一份內容重複送達也不產生第二個 WebView。這是對話模型這一側的開關；
 /// WebView 本身的 loadedHTML 去重由 McpAppWebViewTests 覆蓋。
 @MainActor
 final class McpAppConversationTests: XCTestCase {

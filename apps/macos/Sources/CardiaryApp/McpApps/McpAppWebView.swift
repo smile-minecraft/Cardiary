@@ -158,7 +158,7 @@ public struct McpAppWebView: NSViewRepresentable {
         private weak var webView: WKWebView?
         private(set) var context: McpAppHostContext
         private(set) var loadedHTML: String?
-        /// 頁面回報高度的去抖結果；只有变化才往外送。
+        /// 頁面回報高度的去抖結果；只有變化才往外送。
         private(set) var contentHeight: CGFloat?
         var onHeightChange: ((CGFloat) -> Void)?
 

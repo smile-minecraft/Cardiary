@@ -3,7 +3,7 @@ import SwiftUI
 
 /// 對話流的一列：使用者訊息、助理訊息、工具呼叫或結構化資料。
 struct TranscriptRow: View {
-    /// 目前的深淺色配置，交给嵌入的 MCP App 作為主題。
+    /// 目前的深淺色配置，交給嵌入的 MCP App 作為主題。
     @Environment(\.colorScheme) private var colorScheme
     let item: ConversationItem
     /// 只有最後一則使用者訊息會帶非 nil 的重送動作；`isResending` 進行中時按鈕顯示明確狀態。

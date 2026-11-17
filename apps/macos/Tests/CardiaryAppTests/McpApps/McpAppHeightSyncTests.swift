@@ -107,7 +107,7 @@ private final class RecordedHeights {
 }
 
 /// 造一個 WKScriptMessage：用子類覆寫唯讀的 name/body，確保測到 Coordinator
-/// 真正的訊息處理逻辑，而不是測試裡複製的一份。
+/// 真正的訊息處理邏輯，而不是測試裡複製的一份。
 private final class ScriptMessageFake {
     let message: WKScriptMessage?
     init(name: String, body: Any) {

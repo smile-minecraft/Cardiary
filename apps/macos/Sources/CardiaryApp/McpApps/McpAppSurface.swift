@@ -4,7 +4,7 @@ import SwiftUI
 /// 把隔離的 `McpAppWebView` 放進 SwiftUI，並把頁面回報的高度接到外層。
 ///
 /// 這是產品畫面唯一建立 McpAppWebView 的地方。`McpAppWebView` 本身不管高度，
-/// 高度由它的 `onHeightChange` 回呼經由 Binding 傅上來，交由呼叫端決定容器大小；
+/// 高度由它的 `onHeightChange` 回呼經由 Binding 傳上來，交由呼叫端決定容器大小；
 /// 離開畫面時 `McpAppWebView.dismantleNSView` 會拆掉 WKWebView。
 struct McpAppSurface: View {
     let html: String

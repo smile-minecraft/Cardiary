@@ -4,7 +4,7 @@ import XCTest
 @testable import CardiaryApp
 
 /// 產品接線：`stream.ui.data` 的 Html 內容_parser。這是對話畫面決定要不要
-/// 建立 McpAppWebView 的入口，也是「不凭空造資料格式」的證明：
+/// 建立 McpAppWebView 的入口，也是「不憑空造資料格式」的證明：
 /// 只認約定好的 renderer 與欄位，其他一律退回原本的原生呈現。
 final class McpAppBlockContentTests: XCTestCase {
     func testParserAcceptsMcpAppRendererWithHtml() {

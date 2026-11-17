@@ -1,5 +1,5 @@
 /**
- * MCP 工具結果的 UI 介面透傳：具有 `ui://` 介面資源時，主机要把 HTML 與
+ * MCP 工具結果的 UI 介面透傳：具有 `ui://` 介面資源時，主機要把 HTML 與
  * CSP 網域放進 `metadata`（gateway 會轉成 `stream.ui renderer=mcp.app`）；
  * 讀取失敗或格式不符時工具照樣成功，只留診斷，不洩漏內容。
  */

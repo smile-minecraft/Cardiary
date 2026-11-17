@@ -7,13 +7,13 @@ import XCTest
 @testable import CardiaryApp
 
 /// 驗收 #5 的關鍵差異證據：既有 `testWebViewCannotReadHostProtocolResponse`
-/// 只靠 CORS 讓頁面讀不到回應，无法證明「沒有有效 Token 的請求不會被 host 當成
-/// 有效控制請求」。這裡改用真的 host gateway + 真的 WKWebView（产品同一份
+/// 只靠 CORS 讓頁面讀不到回應，無法證明「沒有有效 Token 的請求不會被 host 當成
+/// 有效控制請求」。這裡改用真的 host gateway + 真的 WKWebView（產品同一份
 /// `McpAppWebView.makeConfiguration`），讓頁面自己開 WebSocket 送一個控制請求，
 /// 直接觀察 host 回傳的錯誤訊框——完全不經過 CORS。
 ///
 /// 頁面沒有 system.hello、也沒有任何 Token。若 host 把這個請求當成有效控制請求，
-/// 就會回一個成功的控制回應；測試要求它只收到拒絕錯誤，绝對不能收到成功回應。
+/// 就會回一個成功的控制回應；測試要求它只收到拒絕錯誤，絕對不能收到成功回應。
 ///
 /// 整個測試刻意保持同步：WebKit 的 JavaScript 回呼只在同步測試（主執行緒 RunLoop
 /// 正常運轉）下才會觸發，`async` 測試方法裡 XCTWaiter 無法驅動 WebKit。因此 host
@@ -142,7 +142,7 @@ final class McpAppHostAuthTests: XCTestCase {
         let closeCode = page.javaScript("window.__close === null ? null : Number(window.__close)")
         let opened = page.javaScript("window.__opened === true") as? Bool ?? false
 
-        // 真正的主張：host 回的是拒絕錯誤，绝對不是成功控制回應。
+        // 真正的主張：host 回的是拒絕錯誤，絕對不是成功控制回應。
         let errors = frames.filter { $0["kind"] as? String == "error" }
         let errorCodes = errors.compactMap { $0["code"] as? String }
         XCTAssertTrue(
@@ -156,7 +156,7 @@ final class McpAppHostAuthTests: XCTestCase {
         }
         XCTAssertTrue(
             success.isEmpty,
-            "沒有有效 Token 的 session.create 绝對不能被當成有效控制請求處理，收到：\(frames)"
+            "沒有有效 Token 的 session.create 絕對不能被當成有效控制請求處理，收到：\(frames)"
         )
         XCTAssertTrue(opened || !frames.isEmpty, "頁面應該真的建立過 WebSocket 並收到 host 訊框")
         if let code = closeCode as? Int {
