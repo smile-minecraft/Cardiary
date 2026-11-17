@@ -13,7 +13,12 @@
 import { randomUUID } from "node:crypto";
 
 import type { JsonValue, ToolBundleDraft } from "@cardiary/engine-adapter";
-import { McpConfigError, type McpServerInput, type McpServerRecord } from "@cardiary/domain";
+import {
+  McpConfigError,
+  validateMcpServerInput,
+  type McpServerInput,
+  type McpServerRecord,
+} from "@cardiary/domain";
 import type {
   HostModule,
   ModuleActivationContext,
@@ -417,6 +422,46 @@ export async function activateMcpModule(
     }
   };
 
+  const trackAdd = (approvalId: string, input: McpServerInput): void => {
+    const task = decideAdd(approvalId, input);
+    pendingAdds.set(approvalId, task);
+  };
+
+  /**
+   * 重啟後把仍在 pending 的 MCP 新增審批重新掛回等待者。
+   *
+   * 審批列在 SQLite，等待中的 Promise 只在行程記憶體；不重新等待的話，
+   * 客戶端核准之後不會有人去寫正本。輸入跟著審批持久化在
+   * `action.toolInput`，這裡驗證後重建流程。驗證失敗的列只記錄下來，
+   * 交給審批服務依 `expiresAt` 收掉，不讓錯誤資料卡住啟動。
+   */
+  const resumePendingAdds = async (): Promise<void> => {
+    const pending = await engine.approvals.listPending();
+    for (const request of pending) {
+      if (disposed || pendingAdds.has(request.id)) continue;
+      if (request.draft.hostApproval?.component !== "mcp") continue;
+      if (request.draft.action.kind !== "module-enable") continue;
+      const raw: unknown = request.draft.action.toolInput;
+      if (raw === undefined || raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+        logger.warn("待決的 MCP 新增審批沒有可用的設定內容，不會重新等待", {
+          approvalId: request.id,
+        });
+        continue;
+      }
+      let input: McpServerInput;
+      try {
+        input = validateMcpServerInput(raw as unknown as McpServerInput);
+      } catch (error) {
+        logger.warn("待決的 MCP 新增審批設定內容無效，不會重新等待", {
+          approvalId: request.id,
+          message: describeError(error),
+        });
+        continue;
+      }
+      trackAdd(request.id, input);
+    }
+  };
+
   const controller: McpController = {
     async listServers(): Promise<McpServerInfo[]> {
       const records = await store.list();
@@ -429,6 +474,9 @@ export async function activateMcpModule(
           kind: "module-enable",
           summary: `新增 MCP 伺服器「${input.name}」`,
           details: describeTarget(input),
+          // 輸入跟著審批列持久化：主機重啟後要靠它重新等待、完成原本的新增。
+          // 內容與 details 相同（名稱、傳輸、目標、允許網域），不含任何秘密。
+          toolInput: input as unknown as JsonValue,
         },
         risk: "high",
         requestedBy: { kind: "host", component: "mcp" },
@@ -441,8 +489,7 @@ export async function activateMcpModule(
         body: `要新增「${input.name}」；核准前不會啟動，也不會註冊任何工具。`,
         level: "warning",
       });
-      const task = decideAdd(approval.id, input);
-      pendingAdds.set(approval.id, task);
+      trackAdd(approval.id, input);
       return { approvalId: approval.id };
     },
 
@@ -532,6 +579,11 @@ export async function activateMcpModule(
   const protocolRegistration = registerMcpProtocol(protocol, controller);
 
   startAll();
+  // 等待者不在重啟後存活；把還在 pending 的新增審批重新接回，核准後才會
+  // 真的寫入正本。接在 startupTask 之後，`settled()` 才等得到重新掛上的工作。
+  startupTask = startupTask.then(resumePendingAdds).catch((error: unknown) => {
+    logger.warn("恢復待決的 MCP 新增審批失敗", { message: describeError(error) });
+  });
 
   return {
     controller,

@@ -315,8 +315,9 @@ export class Gateway {
     for (const [namespace, handler] of options.moduleHandlers ?? []) {
       this.#moduleHandlers.set(namespace, handler);
     }
-    // 宿主審批沒有會話可以搭車，直接訂閱審批服務：不帶對話的
-    // requested／resolved 轉成 system 串流事件，兩條串流的客戶端都會收到。
+    // 宿主審批沒有會話可以搭車，直接訂閱審批服務：只把真正的宿主審批
+    // （requestedBy.kind === "host" 或帶 hostApproval）轉成 system 串流事件。
+    // external-agent 審批同樣沒有對話，但由外部代理面板處理，不進這條串流。
     this.#systemApprovals = options.engine.approvals.subscribe((update) => {
       void this.#handleSystemApprovalUpdate(update).catch((error: unknown) => {
         this.#logger.error("系統審批事件落地失敗", { message: errorMessage(error) });
@@ -1118,7 +1119,9 @@ export class Gateway {
           seq: boundary,
           epoch: this.epoch,
           resyncRequired,
-          ...(resyncRequired ? { snapshot } : {}),
+          ...(resyncRequired
+            ? { snapshot, pendingApprovals: await this.#pendingHostApprovals() }
+            : {}),
         },
       };
       await connection.send(frame);
@@ -1537,19 +1540,20 @@ export class Gateway {
   /**
    * 訂閱審批服務的入口：只轉送沒有對話的宿主審批。
    *
-   * 會話審批（帶 conversationId）由會話事件的處理路徑送出，
-   * 這裡略過，避免客戶端收到兩份。
+   * 會話審批（帶 conversationId）由會話事件的處理路徑送出；
+   * external-agent 審批也沒有對話，但屬於外部代理面板，兩者都在這裡略過，
+   * 避免客戶端收到兩份或收到沒有來源的審批。
    */
   async #handleSystemApprovalUpdate(update: EngineApprovalUpdate): Promise<void> {
     if (update.kind === "requested") {
       const request = update.request;
-      if (request.draft.conversationId !== undefined) return;
+      if (!this.#isHostApprovalRequest(request)) return;
       const projection = await this.#approvalProjection(request);
       await this.#appendSystemEvent("approval.requested", projection as unknown as JSONObject);
       return;
     }
     const resolution = update.resolution;
-    if (resolution.request.draft.conversationId !== undefined) return;
+    if (!this.#isHostApprovalRequest(resolution.request)) return;
     const gate = this.#pendingDecided.get(resolution.request.id);
     // 同會話路徑：決定回應送出之後才送 approval.decided；事件發生在 decide()
     // 內部，先讓出控制權避免卡住呼叫端。
@@ -1573,6 +1577,19 @@ export class Gateway {
           ? { kind: "system" }
           : { kind: "client", clientId: decidedByClient },
     });
+  }
+
+  /**
+   * 這筆審批是不是宿主審批：由主機元件提出、沒有對話。
+   *
+   * 只看 `conversationId` 不夠——外部代理的審批也沒有對話，但它有代理
+   * 面板自己的入口；再檢查提出者或 hostApproval 才能分辨。
+   */
+  #isHostApprovalRequest(request: EngineApprovalRequest): boolean {
+    return (
+      request.draft.conversationId === undefined &&
+      (request.draft.requestedBy.kind === "host" || request.draft.hostApproval !== undefined)
+    );
   }
 
   async #flushAssistant(
@@ -1708,6 +1725,29 @@ export class Gateway {
       return left.requestedAt.localeCompare(right.requestedAt);
     });
     return sorted[0] ?? null;
+  }
+
+  /**
+   * 重啟後仍可決定的宿主審批。
+   *
+   * 審批列在 SQLite，但訂閱只送即時事件；要求完整快照的客戶端（重開
+   * 應用程式或換 epoch）只拿得到快照，所以待決的宿主審批要跟著快照送。
+   * 已經過期的列不再列出，避免顯示一筆按了只會回「已過期」的審批；它們
+   * 的等待者在重接時會立刻收到 expired。順序與會話快照一致：先請求時間
+   * 再識別碼，多筆時畫面順序固定。
+   */
+  async #pendingHostApprovals(): Promise<ProtocolApprovalRequest[]> {
+    const now = this.#clock.now().getTime();
+    const pending = (await this.#options.engine.approvals.listPending()).filter(
+      (request) =>
+        this.#isHostApprovalRequest(request) &&
+        (request.expiresAt === null || Date.parse(request.expiresAt) > now),
+    );
+    const sorted = [...pending].sort((left, right) => {
+      if (left.requestedAt === right.requestedAt) return left.id.localeCompare(right.id);
+      return left.requestedAt.localeCompare(right.requestedAt);
+    });
+    return Promise.all(sorted.map((request) => this.#approvalProjection(request)));
   }
 
   async #sessionSnapshot(state: SessionState, historyLimit: number): Promise<SessionSnapshot> {

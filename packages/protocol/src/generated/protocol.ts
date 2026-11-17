@@ -268,6 +268,14 @@ export type FolderState = "ready" | "not_selected" | "unavailable";
  */
 export type ServiceState = "running" | "paused" | "degraded";
 /**
+ * 審批範圍的種類。
+ */
+export type ApprovalScopeKind = "tool_call" | "settings_change" | "schedule";
+/**
+ * 審批決定的效果。
+ */
+export type ApprovalEffect = "approve" | "reject" | "approve_always";
+/**
  * 會話狀態。
  */
 export type SessionStatus = "idle" | "running" | "waiting_approval" | "archived";
@@ -288,14 +296,6 @@ export type MessageStatus = "streaming" | "complete" | "interrupted" | "failed";
  */
 export type TurnPhase =
   "queued" | "running" | "waiting_approval" | "completed" | "failed" | "interrupted";
-/**
- * 審批範圍的種類。
- */
-export type ApprovalScopeKind = "tool_call" | "settings_change" | "schedule";
-/**
- * 審批決定的效果。
- */
-export type ApprovalEffect = "approve" | "reject" | "approve_always";
 /**
  * 卡片生命週期；cold 是蒸餾後的冷封存。
  */
@@ -2461,6 +2461,10 @@ export interface SystemSubscribeResponsePayload {
    */
   resyncRequired: boolean;
   snapshot?: SystemStatus;
+  /**
+   * 目前待決的宿主審批（沒有對話的審批）。主機重啟後客戶端靠它重新看到仍可決定的審批；只在附上快照時出現。
+   */
+  pendingApprovals?: ApprovalRequest[];
 }
 export interface SystemStatus {
   folder: FolderStatus;
@@ -2495,6 +2499,66 @@ export interface ServiceStatus {
    * 目前進行中的任務數。
    */
   activeTasks: number;
+}
+export interface ApprovalRequest {
+  /**
+   * 審批識別碼。
+   */
+  approvalId: string;
+  /**
+   * 所屬會話。
+   */
+  sessionId: string;
+  /**
+   * 所屬回合。
+   */
+  turnId: string;
+  /**
+   * 相關的工具呼叫。
+   */
+  toolCallId?: string;
+  /**
+   * 給人看的審批標題。
+   */
+  title: string;
+  /**
+   * 補充說明，例如要執行的指令。
+   */
+  summary?: string;
+  scope: ApprovalScope;
+  /**
+   * 可選的決定；至少一個。
+   *
+   * @minItems 1
+   */
+  options: [ApprovalOption, ...ApprovalOption[]];
+  /**
+   * 請求時間，RFC 3339。
+   */
+  requestedAt: string;
+  /**
+   * 逾時時間，RFC 3339；省略代表不會自動逾時。
+   */
+  expiresAt?: string;
+}
+export interface ApprovalScope {
+  kind: ApprovalScopeKind;
+  /**
+   * 審批對象，例如工具名稱或設定鍵。
+   */
+  target: string;
+  detail?: JSONValue;
+}
+export interface ApprovalOption {
+  /**
+   * 選項識別碼。
+   */
+  id: string;
+  /**
+   * 給使用者看的按鈕文字。
+   */
+  label: string;
+  effect: ApprovalEffect;
 }
 /**
  * 系統狀態串流的取消結果。
@@ -2844,66 +2908,6 @@ export interface TurnErrorDetails {
    * 出錯的設定或請求欄位，例如 roles。
    */
   field?: string;
-}
-export interface ApprovalRequest {
-  /**
-   * 審批識別碼。
-   */
-  approvalId: string;
-  /**
-   * 所屬會話。
-   */
-  sessionId: string;
-  /**
-   * 所屬回合。
-   */
-  turnId: string;
-  /**
-   * 相關的工具呼叫。
-   */
-  toolCallId?: string;
-  /**
-   * 給人看的審批標題。
-   */
-  title: string;
-  /**
-   * 補充說明，例如要執行的指令。
-   */
-  summary?: string;
-  scope: ApprovalScope;
-  /**
-   * 可選的決定；至少一個。
-   *
-   * @minItems 1
-   */
-  options: [ApprovalOption, ...ApprovalOption[]];
-  /**
-   * 請求時間，RFC 3339。
-   */
-  requestedAt: string;
-  /**
-   * 逾時時間，RFC 3339；省略代表不會自動逾時。
-   */
-  expiresAt?: string;
-}
-export interface ApprovalScope {
-  kind: ApprovalScopeKind;
-  /**
-   * 審批對象，例如工具名稱或設定鍵。
-   */
-  target: string;
-  detail?: JSONValue;
-}
-export interface ApprovalOption {
-  /**
-   * 選項識別碼。
-   */
-  id: string;
-  /**
-   * 給使用者看的按鈕文字。
-   */
-  label: string;
-  effect: ApprovalEffect;
 }
 /**
  * 訂閱快照中進行中的助理訊息。只在該會話有進行中的回合時出現；不落地，重啟後消失。

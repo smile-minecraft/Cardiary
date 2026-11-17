@@ -22200,19 +22200,22 @@ public struct SystemSubscribeResponsePayload: Codable, Equatable, Sendable {
     public let epoch: String
     public let resyncRequired: Bool
     public let snapshot: SystemStatus?
+    public let pendingApprovals: [ApprovalRequest]?
 
     public init(
         stream: String,
         seq: Int,
         epoch: String,
         resyncRequired: Bool,
-        snapshot: SystemStatus? = nil
+        snapshot: SystemStatus? = nil,
+        pendingApprovals: [ApprovalRequest]? = nil
     ) {
         self.stream = stream
         self.seq = seq
         self.epoch = epoch
         self.resyncRequired = resyncRequired
         self.snapshot = snapshot
+        self.pendingApprovals = pendingApprovals
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -22221,6 +22224,7 @@ public struct SystemSubscribeResponsePayload: Codable, Equatable, Sendable {
         case epoch = "epoch"
         case resyncRequired = "resyncRequired"
         case snapshot = "snapshot"
+        case pendingApprovals = "pendingApprovals"
     }
 
     public init(from decoder: Decoder) throws {
@@ -22230,12 +22234,14 @@ public struct SystemSubscribeResponsePayload: Codable, Equatable, Sendable {
         let epoch = try container.decode(String.self, forKey: .epoch)
         let resyncRequired = try container.decode(Bool.self, forKey: .resyncRequired)
         let snapshot = try container.decodeIfPresent(SystemStatus.self, forKey: .snapshot)
+        let pendingApprovals = try container.decodeIfPresent([ApprovalRequest].self, forKey: .pendingApprovals)
         self.init(
             stream: stream,
             seq: seq,
             epoch: epoch,
             resyncRequired: resyncRequired,
-            snapshot: snapshot
+            snapshot: snapshot,
+            pendingApprovals: pendingApprovals
         )
     }
 
@@ -22246,6 +22252,7 @@ public struct SystemSubscribeResponsePayload: Codable, Equatable, Sendable {
         try container.encode(epoch, forKey: .epoch)
         try container.encode(resyncRequired, forKey: .resyncRequired)
         try container.encodeIfPresent(snapshot, forKey: .snapshot)
+        try container.encodeIfPresent(pendingApprovals, forKey: .pendingApprovals)
     }
 }
 
