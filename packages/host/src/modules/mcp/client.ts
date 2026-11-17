@@ -76,7 +76,10 @@ class StdioMcpClient implements McpClient {
   readonly #server: McpServerRecord;
   readonly #context: McpClientContext;
   #rpc: StdioRpc | null = null;
+  /** 初始化 promise：所有並行呼叫都等它，失敗才清空以便重試。 */
   #connecting: Promise<void> | null = null;
+  /** 關閉 promise：所有並行 close 共用，等到子行程真正結束才 resolve。 */
+  #closing: Promise<void> | null = null;
   #closed = false;
 
   constructor(server: McpServerRecord, context: McpClientContext) {
@@ -95,24 +98,30 @@ class StdioMcpClient implements McpClient {
     return normalizeCallResult(result);
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.#closing !== null) return this.#closing;
     this.#closed = true;
     const rpc = this.#rpc;
+    // 馬上清掉對外可見的 rpc，但把真正的關行程交給共用 promise；第二個
+    // close() 也等同一個 promise，不會在子行程還活著時提前回來。
     this.#rpc = null;
     this.#connecting = null;
     rpc?.dispose();
-    await rpc?.close();
+    this.#closing = rpc?.close() ?? Promise.resolve();
+    return this.#closing;
   }
 
   async #connect(): Promise<void> {
     if (this.#closed) {
       throw new McpClientError("closed", "MCP 用戶端已關閉");
     }
-    if (this.#rpc !== null) {
-      return;
-    }
+    // 初始化還在進行時，即使 #rpc 已從 spawn 起就指派，仍要等同一個
+    // #connecting，否則第二個並行呼叫會在 initialize 回應前就送 tools/*。
     if (this.#connecting !== null) {
       return this.#connecting;
+    }
+    if (this.#rpc !== null) {
+      return;
     }
     this.#connecting = this.#start().catch((error: unknown) => {
       this.#connecting = null;
@@ -157,15 +166,21 @@ class StdioMcpClient implements McpClient {
       this.#context.logger.debug(`MCP ${this.#server.serverId} stderr: ${chunk.toString("utf8")}`);
     });
     const rpc = new StdioRpc(child, this.#server.serverId);
+    // 從 spawn 起就持有 rpc：spawn 與這個指派之間沒有 await，close() 不會在
+    // 初始化途中交錯進來而看不到 child。初始化失敗時 catch 會清掉這個指派。
+    this.#rpc = rpc;
     try {
       await rpc.request("initialize", {
         protocolVersion: MCP_PROTOCOL_VERSION,
         capabilities: {},
         clientInfo: { name: "Cardiary", version: "0.1.0" },
       });
+      if (this.#closed) {
+        throw new McpClientError("closed", "MCP 用戶端已關閉");
+      }
       rpc.notify("notifications/initialized", {});
-      this.#rpc = rpc;
     } catch (error) {
+      if (this.#rpc === rpc) this.#rpc = null;
       rpc.dispose();
       await rpc.close();
       throw error instanceof McpClientError
@@ -213,6 +228,7 @@ class StdioRpc {
   #buffer = "";
   #nextId = 1;
   #closed = false;
+  #closing: Promise<void> | null = null;
 
   constructor(child: ReturnType<SpawnRegistry["spawn"]>, serverId: string) {
     this.#child = child;
@@ -253,14 +269,20 @@ class StdioRpc {
   }
 
   async close(): Promise<void> {
+    // 初始化失敗的 catch 與外層 close() 可能同時關同一個 rpc；重複呼叫要
+    // 共用同一次關行程，且等到 child 真正結束才回，避免留下孤兒。
+    if (this.#closing !== null) return this.#closing;
+    this.#closing = this.#doClose();
+    return this.#closing;
+  }
+
+  async #doClose(): Promise<void> {
     this.#child.closeInput();
     this.#child.signal("SIGTERM");
-    const exited = await Promise.race([
-      this.#child.exited.then(() => true),
-      delay(1_000).then(() => false),
-    ]);
-    if (!exited) {
+    const exited = await Promise.race([this.#child.exited, delay(1_000).then(() => null)]);
+    if (exited === null) {
       this.#child.signal("SIGKILL");
+      await this.#child.exited;
     }
   }
 
