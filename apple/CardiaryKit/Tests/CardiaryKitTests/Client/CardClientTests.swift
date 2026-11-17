@@ -682,7 +682,438 @@ final class CardClientTests: XCTestCase {
         await client.stop()
     }
 
+
+    // MARK: - 版本與待決補丁
+
+    func testCardPatchesListRoundTrip() async throws {
+        let connection = self.connection!
+        try await roundTripShort(
+            type: "card.patches.list",
+            payload: [
+                "patches": [
+                    Self.pendingPatch("patch_1"),
+                    Self.pendingPatch("patch_2", status: "accepted"),
+                ],
+            ]
+        ) { options in
+            let result = try await connection.listCardPatches(cardId: "card_1", options: options)
+            XCTAssertEqual(result.patches.map(\.patchId), ["patch_1", "patch_2"])
+            XCTAssertEqual(result.patches[0].status, .pending)
+            XCTAssertEqual(result.patches[1].status, .accepted)
+            XCTAssertEqual(result.patches[0].patch.format, .unified)
+            return result
+        }
+    }
+
+    func testCardVersionsListRoundTrip() async throws {
+        let connection = self.connection!
+        try await roundTripShort(
+            type: "card.versions.list",
+            payload: [
+                "versions": [
+                    Self.version("ver_1", seq: 1, kind: "create"),
+                    Self.version("ver_2", seq: 2, kind: "patch"),
+                ],
+            ]
+        ) { options in
+            let result = try await connection.listCardVersions(cardId: "card_1", options: options)
+            XCTAssertEqual(result.versions.map(\.seq), [1, 2])
+            XCTAssertEqual(result.versions.map(\.kind), [.create, .patch])
+            return result
+        }
+    }
+
+    /// 與 reloadDocumentDetails 相同的順序：先 patches、再 versions，兩個都要正常回傳。
+    func testPatchesThenVersionsResolveInOrder() async throws {
+        let connection = self.connection!
+        let options = CardiaryConnection.RequestOptions(timeout: .seconds(2))
+
+        let patchesTask = Task {
+            try await connection.listCardPatches(cardId: "card_1", options: options)
+        }
+        let patchesSent = JSONFixture.decode(try await transport.nextSent())
+        XCTAssertEqual(patchesSent["type"] as? String, "card.patches.list")
+        await transport.push(
+            Self.response(
+                type: "card.patches.list",
+                replyTo: try XCTUnwrap(patchesSent["id"] as? String),
+                payload: ["patches": [Self.pendingPatch("patch_1")]]
+            )
+        )
+        let patches = try await patchesTask.value
+        XCTAssertEqual(patches.patches.map(\.patchId), ["patch_1"])
+
+        let versionsTask = Task {
+            try await connection.listCardVersions(cardId: "card_1", options: options)
+        }
+        let versionsSent = JSONFixture.decode(try await transport.nextSent())
+        XCTAssertEqual(versionsSent["type"] as? String, "card.versions.list")
+        await transport.push(
+            Self.response(
+                type: "card.versions.list",
+                replyTo: try XCTUnwrap(versionsSent["id"] as? String),
+                payload: [
+                    "versions": [
+                        Self.version("ver_1", seq: 1, kind: "create"),
+                        Self.version("ver_2", seq: 2, kind: "patch"),
+                    ],
+                ]
+            )
+        )
+        let versions = try await versionsTask.value
+        XCTAssertEqual(versions.versions.map(\.seq), [1, 2])
+    }
+
+    func testCardVersionGetAndRestoreRoundTrip() async throws {
+        let connection = self.connection!
+        try await roundTripShort(
+            type: "card.version.get",
+            payload: ["body": "歷史內文"]
+        ) { options in
+            let result = try await connection.getCardVersion(
+                cardId: "card_1",
+                versionId: "ver_1",
+                options: options
+            )
+            XCTAssertEqual(result.body, "歷史內文")
+            return result
+        }
+        try await roundTripShort(
+            type: "card.version.restore",
+            payload: [
+                "card": Self.card("card_1", revision: "rev_9"),
+                "version": Self.version("ver_1", seq: 1, kind: "restore"),
+            ]
+        ) { options in
+            let result = try await connection.restoreCardVersion(
+                cardId: "card_1",
+                versionId: "ver_1",
+                baseRevision: "rev_1",
+                clientRequestId: "req_restore",
+                options: options
+            )
+            XCTAssertEqual(result.card.revision, "rev_9")
+            XCTAssertEqual(result.version.kind, .restore)
+            return result
+        }
+    }
+
+    func testCardPatchAcceptAndRejectRoundTrip() async throws {
+        let connection = self.connection!
+        try await roundTripShort(
+            type: "card.patch.accept",
+            payload: [
+                "patch": Self.pendingPatch("patch_1", status: "accepted", decidedAt: "2026-11-15T00:01:00Z"),
+                "card": Self.card("card_1", revision: "rev_9"),
+            ]
+        ) { options in
+            let result = try await connection.acceptCardPatch(
+                patchId: "patch_1",
+                clientRequestId: "req_accept",
+                options: options
+            )
+            XCTAssertEqual(result.patch.status, .accepted)
+            XCTAssertEqual(result.patch.decidedAt, "2026-11-15T00:01:00Z")
+            XCTAssertEqual(result.card.revision, "rev_9")
+            return result
+        }
+        try await roundTripShort(
+            type: "card.patch.reject",
+            payload: [
+                "patch": Self.pendingPatch("patch_1", status: "rejected", decidedAt: "2026-11-15T00:01:00Z"),
+            ]
+        ) { options in
+            let result = try await connection.rejectCardPatch(
+                patchId: "patch_1",
+                clientRequestId: "req_reject",
+                options: options
+            )
+            XCTAssertEqual(result.patch.status, .rejected)
+            return result
+        }
+    }
+
+    /// 所有 M3 新增的回應都不能落進 default 變成事件；board 與 notification 同樣要回到請求方。
+    func testM3ResponsesAreNotDeliveredAsEvents() async throws {
+        let connection = self.connection!
+        let events = Recorder<ServerFrame>()
+        let consumer = Task {
+            for await frame in connection.events {
+                events.append(frame)
+            }
+        }
+        defer { consumer.cancel() }
+
+        try await roundTripShort(
+            type: "card.patches.list",
+            payload: ["patches": []]
+        ) { options in
+            _ = try await connection.listCardPatches(cardId: "card_1", options: options)
+        }
+        try await roundTripShort(
+            type: "card.patch.accept",
+            payload: [
+                "patch": Self.pendingPatch("patch_1", status: "accepted"),
+                "card": Self.card("card_1"),
+            ]
+        ) { options in
+            _ = try await connection.acceptCardPatch(
+                patchId: "patch_1",
+                clientRequestId: "req_accept",
+                options: options
+            )
+        }
+        try await roundTripShort(
+            type: "card.patch.reject",
+            payload: ["patch": Self.pendingPatch("patch_1", status: "rejected")]
+        ) { options in
+            _ = try await connection.rejectCardPatch(
+                patchId: "patch_1",
+                clientRequestId: "req_reject",
+                options: options
+            )
+        }
+        try await roundTripShort(
+            type: "card.versions.list",
+            payload: ["versions": []]
+        ) { options in
+            _ = try await connection.listCardVersions(cardId: "card_1", options: options)
+        }
+        try await roundTripShort(
+            type: "card.version.get",
+            payload: ["body": "內文"]
+        ) { options in
+            _ = try await connection.getCardVersion(
+                cardId: "card_1",
+                versionId: "ver_1",
+                options: options
+            )
+        }
+        try await roundTripShort(
+            type: "card.version.restore",
+            payload: [
+                "card": Self.card("card_1"),
+                "version": Self.version("ver_1", seq: 1, kind: "restore"),
+            ]
+        ) { options in
+            _ = try await connection.restoreCardVersion(
+                cardId: "card_1",
+                versionId: "ver_1",
+                baseRevision: "rev_1",
+                clientRequestId: "req_restore",
+                options: options
+            )
+        }
+        try await roundTripShort(
+            type: "board.list",
+            payload: ["boards": [Self.boardSummary("board_1")]]
+        ) { options in
+            _ = try await connection.listBoards(options: options)
+        }
+        try await roundTripShort(
+            type: "board.get",
+            payload: ["board": Self.boardDocument()]
+        ) { options in
+            _ = try await connection.getBoard(boardId: "board_1", options: options)
+        }
+        try await roundTripShort(
+            type: "board.create",
+            payload: ["board": Self.boardDocument()]
+        ) { options in
+            _ = try await connection.createBoard(
+                boardId: "board_1",
+                title: "白板",
+                clientRequestId: "req_board",
+                options: options
+            )
+        }
+        try await roundTripShort(
+            type: "board.save",
+            payload: ["board": Self.boardDocument()]
+        ) { options in
+            _ = try await connection.saveBoard(
+                board: Self.boardDocumentValue(),
+                baseUpdatedAt: "2026-11-15T00:00:00Z",
+                clientRequestId: "req_save",
+                options: options
+            )
+        }
+        try await roundTripShort(
+            type: "board.delete",
+            payload: ["deleted": true]
+        ) { options in
+            _ = try await connection.deleteBoard(boardId: "board_1", options: options)
+        }
+        try await roundTripShort(
+            type: "board.project_card",
+            payload: ["board": Self.boardDocument()]
+        ) { options in
+            _ = try await connection.projectCardOnBoard(
+                boardId: "board_1",
+                itemId: "item_1",
+                cardId: "card_1",
+                position: BoardPoint(x: 10, y: 20),
+                options: options
+            )
+        }
+        try await roundTripShort(
+            type: "board.unproject_card",
+            payload: ["board": Self.boardDocument()]
+        ) { options in
+            _ = try await connection.unprojectCardOnBoard(
+                boardId: "board_1",
+                itemId: "item_1",
+                options: options
+            )
+        }
+        try await roundTripShort(
+            type: "board.create_card_from_selection",
+            payload: ["board": Self.boardDocument(), "cardId": "card_9"]
+        ) { options in
+            _ = try await connection.createCardFromSelection(
+                boardId: "board_1",
+                cardIds: ["card_1"],
+                title: "新卡",
+                body: "內文",
+                itemId: "item_2",
+                position: BoardPoint(x: 30, y: 40),
+                clientRequestId: "req_selection",
+                options: options
+            )
+        }
+        try await roundTripShort(
+            type: "notification.list",
+            payload: [
+                "notifications": [Self.notification("noti_1")],
+                "totalUnread": 1,
+            ]
+        ) { options in
+            _ = try await connection.listNotifications(options: options)
+        }
+        try await roundTripShort(
+            type: "notification.mark_read",
+            payload: ["updated": 1, "totalUnread": 0]
+        ) { options in
+            _ = try await connection.markNotificationsRead(ids: ["noti_1"], options: options)
+        }
+        try await roundTripShort(
+            type: "notification.create_card",
+            payload: ["card": Self.cardSummary("card_9"), "deduped": false]
+        ) { options in
+            _ = try await connection.createCardFromNotification(
+                notificationId: "noti_1",
+                options: options
+            )
+        }
+
+        XCTAssertTrue(events.snapshot.isEmpty, "回應不能變成事件")
+    }
+
     // MARK: - 共用
+
+
+    private func roundTripShort<T: Sendable>(
+        type: String,
+        payload: [String: Any],
+        options: CardiaryConnection.RequestOptions = CardiaryConnection.RequestOptions(timeout: .seconds(2)),
+        call: @escaping @Sendable (CardiaryConnection.RequestOptions) async throws -> T
+    ) async throws {
+        let task = Task { try await call(options) }
+        let sent = JSONFixture.decode(try await transport.nextSent())
+        XCTAssertEqual(sent["type"] as? String, type)
+        await transport.push(
+            Self.response(
+                type: type,
+                replyTo: try XCTUnwrap(sent["id"] as? String),
+                payload: payload
+            )
+        )
+        _ = try await task.value
+    }
+
+    private static func pendingPatch(
+        _ id: String,
+        cardId: String = "card_1",
+        status: String = "pending",
+        decidedAt: String? = nil
+    ) -> [String: Any] {
+        var value: [String: Any] = [
+            "patchId": id,
+            "cardId": cardId,
+            "baseRevision": "rev_1",
+            "patch": ["format": "unified", "text": "@@ -1 +1 @@"],
+            "status": status,
+            "summary": "待決補丁",
+            "createdAt": "2026-11-15T00:00:00Z",
+        ]
+        if let decidedAt {
+            value["decidedAt"] = decidedAt
+        }
+        return value
+    }
+
+    private static func version(
+        _ id: String,
+        seq: Int,
+        kind: String
+    ) -> [String: Any] {
+        [
+            "versionId": id,
+            "cardId": "card_1",
+            "seq": seq,
+            "kind": kind,
+            "revision": "rev_\(seq)",
+            "bodyHash": String(repeating: "a", count: 64),
+            "createdAt": "2026-11-15T00:00:0\(seq)Z",
+        ]
+    }
+
+    private static func boardSummary(_ id: String) -> [String: Any] {
+        [
+            "id": id,
+            "title": "白板",
+            "updatedAt": "2026-11-15T00:00:00Z",
+            "itemCount": 2,
+        ]
+    }
+
+    private static func boardDocument(_ id: String = "board_1") -> [String: Any] {
+        [
+            "schema": 1,
+            "id": id,
+            "title": "白板",
+            "createdAt": "2026-11-15T00:00:00Z",
+            "updatedAt": "2026-11-15T00:00:00Z",
+            "items": [],
+            "inbox": [],
+            "edges": [],
+            "groups": [],
+        ]
+    }
+
+    private static func boardDocumentValue() -> BoardDocument {
+        BoardDocument(
+            id: "board_1",
+            title: "白板",
+            createdAt: "2026-11-15T00:00:00Z",
+            updatedAt: "2026-11-15T00:00:00Z",
+            items: [],
+            inbox: [],
+            edges: [],
+            groups: []
+        )
+    }
+
+    private static func notification(_ id: String) -> [String: Any] {
+        [
+            "notificationId": id,
+            "kind": "schedule",
+            "title": "提醒",
+            "body": "內容",
+            "createdAt": "2026-11-15T00:00:00Z",
+            "payload": [:],
+        ]
+    }
 
     private func roundTrip<T: Sendable>(
         type: String,
