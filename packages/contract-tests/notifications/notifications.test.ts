@@ -189,7 +189,7 @@ describe("代理提議排程的審批路徑", () => {
 
 describe("排程執行與通知", () => {
   it("建立已經過期的一次性排程：背景任務執行後產生通知，可轉卡且重送去重，可標記已讀", async () => {
-    const { client } = await boot({});
+    const { client } = await boot({ scripts: [[{ kind: "text", text: "一切正常" }]] });
     await systemSubscribe(client);
 
     // 過去的時間 → 建立當下就是到期的排程，模組會在啟動或「poke」時補跑一次。
