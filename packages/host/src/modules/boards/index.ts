@@ -1,7 +1,7 @@
 import type { CardService } from "@cardiary/domain";
 import type { JsonValue } from "@cardiary/engine-adapter";
 import type { HostModule, ModuleActivationContext } from "@cardiary/module-api";
-import { BoardFileStore } from "@cardiary/storage";
+import { BoardFileStore, FreshnessStore, type SettingsStore } from "@cardiary/storage";
 
 import { createAuditLog } from "../../permissions/audit.js";
 import { HOST_SERVICE_NAMES, type CardEnvironment } from "../contract.js";
@@ -35,6 +35,14 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   // 資料庫讀原始值，才能把「只有人能改」與「執行期要判斷」分開。
   const agentMode = () => parseAgentModeSetting(cabinet.settings.get(BOARDS_AGENT_MODE_KEY)?.value);
 
+  // 釘選是白板投影的屬性；卡片狀態只是鏡射，由 BoardService 在每次寫入後
+  // 依「任一白板釘選」的結果同步。半衰期與卡片模組讀同一個設定。
+  const freshness = new FreshnessStore({
+    db: cabinet.state,
+    now,
+    halfLifeDays: () => settingNumber(cabinet.settings, "freshness.halfLifeDays", 30),
+  });
+
   const service = new BoardService(
     store,
     now,
@@ -46,6 +54,7 @@ async function activate(context: ModuleActivationContext): Promise<void> {
       });
     },
     cardGateway(cards),
+    freshness,
   );
   registerBoardsProtocol({ service, protocol: context.services.protocol });
 
@@ -88,4 +97,11 @@ function boardChangedPayload(event: BoardChangedEvent): JsonValue {
     ...(event.board === undefined ? {} : { board: event.board }),
     ...(event.cardIds === undefined ? {} : { cardIds: [...event.cardIds] }),
   } as unknown as JsonValue;
+}
+
+/** 讀設定裡的數字；沒有值或格式不對時用預設。與卡片模組的解析一致。 */
+function settingNumber(settings: SettingsStore, key: string, fallback: number): number {
+  const raw = settings.get(key)?.value;
+  const parsed = raw === undefined ? Number.NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
