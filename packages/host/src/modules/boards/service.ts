@@ -36,6 +36,8 @@ export interface BoardCardGateway {
 /** 釘選同步：白板是正本，卡片狀態只是鏡射。 */
 export interface BoardPinStore {
   setPinned(cardId: string, pinned: boolean): void | Promise<void>;
+  /** 目前狀態庫標記為釘選的卡片識別碼；啟動校正要用。 */
+  listPinned(): readonly string[] | Promise<readonly string[]>;
 }
 
 export interface CreateCardOnBoardInput {
@@ -241,23 +243,40 @@ export class BoardService {
     });
   }
 
-  /**
-   * 白板是目前唯一決定「卡片是否釘選」的地方；每次寫入前後比對集合，
-   * 只同步真的改變的卡片。
-   */
+  /** 白板是目前唯一決定「卡片是否釘選」的地方；從所有白板檔算出目前釘選的卡片。 */
   #pinnedCardIds(): Set<string> {
     const boards = this.store.list().map((entry) => entry.board);
     return new Set(listPinnedCardIds(boards));
   }
 
+  /**
+   * 啟動校正：白板是正本，把卡片狀態鏡射到與白板一致。
+   *
+   * 白板有釘選、狀態沒有的，標記為釘選；狀態釘選、白板沒有的，取消釘選。
+   * 白板檔讀不出來時讓啟動失敗，不要猜測後把卡片解除釘選。
+   */
+  async reconcilePins(): Promise<void> {
+    if (this.pins === undefined) return;
+    const pinned = this.#pinnedCardIds();
+    const statePinned = new Set(await this.pins.listPinned());
+    const affected = new Set([...pinned, ...statePinned]);
+    for (const cardId of affected) {
+      await this.pins.setPinned(cardId, pinned.has(cardId));
+    }
+  }
+
+  /**
+   * 寫入後同步釘選。對受影響的卡片（寫入前釘選的或寫入後釘選的）無條件
+   * 呼叫 `setPinned`：白板檔寫入成功但同步中斷時，重試會從新檔重算集合，
+   * 差異會是空的，所以不能只同步差異。`setPinned` 對狀態已一致的卡片
+   * 會早退，重送安全。
+   */
   async #syncPinned(before: ReadonlySet<string>): Promise<void> {
     if (this.pins === undefined) return;
     const after = this.#pinnedCardIds();
-    for (const cardId of before) {
-      if (!after.has(cardId)) await this.pins.setPinned(cardId, false);
-    }
-    for (const cardId of after) {
-      if (!before.has(cardId)) await this.pins.setPinned(cardId, true);
+    const affected = new Set([...before, ...after]);
+    for (const cardId of affected) {
+      await this.pins.setPinned(cardId, after.has(cardId));
     }
   }
 

@@ -177,6 +177,13 @@ export class FreshnessStore {
     return 100;
   }
 
+  /** 目前狀態庫裡標記為釘選的卡片識別碼，給啟動校正比對白板正本。 */
+  listPinned(): string[] {
+    return this.#db
+      .all<{ card_id: string }>("SELECT card_id FROM card_state WHERE pinned = 1 ORDER BY card_id")
+      .map((row) => row.card_id);
+  }
+
   /** 建立卡片時補狀態列；已存在時不動新鮮度。 */
   ensure(cardId: string, persona = "default"): void {
     const now = nowIso(this.#now);

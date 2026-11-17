@@ -56,6 +56,9 @@ async function activate(context: ModuleActivationContext): Promise<void> {
     cardGateway(cards),
     freshness,
   );
+  // 啟動時掃描全部白板與 card_state 校正一次，修補上次中斷留下的差異：
+  // 白板有釘選而狀態沒有的設為釘選，狀態釘選而白板沒有的取消。
+  await service.reconcilePins();
   registerBoardsProtocol({ service, protocol: context.services.protocol });
 
   const bundles = createBoardsToolBundles({

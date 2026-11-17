@@ -25,6 +25,11 @@ interface Setup {
   readonly storage: Storage;
   readonly freshness: FreshnessStore;
   readonly service: BoardService;
+  readonly store: BoardFileStore;
+  readonly cards: {
+    get: (cardId: string) => Promise<{ cardId: string }>;
+    create: (input: { title: string }) => Promise<{ cardId: string }>;
+  };
   readonly events: Array<{ boardId: string; change: string }>;
   readonly clock: { now: Date };
   readonly cleanup: () => void;
@@ -60,7 +65,7 @@ function setup(label = "board-pins"): Setup {
     rmSync(root, { recursive: true, force: true });
   };
   cleanups.push(cleanup);
-  return { storage, freshness, service, events, clock, cleanup };
+  return { storage, freshness, service, store, cards, events, clock, cleanup };
 }
 
 async function pinInBoard(
@@ -210,6 +215,109 @@ describe("BoardService 釘選與卡片狀態同步", () => {
     expect(fixture.freshness.get(cardId).pinned).toBe(true);
 
     await fixture.service.unproject(board.id, itemId);
+    expect(fixture.freshness.get(cardId).pinned).toBe(false);
+  });
+
+  it("釘選同步中斷後，重試同一個操作會把卡片狀態修復為釘選", async () => {
+    const fixture = setup("board-pins-retry");
+    let failOnce = true;
+    const flakyPins = {
+      setPinned: (cardId: string, pinned: boolean): void => {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error("模擬釘選同步中斷");
+        }
+        fixture.freshness.setPinned(cardId, pinned);
+      },
+      listPinned: () => fixture.freshness.listPinned(),
+    };
+    const service = new BoardService(
+      fixture.store,
+      () => fixture.clock.now,
+      () => {},
+      fixture.cards,
+      flakyPins,
+    );
+    const board = await service.create(newCardId(), "白板");
+    const cardId = "01000000000000000000000091";
+    const itemId = "01000000000000000000000081";
+    await service.project({
+      boardId: board.id,
+      itemId,
+      cardId,
+      position: { x: 0, y: 0 },
+      origin: "canvas",
+    });
+
+    // 白板檔寫入成功後、setPinned 失敗：save 失敗，但白板檔已留下釘選。
+    const before = service.get(board.id);
+    const pinnedItems = before.items.map((item) =>
+      item.id === itemId ? { ...item, pinned: true } : item,
+    );
+    await expect(service.save({ ...before, items: pinnedItems }, before.updatedAt)).rejects.toThrow(
+      "模擬釘選同步中斷",
+    );
+    expect(service.get(board.id).items.find((item) => item.id === itemId)?.pinned).toBe(true);
+    expect(fixture.freshness.get(cardId).pinned).toBe(false);
+
+    // 重試同一個操作：集合差異是空的，仍會無條件重送，把狀態修成釘選。
+    const retryBase = service.get(board.id);
+    await service.save({ ...retryBase }, retryBase.updatedAt);
+    expect(fixture.freshness.get(cardId).pinned).toBe(true);
+  });
+
+  it("啟動校正會把白板既有的釘選補進卡片狀態", async () => {
+    const fixture = setup("board-pins-startup-pin");
+    const board = await fixture.service.create(newCardId(), "白板");
+    const cardId = "01000000000000000000000092";
+    const itemId = "01000000000000000000000082";
+    await fixture.service.project({
+      boardId: board.id,
+      itemId,
+      cardId,
+      position: { x: 0, y: 0 },
+      origin: "canvas",
+    });
+    // 白板檔是正本：直接改檔留下釘選，不經過 BoardService（模擬上次同步沒做完）。
+    const current = fixture.store.read(board.id);
+    if (current === undefined) throw new Error("白板檔不存在");
+    fixture.store.write({
+      ...current.board,
+      items: current.board.items.map((item) =>
+        item.id === itemId ? { ...item, pinned: true } : item,
+      ),
+    });
+    expect(fixture.freshness.get(cardId).pinned).toBe(false);
+
+    // 重啟後的啟動校正會把白板的釘選鏡射到卡片狀態。
+    const restarted = new BoardService(
+      fixture.store,
+      () => fixture.clock.now,
+      () => {},
+      undefined,
+      fixture.freshness,
+    );
+    await restarted.reconcilePins();
+    expect(fixture.freshness.get(cardId).pinned).toBe(true);
+  });
+
+  it("啟動校正會取消卡片狀態裡多餘的釘選", async () => {
+    const fixture = setup("board-pins-startup-unpin");
+    const board = await fixture.service.create(newCardId(), "白板");
+    const cardId = "01000000000000000000000093";
+    const itemId = "01000000000000000000000083";
+    await fixture.service.project({
+      boardId: board.id,
+      itemId,
+      cardId,
+      position: { x: 0, y: 0 },
+      origin: "canvas",
+    });
+    // 狀態庫說釘選，但沒有任何白板釘選這張卡。
+    fixture.freshness.setPinned(cardId, true);
+    expect(fixture.freshness.get(cardId).pinned).toBe(true);
+
+    await fixture.service.reconcilePins();
     expect(fixture.freshness.get(cardId).pinned).toBe(false);
   });
 });
