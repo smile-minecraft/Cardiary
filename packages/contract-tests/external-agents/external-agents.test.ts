@@ -172,6 +172,7 @@ async function listAgents(client: ProtocolClient): Promise<
     message?: string;
     resultUnknown?: boolean;
     progress?: { completed: number; total: number };
+    pendingPermission?: { approvalId: string; toolName: string; description?: string };
   }[]
 > {
   const id = client.request("agent.list", {});
@@ -180,6 +181,58 @@ async function listAgents(client: ProtocolClient): Promise<
 }
 
 describe.skipIf(!darwin)("外部代理契約", () => {
+  it(
+    "啟動審批經 pendingPermission 出現在 agent.list 與 agent.state_changed，核准後才啟動",
+    async () => {
+      const { client, workingDirectory, agent } = await bootWithAgent({
+        kind: "opencode",
+        mode: "complete",
+        steps: ["整理結果"],
+      });
+      const { agentSessionId, approvalId } = await startAgent(client, {
+        kind: "opencode",
+        workingDirectory,
+        prompt: "整理這個資料夾",
+      });
+      expect(approvalId).not.toBe("");
+
+      // 啟動還沒核准：狀態卡的 pendingPermission 必須帶著啟動審批的 id，
+      // 客戶端才有辦法畫出核准／拒絕鈕。list 與事件要是同一份投影。
+      const state = await waitForState(
+        client,
+        agentSessionId,
+        (s) => s.status === "waiting-approval",
+      );
+      expect(state.pendingPermission).toMatchObject({
+        approvalId,
+        toolName: "opencode-acp",
+      });
+      expect(state.pendingPermission?.description).toContain(workingDirectory);
+
+      const listed = await listAgents(client);
+      const waiting = listed.find((entry) => entry.agentSessionId === agentSessionId);
+      expect(waiting?.status).toBe("waiting-approval");
+      expect(waiting?.pendingPermission).toEqual(state.pendingPermission);
+
+      // 核准前沒有 spawn、沒有改檔。
+      expect(await agent.readLog()).toEqual([]);
+
+      // 用狀態卡上的 approvalId 核准（不是 start 回應偷藏的 id）。
+      await decide(client, state.pendingPermission!.approvalId, "approve");
+      await waitForState(client, agentSessionId, (s) => s.status === "running");
+      // 核准後真的 spawn 了：假代理寫下 start 事件（含 pid）。
+      const started = await pidOf(agent);
+      expect(started).toBeGreaterThan(0);
+
+      // 核准後 pendingPermission 消失，進度回來。
+      await waitForState(client, agentSessionId, (s) => s.status === "stopped");
+      const done = await listAgents(client);
+      const doneEntry = done.find((entry) => entry.agentSessionId === agentSessionId);
+      expect(doneEntry?.pendingPermission).toBeUndefined();
+    },
+    TEST_TIMEOUT,
+  );
+
   it(
     "opencode：核准後啟動、回報進度，完成後暫存區清空",
     async () => {
@@ -357,7 +410,8 @@ describe.skipIf(!darwin)("外部代理契約", () => {
           return false;
         }
         const pending = (frame.payload as AgentStatePayload).pendingPermission;
-        if (pending?.approvalId && pending.description) {
+        // 啟動審批現在也走 pendingPermission，必須排除，只收代理自己提出的工具權限。
+        if (pending?.approvalId && pending.approvalId !== approvalId && pending.description) {
           pendings.set(pending.description, pending.approvalId);
         }
         return pendings.size >= 2;
@@ -496,7 +550,9 @@ describe.skipIf(!darwin)("外部代理契約", () => {
       const pending = await waitForState(
         client,
         agentSessionId,
-        (state) => state.pendingPermission !== undefined,
+        (state) =>
+          state.pendingPermission !== undefined &&
+          state.pendingPermission.approvalId !== approvalId,
       );
       expect(pending.status).toBe("waiting-approval");
       expect(pending.pendingPermission?.toolName).toBe("bash");
@@ -531,7 +587,9 @@ describe.skipIf(!darwin)("外部代理契約", () => {
       const pending = await waitForState(
         client,
         agentSessionId,
-        (state) => state.pendingPermission !== undefined,
+        (state) =>
+          state.pendingPermission !== undefined &&
+          state.pendingPermission.approvalId !== approvalId,
       );
       await decide(client, pending.pendingPermission?.approvalId ?? "", "deny");
 

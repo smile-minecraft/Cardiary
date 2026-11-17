@@ -67,6 +67,13 @@ import {
   resolveAgentCommand,
 } from "./transport.js";
 
+/** 協定 `pendingPermission` 的投影形狀；list 與 state_changed 共用同一份。 */
+export interface PendingPermissionWire {
+  readonly approvalId: string;
+  readonly toolName: string;
+  readonly description?: string;
+}
+
 /** `module.external-agents.state` 事件的 `data`。 */
 export interface ExternalAgentStateData {
   readonly agentSessionId: string;
@@ -75,11 +82,46 @@ export interface ExternalAgentStateData {
   readonly progress?: ExternalAgentSessionRecord["progress"];
   readonly message?: string;
   readonly resultUnknown?: boolean;
-  readonly pendingPermission?: {
-    readonly approvalId: string;
-    readonly toolName: string;
-    readonly description?: string;
-  };
+  readonly pendingPermission?: PendingPermissionWire;
+}
+
+/**
+ * 把一筆代理紀錄投影成協定的 `pendingPermission`。
+ *
+ * 代理卡住有兩種原因，兩者都要讓客戶端畫出核准／拒絕鈕：
+ * 1. 代理行程真的提出工具權限請求（`pendingPermission`）；
+ * 2. 代理還沒啟動，正在等啟動審批（`startApprovalId`）。
+ *
+ * 舊版只投影第一種，而啟動時 `pendingPermission` 永遠是 null，於是狀態卡上
+ * 沒有核准鈕，整個啟動流程卡死。這裡把第二種也投影成同一個形狀；工具權限
+ * 請求優先，因為它才是代理正在等待的東西。`startApprovalId` 仍舊只存在於
+ * 耐久紀錄，這裡純粹讀它、不改它，清掉時機交給原本的生命週期。
+ */
+function projectPendingPermission(
+  record: ExternalAgentSessionRecord,
+): PendingPermissionWire | undefined {
+  // 代理提出過工具權限請求時，一律以它為準。即使 approvalId 還沒填上
+  // （要求與建立審批之間的非同步窗口），也不能回退到啟動審批，否則狀態卡
+  // 會把真正的工具請求顯示成「啟動代理」，點下去等於核准了錯誤的東西。
+  if (record.pendingPermission) {
+    if (record.pendingPermission.approvalId === "") return undefined;
+    return {
+      approvalId: record.pendingPermission.approvalId,
+      toolName: record.pendingPermission.toolName,
+      ...(record.pendingPermission.description
+        ? { description: record.pendingPermission.description }
+        : {}),
+    };
+  }
+  if (record.status === "waiting-approval" && record.startApprovalId) {
+    const label = record.agentKind === "opencode" ? "OpenCode" : "Claude Code";
+    return {
+      approvalId: record.startApprovalId,
+      toolName: record.agentKind === "opencode" ? "opencode-acp" : "claude-code-stream-json",
+      description: `啟動 ${label}：${record.workingDirectory}`,
+    };
+  }
+  return undefined;
 }
 
 /** 協定 `AgentSessionInfo` 的形狀；`completed` 在協定列舉裡映射到 `stopped`。 */
@@ -92,7 +134,7 @@ export interface AgentSessionInfoWire {
   readonly progress?: { step: string; label: string; completed: number; total: number };
   readonly message?: string;
   readonly resultUnknown?: boolean;
-  readonly pendingPermission?: { approvalId: string; toolName: string; description?: string };
+  readonly pendingPermission?: PendingPermissionWire;
 }
 
 export interface StartAgentInput {
@@ -392,38 +434,31 @@ export class ExternalAgentsService {
     const records = await listRecords(this.#storage);
     return records
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
-      .map((record) => ({
-        agentSessionId: record.agentSessionId,
-        agentKind: record.agentKind,
-        // 協定的 AgentStatus 沒有 completed；完成的 session 以 stopped 呈現，
-        // 真正的結果寫在 message，模組事件則保留完整的領域狀態。
-        status: record.status === "completed" ? "stopped" : record.status,
-        workingDirectory: record.workingDirectory,
-        startedAt: record.startedAt,
-        ...(record.progress
-          ? {
-              progress: {
-                step: String(record.progress.step),
-                label: record.progress.label,
-                completed: record.progress.completed,
-                total: record.progress.total,
-              },
-            }
-          : {}),
-        ...(record.message ? { message: record.message } : {}),
-        ...(record.resultUnknown ? { resultUnknown: true } : {}),
-        ...(record.pendingPermission && record.pendingPermission.approvalId !== ""
-          ? {
-              pendingPermission: {
-                approvalId: record.pendingPermission.approvalId,
-                toolName: record.pendingPermission.toolName,
-                ...(record.pendingPermission.description === undefined
-                  ? {}
-                  : { description: record.pendingPermission.description }),
-              },
-            }
-          : {}),
-      }));
+      .map((record) => {
+        const pendingPermission = projectPendingPermission(record);
+        return {
+          agentSessionId: record.agentSessionId,
+          agentKind: record.agentKind,
+          // 協定的 AgentStatus 沒有 completed；完成的 session 以 stopped 呈現，
+          // 真正的結果寫在 message，模組事件則保留完整的領域狀態。
+          status: record.status === "completed" ? "stopped" : record.status,
+          workingDirectory: record.workingDirectory,
+          startedAt: record.startedAt,
+          ...(record.progress
+            ? {
+                progress: {
+                  step: String(record.progress.step),
+                  label: record.progress.label,
+                  completed: record.progress.completed,
+                  total: record.progress.total,
+                },
+              }
+            : {}),
+          ...(record.message ? { message: record.message } : {}),
+          ...(record.resultUnknown ? { resultUnknown: true } : {}),
+          ...(pendingPermission ? { pendingPermission } : {}),
+        };
+      });
   }
 
   /** `module.external-agents.usage` 的資料來源；含資料夾外的 Claude 固定目錄。 */
@@ -1173,6 +1208,7 @@ export class ExternalAgentsService {
     ) {
       this.#live.delete(record.agentSessionId);
     }
+    const pendingPermission = projectPendingPermission(record);
     this.#deps.emitState({
       agentSessionId: record.agentSessionId,
       agentKind: record.agentKind,
@@ -1180,17 +1216,7 @@ export class ExternalAgentsService {
       ...(record.progress ? { progress: record.progress } : {}),
       ...(record.message ? { message: record.message } : {}),
       ...(record.resultUnknown ? { resultUnknown: true } : {}),
-      ...(record.pendingPermission
-        ? {
-            pendingPermission: {
-              approvalId: record.pendingPermission.approvalId,
-              toolName: record.pendingPermission.toolName,
-              ...(record.pendingPermission.description
-                ? { description: record.pendingPermission.description }
-                : {}),
-            },
-          }
-        : {}),
+      ...(pendingPermission ? { pendingPermission } : {}),
     });
   }
 
