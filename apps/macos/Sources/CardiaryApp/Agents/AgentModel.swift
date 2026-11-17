@@ -274,14 +274,18 @@ public final class AgentModel: ObservableObject {
 
     /// 停止外部代理；審批還沒決定時，主機會一併撤回，行程也會被收拾乾淨。
     public func stop(_ session: AgentSessionPresentation) async {
+        noticeMessage = nil
         guard let agents else {
             errorMessage = AppL10n.text(.agentServiceUnavailable, language: language)
             return
         }
         do {
-            _ = try await agents.stopAgent(agentSessionId: session.agentSessionId)
+            let response = try await agents.stopAgent(agentSessionId: session.agentSessionId)
             errorMessage = nil
-            noticeMessage = AppL10n.text(.agentStoppedNotice, language: language)
+            noticeMessage = AppL10n.text(
+                response.stopped ? .agentStoppedNotice : .agentStopNotAppliedNotice,
+                language: language
+            )
             await reload()
         } catch {
             errorMessage = AppL10n.format(
@@ -302,6 +306,7 @@ public final class AgentModel: ObservableObject {
 
     /// 送出待核准的決定。成功後先在本機清掉，主機的 `agent.state_changed` 再確認一次。
     public func decide(_ session: AgentSessionPresentation, optionId: String) async {
+        noticeMessage = nil
         guard let permission = session.pendingPermission else { return }
         guard !decidingIds.contains(session.agentSessionId) else { return }
         guard let approvals else {

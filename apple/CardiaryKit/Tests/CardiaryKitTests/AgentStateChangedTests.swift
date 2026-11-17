@@ -131,6 +131,33 @@ final class AgentStateChangedTests: XCTestCase {
         await client.stop()
     }
 
+    /// 主機回報 stopped:false 時，客戶端要如實解碼，不能當成已停止。
+    func testStopAgentDecodesStoppedFalse() async throws {
+        let queue = TransportQueue()
+        let transport = FakeServerTransport()
+        queue.append(transport)
+        let client = makeClient(queue: queue)
+        try await connect(client: client, transport: transport)
+
+        let task = Task {
+            try await client.stopAgent(agentSessionId: "agent-9")
+        }
+        let sent = JSONFixture.decode(try await transport.nextSent())
+        XCTAssertEqual(sent["type"] as? String, "agent.stop")
+
+        await transport.push(JSONFixture.string([
+            "v": 1,
+            "kind": "response",
+            "replyTo": try XCTUnwrap(sent["id"] as? String),
+            "type": "agent.stop",
+            "payload": ["agentSessionId": "agent-9", "stopped": false],
+        ]))
+        let response = try await task.value
+        XCTAssertEqual(response.agentSessionId, "agent-9")
+        XCTAssertFalse(response.stopped)
+        await client.stop()
+    }
+
     // MARK: - 測試資料
 
     private func decodeAgentStateChanged(stream: String, seq: Int) throws -> ServerFrame {

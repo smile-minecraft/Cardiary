@@ -715,6 +715,23 @@
         }
       }
     },
+    "agentStopNotAppliedNotice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The host did not stop the agent for this request."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "主機未執行這次停止操作。"
+          }
+        }
+      }
+    },
     "agentStoppedNotice": {
       "extractionState": "manual",
       "localizations": {

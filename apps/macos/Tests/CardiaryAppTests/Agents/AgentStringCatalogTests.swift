@@ -17,7 +17,7 @@ final class AgentStringCatalogTests: XCTestCase {
         .agentStartTitle, .agentStartKind, .agentStartDirectory,
         .agentStartPrompt, .agentStartPromptPlaceholder, .agentStartAction,
         .agentStartNeedsApproval, .agentStartInvalidDirectory, .agentStartedNotice,
-        .agentStopAction, .agentStoppedNotice
+        .agentStopAction, .agentStoppedNotice, .agentStopNotAppliedNotice
     ]
 
     func testEveryAgentKeyHasBothLanguages() {
@@ -52,6 +52,12 @@ final class AgentStringCatalogTests: XCTestCase {
         XCTAssertEqual(AppL10n.text(.agentStartAction, language: .en), "Start")
         XCTAssertEqual(AppL10n.text(.agentStopAction, language: .zhHant), "停止")
         XCTAssertEqual(AppL10n.text(.agentStopAction, language: .en), "Stop")
+        XCTAssertEqual(AppL10n.text(.agentStoppedNotice, language: .zhHant), "已送出停止請求。")
+        XCTAssertEqual(AppL10n.text(.agentStopNotAppliedNotice, language: .zhHant), "主機未執行這次停止操作。")
+        XCTAssertEqual(
+            AppL10n.text(.agentStopNotAppliedNotice, language: .en),
+            "The host did not stop the agent for this request."
+        )
     }
 
     func testKindAndStatusTextFollowLanguage() {

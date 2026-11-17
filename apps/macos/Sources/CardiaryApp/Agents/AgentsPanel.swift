@@ -106,6 +106,7 @@ struct AgentsPanelView: View {
             }
         }
         .themeBlock(Palette.surface)
+        .disabled(model.isStarting)
     }
 
     private func chooseDirectory() {

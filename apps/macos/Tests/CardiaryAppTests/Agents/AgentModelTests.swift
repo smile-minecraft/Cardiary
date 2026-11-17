@@ -351,6 +351,63 @@ final class AgentModelTests: XCTestCase {
         XCTAssertNil(model.errorMessage)
     }
 
+    func testStopNotAppliedShowsDistinctNoticeAndReloads() async {
+        let service = FakeCardiaryService(
+            agentSessions: [Fixtures.agentInfo(id: "agent-x")],
+            agentStopStopped: false
+        )
+        let model = AgentModel()
+        model.attach(service: service, approvals: service)
+        await model.reload()
+        let listsBefore = await service.agentListCallCount
+
+        await model.stop(model.sessions[0])
+
+        let calls = await service.agentStopCalls
+        let listsAfter = await service.agentListCallCount
+        XCTAssertEqual(calls, ["agent-x"])
+        XCTAssertEqual(model.noticeMessage, AppL10n.text(.agentStopNotAppliedNotice))
+        XCTAssertNotEqual(model.noticeMessage, AppL10n.text(.agentStoppedNotice))
+        XCTAssertNil(model.errorMessage)
+        XCTAssertEqual(listsAfter, listsBefore + 1, "停止後仍要 reload 快照")
+    }
+
+    func testFailedStopClearsPreviousNotice() async {
+        let service = FakeCardiaryService(
+            agentSessions: [Fixtures.agentInfo(id: "agent-x")]
+        )
+        let model = AgentModel()
+        model.attach(service: service, approvals: service)
+        await model.reload()
+
+        let succeeded = await model.start(agentKind: .opencode, workingDirectory: "/work", prompt: "做事")
+        XCTAssertTrue(succeeded)
+        XCTAssertNotNil(model.noticeMessage)
+
+        await service.setFailure(.agentStop)
+        await model.stop(model.sessions[0])
+
+        XCTAssertNotNil(model.errorMessage)
+        XCTAssertNil(model.noticeMessage)
+    }
+
+    func testFailedDecisionClearsPreviousNotice() async {
+        let service = FakeCardiaryService()
+        let model = AgentModel()
+        model.attach(service: service, approvals: service)
+        await model.start(agentKind: .opencode, workingDirectory: "/work", prompt: "做事")
+        XCTAssertNotNil(model.noticeMessage)
+        model.update(sessions: [
+            Fixtures.agentInfo(status: .waitingApproval, pendingPermission: Fixtures.agentPermission())
+        ])
+
+        await service.setFailure(.approval)
+        await model.approve(model.sessions[0])
+
+        XCTAssertNotNil(model.errorMessage)
+        XCTAssertNil(model.noticeMessage)
+    }
+
     func testFailedStopShowsError() async {
         let service = FakeCardiaryService(
             agentSessions: [Fixtures.agentInfo(id: "agent-x")],

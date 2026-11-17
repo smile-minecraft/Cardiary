@@ -106,6 +106,7 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case agentStartedNotice
     case agentStopAction
     case agentStoppedNotice
+    case agentStopNotAppliedNotice
     case connectionConnecting
     case connectionDisconnected
     case connectionRetry
