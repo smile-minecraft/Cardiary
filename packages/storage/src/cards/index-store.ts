@@ -506,6 +506,19 @@ export class CardIndexStore {
       .map((row) => row.tag);
   }
 
+  /** 一次讀出全部卡的標籤；載入常駐索引時用，避免逐卡查詢。 */
+  tagsByCard(): Map<string, string[]> {
+    const tags = new Map<string, string[]>();
+    for (const row of this.#db.all<{ card_id: string; tag: string }>(
+      "SELECT card_id, tag FROM card_tags ORDER BY card_id, rowid",
+    )) {
+      const list = tags.get(row.card_id);
+      if (list === undefined) tags.set(row.card_id, [row.tag]);
+      else list.push(row.tag);
+    }
+    return tags;
+  }
+
   /** 血緣：來源卡片識別碼，依卡片檔裡的順序。 */
   sourcesOf(cardId: string): string[] {
     return this.#db

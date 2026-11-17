@@ -9,6 +9,7 @@ import { CardVectors } from "./vectors.js";
 const CONSENT_KEY = "retrieval.allowModelDownload";
 
 const active = new Set<CardVectors>();
+const unsubscribers = new Set<() => void>();
 
 /**
  * 模組的 settings 讀取器會擋掉 human-only 的值；主機在同一個資料庫讀原始值，
@@ -76,12 +77,17 @@ export const hostModule: HostModule = {
       if (change.key !== CONSENT_KEY) return;
       vectors.refresh();
     });
+    // 卡片寫入與索引重建要讓常駐快照跟著更新；不能等到下一次查詢才發現。
+    unsubscribers.add(cards.onChange((change) => vectors.cardChanged(change)));
+    unsubscribers.add(cards.onRebuild(() => vectors.invalidate()));
     active.add(vectors);
     context.services.host.provide("retrieval", new RetrievalService(cards, vectors));
     // 啟用時就先回報目前狀態；不是 search 才知道要不要重建。
     vectors.refresh();
   },
   deactivate() {
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    unsubscribers.clear();
     for (const vectors of active) vectors.stop();
     active.clear();
   },
