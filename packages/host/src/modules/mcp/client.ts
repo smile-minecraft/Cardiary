@@ -19,6 +19,8 @@ export interface McpToolDescriptor {
   readonly name: string;
   readonly description?: string;
   readonly inputSchema?: Readonly<Record<string, unknown>>;
+  /** tools/list 回傳的原始 _meta；用來找出綁定的 ui:// 介面資源。 */
+  readonly meta?: Readonly<Record<string, unknown>>;
 }
 
 /** 一次工具呼叫的結果。 */
@@ -32,6 +34,8 @@ export interface McpCallResult {
 export interface McpClient {
   listTools(): Promise<McpToolDescriptor[]>;
   callTool(name: string, args: Readonly<Record<string, unknown>>): Promise<McpCallResult>;
+  /** 讀取 MCP 資源（例如 ui:// 介面），回傳 resources/read 的原始結果。 */
+  readResource(uri: string): Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -96,6 +100,11 @@ class StdioMcpClient implements McpClient {
     await this.#connect();
     const result = await this.#rpc!.request("tools/call", { name, arguments: args });
     return normalizeCallResult(result);
+  }
+
+  async readResource(uri: string): Promise<unknown> {
+    await this.#connect();
+    return this.#rpc!.request("resources/read", { uri });
   }
 
   close(): Promise<void> {
@@ -403,6 +412,11 @@ class HttpMcpClient implements McpClient {
     return normalizeCallResult(await this.#request("tools/call", { name, arguments: args }));
   }
 
+  async readResource(uri: string): Promise<unknown> {
+    await this.#connect();
+    return this.#request("resources/read", { uri });
+  }
+
   async close(): Promise<void> {
     this.#closed = true;
     this.#sessionId = null;
@@ -582,6 +596,7 @@ function parseToolsList(result: unknown): {
       ...(typeof tool.inputSchema === "object" && tool.inputSchema !== null
         ? { inputSchema: tool.inputSchema as Record<string, unknown> }
         : {}),
+      ...(isRecord(tool._meta) ? { meta: tool._meta } : {}),
     });
   }
   return {
@@ -697,6 +712,10 @@ function isRedirect(status: number): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function delay(ms: number): Promise<void> {
