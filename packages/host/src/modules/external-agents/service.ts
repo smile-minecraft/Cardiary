@@ -52,7 +52,6 @@ import {
   writeRecord,
   type AgentStoragePaths,
 } from "./store.js";
-import { loadClaudeToken } from "./credentials.js";
 import {
   ACP_IDS,
   agentArgs,
@@ -201,9 +200,9 @@ export interface ExternalAgentsDeps {
   readonly homeDir?: string;
   /** OpenCode 的預設模型；spike 實測的免費模型，代理沒登入也能跑。 */
   readonly openCodeModel?: string;
-  /** Claude Code 的 OAuth 權杖；測試注入用，優先於環境變數與憑證檔。 */
+  /** Claude Code 的 OAuth 權杖；測試注入用，優先於鑰匙圈與環境變數。 */
   readonly claudeToken?: string;
-  /** 從殼的鑰匙圈讀 Claude Code 權杖；優先於環境變數與憑證檔。 */
+  /** 從殼的鑰匙圈讀 Claude Code 權杖；優先於環境變數。 */
   readonly readClaudeToken?: () => Promise<string | null>;
   /** 以下為測試可調的等待上限；正式環境用預設值。 */
   readonly timeouts?: {
@@ -645,17 +644,10 @@ export class ExternalAgentsService {
     if (record.agentKind === "claude-code") {
       claudeToken = await this.#resolveClaudeToken();
       if (!claudeToken) {
-        const updated: ExternalAgentSessionRecord = {
-          ...record,
-          status: "failed",
+        await this.#finishSession(live, {
+          kind: "failed",
           message: "Claude Code 需要授權權杖，請在設定中提供。",
-          startApprovalId: undefined,
-          updatedAt: this.#now().toISOString(),
-          lastEventSeq: record.lastEventSeq + 1,
-        };
-        live.record = updated;
-        await writeRecord(this.#storage, updated);
-        this.#emit(updated);
+        });
         return;
       }
     }
@@ -820,7 +812,14 @@ export class ExternalAgentsService {
         return;
       }
       const sessionId = result.sessionId;
-      live.acpSessionId = typeof sessionId === "string" ? sessionId : null;
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        await this.#applyEvent(live, {
+          kind: "failed",
+          message: "代理建立工作階段失敗：未提供工作階段識別碼。",
+        });
+        return;
+      }
+      live.acpSessionId = sessionId;
       if (live.record.agentKind === "opencode") {
         // Claude 的 adapter 有自己的模型設定；OpenCode 的模型 id 不能套過去。
         // 沒有 acpSessionId 時不送 prompt，否則代理收不到也無法回 completion。
@@ -1071,9 +1070,10 @@ export class ExternalAgentsService {
       if (isTerminalAgentStatus(current.status)) return;
       const reduced = applyAgentEvent(current, event, nextEventSeq(current), this.#now());
       if (!reduced.applied) return;
-      live.record = reduced.record;
-      await writeRecord(this.#storage, reduced.record);
-      this.#emit(reduced.record);
+      const finished = { ...reduced.record, startApprovalId: undefined };
+      live.record = finished;
+      await writeRecord(this.#storage, finished);
+      this.#emit(finished);
     })();
     live.termination = task;
     try {
@@ -1283,7 +1283,7 @@ export class ExternalAgentsService {
   // ---- 小工具 -----------------------------------------------------------
 
   /**
-   * 依優先序解析 Claude 權杖：測試注入 > 殼的鑰匙圈 > 環境變數 > 舊的憑證檔。
+   * 依優先序解析 Claude 權杖：測試注入 > 殼的鑰匙圈 > 環境變數。
    * 任一層取不到或拋錯都往下試；全部失敗回 null，由呼叫端記為 failed 且不啟動行程。
    */
   async #resolveClaudeToken(): Promise<string | null> {
@@ -1293,16 +1293,10 @@ export class ExternalAgentsService {
         const token = await this.#deps.readClaudeToken();
         if (token) return token;
       } catch {
-        // 殼的鑰匙圈讀不到時，往下試環境變數與憑證檔。
+        // 殼的鑰匙圈讀不到時，往下試環境變數。
       }
     }
-    const envToken = process.env.CARDIARY_CLAUDE_OAUTH_TOKEN;
-    if (envToken) return envToken;
-    try {
-      return await loadClaudeToken(this.#deps.paths);
-    } catch {
-      return null;
-    }
+    return process.env.CARDIARY_CLAUDE_OAUTH_TOKEN || null;
   }
 
   /** Claude Code 的例外只在它自己的種類上放行；其餘代理拿不到。 */

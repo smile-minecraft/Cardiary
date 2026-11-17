@@ -15,7 +15,6 @@ import { HOST_SERVICE_NAMES, type AgentApprovalsService } from "../contract.js";
 import { manifest } from "./manifest.js";
 import { registerExternalAgentsProtocol } from "./protocol.js";
 import { ExternalAgentsService, type ExternalAgentStateData } from "./service.js";
-import { loadClaudeToken } from "./credentials.js";
 
 export const hostModule: HostModule = { manifest, activate, deactivate };
 
@@ -46,10 +45,10 @@ async function activate(context: ModuleActivationContext): Promise<void> {
             return result.value;
           }
         } catch {
-          // 殼的鑰匙圈讀不到時，往下試舊的憑證檔。
+          // 殼無法提供權杖。
         }
       }
-      return loadClaudeToken(context.services.paths);
+      return null;
     },
   });
   registerExternalAgentsProtocol({ service, protocol: context.services.protocol });

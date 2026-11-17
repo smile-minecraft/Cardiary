@@ -16,8 +16,6 @@ coverage/
 *.mobileprovision
 auth.json
 credentials*
-!packages/host/src/modules/external-agents/credentials.ts
-!packages/host/src/modules/external-agents/credentials.test.ts
 
 # Swift / Xcode
 .build/

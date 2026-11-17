@@ -101,8 +101,8 @@ export interface AgentEnvInput {
  * 不從主機的環境繼承：主機進程裡可能有 token，洩漏給代理沒有好處。
  * 只帶 PATH 與語系，加上導向專屬目錄的 HOME／XDG 變數。
  *
- * Claude Code 的登入權杖由橋接層從憑證檔讀出，只注入子行程環境（`CLAUDE_CODE_OAUTH_TOKEN`），
- * 不寫入工作階段紀錄，也不進日誌；橋接層不碰 Keychain 或 broker。
+ * Claude Code 的登入權杖只注入子行程環境（`CLAUDE_CODE_OAUTH_TOKEN`），
+ * 不寫入工作階段紀錄，也不進日誌。
  * `CLAUDE_CODE_EXECUTABLE` 指向 adapter 要執行的 `claude` CLI，可用 `claudeCliPath` 覆蓋。
  * adapter 固定講 ACP v1；補上標準身份變數 USER，但不設 `CLAUDE_CONFIG_DIR`。
  * adapter 仍會寫 `~/.claude`（此處是代理專屬家目錄）與

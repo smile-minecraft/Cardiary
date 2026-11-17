@@ -284,6 +284,10 @@ describe.skipIf(process.platform !== "darwin")("外部代理啟動驗證", () =>
       const spawnSpy = vi.spyOn(neverSpawns, "spawn");
 
       const started = await service.start({ agentKind: "claude-code", workingDirectory });
+      const scratch = scratchDir(agentStoragePaths(paths), started.agentSessionId);
+      await mkdir(scratch, { recursive: true });
+      await writeFile(join(scratch, "marker"), "temporary");
+      expect(await readdir(scratch)).toContain("marker");
 
       // 等到服務真的開始等審批（waitForDecision 會覆寫 pending entry），再核准。
       await eventually(async () =>
@@ -301,6 +305,10 @@ describe.skipIf(process.platform !== "darwin")("外部代理啟動驗證", () =>
       });
       const failed = await readRecord(agentStoragePaths(paths), started.agentSessionId);
       expect(failed?.message).toContain("權杖");
+      expect(failed?.startApprovalId).toBeUndefined();
+      expect(failed?.pendingPermission).toBeNull();
+      expect(approvals.pendingIds()).toEqual([]);
+      await expect(readdir(scratch)).rejects.toMatchObject({ code: "ENOENT" });
       expect(spawnSpy).not.toHaveBeenCalled();
       spawnSpy.mockRestore();
     } finally {

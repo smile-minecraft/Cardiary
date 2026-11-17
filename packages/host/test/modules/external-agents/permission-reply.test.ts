@@ -23,7 +23,11 @@ import type {
   AgentApprovalsService,
 } from "../../../src/modules/contract.js";
 import { ExternalAgentsService } from "../../../src/modules/external-agents/service.js";
-import { agentStoragePaths, readRecord } from "../../../src/modules/external-agents/store.js";
+import {
+  agentStoragePaths,
+  readRecord,
+  scratchDir,
+} from "../../../src/modules/external-agents/store.js";
 import { SpawnRegistry } from "../../../src/spawn/wrapper.js";
 
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -31,6 +35,7 @@ const roots: string[] = [];
 const agentDirs: string[] = [];
 const harnesses: { service: ExternalAgentsService; registry: SpawnRegistry }[] = [];
 const originalOpencodeCommand = process.env.CARDIARY_AGENT_COMMAND_OPENCODE;
+const originalClaudeCommand = process.env.CARDIARY_AGENT_COMMAND_CLAUDE_CODE;
 
 type Outcome = "approved" | "denied" | "expired" | "withdrawn";
 
@@ -111,6 +116,13 @@ const plan = JSON.parse(readFileSync(new URL("./plan.json", import.meta.url), "u
 const log = (entry) => appendFileSync(plan.logFile, JSON.stringify(entry) + "\n");
 const send = (frame) => process.stdout.write(JSON.stringify(frame) + "\n");
 
+// 只記錄布林值，不把權杖本身寫進任何記錄。
+log({
+  event: "env",
+  oauthPresent: !!process.env.CLAUDE_CODE_OAUTH_TOKEN,
+  oauthMatches: process.env.CLAUDE_CODE_OAUTH_TOKEN === "fake-claude-token-for-test",
+});
+
 let permissionResolve = null;
 const waitPermission = () => new Promise((resolve) => { permissionResolve = resolve; });
 
@@ -163,21 +175,35 @@ async function runPrompt() {
 }
 
 function handle(frame) {
+  if (frame.method) log({ event: "method", method: frame.method, params: frame.params });
   if (frame.method === "initialize") {
     send({ jsonrpc: "2.0", id: frame.id, result: { protocolVersion: 1, agentCapabilities: {} } });
     return;
   }
   if (frame.method === "session/new") {
-    send({ jsonrpc: "2.0", id: frame.id, result: { sessionId: "sess_fake" } });
+    if (plan.sessionNewError) {
+      send({ jsonrpc: "2.0", id: frame.id, error: { code: -32000, message: plan.sessionNewError } });
+      return;
+    }
+    const result = plan.sessionId === null ? {} : { sessionId: plan.sessionId ?? "sess_fake" };
+    if (plan.includeModes) result.modes = { availableModes: [{ id: "default" }] };
+    send({ jsonrpc: "2.0", id: frame.id, result });
     return;
   }
   if (frame.method === "session/set_config_option") {
+    if (plan.setModeError) {
+      send({ jsonrpc: "2.0", id: frame.id, error: { code: -32000, message: plan.setModeError } });
+      return;
+    }
     send({ jsonrpc: "2.0", id: frame.id, result: {} });
     return;
   }
   if (frame.method === "session/prompt") {
     void runPrompt();
     return;
+  }
+  if (frame.result !== undefined || frame.error !== undefined) {
+    log({ event: "response", id: frame.id, result: frame.result, error: frame.error });
   }
   if (frame.method === "session/cancel") {
     log({ event: "cancel" });
@@ -208,6 +234,13 @@ interface StrictAgentRequest {
   readonly allowOptionId: string;
   readonly denyOptionId: string;
   readonly expectedOptionId: string;
+  /** 握手行為覆寫；用來測試 session/new 缺欄位、setMode 錯誤等情境。 */
+  readonly handshake?: {
+    readonly sessionId?: string | null;
+    readonly includeModes?: boolean;
+    readonly sessionNewError?: string;
+    readonly setModeError?: string;
+  };
 }
 
 async function installStrictAgent(
@@ -224,7 +257,8 @@ async function installStrictAgent(
   const markerFile = join(workingDirectory, "marker.txt");
   const script = join(dir, "agent.mjs");
   const wrapper = join(dir, "agent");
-  await writeFile(join(dir, "plan.json"), JSON.stringify({ request, logFile, markerFile }), "utf8");
+  const plan = { request, logFile, markerFile, ...(request.handshake ?? {}) };
+  await writeFile(join(dir, "plan.json"), JSON.stringify(plan), "utf8");
   await writeFile(script, AGENT_SOURCE, "utf8");
   await writeFile(wrapper, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`, "utf8");
   await chmod(wrapper, 0o755);
@@ -251,12 +285,17 @@ async function eventually(check: () => Promise<boolean> | boolean, ms = 10_000):
   throw new Error("條件等待逾時");
 }
 
-async function makeHarness(): Promise<{
+async function makeHarness(options?: {
+  readonly claudeToken?: string;
+  readonly readClaudeToken?: () => Promise<string | null>;
+}): Promise<{
   service: ExternalAgentsService;
   registry: SpawnRegistry;
   approvals: RecordingApprovals;
   paths: CardiaryPaths;
   workingDirectory: string;
+  events: unknown[];
+  logs: string[];
 }> {
   const root = await mkdtemp(join(tmpdir(), "cardiary-permission-reply-root-"));
   roots.push(root);
@@ -276,13 +315,18 @@ async function makeHarness(): Promise<{
   };
   const registry = new SpawnRegistry();
   const approvals = new RecordingApprovals();
+  const events: unknown[] = [];
+  const logs: string[] = [];
   const service = new ExternalAgentsService({
     paths,
     spawn: registry,
     approvals,
-    emitState: () => undefined,
+    emitState: (event) => events.push(event),
+    logger: { warn: (message) => logs.push(message) },
     now: () => NOW,
     homeDir: join(root, "home"),
+    ...(options?.claudeToken ? { claudeToken: options.claudeToken } : {}),
+    ...(options?.readClaudeToken ? { readClaudeToken: options.readClaudeToken } : {}),
     timeouts: {
       cancelGraceMs: 30,
       termGraceMs: 30,
@@ -292,7 +336,7 @@ async function makeHarness(): Promise<{
     },
   });
   harnesses.push({ service, registry });
-  return { service, registry, approvals, paths, workingDirectory };
+  return { service, registry, approvals, paths, workingDirectory, events, logs };
 }
 
 /** 等到假代理服務端寫出該次權限回覆的紀錄。 */
@@ -305,11 +349,14 @@ async function waitForReplyLog(logFile: string): Promise<void> {
 describe.skipIf(process.platform !== "darwin")("外部代理權限回覆的主機層往返", () => {
   beforeEach(() => {
     delete process.env.CARDIARY_AGENT_COMMAND_OPENCODE;
+    delete process.env.CARDIARY_AGENT_COMMAND_CLAUDE_CODE;
   });
 
   afterEach(async () => {
     if (originalOpencodeCommand === undefined) delete process.env.CARDIARY_AGENT_COMMAND_OPENCODE;
     else process.env.CARDIARY_AGENT_COMMAND_OPENCODE = originalOpencodeCommand;
+    if (originalClaudeCommand === undefined) delete process.env.CARDIARY_AGENT_COMMAND_CLAUDE_CODE;
+    else process.env.CARDIARY_AGENT_COMMAND_CLAUDE_CODE = originalClaudeCommand;
     // 不管測試成功或失敗，先收掉服務與子行程再刪測試目錄，避免留下孤兒行程。
     for (const { service, registry } of harnesses.splice(0)) {
       await service.shutdown().catch(() => undefined);
@@ -319,8 +366,143 @@ describe.skipIf(process.platform !== "darwin")("外部代理權限回覆的主�
     for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
   });
 
+  const handshakeRequest: StrictAgentRequest = {
+    id: 0,
+    title: "執行 bash",
+    allowOptionId: "allow-actual",
+    denyOptionId: "deny-actual",
+    expectedOptionId: "allow-actual",
+  };
+
+  for (const testCase of [
+    { name: "缺 default 模式", handshake: {}, expectedMode: false },
+    {
+      name: "設定模式失敗",
+      handshake: { includeModes: true, setModeError: "bad mode" },
+      expectedMode: true,
+    },
+    {
+      name: "缺 sessionId",
+      handshake: { includeModes: true, sessionId: null },
+      expectedMode: false,
+    },
+    { name: "建立工作階段失敗", handshake: { sessionNewError: "new failed" }, expectedMode: false },
+  ]) {
+    it(`Claude 握手${testCase.name}時失敗且清除暫存`, async () => {
+      const { service, registry, approvals, paths, workingDirectory } = await makeHarness({
+        claudeToken: "fake-claude-token-for-test",
+      });
+      const agent = await installStrictAgent(
+        { ...handshakeRequest, handshake: testCase.handshake },
+        workingDirectory,
+      );
+      process.env.CARDIARY_AGENT_COMMAND_CLAUDE_CODE = agent.command;
+      const started = await service.start({
+        agentKind: "claude-code",
+        workingDirectory,
+        prompt: "任務",
+      });
+      approvals.approve(started.approvalId!);
+      const storage = agentStoragePaths(paths);
+      await eventually(
+        async () => (await readRecord(storage, started.agentSessionId))?.status === "failed",
+        3000,
+      );
+      const record = await readRecord(storage, started.agentSessionId);
+      expect(record?.startApprovalId).toBeUndefined();
+      expect(record?.pendingPermission).toBeNull();
+      expect(existsSync(scratchDir(storage, started.agentSessionId))).toBe(false);
+      expect(registry.runningCount).toBe(0);
+      const methods = (await readAgentLog(agent.logFile)).filter(
+        (entry) => entry.event === "method",
+      );
+      expect(methods.some((entry) => entry.method === "session/set_config_option")).toBe(
+        testCase.expectedMode,
+      );
+      expect(methods.some((entry) => entry.method === "session/prompt")).toBe(false);
+    }, 10000);
+  }
+
+  it("Claude 核准後讀取權杖，先設定 default 模式才送出任務", async () => {
+    let reads = 0;
+    const token = "fake-claude-token-for-test";
+    const { service, approvals, paths, workingDirectory, events, logs } = await makeHarness({
+      readClaudeToken: async () => {
+        reads += 1;
+        return token;
+      },
+    });
+    const agent = await installStrictAgent(
+      { ...handshakeRequest, handshake: { includeModes: true } },
+      workingDirectory,
+    );
+    process.env.CARDIARY_AGENT_COMMAND_CLAUDE_CODE = agent.command;
+    const started = await service.start({
+      agentKind: "claude-code",
+      workingDirectory,
+      prompt: "任務",
+    });
+    expect(reads).toBe(0);
+    approvals.approve(started.approvalId!);
+    await eventually(() =>
+      approvals.entries.some((entry) => entry.input.requestId.includes("permission:")),
+    );
+    expect(reads).toBe(1);
+    const entries = await readAgentLog(agent.logFile);
+    expect(entries.find((entry) => entry.event === "env")).toMatchObject({
+      oauthPresent: true,
+      oauthMatches: true,
+    });
+    const methods = entries.filter((entry) => entry.event === "method");
+    expect(methods.slice(0, 4).map((entry) => entry.method)).toEqual([
+      "initialize",
+      "session/new",
+      "session/set_config_option",
+      "session/prompt",
+    ]);
+    expect(methods[2]?.params).toMatchObject({
+      sessionId: "sess_fake",
+      configId: "mode",
+      value: "default",
+    });
+    approvals.approve(
+      approvals.entries.find((entry) => entry.input.requestId.includes("permission:"))!.approvalId,
+    );
+    const storage = agentStoragePaths(paths);
+    await eventually(
+      async () => (await readRecord(storage, started.agentSessionId))?.status === "completed",
+    );
+    expect(JSON.stringify(await readRecord(storage, started.agentSessionId))).not.toContain(token);
+    expect(JSON.stringify(events)).not.toContain(token);
+    expect(JSON.stringify(logs)).not.toContain(token);
+    expect(await readFile(agent.logFile, "utf8")).not.toContain(token);
+  }, 30000);
+
+  it("拒絕 Claude 啟動不讀取權杖", async () => {
+    let reads = 0;
+    const { service, approvals, paths, workingDirectory } = await makeHarness({
+      readClaudeToken: async () => {
+        reads += 1;
+        return "fake-claude-token-for-test";
+      },
+    });
+    const started = await service.start({ agentKind: "claude-code", workingDirectory });
+    approvals.deny(started.approvalId!);
+    await eventually(
+      async () =>
+        (await readRecord(agentStoragePaths(paths), started.agentSessionId))?.status === "failed",
+    );
+    expect(reads).toBe(0);
+  });
+
   it("數字 id 0 的核准：回覆保留 number 型別與實際 allow optionId，動作才執行", async () => {
-    const { service, registry, approvals, paths, workingDirectory } = await makeHarness();
+    let tokenReads = 0;
+    const { service, registry, approvals, paths, workingDirectory } = await makeHarness({
+      readClaudeToken: async () => {
+        tokenReads += 1;
+        return "fake-claude-token-for-test";
+      },
+    });
     const request: StrictAgentRequest = {
       id: 0,
       title: "執行 bash",
@@ -356,6 +538,11 @@ describe.skipIf(process.platform !== "darwin")("外部代理權限回覆的主�
     await waitForReplyLog(agent.logFile);
 
     const log = await readAgentLog(agent.logFile);
+    expect(tokenReads).toBe(0);
+    expect(log.find((entry) => entry.event === "env")).toMatchObject({
+      oauthPresent: false,
+      oauthMatches: false,
+    });
     const reply = log.find((entry) => entry.event === "permission-reply")!;
     expect(reply.replyIdType).toBe("number");
     expect(reply.replyId).toBe(0);
