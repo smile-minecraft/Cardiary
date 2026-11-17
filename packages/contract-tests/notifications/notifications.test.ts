@@ -188,6 +188,68 @@ describe("代理提議排程的審批路徑", () => {
 });
 
 describe("排程執行與通知", () => {
+  it("緊急全部暫停中止執行中的排程任務，執行紀錄標成 cancelled", async () => {
+    const { client } = await boot({
+      scripts: [[{ kind: "text", text: "排程任務執行中".repeat(20), chunkSize: 1, delayMs: 50 }]],
+    });
+    await systemSubscribe(client);
+    // 一般對話沒有進行中的回合；緊急暫停不該把它算進受影響的會話。
+    const idleSessionId = await createSession(client);
+
+    const created = await moduleRequest<{ schedule: { scheduleId: string } }>(
+      client,
+      "module.scheduler.create",
+      {
+        name: "慢速排程",
+        kind: "once",
+        spec: { at: "2020-01-01T00:00:00.000Z" },
+        task: { type: "agent", prompt: "做一件很久的事" },
+      },
+    );
+
+    // 背景任務會建立標題「排程：名稱」的對話；等它出現、使用者訊息已落地（回合已開始），
+    // 再送緊急暫停。不訂閱背景會話的串流：回合在訂閱前就開始，重播的 frame 不是這個測試要驗的。
+    let backgroundSessionId: string | undefined;
+    const deadline = Date.now() + 10_000;
+    while (backgroundSessionId === undefined && Date.now() < deadline) {
+      const listed = await requestPayload<{
+        sessions: Array<{ id: string; title?: string; messageCount?: number }>;
+      }>(client, "session.list", {});
+      const background = listed.sessions.find((session) => session.title === "排程：慢速排程");
+      if (background !== undefined && (background.messageCount ?? 0) > 0) {
+        backgroundSessionId = background.id;
+      }
+      if (backgroundSessionId === undefined) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+    expect(backgroundSessionId).toBeDefined();
+    const backgroundId = backgroundSessionId as string;
+
+    const pauseId = client.request("approval.pause_all", { reason: "測試緊急暫停" });
+    const paused = await client.waitForReply(pauseId);
+    const interrupted = (paused.payload as { interruptedSessionIds: string[] })
+      .interruptedSessionIds;
+    expect(interrupted).toContain(backgroundId);
+    expect(interrupted).not.toContain(idleSessionId);
+
+    // 排程服務收到中止的回合後，執行紀錄要標成 cancelled。
+    let runs: Array<{ status: string; conversationId?: string }> = [];
+    const runsDeadline = Date.now() + 10_000;
+    while (runs.length === 0 && Date.now() < runsDeadline) {
+      const result = await moduleRequest<{
+        runs: Array<{ status: string; conversationId?: string }>;
+      }>(client, "module.scheduler.runs", { scheduleId: created.schedule.scheduleId });
+      runs = result.runs;
+      if (runs.length === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBe("cancelled");
+    expect(runs[0]?.conversationId).toBe(backgroundId);
+  }, 40_000);
+
   it("建立已經過期的一次性排程：背景任務執行後產生通知，可轉卡且重送去重，可標記已讀", async () => {
     const { client } = await boot({ scripts: [[{ kind: "text", text: "一切正常" }]] });
     await systemSubscribe(client);
