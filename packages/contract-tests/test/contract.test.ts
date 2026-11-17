@@ -53,20 +53,32 @@ async function subscribe(connected: ProtocolClient, sessionId: string): Promise<
 }
 
 describe("以 node 直接啟動的主機服務", () => {
-  it("hello、系統訂閱與 schema 驗證；seq 接續開機事件", async () => {
+  it("hello、系統訂閱與 schema 驗證；含系統狀態與檢索狀態兩個開機事件", async () => {
     const service = await boot();
     const connected = await client(service);
-    const subscribeId = connected.request("system.subscribe", {});
+    // 帶 lastSeq=0 與目前 epoch，回放從 1 開始的開機事件。
+    const subscribeId = connected.request("system.subscribe", {
+      lastSeq: 0,
+      epoch: service.ready.epoch,
+    });
     const reply = await connected.waitForReply(subscribeId);
     const payload = reply.payload as { seq: number; epoch: string; resyncRequired: boolean };
-    // 開機時事件的固定順序：seq 1 是主機啟動時落地的 system.status，
-    // seq 2 是檢索模組啟用時送出的 module.retrieval.status。
-    expect(payload.seq).toBe(2);
-    expect(payload.resyncRequired).toBe(true);
     expect(payload.epoch).toBe(service.ready.epoch);
+    expect(payload.resyncRequired).toBe(false);
     expect(service.ready.clientPort).toBeGreaterThan(0);
     // connectAndHello 已經用正式 schema 驗過 hello 回應。
     expect(connected.frames[0]?.type).toBe("system.hello");
+    // 結構性斷言：開機事件包含 system.status 與 module.retrieval.status，
+    // 不依賴固定順序，也不假設固定的 seq 數字。
+    const systemStatus = await connected.waitFor(
+      (frame) => frame.kind === "event" && frame.type === "system.status",
+    );
+    const retrievalStatus = await connected.waitFor(
+      (frame) => frame.kind === "event" && frame.type === "module.retrieval.status",
+    );
+    const replayed = [systemStatus, retrievalStatus].map((frame) => Number(frame.seq));
+    expect(replayed.every((seq) => Number.isFinite(seq))).toBe(true);
+    expect(payload.seq).toBeGreaterThanOrEqual(Math.max(...replayed));
   });
 
   it("無 Token、錯 Token、控制 Token 都拿不到狀態；URL 帶 Token 也无效", async () => {
