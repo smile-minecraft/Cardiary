@@ -58,7 +58,7 @@ final class EditMenuTests: XCTestCase {
         let field = FakePasteSecureTextField(fakeText: "fake-token-content")
 
         let item = actionItem("paste:", in: EditMenu.make(language: .en))
-        NSApp.sendAction(item.action!, to: field, from: item)
+        field.perform(item.action!, with: item)
 
         XCTAssertTrue(field.didPaste, "貼上動作的 selector 應送達安全輸入框")
         XCTAssertEqual(field.stringValue, "fake-token-content")
@@ -78,7 +78,7 @@ final class EditMenuTests: XCTestCase {
         editor?.setSelectedRange(NSRange(location: 0, length: 0))
 
         let item = actionItem("selectAll:", in: EditMenu.make(language: .en))
-        NSApp.sendAction(item.action!, to: window.firstResponder, from: item)
+        window.firstResponder?.perform(item.action!, with: item)
 
         XCTAssertEqual(editor?.selectedRange.location, 0)
         XCTAssertEqual(editor?.selectedRange.length, 6, "Cmd-A 應選取全部六個字元")
