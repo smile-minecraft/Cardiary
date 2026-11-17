@@ -138,6 +138,110 @@ extension ServerFrame {
         }
     }
 
+    /// 回應幀對應的請求識別碼；事件與沒有 `replyTo` 的錯誤回傳 nil。
+    /// `handle(_:)` 用它把回應交還給等待的請求。
+    var replyTo: String? {
+        switch self {
+        case .systemHelloResponse(let frame): return frame.replyTo
+        case .systemSubscribeResponse(let frame): return frame.replyTo
+        case .systemUnsubscribeResponse(let frame): return frame.replyTo
+        case .systemStatusEvent: return nil
+        case .sessionCreateResponse(let frame): return frame.replyTo
+        case .sessionListResponse(let frame): return frame.replyTo
+        case .sessionSendMessageResponse(let frame): return frame.replyTo
+        case .sessionInterruptResponse(let frame): return frame.replyTo
+        case .sessionSubscribeResponse(let frame): return frame.replyTo
+        case .sessionUnsubscribeResponse(let frame): return frame.replyTo
+        case .sessionGetHistoryResponse(let frame): return frame.replyTo
+        case .sessionArchiveResponse(let frame): return frame.replyTo
+        case .sessionUnarchiveResponse(let frame): return frame.replyTo
+        case .sessionDeletionPreviewResponse(let frame): return frame.replyTo
+        case .sessionDeleteResponse(let frame): return frame.replyTo
+        case .cardListResponse(let frame): return frame.replyTo
+        case .cardGetResponse(let frame): return frame.replyTo
+        case .cardCreateResponse(let frame): return frame.replyTo
+        case .cardPatchResponse(let frame): return frame.replyTo
+        case .cardPatchesListResponse(let frame): return frame.replyTo
+        case .cardPatchAcceptResponse(let frame): return frame.replyTo
+        case .cardPatchRejectResponse(let frame): return frame.replyTo
+        case .cardVersionsListResponse(let frame): return frame.replyTo
+        case .cardVersionGetResponse(let frame): return frame.replyTo
+        case .cardVersionRestoreResponse(let frame): return frame.replyTo
+        case .cardDeleteResponse(let frame): return frame.replyTo
+        case .cardSearchResponse(let frame): return frame.replyTo
+        case .cardRefreshResponse(let frame): return frame.replyTo
+        case .boardListResponse(let frame): return frame.replyTo
+        case .boardGetResponse(let frame): return frame.replyTo
+        case .boardCreateResponse(let frame): return frame.replyTo
+        case .boardSaveResponse(let frame): return frame.replyTo
+        case .boardDeleteResponse(let frame): return frame.replyTo
+        case .boardProjectCardResponse(let frame): return frame.replyTo
+        case .boardUnprojectCardResponse(let frame): return frame.replyTo
+        case .boardCreateCardFromSelectionResponse(let frame): return frame.replyTo
+        case .mediaImportResponse(let frame): return frame.replyTo
+        case .contextGetResponse(let frame): return frame.replyTo
+        case .contextAddCardResponse(let frame): return frame.replyTo
+        case .contextRemoveCardResponse(let frame): return frame.replyTo
+        case .contextCompactResponse(let frame): return frame.replyTo
+        case .systemSettingsGetResponse(let frame): return frame.replyTo
+        case .systemSettingsSetResponse(let frame): return frame.replyTo
+        case .systemModulesGetResponse(let frame): return frame.replyTo
+        case .systemModulesSetEnabledResponse(let frame): return frame.replyTo
+        case .systemModelsGetResponse(let frame): return frame.replyTo
+        case .systemModelsSetResponse(let frame): return frame.replyTo
+        case .streamTurnStartedEvent: return nil
+        case .streamTextDeltaEvent: return nil
+        case .streamMessageCompletedEvent: return nil
+        case .streamToolCallEvent: return nil
+        case .streamToolResultEvent: return nil
+        case .streamTurnStateEvent: return nil
+        case .streamUiEvent: return nil
+        case .cardChangedEvent: return nil
+        case .boardChangedEvent: return nil
+        case .contextChangedEvent: return nil
+        case .contextCompactedEvent: return nil
+        case .sessionArchivedEvent: return nil
+        case .sessionUnarchivedEvent: return nil
+        case .sessionDeletedEvent: return nil
+        case .systemSettingsChangedEvent: return nil
+        case .systemModulesChangedEvent: return nil
+        case .systemModelsChangedEvent: return nil
+        case .approvalRequestedEvent: return nil
+        case .approvalDecideResponse(let frame): return frame.replyTo
+        case .approvalDecidedEvent: return nil
+        case .approvalPauseAllResponse(let frame): return frame.replyTo
+        case .notificationListResponse(let frame): return frame.replyTo
+        case .notificationMarkReadResponse(let frame): return frame.replyTo
+        case .notificationCreateCardResponse(let frame): return frame.replyTo
+        case .notificationChangedEvent: return nil
+        case .pairingBeginResponse(let frame): return frame.replyTo
+        case .pairingCompleteResponse(let frame): return frame.replyTo
+        case .agentStartResponse(let frame): return frame.replyTo
+        case .agentStopResponse(let frame): return frame.replyTo
+        case .agentListResponse(let frame): return frame.replyTo
+        case .agentStateChangedEvent: return nil
+        case .mcpServersListResponse(let frame): return frame.replyTo
+        case .mcpServerAddResponse(let frame): return frame.replyTo
+        case .mcpServerRemoveResponse(let frame): return frame.replyTo
+        case .mcpServerSetEnabledResponse(let frame): return frame.replyTo
+        case .mcpServerAllowHostsResponse(let frame): return frame.replyTo
+        case .mcpServersChangedEvent: return nil
+        case .settingsListResponse(let frame): return frame.replyTo
+        case .settingsProposeChangeResponse(let frame): return frame.replyTo
+        case .settingsChangesListResponse(let frame): return frame.replyTo
+        case .settingsChangeDecideResponse(let frame): return frame.replyTo
+        case .settingsChangedEvent: return nil
+        case .storageUsageResponse(let frame): return frame.replyTo
+        case .storageCleanupPreviewResponse(let frame): return frame.replyTo
+        case .storageCleanupApplyResponse(let frame): return frame.replyTo
+        case .storageChangedEvent: return nil
+        case .emotionGetResponse(let frame): return frame.replyTo
+        case .errorFrame(let frame): return frame.replyTo
+        case .moduleResponse(let frame): return frame.replyTo
+        case .moduleEvent: return nil
+        }
+    }
+
     /// 給錯誤訊息用的種類標籤。
     var kindLabel: String {
         switch self {

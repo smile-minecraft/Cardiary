@@ -1453,100 +1453,12 @@ public actor CardiaryConnection {
                 throw CardiaryClientError.unexpectedReply(replyTo)
             }
             continuation.resume(throwing: wrappedError(error))
-        case .systemHelloResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .systemSubscribeResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .systemUnsubscribeResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .sessionCreateResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .sessionListResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .sessionSendMessageResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .sessionInterruptResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .sessionSubscribeResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .sessionUnsubscribeResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .sessionGetHistoryResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .sessionArchiveResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .sessionUnarchiveResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .sessionDeletionPreviewResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .sessionDeleteResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .cardListResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .cardGetResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .cardCreateResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .cardPatchResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .cardDeleteResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .cardSearchResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .cardRefreshResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .mediaImportResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .contextGetResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .contextAddCardResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .contextRemoveCardResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .contextCompactResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .approvalDecideResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .approvalPauseAllResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .systemModelsGetResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .systemModelsSetResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .systemSettingsGetResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .systemSettingsSetResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .systemModulesGetResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .systemModulesSetEnabledResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .storageUsageResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .storageCleanupPreviewResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .storageCleanupApplyResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .moduleResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .mcpServersListResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .mcpServerAddResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .mcpServerRemoveResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .mcpServerSetEnabledResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .mcpServerAllowHostsResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .agentListResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .agentStartResponse(let response):
-            resume(response.replyTo, with: frame)
-        case .agentStopResponse(let response):
-            resume(response.replyTo, with: frame)
         default:
-            eventContinuation.yield(frame)
+            if let replyTo = frame.replyTo {
+                resume(replyTo, with: frame)
+            } else {
+                eventContinuation.yield(frame)
+            }
         }
     }
 
