@@ -76,7 +76,7 @@ export async function makeFolder(requestedFolderId?: string): Promise<TestFolder
   try {
     storage.close();
   } catch (error) {
-    throw new Error(`初始化測試資料夾失敗：${String(error)}`);
+    throw new Error(`初始化測試資料夾失敗：${String(error)}`, { cause: error });
   }
   const folderId = (
     JSON.parse(await readFile(join(path, "state", "folder.json"), "utf8")) as {
