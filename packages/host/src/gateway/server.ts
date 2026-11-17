@@ -530,6 +530,17 @@ export class Gateway {
   }
 
   async #emitIntent(intent: ProtocolEventIntent): Promise<void> {
+    // MCP 伺服器增刪時，工具組內容會變。對已釘選 MCP 工具組的進行中對話
+    // 預告目前的工具組，讓它在下一次壓縮換版；新對話不受影響，建立時會
+    // 直接取目前的工具組。任何一步失敗都只記診斷，不擋掉事件落地。
+    if (intent.kind === "mcp-servers-changed") {
+      try {
+        await this.#stageMcpBundleUpdates();
+      } catch (error) {
+        // 預告是附帶動作；失敗不能擋掉事件本身落地。
+        this.#logger.warn("MCP 工具組變更預告失敗", { message: errorMessage(error) });
+      }
+    }
     const mapped = mapEventIntent(intent);
     if ("error" in mapped) {
       this.#logger.warn("丟棄模組事件意圖", { reason: mapped.error });
@@ -1950,6 +1961,35 @@ export class Gateway {
       if (!pins.some((pin) => pin.bundleId === extra.bundleId)) pins.push(extra);
     }
     return pins;
+  }
+
+  /**
+   * MCP 伺服器增刪時，把目前的工具組預告給已釘選 MCP 工具組的對話。
+   *
+   * 只篩掉沒釘 MCP 的對話；其餘對話一律預告目前的工具組，由引擎在套用時
+   * 判斷有沒有真正差異。引擎看得到尚未套用的更新，能正確處理「新增後又
+   * 移除」這類取消；閘道不能拿自己看到的已套用清單提前跳過。新對話不受
+   * 影響，建立時直接取目前的工具組。
+   */
+  async #stageMcpBundleUpdates(): Promise<void> {
+    const conversations = await this.#options.engine.listConversations?.();
+    if (conversations === undefined || conversations.length === 0) return;
+    const current = this.#pinnedToolBundles();
+    for (const conversation of conversations) {
+      const pinned = conversation.toolBundles;
+      if (!pinned.some((pin) => pin.bundleId.startsWith("mcp:"))) continue;
+      try {
+        await this.#options.engine.stageConversationUpdate(conversation.id, {
+          reason: "module-reload",
+          toolBundles: current,
+        });
+      } catch (error) {
+        this.#logger.warn("MCP 工具組變更預告失敗", {
+          conversationId: conversation.id,
+          message: errorMessage(error),
+        });
+      }
+    }
   }
 
   async #recoverCreateSession(

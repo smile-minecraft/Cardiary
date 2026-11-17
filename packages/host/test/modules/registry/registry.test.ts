@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   HostModule,
+  ModuleActivationContext,
   ModuleManifest,
   ModuleServices,
   ToolBundle,
@@ -230,6 +231,37 @@ describe("HTTP 路由表", () => {
 });
 
 describe("模組生命週期", () => {
+  it("撤銷工具組會移除釘選，舊手把不會撤銷重新註冊的工具組", async () => {
+    const { registry, tools } = makeRegistry();
+    const captured: { context?: ModuleActivationContext } = {};
+    await registry.load({
+      manifest: manifestOf("mcp"),
+      activate(context) {
+        captured.context = context;
+      },
+    });
+    await registry.activate("mcp");
+    const context = captured.context!;
+    const draft = { bundleId: "mcp:server", label: "server", tools: [] };
+    const first = context.registerToolBundle(draft);
+    expect(registry.activeToolBundles()).toEqual([{ bundleId: "mcp:server", generation: 1 }]);
+    const second = context.registerToolBundle(draft);
+    expect(registry.activeToolBundles()).toEqual([{ bundleId: "mcp:server", generation: 1 }]);
+    await first.dispose();
+    await first.dispose();
+    expect(registry.activeToolBundles()).toEqual([{ bundleId: "mcp:server", generation: 1 }]);
+    expect(tools.retired).toEqual([]);
+    await second.dispose();
+    await second.dispose();
+    expect(registry.activeToolBundles()).toEqual([]);
+    expect(tools.retired).toEqual(["mcp:server@1"]);
+    const third = context.registerToolBundle(draft);
+    expect(registry.activeToolBundles()).toEqual([{ bundleId: "mcp:server", generation: 1 }]);
+    await third.dispose();
+    expect(registry.activeToolBundles()).toEqual([]);
+    expect(tools.retired).toEqual(["mcp:server@1", "mcp:server@1"]);
+  });
+
   it("啟用註冊、停用由主機銷毀每個 handle 一次，模組不自行銷毀也不重複", async () => {
     const { registry, tools } = makeRegistry();
     const captured: { handle: { dispose(): Promise<void> } | null } = { handle: null };

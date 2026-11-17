@@ -610,7 +610,11 @@ export class FakeEngine implements EngineAdapter {
 
   async stageConversationUpdate(id: ConversationId, update: ConversationUpdate): Promise<void> {
     const conversation = this.#conversation(id);
-    conversation.staged = update;
+    conversation.staged = mergeStagedUpdate(
+      { systemContext: conversation.systemContext, toolBundles: conversation.toolBundles },
+      conversation.staged,
+      update,
+    );
   }
 
   /** 套用等待中的工具組與固定前綴；回傳這次有沒有換版。 */
@@ -1644,6 +1648,60 @@ export class FakeEngine implements EngineAdapter {
 
 export function turnIdFor(messageId: MessageId): TurnId {
   return `turn_${messageId}`;
+}
+
+/**
+ * 把一次預告合併到對話既有尚未套用的預告。
+ *
+ * 每個欄位獨立處理：送了欄位就拿它跟已套用值比，相同撤銷舊預告、不同才覆蓋；
+ * 沒送的欄位保留先前預告。全數無差異回 `null`，壓縮不標記 `appliedUpdate`。
+ * 這份邏輯與真轉接層各自獨立實作，讓兩邊測試能互相印證。
+ */
+function mergeStagedUpdate(
+  applied: { readonly systemContext: string; readonly toolBundles: readonly ToolBundlePin[] },
+  previous: ConversationUpdate | null,
+  update: ConversationUpdate,
+): ConversationUpdate | null {
+  const systemContext = fieldAfterUpdate(
+    applied.systemContext,
+    previous?.systemContext,
+    update.systemContext,
+  );
+  const toolBundles = fieldAfterUpdate(
+    applied.toolBundles,
+    previous?.toolBundles,
+    update.toolBundles,
+    samePinSet,
+  );
+  if (systemContext === undefined && toolBundles === undefined) return null;
+  return {
+    reason: update.reason,
+    ...(systemContext === undefined ? {} : { systemContext }),
+    ...(toolBundles === undefined ? {} : { toolBundles }),
+  };
+}
+
+function fieldAfterUpdate<T>(
+  applied: T,
+  previous: T | undefined,
+  incoming: T | undefined,
+  equal: (left: T, right: T) => boolean = (left, right) => left === right,
+): T | undefined {
+  if (incoming === undefined) return previous;
+  return equal(incoming, applied) ? undefined : incoming;
+}
+
+/** 工具組用 bundleId 與 generation 的集合比對，順序不構成差異。 */
+function samePinSet(left: readonly ToolBundlePin[], right: readonly ToolBundlePin[]): boolean {
+  const keys = (pins: readonly ToolBundlePin[]): Set<string> =>
+    new Set(pins.map((pin) => `${pin.bundleId}@${pin.generation}`));
+  const leftKeys = keys(left);
+  const rightKeys = keys(right);
+  if (leftKeys.size !== rightKeys.size) return false;
+  for (const key of leftKeys) {
+    if (!rightKeys.has(key)) return false;
+  }
+  return true;
 }
 
 function cursorAt(index: number): ConversationCursor {

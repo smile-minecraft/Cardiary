@@ -778,11 +778,17 @@ export class HostModuleRegistry implements ModuleHost {
       identity,
       services,
       registerToolBundle: (draft) => {
-        bundles.push({ bundleId: draft.bundleId, generation: identity.generation });
+        const previous = bundles.findIndex((pin) => pin.bundleId === draft.bundleId);
+        if (previous >= 0) bundles.splice(previous, 1);
+        const pin = { bundleId: draft.bundleId, generation: identity.generation };
+        bundles.push(pin);
         pending.push(this.#options.tools.register({ ...draft, generation: identity.generation }));
-        return handle("tools", () =>
-          this.#options.tools.retire(draft.bundleId, identity.generation),
-        );
+        return handle("tools", () => {
+          const index = bundles.indexOf(pin);
+          if (index < 0) return;
+          bundles.splice(index, 1);
+          return this.#options.tools.retire(draft.bundleId, identity.generation);
+        });
       },
       registerContextSection: (section: ContextSectionContribution) => {
         this.#contextSections.push(section);

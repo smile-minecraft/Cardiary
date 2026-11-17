@@ -154,6 +154,12 @@ export interface ForkConversationRequest {
  *
  * 用來落實「新版模組對新對話立即生效，進行中的對話在壓縮時才換」。
  * 轉接層套用後在 `conversation.compacted` 事件標記 `appliedUpdate`。
+ *
+ * 這是部分更新：只帶要改的欄位。呼叫端送某欄位時，引擎拿它跟對話已套用
+ * 的值比較；相同就撤銷該欄位先前尚未套用的預告，不同才蓋掉該欄位。沒送
+ * 的欄位保留先前還沒套用的預告，所以工具組更新不會抹掉固定前綴的更新。
+ * 所有欄位都沒有差異時不算變更，引擎不保留預告，壓縮也不會標記套用。
+ * `reason` 記錄這一次有效變更的理由。
  */
 export interface ConversationUpdate {
   readonly reason: "module-reload" | "context-refresh" | "manual";
