@@ -37,6 +37,12 @@ public struct SettingsNotificationSystemCenter: NotificationSystemCenterSettings
     }
 }
 
+/// 系統通知中心發生的錯誤。
+public enum NotificationSystemCenterError: Error, Equatable {
+    /// 目前環境沒有可用的系統通知中心，例如跑在測試環境。
+    case unavailable
+}
+
 /// macOS 的 `UNUserNotificationCenter` 實作。
 #if canImport(UserNotifications)
 public struct UserNotificationSystemCenter: NotificationSystemCenter {
@@ -47,10 +53,19 @@ public struct UserNotificationSystemCenter: NotificationSystemCenter {
     }
 
     /// 只有真正的 App 才拿得到系統通知中心；跑在測試環境就回 nil，呼叫方當作不支援。
+    ///
+    /// Xcode 的測試會帶 `XCTestConfigurationFilePath`；`swift test` 直接跑時沒有這個變數，
+    /// 但測試目標已經載入 XCTest，否則 `UNUserNotificationCenter.current()` 會擲出
+    /// Objective-C 例外，讓整個測試行程結束。
     private var resolvedCenter: UNUserNotificationCenter? {
         if let center { return center }
-        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return nil }
+        guard Self.isRunningTests == false else { return nil }
         return UNUserNotificationCenter.current()
+    }
+
+    private static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || NSClassFromString("XCTestCase") != nil
     }
 
     public func requestAuthorization() async -> Bool {
@@ -70,7 +85,10 @@ public struct UserNotificationSystemCenter: NotificationSystemCenter {
         // 立即送出；0.1 秒只是觸發器需要的非零間隔。
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            guard let center = resolvedCenter else { return }
+            guard let center = resolvedCenter else {
+                continuation.resume(throwing: NotificationSystemCenterError.unavailable)
+                return
+            }
             center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger)) { error in
                 if let error {
                     continuation.resume(throwing: error)
