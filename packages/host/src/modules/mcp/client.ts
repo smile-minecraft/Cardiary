@@ -76,7 +76,10 @@ class StdioMcpClient implements McpClient {
   readonly #server: McpServerRecord;
   readonly #context: McpClientContext;
   #rpc: StdioRpc | null = null;
+  /** 初始化 promise：所有並行呼叫都等它，失敗才清空以便重試。 */
   #connecting: Promise<void> | null = null;
+  /** 關閉 promise：所有並行 close 共用，等到子行程真正結束才 resolve。 */
+  #closing: Promise<void> | null = null;
   #closed = false;
 
   constructor(server: McpServerRecord, context: McpClientContext) {
@@ -95,24 +98,30 @@ class StdioMcpClient implements McpClient {
     return normalizeCallResult(result);
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.#closing !== null) return this.#closing;
     this.#closed = true;
     const rpc = this.#rpc;
+    // 馬上清掉對外可見的 rpc，但把真正的關行程交給共用 promise；第二個
+    // close() 也等同一個 promise，不會在子行程還活著時提前回來。
     this.#rpc = null;
     this.#connecting = null;
     rpc?.dispose();
-    await rpc?.close();
+    this.#closing = rpc?.close() ?? Promise.resolve();
+    return this.#closing;
   }
 
   async #connect(): Promise<void> {
     if (this.#closed) {
       throw new McpClientError("closed", "MCP 用戶端已關閉");
     }
-    if (this.#rpc !== null) {
-      return;
-    }
+    // 初始化還在進行時，即使 #rpc 已從 spawn 起就指派，仍要等同一個
+    // #connecting，否則第二個並行呼叫會在 initialize 回應前就送 tools/*。
     if (this.#connecting !== null) {
       return this.#connecting;
+    }
+    if (this.#rpc !== null) {
+      return;
     }
     this.#connecting = this.#start().catch((error: unknown) => {
       this.#connecting = null;

@@ -68,6 +68,8 @@ jobs:
           packages/host/test/modules/local-tools/tools.test.ts
           packages/host/test/modules/local-tools/integration.test.ts
           packages/host/test/modules/mcp/stdio-sandbox-e2e.test.ts
+          packages/host/test/modules/mcp/stdio-close.test.ts
+          packages/host/test/modules/mcp/stdio-concurrency.test.ts
       # 契約測試只有這一個測試有 darwin 分支；用名稱篩選，不跑整包契約測試。
       - name: 控制面的 darwin 檢查
         run: pnpm vitest run packages/contract-tests/test/contract.test.ts -t "控制面不開 TCP listener"
