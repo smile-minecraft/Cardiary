@@ -180,6 +180,7 @@ private struct NotificationRow: View {
             Palette.surface,
             in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius)
         )
+        .draggable(NotificationDrag(notificationId: item.notificationId))
     }
 
     private var kindLabel: String {

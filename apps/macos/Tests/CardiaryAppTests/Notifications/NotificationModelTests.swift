@@ -163,6 +163,43 @@ final class NotificationModelTests: XCTestCase {
         XCTAssertEqual(model.notifications[0].cardId, "card-1")
     }
 
+    func testAddToConversationByDragIdsResolvesLoadedNotifications() async {
+        let fake = FakeNotificationAndContextService()
+        let model = makeModel()
+        model.attach(service: fake)
+        model.update(notifications: payload([record(id: "n-1"), record(id: "n-2")], unread: 2))
+
+        // 拖曳只帶識別碼：已知的加入、找不到的略過。
+        let added = await model.addToConversation(
+            notificationIds: ["n-2", "n-missing"],
+            sessionId: "session-1",
+            conversationTitle: "晚餐聊聊"
+        )
+
+        XCTAssertEqual(added, 1)
+        let calls = await fake.addCardCalls
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls.first?.sessionId, "session-1")
+        XCTAssertEqual(calls.first?.cardId, "card-1")
+        XCTAssertEqual(model.notifications.first { $0.notificationId == "n-2" }?.cardId, "card-1")
+        XCTAssertNil(model.notifications.first { $0.notificationId == "n-1" }?.cardId)
+    }
+
+    func testAddToConversationByDragIdsIgnoresUnknownOnly() async {
+        let fake = FakeNotificationAndContextService()
+        let model = makeModel()
+        model.attach(service: fake)
+        model.update(notifications: payload([record(id: "n-1")], unread: 1))
+
+        let added = await model.addToConversation(
+            notificationIds: ["n-missing"], sessionId: "session-1"
+        )
+
+        XCTAssertEqual(added, 0)
+        let calls = await fake.addCardCalls
+        XCTAssertTrue(calls.isEmpty)
+    }
+
     func testPresentSystemNotificationShowsWhenEnabledAndAuthorized() async {
         let center = FakeSystemCenter(authorize: true, failShow: false)
         let settings = FakeSystemCenterSettings(enabled: true)

@@ -335,6 +335,29 @@ public final class NotificationModel: ObservableObject {
         }
     }
 
+    /// 拖曳進對話：依通知識別碼找出目前載入的通知並逐筆加入；回傳實際加入的筆數。
+    ///
+    /// 找不到識別碼的通知直接略過——拖曳的內容可能來自已重新載入的通知流。
+    @discardableResult
+    public func addToConversation(
+        notificationIds: [String],
+        sessionId: String,
+        conversationTitle: String? = nil
+    ) async -> Int {
+        var added = 0
+        for id in notificationIds {
+            guard let item = notifications.first(where: { $0.notificationId == id }) else {
+                continue
+            }
+            if await addToConversation(
+                item, sessionId: sessionId, conversationTitle: conversationTitle
+            ) {
+                added += 1
+            }
+        }
+        return added
+    }
+
     /// 有權限且設定允許時，送一則系統通知；失敗不擋住通知流程。
     public func presentSystemNotification(for item: NotificationPresentation) async {
         guard let systemCenter else { return }
