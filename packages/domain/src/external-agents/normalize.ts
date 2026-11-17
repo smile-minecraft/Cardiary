@@ -101,7 +101,7 @@ function normalizeAcpPermission(frame: AcpJsonRpcRequest): NormalizedAgentEvent 
     input,
     ...(description ? { description } : {}),
     requestKey,
-    replyToken: String(frame.id),
+    replyToken: frame.id,
     ...(allowOptionId ? { allowOptionId } : {}),
     ...(denyOptionId ? { denyOptionId } : {}),
   };

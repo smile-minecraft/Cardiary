@@ -192,7 +192,7 @@ export interface ExternalAgentsDeps {
 
 interface TrackedPermission {
   readonly approvalId: string;
-  readonly replyToken: string;
+  readonly replyToken: number | string;
   readonly toolName: string;
   readonly input: Record<string, unknown>;
   /** OpenCode ACP 伺服器實際给的 optionId；回錯會被當成拒絕。 */
@@ -903,7 +903,7 @@ export class ExternalAgentsService {
                 ? (tracked.allowOptionId ?? "allow_once")
                 : (tracked.denyOptionId ?? "reject_once"),
             )
-          : encodeClaudePermissionReply(tracked.replyToken, allow ? "allow" : "deny", {
+          : encodeClaudePermissionReply(String(tracked.replyToken), allow ? "allow" : "deny", {
               ...(allow ? { updatedInput: tracked.input as JsonValue } : { message }),
             });
       child.write(reply);

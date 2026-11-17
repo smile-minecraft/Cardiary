@@ -75,11 +75,39 @@ describe("opencode acp normalization", () => {
     expect(events[0]).toMatchObject({
       kind: "permission",
       toolName: "shell",
-      replyToken: "41",
+      replyToken: 41,
       requestKey: "opencode:41",
       allowOptionId: "once",
       denyOptionId: "reject",
     });
+  });
+
+  it("request id 的型別原樣保留：數字 0 與字串 '0' 的 replyToken 型別不同，去重鍵仍相同", () => {
+    const numeric = normalizeAcpLine(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 0,
+        method: "session/request_permission",
+        params: { toolCall: { toolName: "shell" }, options: [] },
+      }),
+    );
+    const textual = normalizeAcpLine(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: "0",
+        method: "session/request_permission",
+        params: { toolCall: { toolName: "shell" }, options: [] },
+      }),
+    );
+    // replyToken 保留原本的 id 型別，回覆代理時才不會因型別不符被當成未知請求。
+    expect(numeric[0]).toMatchObject({ replyToken: 0, requestKey: "opencode:0" });
+    expect(typeof (numeric[0] as { replyToken: number | string }).replyToken).toBe("number");
+    expect(textual[0]).toMatchObject({ replyToken: "0", requestKey: "opencode:0" });
+    expect(typeof (textual[0] as { replyToken: number | string }).replyToken).toBe("string");
+    // 去重鍵仍是字串，數字 0 與字串 "0" 共用同一個 requestKey。
+    expect((numeric[0] as { requestKey: string }).requestKey).toBe(
+      (textual[0] as { requestKey: string }).requestKey,
+    );
   });
 
   it("plan 更新換算成進度", () => {
