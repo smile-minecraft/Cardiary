@@ -9,6 +9,9 @@ final class AgentStringCatalogTests: XCTestCase {
     private let agentKeys: [AppString] = [
         .inspectorAgentsTitle, .inspectorAgentsEmpty, .agentsUnavailable,
         .agentKindOpencode, .agentKindClaudeCode,
+        .agentClaudeTokenTitle, .agentClaudeTokenPlaceholder, .agentClaudeTokenHint,
+        .agentClaudeTokenSave, .agentClaudeTokenSaved, .agentClaudeTokenEmpty,
+        .agentClaudeTokenUnavailable, .agentClaudeTokenSaveFailed,
         .agentStatusStarting, .agentStatusRunning, .agentStatusWaitingApproval,
         .agentStatusStopped, .agentStatusFailed,
         .agentResultUnknown, .agentResultUnknownHelp,

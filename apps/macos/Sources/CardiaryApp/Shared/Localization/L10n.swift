@@ -84,6 +84,14 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case agentsUnavailable
     case agentKindOpencode
     case agentKindClaudeCode
+    case agentClaudeTokenTitle
+    case agentClaudeTokenPlaceholder
+    case agentClaudeTokenHint
+    case agentClaudeTokenSave
+    case agentClaudeTokenSaved
+    case agentClaudeTokenEmpty
+    case agentClaudeTokenUnavailable
+    case agentClaudeTokenSaveFailed
     case agentStatusStarting
     case agentStatusRunning
     case agentStatusWaitingApproval

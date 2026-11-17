@@ -1,4 +1,5 @@
 import CardiaryKit
+import CardiaryShellCore
 import Combine
 import Foundation
 
@@ -119,6 +120,9 @@ public struct AgentSessionPresentation: Identifiable, Equatable, Sendable {
 /// 檢視欄的外部代理清單：快照、事件更新、待核准的決定。
 @MainActor
 public final class AgentModel: ObservableObject {
+    /// 外部代理權杖在鑰匙圈的帳號。
+    public static let claudeTokenAccount = "external-agent/claude-code"
+
     @Published public private(set) var sessions: [AgentSessionPresentation] = []
     /// 是否拿過主機的完整清單。事件可能先到，但沒有快照就不知道還有哪些會話。
     @Published public private(set) var isKnown = false
@@ -130,6 +134,7 @@ public final class AgentModel: ObservableObject {
     private var agents: (any AgentService)?
     private var approvals: (any ApprovalService)?
     private let language: AppLanguage
+    private let keychain: (any KeychainWriting)?
 
     /// 上次沒拿到成功回應的啟動要求。重試相同內容沿用請求 id，讓主機去重不要重跑任務。
     private struct PendingStartAttempt {
@@ -147,13 +152,37 @@ public final class AgentModel: ObservableObject {
     private var pendingStartAttempt: PendingStartAttempt?
 
     /// - Parameter language: 這個模型產生訊息時用的介面語言；測試可以指定。
-    public init(language: AppLanguage = AppL10n.language) {
+    /// - Parameter keychain: 用來存放外部代理權杖的鑰匙圈；測試可以指定替身。
+    public init(language: AppLanguage = AppL10n.language, keychain: (any KeychainWriting)? = nil) {
         self.language = language
+        self.keychain = keychain
     }
 
     public func attach(service: any AgentService, approvals: any ApprovalService) {
         self.agents = service
         self.approvals = approvals
+    }
+
+    /// 把 Claude Code 權杖寫入鑰匙圈。回傳是否成功，讓表單只在成功時清空欄位。
+    /// 權杖只交給鑰匙圈，不進 log 也不寫入任何檔案。
+    @discardableResult
+    public func storeClaudeToken(_ token: String) -> Bool {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            errorMessage = AppL10n.text(.agentClaudeTokenEmpty, language: language)
+            return false
+        }
+        guard let keychain else {
+            errorMessage = AppL10n.text(.agentClaudeTokenUnavailable, language: language)
+            return false
+        }
+        guard keychain.store(account: Self.claudeTokenAccount, value: trimmed) else {
+            errorMessage = AppL10n.text(.agentClaudeTokenSaveFailed, language: language)
+            return false
+        }
+        noticeMessage = AppL10n.text(.agentClaudeTokenSaved, language: language)
+        errorMessage = nil
+        return true
     }
 
     /// 從主機重新載入完整清單；事件更新過的內容以這份快照為準。

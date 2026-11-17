@@ -24,6 +24,7 @@ struct AgentsPanelView: View {
     @State private var kind: AgentKind = .opencode
     @State private var directory = ""
     @State private var prompt = ""
+    @State private var claudeToken = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
@@ -59,6 +60,30 @@ struct AgentsPanelView: View {
                 Text(AppL10n.text(.agentKindClaudeCode)).tag(AgentKind.claudeCode)
             }
             .pickerStyle(.segmented)
+
+            if kind == .claudeCode {
+                VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
+                    Text(AppL10n.text(.agentClaudeTokenTitle))
+                        .font(.cardiary(.callout, weight: .semibold))
+                    SecureField(AppL10n.text(.agentClaudeTokenPlaceholder), text: $claudeToken)
+                        .textFieldStyle(ThemeFieldStyle())
+                    Text(AppL10n.text(.agentClaudeTokenHint))
+                        .font(.cardiary(.caption2))
+                        .foregroundStyle(Palette.inkSecondary)
+                    HStack {
+                        Spacer()
+                        Button {
+                            if model.storeClaudeToken(claudeToken) {
+                                claudeToken = ""
+                            }
+                        } label: {
+                            Label(AppL10n.text(.agentClaudeTokenSave), systemImage: "key")
+                        }
+                        .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
+                        .controlSize(.small)
+                    }
+                }
+            }
 
             HStack(spacing: DesignTokens.spacingS) {
                 TextField(AppL10n.text(.agentStartDirectory), text: $directory)

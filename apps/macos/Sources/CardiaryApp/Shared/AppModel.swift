@@ -65,7 +65,7 @@ public final class AppModel: ObservableObject {
         self.conversation = ConversationModel()
         self.firstRun = FirstRunModel(keychain: keychain)
         self.approvals = ApprovalModel(language: language)
-        self.agents = AgentModel(language: language)
+        self.agents = AgentModel(language: language, keychain: keychain)
         self.remote = RemoteModel(language: language)
         self.notifications = NotificationModel(language: language)
         self.settingsModel = SettingsModel(keychain: keychain, language: language)

@@ -341,6 +341,142 @@
         }
       }
     },
+    "agentClaudeTokenEmpty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste a token first."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先貼上權杖。"
+          }
+        }
+      }
+    },
+    "agentClaudeTokenHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stored only in the keychain on this Mac; the host reads it only when starting Claude."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只存在這台 Mac 的鑰匙圈，主機啟動 Claude 時才會讀取。"
+          }
+        }
+      }
+    },
+    "agentClaudeTokenPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste your Claude Code token"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "貼上 Claude Code 權杖"
+          }
+        }
+      }
+    },
+    "agentClaudeTokenSave": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save to keychain"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存入鑰匙圈"
+          }
+        }
+      }
+    },
+    "agentClaudeTokenSaveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not write to the keychain."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法寫入鑰匙圈。"
+          }
+        }
+      }
+    },
+    "agentClaudeTokenSaved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token saved to the keychain."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已將權杖寫入鑰匙圈。"
+          }
+        }
+      }
+    },
+    "agentClaudeTokenTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code token"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code 權杖"
+          }
+        }
+      }
+    },
+    "agentClaudeTokenUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keychain is unavailable; the token cannot be saved."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法使用鑰匙圈，不能儲存權杖。"
+          }
+        }
+      }
+    },
     "agentKindClaudeCode": {
       "extractionState": "manual",
       "localizations": {

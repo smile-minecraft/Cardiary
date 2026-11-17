@@ -1,4 +1,5 @@
 import CardiaryKit
+import CardiaryShellCore
 import XCTest
 
 @testable import CardiaryApp
@@ -423,5 +424,54 @@ final class AgentModelTests: XCTestCase {
         XCTAssertTrue(calls.isEmpty)
         XCTAssertNotNil(model.errorMessage)
         XCTAssertNil(model.noticeMessage)
+    }
+
+    // MARK: - Claude Code 權杖
+
+    func testStoreClaudeTokenStoresTrimmedValueAndShowsNotice() {
+        let keychain = FakeKeychain()
+        let model = AgentModel(keychain: keychain)
+
+        let stored = model.storeClaudeToken("  sk-test-token  \n")
+
+        XCTAssertTrue(stored)
+        let calls = keychain.storeCalls
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls[0].account, AgentModel.claudeTokenAccount)
+        XCTAssertEqual(calls[0].value, "sk-test-token")
+        XCTAssertEqual(model.noticeMessage, AppL10n.text(.agentClaudeTokenSaved))
+        XCTAssertNil(model.errorMessage)
+    }
+
+    func testStoreBlankClaudeTokenDoesNotCallKeychain() {
+        let keychain = FakeKeychain()
+        let model = AgentModel(keychain: keychain)
+
+        let stored = model.storeClaudeToken("  \n  ")
+
+        XCTAssertFalse(stored)
+        XCTAssertTrue(keychain.storeCalls.isEmpty)
+        XCTAssertEqual(model.errorMessage, AppL10n.text(.agentClaudeTokenEmpty))
+    }
+
+    func testStoreClaudeTokenWithoutKeychainReportsUnavailable() {
+        let model = AgentModel()
+
+        let stored = model.storeClaudeToken("sk-test-token")
+
+        XCTAssertFalse(stored)
+        XCTAssertEqual(model.errorMessage, AppL10n.text(.agentClaudeTokenUnavailable))
+    }
+
+    func testFailedKeychainWriteReportsSaveFailed() {
+        let keychain = FakeKeychain()
+        keychain.storeSucceeds = false
+        let model = AgentModel(keychain: keychain)
+
+        let stored = model.storeClaudeToken("sk-test-token")
+
+        XCTAssertFalse(stored)
+        XCTAssertEqual(keychain.storeCalls.count, 1)
+        XCTAssertEqual(model.errorMessage, AppL10n.text(.agentClaudeTokenSaveFailed))
     }
 }
