@@ -107,6 +107,9 @@ function makeEngine(): HostEngine {
       waitForDecision() {
         return new Promise(() => undefined);
       },
+      async listPending() {
+        return [];
+      },
     },
   } as unknown as HostEngine;
 }

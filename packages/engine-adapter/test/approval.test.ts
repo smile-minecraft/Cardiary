@@ -146,6 +146,55 @@ describe("審批", () => {
     }
   }, 20000);
 
+  it("宿主審批跨重啟仍待決：設定跟著審批持久化，決定後等待者讀到結果", async () => {
+    const ledger = createInMemoryApprovalLedger();
+    const toolInput = {
+      name: "Local",
+      transport: "stdio" as const,
+      command: "node",
+      args: ["server.js", "--port", "8931"],
+      allowedHosts: ["example.com"],
+    };
+    const draft = {
+      hostApproval: { component: "mcp", requestId: "host-restart" },
+      action: {
+        kind: "module-enable" as const,
+        summary: "新增 MCP 伺服器「Local」",
+        toolInput,
+      },
+      risk: "high" as const,
+      requestedBy: { kind: "host" as const, component: "mcp" },
+    };
+    const first = await createFixture({ ledger });
+    const request = await first.adapter.approvals.request(draft);
+    expect(request.draft.action.toolInput).toEqual(toolInput);
+    expect((await first.adapter.approvals.listPending()).map((entry) => entry.id)).toContain(
+      request.id,
+    );
+    const root = first.root;
+    // 模擬重啟：同一份 ledger，新的轉接層實例。
+    await first.close();
+    const second = await createFixture({ root, ledger });
+    try {
+      const restored = await second.adapter.approvals.listPending();
+      const entry = restored.find((candidate) => candidate.id === request.id);
+      expect(entry?.draft.action.toolInput).toEqual(toolInput);
+      const waiter = second.adapter.approvals.waitForDecision(request.id);
+      await second.adapter.approvals.decide({
+        requestId: request.id,
+        verdict: "approve",
+        decidedBy: { kind: "human", clientId: "test" },
+      });
+      const resolution = await waiter;
+      expect(resolution.outcome).toBe("approved");
+      expect(
+        (await second.adapter.approvals.listPending()).map((candidate) => candidate.id),
+      ).not.toContain(request.id);
+    } finally {
+      await second.cleanup();
+    }
+  }, 20000);
+
   it("宿主審批：缺 component／requestId、元件不一致或帶對話／外部代理識別碼時拒絕", async () => {
     const fixture = await createFixture();
     try {

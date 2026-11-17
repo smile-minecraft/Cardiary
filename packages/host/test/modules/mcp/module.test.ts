@@ -16,6 +16,7 @@ import type {
 } from "../../../src/modules/mcp/client.js";
 import { toolNamesOf } from "../../../src/modules/mcp/tools.js";
 import { openMcpApprovals } from "./helpers.js";
+import { waitUntil } from "../../helpers.js";
 
 const INPUT = {
   name: "Local",
@@ -55,7 +56,16 @@ function makeFolder(): string {
 class FakeApprovals {
   readonly calls: unknown[] = [];
   readonly #waiters = new Map<string, (resolution: Record<string, unknown>) => void>();
+  readonly #seeded: Array<Record<string, unknown>> = [];
   #count = 0;
+
+  seed(request: Record<string, unknown>): void {
+    this.#seeded.push(request);
+  }
+
+  async listPending(): Promise<Array<Record<string, unknown>>> {
+    return [...this.#seeded];
+  }
 
   async request(draft: unknown): Promise<{ id: string }> {
     const id = `approval-${(this.#count += 1)}`;
@@ -75,6 +85,10 @@ class FakeApprovals {
       this.#waiters.delete(id);
       resolve({ outcome, request: {}, decision: {} });
     }
+  }
+
+  waiting(): string[] {
+    return [...this.#waiters.keys()];
   }
 }
 
@@ -182,6 +196,87 @@ describe("MCP 模組的審批與工具註冊", () => {
     });
     const { approvalId } = await handle.controller.requestAdd(INPUT);
     approvals.decide(approvalId, "denied");
+    await handle.settled();
+
+    expect(await store.list()).toEqual([]);
+    expect(bundles).toEqual([]);
+    await handle.dispose();
+  });
+
+  it("重啟後仍在 pending 的新增審批會重新等待，核准後完成新增", async () => {
+    const root = makeFolder();
+    const store = new McpServerStore(new FolderLayout(root));
+    const approvals = new FakeApprovals();
+    approvals.seed({
+      id: "approval-resumed",
+      status: "pending",
+      requestedAt: "2026-11-18T00:00:00.000Z",
+      expiresAt: null,
+      draft: {
+        action: {
+          kind: "module-enable",
+          summary: "新增 MCP 伺服器「Local」",
+          toolInput: { ...INPUT },
+        },
+        risk: "high",
+        requestedBy: { kind: "host", component: "mcp" },
+        hostApproval: { component: "mcp", requestId: "host-resumed" },
+      },
+    });
+    const bundles: ToolBundleDraft[] = [];
+    const calls: string[] = [];
+    const bindings = openMcpApprovals();
+    const handle = await activateMcpModule(makeContext(bundles), {
+      store,
+      engine: makeEngine(approvals),
+      clientFactory: fakeClient(calls),
+      folderRoot: root,
+      bindings,
+    });
+    // 等重接排上等待者；沒有等就直接決定，決定會被丟掉、settled 會一直等。
+    await waitUntil(() => approvals.waiting().includes("approval-resumed"), 5000);
+
+    approvals.decide("approval-resumed", "approved");
+    await handle.settled();
+
+    const records = await store.list();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.name).toBe(INPUT.name);
+    expect(bundles.length).toBeGreaterThanOrEqual(1);
+    expect(bindings.isApproved(records[0]!)).toBe(true);
+    await handle.dispose();
+  });
+
+  it("待決審批的設定內容無效時跳過重接，不擋住啟動", async () => {
+    const root = makeFolder();
+    const store = new McpServerStore(new FolderLayout(root));
+    const approvals = new FakeApprovals();
+    approvals.seed({
+      id: "approval-broken",
+      status: "pending",
+      requestedAt: "2026-11-18T00:00:00.000Z",
+      expiresAt: null,
+      draft: {
+        action: {
+          kind: "module-enable",
+          summary: "新增 MCP 伺服器",
+          toolInput: { name: 42, transport: "carrier" },
+        },
+        risk: "high",
+        requestedBy: { kind: "host", component: "mcp" },
+        hostApproval: { component: "mcp", requestId: "host-broken" },
+      },
+    });
+    const bundles: ToolBundleDraft[] = [];
+    const handle = await activateMcpModule(makeContext(bundles), {
+      store,
+      engine: makeEngine(approvals),
+      clientFactory: fakeClient([]),
+      folderRoot: root,
+      bindings: openMcpApprovals(),
+    });
+
+    // 無效列沒有被重新掛上，settled() 應立即返回，不留下資料的正本寫入。
     await handle.settled();
 
     expect(await store.list()).toEqual([]);
