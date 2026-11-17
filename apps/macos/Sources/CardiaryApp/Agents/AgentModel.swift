@@ -131,6 +131,21 @@ public final class AgentModel: ObservableObject {
     private var approvals: (any ApprovalService)?
     private let language: AppLanguage
 
+    /// 上次沒拿到成功回應的啟動要求。重試相同內容沿用請求 id，讓主機去重不要重跑任務。
+    private struct PendingStartAttempt {
+        let agentKind: AgentKind
+        let workingDirectory: String
+        let prompt: String?
+        let clientRequestId: String
+
+        /// 只比較內容，不比較請求 id。
+        func matches(kind: AgentKind, directory: String, prompt: String?) -> Bool {
+            agentKind == kind && workingDirectory == directory && self.prompt == prompt
+        }
+    }
+
+    private var pendingStartAttempt: PendingStartAttempt?
+
     /// - Parameter language: 這個模型產生訊息時用的介面語言；測試可以指定。
     public init(language: AppLanguage = AppL10n.language) {
         self.language = language
@@ -205,6 +220,7 @@ public final class AgentModel: ObservableObject {
         workingDirectory: String,
         prompt: String?
     ) async -> Bool {
+        noticeMessage = nil
         let directory = workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedPrompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalPrompt = trimmedPrompt?.isEmpty == true ? nil : trimmedPrompt
@@ -218,6 +234,20 @@ public final class AgentModel: ObservableObject {
         }
         guard !isStarting else { return false }
 
+        let clientRequestId: String
+        if let attempt = pendingStartAttempt,
+           attempt.matches(kind: agentKind, directory: directory, prompt: finalPrompt) {
+            clientRequestId = attempt.clientRequestId
+        } else {
+            clientRequestId = UUID().uuidString
+            pendingStartAttempt = PendingStartAttempt(
+                agentKind: agentKind,
+                workingDirectory: directory,
+                prompt: finalPrompt,
+                clientRequestId: clientRequestId
+            )
+        }
+
         isStarting = true
         defer { isStarting = false }
         do {
@@ -225,8 +255,9 @@ public final class AgentModel: ObservableObject {
                 agentKind: agentKind,
                 workingDirectory: directory,
                 prompt: finalPrompt,
-                clientRequestId: UUID().uuidString
+                clientRequestId: clientRequestId
             )
+            pendingStartAttempt = nil
             errorMessage = nil
             noticeMessage = AppL10n.text(.agentStartedNotice, language: language)
             await reload()

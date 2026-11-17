@@ -232,6 +232,109 @@ final class AgentModelTests: XCTestCase {
         XCTAssertEqual(model.errorMessage, AppL10n.text(.agentServiceUnavailable))
     }
 
+    func testLostResponseRetryReusesRequestId() async {
+        let service = FakeCardiaryService(loseFirstStartResponse: true)
+        let model = AgentModel()
+        model.attach(service: service, approvals: service)
+
+        let first = await model.start(
+            agentKind: .opencode,
+            workingDirectory: "/work",
+            prompt: "做事"
+        )
+        XCTAssertFalse(first)
+        var calls = await service.agentStartCalls
+        XCTAssertEqual(calls.count, 1)
+        let firstId = calls[0].clientRequestId
+
+        // 斷線重連不該清掉 attempt；重試沿用同一個要求和同一個 id。
+        model.markDisconnected()
+        model.attach(service: service, approvals: service)
+        let retry = await model.start(
+            agentKind: .opencode,
+            workingDirectory: "  /work  ",
+            prompt: "  做事  "
+        )
+        XCTAssertTrue(retry)
+        calls = await service.agentStartCalls
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertEqual(calls[1].clientRequestId, firstId)
+        XCTAssertEqual(calls[1].workingDirectory, "/work")
+        XCTAssertEqual(calls[1].prompt, "做事")
+    }
+
+    func testDifferentPayloadAfterLostResponseUsesNewRequestId() async {
+        let service = FakeCardiaryService(loseFirstStartResponse: true)
+        let model = AgentModel()
+        model.attach(service: service, approvals: service)
+
+        let first = await model.start(agentKind: .opencode, workingDirectory: "/work", prompt: "做事")
+        XCTAssertFalse(first)
+        var calls = await service.agentStartCalls
+        let firstId = calls[0].clientRequestId
+
+        let second = await model.start(agentKind: .claudeCode, workingDirectory: "/work", prompt: "做事")
+        XCTAssertTrue(second)
+        calls = await service.agentStartCalls
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertNotEqual(calls[1].clientRequestId, firstId)
+    }
+
+    func testStartAfterSuccessUsesNewRequestId() async {
+        let service = FakeCardiaryService()
+        let model = AgentModel()
+        model.attach(service: service, approvals: service)
+
+        let first = await model.start(agentKind: .opencode, workingDirectory: "/work", prompt: "做事")
+        XCTAssertTrue(first)
+        var calls = await service.agentStartCalls
+        let firstId = calls[0].clientRequestId
+
+        let second = await model.start(agentKind: .opencode, workingDirectory: "/work", prompt: "做事")
+        XCTAssertTrue(second)
+        calls = await service.agentStartCalls
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertNotEqual(calls[1].clientRequestId, firstId)
+    }
+
+    func testConcurrentStartSendsOnlyOneRequest() async {
+        let service = FakeCardiaryService(holdFirstStart: true)
+        let model = AgentModel()
+        model.attach(service: service, approvals: service)
+
+        async let first = model.start(agentKind: .opencode, workingDirectory: "/work", prompt: "做事")
+        await service.waitForFirstStartEntered()
+        let second = await model.start(agentKind: .opencode, workingDirectory: "/work", prompt: "做事")
+
+        var calls = await service.agentStartCalls
+        XCTAssertFalse(second, "第一次還沒回來時，重入不該送第二次請求")
+        XCTAssertTrue(model.isStarting)
+        XCTAssertEqual(calls.count, 1)
+
+        await service.releaseFirstStart()
+        let firstResult = await first
+        XCTAssertTrue(firstResult)
+        XCTAssertFalse(model.isStarting)
+        calls = await service.agentStartCalls
+        XCTAssertEqual(calls.count, 1)
+    }
+
+    func testNewFailedStartClearsPreviousNotice() async {
+        let service = FakeCardiaryService(agentSessions: [Fixtures.agentInfo()])
+        let model = AgentModel()
+        model.attach(service: service, approvals: service)
+
+        let succeeded = await model.start(agentKind: .opencode, workingDirectory: "/work", prompt: "做事")
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(model.noticeMessage, AppL10n.text(.agentStartedNotice))
+
+        await service.setFailure(.agentStart)
+        let failed = await model.start(agentKind: .opencode, workingDirectory: "/work", prompt: "做事")
+        XCTAssertFalse(failed)
+        XCTAssertNil(model.noticeMessage)
+        XCTAssertNotNil(model.errorMessage)
+    }
+
     // MARK: - 停止
 
     func testStopSendsSessionId() async {

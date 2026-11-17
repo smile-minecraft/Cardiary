@@ -21,6 +21,7 @@ actor FakeCardiaryService:
         case storageApply
         case agentStart
         case agentStop
+        case agentStartLostResponse
     }
 
     private var listPages: [SessionListResponsePayload]
@@ -31,7 +32,7 @@ actor FakeCardiaryService:
     private let sendResponse: SessionSendMessageResponsePayload?
     private var sendDelay: Duration = .zero
     private var modelsState: SystemModelsState
-    private let failure: Failure?
+    private var failure: Failure?
     private var settingsItems: [SettingItem]
     private var modulesList: [ModuleInfo]
     private var mcpServersList: [McpServerInfo]
@@ -41,6 +42,12 @@ actor FakeCardiaryService:
     private let storagePreviewPayload: StorageCleanupPreviewResponsePayload?
     private let storageApplyPayload: StorageCleanupApplyResponsePayload?
     private var agentSessions: [AgentSessionInfo]
+    private var didLoseStartResponse = false
+    private let agentStopStopped: Bool
+    private let holdFirstStart: Bool
+    private var startHasEntered = false
+    private var startEnteredWaiter: CheckedContinuation<Void, Never>?
+    private var startReleaseGate: CheckedContinuation<Void, Never>?
 
     private(set) var historyCursors: [String?] = []
     private(set) var listCalls = 0
@@ -82,6 +89,12 @@ actor FakeCardiaryService:
         clientRequestId: String?
     )] = []
     private(set) var agentStopCalls: [String] = []
+    private(set) var agentListCallCount = 0
+
+    /// 測試中切換外部服務的失敗狀態，用來驗證清除舊訊息等行為。
+    func setFailure(_ newFailure: Failure?) {
+        failure = newFailure
+    }
 
     init(
         sessions: [SessionSummary] = [],
@@ -101,6 +114,9 @@ actor FakeCardiaryService:
         storagePreview: StorageCleanupPreviewResponsePayload? = nil,
         storageApply: StorageCleanupApplyResponsePayload? = nil,
         agentSessions: [AgentSessionInfo] = [],
+        agentStopStopped: Bool = true,
+        holdFirstStart: Bool = false,
+        loseFirstStartResponse: Bool = false,
         failure: Failure? = nil
     ) {
         self.fallbackSessions = sessions
@@ -120,6 +136,9 @@ actor FakeCardiaryService:
         self.storagePreviewPayload = storagePreview
         self.storageApplyPayload = storageApply
         self.agentSessions = agentSessions
+        self.agentStopStopped = agentStopStopped
+        self.holdFirstStart = holdFirstStart
+        self.didLoseStartResponse = loseFirstStartResponse
         self.failure = failure
     }
 
@@ -382,7 +401,8 @@ actor FakeCardiaryService:
     // MARK: - AgentService
 
     func listAgents() async throws -> AgentListResponsePayload {
-        AgentListResponsePayload(agents: agentSessions)
+        agentListCallCount += 1
+        return AgentListResponsePayload(agents: agentSessions)
     }
 
     func startAgent(
@@ -393,16 +413,42 @@ actor FakeCardiaryService:
     ) async throws -> AgentStartResponsePayload {
         if failure == .agentStart { throw Failure.agentStart }
         agentStartCalls.append((agentKind, workingDirectory, prompt, clientRequestId))
+        if holdFirstStart && !startHasEntered {
+            startHasEntered = true
+            startEnteredWaiter?.resume()
+            startEnteredWaiter = nil
+            await withCheckedContinuation { continuation in
+                startReleaseGate = continuation
+            }
+        }
+        if didLoseStartResponse {
+            didLoseStartResponse = false
+            throw Failure.agentStartLostResponse
+        }
         return AgentStartResponsePayload(
             agentSessionId: "agent-started",
             approvalId: "start-approval"
         )
     }
 
+    /// 放掉被 `holdFirstStart` 掛起的第一次啟動，讓它繼續送出回應。
+    func releaseFirstStart() {
+        startReleaseGate?.resume()
+        startReleaseGate = nil
+    }
+
+    /// 等第一次啟動進入 `startAgent`；測試用它確認第二次呼叫前第一次還沒回來。
+    func waitForFirstStartEntered() async {
+        if startHasEntered { return }
+        await withCheckedContinuation { continuation in
+            startEnteredWaiter = continuation
+        }
+    }
+
     func stopAgent(agentSessionId: String) async throws -> AgentStopResponsePayload {
         if failure == .agentStop { throw Failure.agentStop }
         agentStopCalls.append(agentSessionId)
-        return AgentStopResponsePayload(agentSessionId: agentSessionId, stopped: true)
+        return AgentStopResponsePayload(agentSessionId: agentSessionId, stopped: agentStopStopped)
     }
 
     // MARK: - CardService
