@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@cardiary/protocol": "workspace:*",
+    "@cardiary/storage": "workspace:*",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "ws": "8.23.0"

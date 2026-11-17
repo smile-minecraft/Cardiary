@@ -53,15 +53,36 @@ export async function makeEmptyFolder(): Promise<TestFolder> {
 
 export async function makeFolder(requestedFolderId?: string): Promise<TestFolder> {
   const path = await mkdtemp(join(tmpdir(), "cardiary-contract-"));
-  await mkdir(join(path, "state"), { recursive: true });
-  await mkdir(join(path, "tmp"), { recursive: true });
-  const folderId =
-    requestedFolderId ??
-    `contract_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  await writeFile(
-    join(path, "state", "folder.json"),
-    JSON.stringify({ format: 1, folderId, createdAt: new Date().toISOString(), createdBy: "test" }),
-  );
+  if (requestedFolderId !== undefined) {
+    // 呼叫端要同一個 folderId 的誘餌資料夾：維持只寫 folder.json 的最小實作，
+    // 不走初始化流程（測試不需要合法的資料夾，初始化反而要求資料夾是空的）。
+    await mkdir(join(path, "state"), { recursive: true });
+    await mkdir(join(path, "tmp"), { recursive: true });
+    await writeFile(
+      join(path, "state", "folder.json"),
+      JSON.stringify({
+        format: 1,
+        folderId: requestedFolderId,
+        createdAt: new Date().toISOString(),
+        createdBy: "test",
+      }),
+    );
+    return { path, folderId: requestedFolderId };
+  }
+  // 真 Pi 組裝開資料夾時會驗證九個子資料夾與兩個資料庫的身分（application_id），
+  // 手寫的 folder.json 不夠；用正式的初始化流程建立，讓兩種組裝都拿到合法資料夾。
+  const { Storage } = await import("@cardiary/storage");
+  const storage = Storage.open({ path, initialize: true, createdBy: "test" });
+  try {
+    storage.close();
+  } catch (error) {
+    throw new Error(`初始化測試資料夾失敗：${String(error)}`);
+  }
+  const folderId = (
+    JSON.parse(await readFile(join(path, "state", "folder.json"), "utf8")) as {
+      folderId: string;
+    }
+  ).folderId;
   return { path, folderId };
 }
 
