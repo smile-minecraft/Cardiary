@@ -340,7 +340,9 @@ export class CardIndexStore {
          DELETE FROM card_sources;
          DELETE FROM asset_refs;
          DELETE FROM fts_cards;
-         DELETE FROM vec_cards;`,
+         DELETE FROM vec_cards;
+         DELETE FROM vec_cards_usage;
+         DELETE FROM vec_cards_evicted;`,
       );
       for (const card of cards) {
         this.#writeCard(tx, card);
@@ -714,6 +716,8 @@ export class CardIndexStore {
     tx.run("DELETE FROM asset_refs WHERE card_id = ?", cardId);
     tx.run("DELETE FROM fts_cards WHERE card_id = ?", cardId);
     tx.run("DELETE FROM vec_cards WHERE card_id = ?", cardId);
+    tx.run("DELETE FROM vec_cards_usage WHERE card_id = ?", cardId);
+    tx.run("DELETE FROM vec_cards_evicted WHERE card_id = ?", cardId);
   }
 
   #resolveTarget(
