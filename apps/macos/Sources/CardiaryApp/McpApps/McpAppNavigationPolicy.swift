@@ -53,16 +53,28 @@ public struct McpAppNavigationPolicy: Equatable, Sendable {
     }
 }
 
-/// 頁面可以送給殼的訊息。只收這一種，其他形狀一律忽略。
+/// 頁面可以送給殼的訊息。只收「準備好了」與「高度變化」兩種，其他形狀一律忽略。
 ///
-/// 訊息通道從頁面往殼的方向只做「我準備好了」，殼收到後才把主題、語系與
-/// 卡片摘要寫進 DOM；頁面沒有辦法要求更多資料。
+/// 訊息通道從頁面往殼的方向只做兩件事：`ready` 讓殼把主題、語系與卡片摘要
+/// 寫進 DOM；`height` 回報頁面內容高度，讓原生這側調整容器、不截斷內容。
+/// 頁面沒有辦法要求更多資料，也拿不到任何連線資訊。
 public enum McpAppBridgeMessage: Equatable, Sendable {
     case ready
+    /// 頁面內容高度（點）。只接受有限的非負數。
+    case height(Double)
 
     public static func parse(_ body: Any) -> McpAppBridgeMessage? {
-        guard let dictionary = body as? [String: Any], dictionary.count == 1 else { return nil }
-        guard let type = dictionary["type"] as? String, type == "ready" else { return nil }
-        return .ready
+        guard let dictionary = body as? [String: Any],
+              let type = dictionary["type"] as? String
+        else { return nil }
+        if type == "ready", dictionary.count == 1 {
+            return .ready
+        }
+        if type == "height", dictionary.count == 2,
+           let value = dictionary["height"] as? Double, value.isFinite, value >= 0
+        {
+            return .height(value)
+        }
+        return nil
     }
 }

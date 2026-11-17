@@ -11,7 +11,9 @@ import type {
   JsonSchema,
   JsonValue,
   ToolBundleDraft,
+  ToolContent,
   ToolDefinition,
+  ToolDiagnostic,
   ToolOutcome,
 } from "@cardiary/engine-adapter";
 import type { McpServerRecord } from "@cardiary/domain";
@@ -47,6 +49,12 @@ export function bundleIdFor(serverId: string): string {
 
 const LIST_TOOL_NAME = "list_tools";
 const CALL_TOOL_NAME = "call";
+
+/** MCP App 介面資源的 MIME；uri 必須是 ui://，HTML 最大 1 MiB。 */
+const MCP_APP_MIME = "text/html;profile=mcp-app";
+const UI_URI_PREFIX = "ui://";
+const MAX_HTML_BYTES = 1024 * 1024;
+const CSP_KEYS = ["connectDomains", "resourceDomains", "frameDomains", "baseUriDomains"] as const;
 
 /** 建立包含兩個入口工具的工具組；伺服器工具之後才加入。 */
 export function buildBundleDraft(runtime: McpServerRuntime): ToolBundleDraft {
@@ -175,7 +183,8 @@ async function runTool(
   }
   try {
     const result = await runtime.client.callTool(toolName, args);
-    return toOutcome(result);
+    const descriptor = runtime.tools?.find((tool) => tool.name === toolName);
+    return await toOutcome(runtime, descriptor, result);
   } catch (error) {
     return failure(`MCP 工具 ${toolName} 執行失敗：${errorMessage(error)}`);
   }
@@ -197,11 +206,188 @@ async function loadTools(runtime: McpServerRuntime): Promise<McpToolDescriptor[]
   return tools;
 }
 
-function toOutcome(result: McpCallResult): ToolOutcome {
+async function toOutcome(
+  runtime: McpServerRuntime,
+  descriptor: McpToolDescriptor | undefined,
+  result: McpCallResult,
+): Promise<ToolOutcome> {
   if (result.isError) {
-    return { ok: false, message: result.text.length > 0 ? result.text : "MCP 工具回報失敗" };
+    const visibleText = textFromContent(result.content);
+    if (visibleText.length > 0) {
+      return { ok: false, message: visibleText };
+    }
+    // 錯誤訊息不能夾帶 UI resource 的 HTML；沒有 UI resource 時才沿用原本的 text。
+    return {
+      ok: false,
+      message:
+        inlineUiResource(result.content) === null && result.text.length > 0
+          ? result.text
+          : "MCP 工具回報失敗",
+    };
   }
-  return { ok: true, content: [{ type: "text", text: result.text }] };
+  const hasInlineUi = inlineUiResource(result.content) !== null;
+  const visibleText = textFromContent(result.content);
+  // 有 UI resource 時，模型只看 text 區塊；HTML 只出現在 metadata.data.html。
+  // content 只有 UI resource 而沒有 text 區塊時，仍回一個非空的占位文字，
+  // 避免模型端收到空的 tool_result。
+  const content: ToolContent[] = hasInlineUi
+    ? visibleText.length > 0
+      ? [{ type: "text", text: visibleText }]
+      : [{ type: "text", text: "（此工具結果是 MCP App 介面，已顯示在畫面上。）" }]
+    : [{ type: "text", text: result.text }];
+
+  // 工具結果自帶的 resource 優先；沒有才看工具描述的 _meta 要不要讀 ui:// 資源。
+  let resource = inlineUiResource(result.content);
+  let fallbackUri: string | undefined;
+  if (resource === null) {
+    const uri = resourceUriFromMeta(descriptor?.meta);
+    if (uri !== undefined) {
+      fallbackUri = uri;
+      try {
+        resource = firstResourceContent(await runtime.client.readResource(uri));
+      } catch {
+        return withDiagnostic(content, unavailable("讀取失敗"));
+      }
+    }
+  }
+
+  // 完全沒有 UI 意圖：照原樣回文字，不加診斷。
+  if (resource === null) {
+    // 描述指向 UI 但讀回來沒有內容，也算資源無法讀取。
+    if (fallbackUri !== undefined) {
+      return withDiagnostic(content, unavailable("沒有 resource 內容"));
+    }
+    return { ok: true, content };
+  }
+
+  const uri = typeof resource.uri === "string" ? resource.uri : fallbackUri;
+  if (uri === undefined || !uri.startsWith(UI_URI_PREFIX)) {
+    return withDiagnostic(content, unavailable("uri 不是 ui://"));
+  }
+  const mimeType = resource.mimeType;
+  if (typeof mimeType !== "string" || !mimeType.includes(MCP_APP_MIME)) {
+    return withDiagnostic(content, unavailable("MIME 不符"));
+  }
+  const html = decodeResourceHtml(resource);
+  if (html === null) {
+    return withDiagnostic(content, unavailable("沒有 HTML 內容"));
+  }
+  if (Buffer.byteLength(html, "utf8") > MAX_HTML_BYTES) {
+    return withDiagnostic(content, {
+      code: "output-truncated",
+      message: "MCP App HTML 超過大小上限",
+    });
+  }
+  return {
+    ok: true,
+    content,
+    metadata: {
+      renderer: "mcp.app",
+      data: { html, allowedHosts: allowedHostsFrom(resource._meta) },
+    },
+  };
+}
+
+/** 只取 text 區塊的文字，以換行 join；其餘區塊（含 UI resource）不進模型可見文字。 */
+function textFromContent(content: readonly unknown[]): string {
+  return content
+    .map((entry) => {
+      if (isPlainObject(entry) && entry.type === "text" && typeof entry.text === "string") {
+        return entry.text;
+      }
+      return null;
+    })
+    .filter((value): value is string => value !== null)
+    .join("\n");
+}
+
+/** 工具結果 content 裡第一個 MIME 符合的 resource。 */
+function inlineUiResource(content: readonly unknown[]): Record<string, unknown> | null {
+  for (const entry of content) {
+    if (!isPlainObject(entry) || entry.type !== "resource") continue;
+    const resource = entry.resource;
+    if (!isPlainObject(resource)) continue;
+    const mime = resource.mimeType;
+    if (typeof mime === "string" && mime.includes(MCP_APP_MIME)) {
+      return resource;
+    }
+  }
+  return null;
+}
+
+/** 從工具描述的原始 _meta 找出綁定的 ui:// 資源 uri。 */
+function resourceUriFromMeta(
+  meta: Readonly<Record<string, unknown>> | undefined,
+): string | undefined {
+  if (meta === undefined) return undefined;
+  const ui = meta.ui;
+  if (isPlainObject(ui)) {
+    const current = ui.resourceUri;
+    if (typeof current === "string" && current.startsWith(UI_URI_PREFIX)) return current;
+  }
+  // 舊的扁平寫法 _meta["ui/resourceUri"]。
+  const legacy = meta["ui/resourceUri"];
+  if (typeof legacy === "string" && legacy.startsWith(UI_URI_PREFIX)) return legacy;
+  return undefined;
+}
+
+/** 從 resources/read 回應取出第一個內容項目。 */
+function firstResourceContent(result: unknown): Record<string, unknown> | null {
+  if (!isPlainObject(result) || !Array.isArray(result.contents)) return null;
+  for (const entry of result.contents) {
+    if (isPlainObject(entry)) return entry;
+  }
+  return null;
+}
+
+/** resource 的 text 或 base64 blob 轉成 UTF-8 字串。 */
+function decodeResourceHtml(resource: Readonly<Record<string, unknown>>): string | null {
+  if (typeof resource.text === "string") return resource.text;
+  if (typeof resource.blob === "string") {
+    return Buffer.from(resource.blob, "base64").toString("utf8");
+  }
+  return null;
+}
+
+/** 只從資源 _meta.ui.csp 的四個欄位取出 http/https hostname，去重。 */
+function allowedHostsFrom(meta: unknown): string[] {
+  const ui = isPlainObject(meta) ? meta.ui : undefined;
+  const csp = isPlainObject(ui) ? ui.csp : undefined;
+  if (!isPlainObject(csp)) return [];
+  const hosts: string[] = [];
+  const seen = new Set<string>();
+  for (const key of CSP_KEYS) {
+    const domains = csp[key];
+    if (!Array.isArray(domains)) continue;
+    for (const entry of domains) {
+      if (typeof entry !== "string") continue;
+      const host = httpHostname(entry);
+      if (host !== null && !seen.has(host)) {
+        seen.add(host);
+        hosts.push(host);
+      }
+    }
+  }
+  return hosts;
+}
+
+function httpHostname(value: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  return url.hostname.length > 0 ? url.hostname : null;
+}
+
+function withDiagnostic(content: ToolContent[], diagnostic: ToolDiagnostic): ToolOutcome {
+  return { ok: true, content, diagnostics: [diagnostic] };
+}
+
+function unavailable(reason: string): ToolDiagnostic {
+  return { code: "tool-unavailable", message: `MCP App 介面資源無法讀取：${reason}` };
 }
 
 function parseCallInput(

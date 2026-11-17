@@ -154,10 +154,12 @@ function parseTool(value: unknown): McpToolDescriptor | null {
   if (inputSchema !== undefined && !isPlainObject(inputSchema)) {
     return null;
   }
+  const meta = value.meta;
   return {
     name,
     ...(description === undefined ? {} : { description }),
     ...(inputSchema === undefined ? {} : { inputSchema }),
+    ...(isPlainObject(meta) ? { meta } : {}),
   };
 }
 
