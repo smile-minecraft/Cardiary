@@ -1,3 +1,4 @@
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +14,7 @@ import {
 } from "../../storage/src/index.js";
 import { CardLibrary } from "../../host/src/modules/cards/library.js";
 import { CardStateStore } from "../../host/src/modules/cards/state.js";
+import { measureCache } from "../../host/src/modules/retrieval/cache-usage.js";
 import { CardVectors, type CardEmbedder } from "../../host/src/modules/retrieval/vectors.js";
 import { RetrievalService } from "../../host/src/modules/retrieval/service.js";
 import type { SpawnRegistry } from "../../host/src/spawn/wrapper.js";
@@ -217,7 +219,15 @@ describe("常駐向量索引", () => {
     expect(store.evictedRevisions().size).toBe(3);
     fixture.vectors.stop();
 
-    // 新的一次載入看得到 evicted 標記；搜尋找到這些卡時要排回重建。
+    // 新的一次載入看得到 evicted 標記；只載入不重建。
+    let embeddings = 0;
+    const counting: CardEmbedder = {
+      embed: (text: string) => {
+        embeddings += 1;
+        return Promise.resolve(fakeVector(text));
+      },
+      stop: () => {},
+    };
     const vectors = new CardVectors({
       library: fixture.library,
       database: () => fixture.storage.cache,
@@ -226,19 +236,95 @@ describe("常駐向量索引", () => {
       cache: join(fixture.folder, "cache"),
       modelKey: MODEL,
       warn: () => {},
-      embedder: EMBEDDER,
+      embedder: counting,
     });
     const service = new RetrievalService(fixture.library, vectors);
     vectors.refresh();
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    // evicted 但 revision 沒變：重新載入時不該重建，要等全文搜尋找到才排回重建。
+    expect(embeddings).toBe(0);
+    expect(vectorCount(fixture.storage.cache, MODEL)).toBe(0);
+
     const first = await service.search({ query: "手寫字" }, "search");
     expect(first.items.length).toBe(3);
     await waitFor(() => vectorCount(fixture.storage.cache, MODEL) === 3);
+    expect(embeddings).toBeGreaterThanOrEqual(3);
     expect(new CardVectorStore(fixture.storage.cache).evictedRevisions().size).toBe(0);
 
     const after = await service.search({ query: "手寫字" }, "search");
     expect(after.items.map((item) => item.card.cardId).sort()).toEqual(
       first.items.map((item) => item.card.cardId).sort(),
     );
+    vectors.stop();
+  });
+
+  it("容量上限把模型檔計入，超出預算時淘汰向量", async () => {
+    const fixture = await makeFixture();
+    for (let index = 0; index < 3; index += 1) {
+      await addCard(fixture.library, `容量上限測試 ${index}。`);
+    }
+    fixture.vectors.refresh();
+    await waitFor(() => vectorCount(fixture.storage.cache, MODEL) === 3);
+    fixture.vectors.stop();
+
+    // 模型權重不自動淘汰，但必須佔用 2 GB 的額度。
+    const models = join(fixture.folder, "cache", "models");
+    mkdirSync(models, { recursive: true });
+    writeFileSync(join(models, "model.onnx"), Buffer.alloc(64 * 1024));
+    const before = measureCache(join(fixture.folder, "cache"));
+    expect(before.modelBytes).toBe(64 * 1024);
+
+    const vectors = new CardVectors({
+      library: fixture.library,
+      database: () => fixture.storage.cache,
+      allowed: () => true,
+      spawn: SPAWN,
+      cache: join(fixture.folder, "cache"),
+      modelKey: MODEL,
+      // 模型權重 64 KB 沒計入的話，這個預算下向量仍可以留著；
+      // 計入之後非向量部分已超出上限，向量只能全部淘汰。
+      maxCacheBytes: before.indexBytes + 1,
+      warn: () => {},
+      embedder: EMBEDDER,
+    });
+    vectors.refresh();
+
+    expect(vectorCount(fixture.storage.cache, MODEL)).toBe(0);
+    expect(new CardVectorStore(fixture.storage.cache).evictedRevisions().size).toBe(3);
+    const status = vectors.status();
+    expect(status.state).toBe("ready");
+    expect(status.cache?.modelsBytes).toBe(64 * 1024);
+    expect(status.cache?.maxBytes).toBe(before.indexBytes + 1);
+    expect(status.cache?.overLimit).toBe(true);
+    vectors.stop();
+  });
+
+  it("切換索引模型會清掉舊模型權重", async () => {
+    const fixture = await makeFixture();
+    await addCard(fixture.library, "模型切換測試。");
+    fixture.vectors.refresh();
+    await waitFor(() => vectorCount(fixture.storage.cache, MODEL) === 1);
+    fixture.vectors.stop();
+
+    const models = join(fixture.folder, "cache", "models");
+    mkdirSync(join(models, "old-model"), { recursive: true });
+    writeFileSync(join(models, "old-model", "weights.onnx"), Buffer.alloc(1024));
+
+    const vectors = new CardVectors({
+      library: fixture.library,
+      database: () => fixture.storage.cache,
+      allowed: () => true,
+      spawn: SPAWN,
+      cache: join(fixture.folder, "cache"),
+      modelKey: "cache-test@2",
+      warn: () => {},
+      embedder: EMBEDDER,
+    });
+    vectors.refresh();
+
+    expect(existsSync(models)).toBe(false);
+    await waitFor(() => vectorCount(fixture.storage.cache, "cache-test@2") === 1);
+    expect(vectorCount(fixture.storage.cache, MODEL)).toBe(0);
     vectors.stop();
   });
 });

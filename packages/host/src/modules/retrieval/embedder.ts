@@ -31,7 +31,10 @@ export class LocalEmbedder {
 
   embed(text: string): Promise<Float32Array> {
     const child = this.#child ?? this.#start();
-    if (this.#idle !== undefined) clearTimeout(this.#idle);
+    if (this.#idle !== undefined) {
+      clearTimeout(this.#idle);
+      this.#idle = undefined;
+    }
     const id = ++this.#nextId;
     return new Promise((resolve, reject) => {
       this.#pending.set(id, { resolve, reject });

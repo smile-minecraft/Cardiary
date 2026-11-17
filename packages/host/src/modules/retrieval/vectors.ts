@@ -8,14 +8,20 @@ import {
 import type { CardLibrary, CardLibraryChange } from "../cards/library.js";
 import type { SpawnRegistry } from "../../spawn/wrapper.js";
 import type { VectorSource } from "./service.js";
+import { measureCache } from "./cache-usage.js";
 import { LocalEmbedder } from "./embedder.js";
 import { EMBEDDING_INDEX_KEY as MODEL } from "./model.js";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 
 const QUERY_PREFIX =
   "Instruct: Given a query about personal notes, retrieve the notes that answer it\nQuery: ";
 
 /** cache/ 裡向量索引的預設容量上限（第 18 章：2 GB）；超過時淘汰最久未用的向量。 */
 export const VECTOR_CACHE_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+
+/** 查詢嵌入的等待上限；超過就退回全文結果，不讓模型載入卡住搜尋。 */
+export const QUERY_EMBED_TIMEOUT_MS = 1_500;
 
 /** 未同意下載模型時的狀態原因碼。 */
 export const RETRIEVAL_CONSENT_REASON = "consent-required";
@@ -30,7 +36,20 @@ export interface RetrievalStatus {
   readonly total?: number;
   /** 向量索引不能用時都會退回全文檢索。 */
   readonly fallback?: "fts";
+  /** 整個 `cache/` 的用量；不限於向量表。 */
+  readonly cache?: RetrievalCacheStatus;
 }
+
+/** `cache/` 用量；`vectorsBytes` 是向量列的估算值，其餘欄位是實際檔案大小。 */
+export type RetrievalCacheStatus = {
+  readonly totalBytes: number;
+  readonly maxBytes: number;
+  readonly overLimit: boolean;
+  readonly modelsBytes: number;
+  readonly thumbsBytes: number;
+  readonly indexBytes: number;
+  readonly vectorsBytes: number;
+};
 
 /** 進度事件的結構化內容。 */
 export interface RetrievalProgress {
@@ -55,6 +74,8 @@ export interface CardVectorsOptions {
   readonly warn: (message: string) => void;
   readonly modelKey?: string;
   readonly maxCacheBytes?: number;
+  /** 查詢嵌入的等待上限；省略時用 1.5 秒，逾時只回全文結果。 */
+  readonly queryTimeoutMs?: number;
   /** 測試用假實作；省略時建立真的嵌入子行程。 */
   readonly embedder?: CardEmbedder;
   readonly onProgress?: (progress: RetrievalProgress) => void;
@@ -104,6 +125,7 @@ export class CardVectors implements VectorSource {
   readonly #warn: (message: string) => void;
   readonly #modelKey: string;
   readonly #maxCacheBytes: number;
+  readonly #queryTimeoutMs: number;
   readonly #onProgress: ((progress: RetrievalProgress) => void) | undefined;
   readonly #onStatus: ((status: RetrievalStatus) => void) | undefined;
   readonly #embedder: CardEmbedder;
@@ -125,6 +147,7 @@ export class CardVectors implements VectorSource {
     this.#warn = options.warn;
     this.#modelKey = options.modelKey ?? MODEL;
     this.#maxCacheBytes = options.maxCacheBytes ?? VECTOR_CACHE_MAX_BYTES;
+    this.#queryTimeoutMs = options.queryTimeoutMs ?? QUERY_EMBED_TIMEOUT_MS;
     this.#onProgress = options.onProgress;
     this.#onStatus = options.onStatus;
     this.#embedder =
@@ -208,23 +231,23 @@ export class CardVectors implements VectorSource {
     }
     const state = this.#ensureLoaded(this.#database());
     if (this.#building !== undefined) {
-      return {
+      return this.#withCache({
         state: "building",
         phase: "index",
         completed: this.#progress.completed,
         total: this.#progress.total,
         fallback: "fts",
-      };
+      });
     }
     const pending = state.missing.size + this.#requeued.size;
-    if (pending === 0) return { state: "ready" };
-    return {
+    if (pending === 0) return this.#withCache({ state: "ready" });
+    return this.#withCache({
       state: "building",
       phase: "index",
       completed: this.#progress.completed,
       total: pending,
       fallback: "fts",
-    };
+    });
   }
 
   /**
@@ -241,6 +264,8 @@ export class CardVectors implements VectorSource {
     }
     const state = this.#ensureLoaded(this.#database());
     this.#ensureRebuild(state);
+    // 沒有重建在跑時立刻套用容量上限；重建的話等它結束再套用。
+    if (this.#building === undefined) this.#enforceCacheLimit(state);
     this.#emitReadyIfComplete(state);
   }
 
@@ -254,20 +279,40 @@ export class CardVectors implements VectorSource {
     const state = this.#ensureLoaded(db);
     this.#ensureRebuild(state);
     if (state.cards.size === 0) return [];
-    // 重建期間仍供出 revision 相符的向量；不相符的卡由全文索引覆蓋。
-    let queryVector: Float32Array;
-    try {
-      queryVector = await this.#embedder.embed(QUERY_PREFIX + (query.query ?? ""));
-    } catch (error) {
-      this.#warn(error instanceof Error ? error.message : String(error));
-      return [];
-    }
+    // 重建期間向量不完整，只回全文結果；不要為了一次查詢等模型或重建。
+    if (this.#building !== undefined) return [];
+    // 模型閒置後重新載入可能超過上限；逾時就放棄向量，讓全文結果先回去。
+    const embedding = this.#embedder.embed(QUERY_PREFIX + (query.query ?? ""));
+    const queryVector = await this.#withDeadline(embedding);
+    if (queryVector === undefined) return [];
     if (!this.#allowed() || this.#database() !== db) {
       this.stop();
       return [];
     }
     if (this.#state !== state) return [];
     return this.#rank(state, query, queryVector);
+  }
+
+  /** 等查詢嵌入，但最多 `#queryTimeoutMs`；逾時回 `undefined`，背景結果直接丟棄。 */
+  async #withDeadline(embedding: Promise<Float32Array>): Promise<Float32Array | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timeout = new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), this.#queryTimeoutMs);
+        timer.unref();
+      });
+      const result = await Promise.race([embedding, timeout]);
+      if (result === undefined) {
+        embedding.catch(() => undefined);
+        return undefined;
+      }
+      return result;
+    } catch (error) {
+      this.#warn(error instanceof Error ? error.message : String(error));
+      return undefined;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   #rank(state: IndexState, query: CardQuery, queryVector: Float32Array): readonly CardSearchHit[] {
@@ -327,7 +372,11 @@ export class CardVectors implements VectorSource {
     const index = new CardIndexStore({ db });
     const store = new CardVectorStore(db);
     // 模型不符時會整批刪除舊向量；重建由呼叫端啟動。
-    store.selectModel(this.#modelKey);
+    if (store.selectModel(this.#modelKey)) {
+      // 舊模型的權重留著只會佔容量，換模型時整批清掉。
+      this.#embedder.stop();
+      this.#removeModelWeights();
+    }
     const tags = index.tagsByCard();
     const cards = new Map<string, CachedCard>();
     const supersedes = new Map<string, number>();
@@ -430,10 +479,9 @@ export class CardVectors implements VectorSource {
         this.#emitStatus({ state: "degraded", reason, fallback: "fts" });
       })
       .finally(() => {
-        // 重建結束後把向量快取壓回容量上限；被淘汰的卡由全文索引覆蓋。
+        // 重建結束後把整個 cache 壓回容量上限；被淘汰的卡由全文索引覆蓋。
         try {
-          state.store.evictToFit(this.#maxCacheBytes);
-          this.#syncEvicted(state);
+          this.#enforceCacheLimit(state);
         } catch (error) {
           this.#warn(error instanceof Error ? error.message : String(error));
         }
@@ -492,6 +540,49 @@ export class CardVectors implements VectorSource {
     for (const cardId of state.cards.keys()) this.#reconcileVector(state, cardId);
   }
 
+  /**
+   * 用整個 `cache/` 的實際用量決定向量要淘汰多少。
+   *
+   * 模型與縮圖不歸這個模組淘汰，但它們的位元組必須先從 2 GB 扣掉；剩下的
+   * 額度才給向量。非向量檔案本身超過上限時，最多只能把向量全部淘汰，
+   * 狀態會誠實回報 `overLimit`。
+   */
+  #enforceCacheLimit(state: IndexState): void {
+    const usage = measureCache(this.#cache);
+    const vectorBytes = state.store.estimateBytes();
+    const otherBytes = Math.max(0, usage.totalBytes - vectorBytes);
+    state.store.evictToFit(Math.max(0, this.#maxCacheBytes - otherBytes));
+    this.#syncEvicted(state);
+  }
+
+  /** 換模型時刪掉 `cache/models/`；刪不掉只警告，不讓檢索失效。 */
+  #removeModelWeights(): void {
+    try {
+      rmSync(join(this.#cache, "models"), { recursive: true, force: true });
+    } catch (error) {
+      this.#warn(`無法清除舊模型：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** 把整個 cache 的用量附進狀態，讓儲存面板看到的是實測值。 */
+  #withCache(status: RetrievalStatus): RetrievalStatus {
+    // 未同意時不碰資料庫，也不用量 cache；disabled 的形狀保持最小。
+    if (status.state === "disabled") return status;
+    const usage = measureCache(this.#cache);
+    return {
+      ...status,
+      cache: {
+        totalBytes: usage.totalBytes,
+        maxBytes: this.#maxCacheBytes,
+        overLimit: usage.totalBytes > this.#maxCacheBytes,
+        modelsBytes: usage.modelBytes,
+        thumbsBytes: usage.thumbBytes,
+        indexBytes: usage.indexBytes,
+        vectorsBytes: this.#state?.store.estimateBytes() ?? 0,
+      },
+    };
+  }
+
   #emitReadyIfComplete(state: IndexState): void {
     if (this.#state !== state || this.#building !== undefined) return;
     if (state.missing.size === 0 && this.#requeued.size === 0) {
@@ -513,9 +604,11 @@ export class CardVectors implements VectorSource {
   }
 
   #emitStatus(status: RetrievalStatus): void {
-    const key = JSON.stringify(status);
+    // 用量也算進狀態；淘汰後即使 state 還是 ready，面板也要拿到新的數字。
+    const full = this.#withCache(status);
+    const key = JSON.stringify(full);
     if (this.#lastStatus === key) return;
     this.#lastStatus = key;
-    this.#onStatus?.(status);
+    this.#onStatus?.(full);
   }
 }

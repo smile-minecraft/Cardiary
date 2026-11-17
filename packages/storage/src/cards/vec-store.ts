@@ -41,22 +41,29 @@ export class CardVectorStore {
     ) STRICT;`);
   }
 
-  selectModel(model: string): void {
-    this.db.transaction((tx) => {
+  /**
+   * 切換到指定模型。
+   *
+   * 已有不同的舊模型時清空三張向量表並回傳 `true`，呼叫端據此清掉舊模型
+   * 權重；第一次採用只有寫入 meta，回傳 `false`，沒有舊目錄要清。
+   */
+  selectModel(model: string): boolean {
+    return this.db.transaction((tx) => {
       const previous = tx.get<{ value: string }>(
         "SELECT value FROM card_index_meta WHERE key = ?",
         "embedding.model",
       );
-      if (previous?.value !== model) {
-        tx.run("DELETE FROM vec_cards");
-        tx.run("DELETE FROM vec_cards_usage");
-        tx.run("DELETE FROM vec_cards_evicted");
-        tx.run(
-          "INSERT INTO card_index_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-          "embedding.model",
-          model,
-        );
-      }
+      if (previous?.value === model) return false;
+      tx.run("DELETE FROM vec_cards");
+      tx.run("DELETE FROM vec_cards_usage");
+      tx.run("DELETE FROM vec_cards_evicted");
+      tx.run(
+        "INSERT INTO card_index_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        "embedding.model",
+        model,
+      );
+      // 沒有舊記錄時只是採用模型，沒有「舊模型目錄」要清。
+      return previous !== undefined;
     });
   }
 

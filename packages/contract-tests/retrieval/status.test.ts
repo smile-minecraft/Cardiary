@@ -67,6 +67,7 @@ interface FakeChild {
   readonly stdout: EventEmitter;
   readonly exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
   readonly pid: number;
+  readonly signals: NodeJS.Signals[];
   signal(signal: NodeJS.Signals): void;
   write(data: string): void;
   closeInput(): void;
@@ -134,6 +135,7 @@ function createFakeSpawn(): {
           callback();
         },
       });
+      const signals: NodeJS.Signals[] = [];
       const child: FakeChild = {
         pid: 4242 + children.length,
         child: { stdin },
@@ -141,8 +143,10 @@ function createFakeSpawn(): {
         stdout,
         stderr,
         exited,
-        signal() {
-          resolveExit({ code: null, signal: "SIGTERM" });
+        signals,
+        signal(signal) {
+          signals.push(signal);
+          resolveExit({ code: null, signal });
         },
         write(data: string) {
           stdin.write(data);
@@ -171,6 +175,8 @@ interface Fixture {
   readonly warnings: string[];
   readonly onChangeListeners: Array<(change: SettingChange) => void>;
   readonly fakeSpawn: ReturnType<typeof createFakeSpawn>;
+  /** 呼叫 `cabinet.cache()` 的次數；未同意時必須是 0。 */
+  readonly counters: { cacheCalls: number };
 }
 
 const fixtures: Fixture[] = [];
@@ -217,10 +223,14 @@ async function makeFixture(cardCount: number): Promise<Fixture> {
       body: `手寫字練習筆記 ${index}。\n`,
     });
   }
+  const counters = { cacheCalls: 0 };
   const cabinet: CardEnvironment = {
     layout: storage.layout,
     state: storage.state,
-    cache: () => storage.cache,
+    cache: () => {
+      counters.cacheCalls += 1;
+      return storage.cache;
+    },
     settings: storage.settings,
     ownsConnections: false,
     close: () => {},
@@ -239,6 +249,7 @@ async function makeFixture(cardCount: number): Promise<Fixture> {
     warnings,
     onChangeListeners,
     fakeSpawn,
+    counters,
   };
   fixtures.push(fixture);
   return fixture;
@@ -347,6 +358,7 @@ describe("retrieval 模組的可觀察狀態", () => {
 
     const statuses = retrievalStatuses(fixture.events);
     expect(fixture.fakeSpawn.children).toHaveLength(0);
+    expect(fixture.counters.cacheCalls).toBe(0);
     expect(statuses.at(-1)).toEqual({
       state: "disabled",
       reason: "consent-required",
@@ -398,8 +410,9 @@ describe("retrieval 模組的可觀察狀態", () => {
       total: 3,
     });
 
-    // 翻回未同意：應收到 disabled，子行程結束。
-    const childrenBefore = fixture.fakeSpawn.children.length;
+    // 翻回未同意：應收到 disabled，子行程收到 SIGTERM 並結束。
+    const childBefore = fixture.fakeSpawn.children.at(-1);
+    expect(childBefore).toBeDefined();
     fixture.cabinet.settings.set({
       key: "retrieval.allowModelDownload",
       value: JSON.stringify(false),
@@ -409,7 +422,8 @@ describe("retrieval 模組的可觀察狀態", () => {
     for (const listener of fixture.onChangeListeners) listener(changeFor(false));
     const last = retrievalStatuses(fixture.events).at(-1);
     expect(last).toEqual({ state: "disabled", reason: "consent-required", fallback: "fts" });
-    expect(childrenBefore).toBeGreaterThan(0);
+    expect(childBefore?.signals).toContain("SIGTERM");
+    await expect(childBefore?.exited).resolves.toEqual({ code: null, signal: "SIGTERM" });
 
     // 服務從模組的提供面仍然可用，且不再需要向量。
     const service = fixture.provided.get("retrieval") as RetrievalService;

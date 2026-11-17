@@ -40,8 +40,8 @@ function newUlid(offset = 0): string {
 
 /**
  * 決定性的假嵌入器：相同的文字永遠得到相同的向量。
- * `hold()` 之後卡片的嵌入呼叫會卡住，讓測試在重建期間做決定性觀察；
- * 以 `Instruct:` 開頭的查詢文字不受影響。
+ * `hold()` 之後所有嵌入呼叫（含查詢）都會卡住，讓測試在重建期間與查詢
+ * 逾時路徑做決定性觀察。
  */
 function createFakeEmbedder(): {
   readonly embedder: CardEmbedder;
@@ -53,7 +53,7 @@ function createFakeEmbedder(): {
   const embedder: CardEmbedder = {
     embed(text: string): Promise<Float32Array> {
       const vector = fakeVector(text);
-      if (!hold || text.startsWith("Instruct:")) return Promise.resolve(vector);
+      if (!hold) return Promise.resolve(vector);
       return new Promise<Float32Array>((resolve) => {
         gates.push(() => resolve(vector));
       });
@@ -229,6 +229,7 @@ describe("向量索引的跨重啟整合", () => {
       spawn: SPAWN,
       cache: join(folder, "cache"),
       modelKey: "model-a@1",
+      queryTimeoutMs: 200,
       warn: () => {},
       embedder: fake.embedder,
       onStatus: (status) => statuses.push(status),
@@ -237,12 +238,15 @@ describe("向量索引的跨重啟整合", () => {
     expect(vectorCount(second.storage.cache, "model-a@1")).toBe(0);
     const service = new RetrievalService(second.library, vectors);
 
-    // 重建期間：查詢立即回傳全文結果，向量為空，不等待重建。
+    // 重建期間：查詢立即回傳全文結果，向量為空，不等模型或重建。
+    const duringStarted = Date.now();
     const during = await service.search({ query: "手寫字" }, "search");
+    const duringMs = Date.now() - duringStarted;
     const fullTextOnly = await new RetrievalService(second.library).search(
       { query: "手寫字" },
       "search",
     );
+    expect(duringMs).toBeLessThan(1000);
     expect(during.items.map((item) => item.card.cardId)).toEqual(
       fullTextOnly.items.map((item) => item.card.cardId),
     );
@@ -264,6 +268,19 @@ describe("向量索引的跨重啟整合", () => {
     expect(after.items.map((item) => item.score)).toEqual(baseline.items.map((item) => item.score));
     expect(statuses.at(-1)?.state).toBe("ready");
     expect(progress.some((p) => p.phase === "index" && p.completed === count)).toBe(true);
+
+    // 索引已就緒、但查詢嵌入卡住（例如模型重新載入）：短上限後退回全文，
+    // 不能讓查詢等滿模型載入時間。
+    fake.hold();
+    const heldStarted = Date.now();
+    const withoutVectors = await service.search({ query: "手寫字" }, "search");
+    const heldMs = Date.now() - heldStarted;
+    fake.release();
+    expect(heldMs).toBeGreaterThanOrEqual(150);
+    expect(heldMs).toBeLessThan(1000);
+    expect(withoutVectors.items.map((item) => item.card.cardId)).toEqual(
+      fullTextOnly.items.map((item) => item.card.cardId),
+    );
   });
 
   it("嵌入模型切換後整批重算，vec_cards 不混用兩個模型", async () => {
