@@ -7,10 +7,29 @@ import SwiftUI
 struct SidebarView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var conversations: ConversationListModel
+    @StateObject private var dropTarget: NotificationDropTarget
 
     init(model: AppModel) {
         self.model = model
         self.conversations = model.conversations
+        _dropTarget = StateObject(
+            wrappedValue: NotificationDropTarget(
+                selectConversation: { id in
+                    await model.selectConversation(id)
+                },
+                addNotifications: { drags, sessionId, title in
+                    let added = await model.notifications.addToConversation(
+                        drags: drags,
+                        sessionId: sessionId,
+                        conversationTitle: title
+                    )
+                    return NotificationDropTarget.AddOutcome(
+                        added: added,
+                        errorMessage: model.notifications.errorMessage
+                    )
+                }
+            )
+        )
     }
 
     var body: some View {
@@ -50,22 +69,32 @@ struct SidebarView: View {
                             .padding(.vertical, DesignTokens.spacingXS)
                     } else {
                         ForEach(conversations.sessions) { session in
-                            SidebarRowLabel(
-                                title: session.title.isEmpty ? AppL10n.text(.conversationUntitled) : session.title,
-                                systemImage: symbol(for: session.status),
-                                tone: tone(for: session.status),
-                                isSelected: model.selection == .conversation(session.id)
-                            )
-                            .onTapGesture { select(.conversation(session.id)) }
-                            .contextMenu {
-                                if session.status != .archived {
-                                    Button {
-                                        guard let service = model.service else { return }
-                                        Task { await conversations.archive(sessionId: session.id, using: service) }
-                                    } label: {
-                                        Label(AppL10n.text(.conversationArchive), systemImage: "archivebox")
+                            let title = session.title.isEmpty
+                                ? AppL10n.text(.conversationUntitled) : session.title
+                            NotificationDropRow(
+                                conversationId: session.id,
+                                conversationTitle: session.title.isEmpty ? nil : session.title,
+                                displayTitle: title,
+                                target: dropTarget
+                            ) { isDropTarget in
+                                SidebarRowLabel(
+                                    title: title,
+                                    systemImage: symbol(for: session.status),
+                                    tone: tone(for: session.status),
+                                    isSelected: model.selection == .conversation(session.id),
+                                    isDropTarget: isDropTarget
+                                )
+                                .onTapGesture { select(.conversation(session.id)) }
+                                .contextMenu {
+                                    if session.status != .archived {
+                                        Button {
+                                            guard let service = model.service else { return }
+                                            Task { await conversations.archive(sessionId: session.id, using: service) }
+                                        } label: {
+                                            Label(AppL10n.text(.conversationArchive), systemImage: "archivebox")
+                                        }
+                                        .disabled(!model.isServiceAvailable)
                                     }
-                                    .disabled(!model.isServiceAvailable)
                                 }
                             }
                         }
@@ -77,6 +106,15 @@ struct SidebarView: View {
                             tone: .red
                         )
                         .padding(.horizontal, DesignTokens.spacingXS)
+                    }
+                    if let message = dropTarget.message {
+                        MessageBanner(
+                            text: message,
+                            systemImage: dropTarget.isError ? "exclamationmark.triangle" : "checkmark.circle",
+                            tone: dropTarget.isError ? .red : .sage
+                        )
+                        .padding(.horizontal, DesignTokens.spacingXS)
+                        .onTapGesture { dropTarget.dismiss() }
                     }
 
                     SidebarSectionLabel(title: AppL10n.text(.sidebarSectionTools), suit: .diamond)
@@ -203,6 +241,7 @@ private struct SidebarRowLabel: View {
     let systemImage: String
     let tone: Tone
     let isSelected: Bool
+    var isDropTarget = false
 
     @State private var isHovered = false
 
@@ -210,25 +249,33 @@ private struct SidebarRowLabel: View {
         HStack(spacing: 10) {
             Image(systemName: systemImage)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isSelected ? Palette.onAccent : tone.ink)
+                .foregroundStyle(isSelected && !isDropTarget ? Palette.onAccent : tone.ink)
                 .frame(width: 20)
             Text(title)
                 .font(.cardiary(.callout, weight: isSelected ? .semibold : .medium))
-                .foregroundStyle(isSelected ? Palette.onAccent : Palette.ink)
+                .foregroundStyle(isSelected && !isDropTarget ? Palette.onAccent : Palette.ink)
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, DesignTokens.rowPadding)
         .padding(.vertical, 7)
         .background(background, in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
+        .overlay {
+            if isDropTarget {
+                RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous)
+                    .strokeBorder(Palette.purple, lineWidth: 1.5)
+            }
+        }
         .contentShape(RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovered)
+        .animation(.easeOut(duration: 0.12), value: isDropTarget)
         .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var background: Color {
+        if isDropTarget { return Palette.purpleSoft }
         if isSelected { return Palette.red }
         return isHovered ? Palette.hover : .clear
     }

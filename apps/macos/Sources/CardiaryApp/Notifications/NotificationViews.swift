@@ -47,7 +47,21 @@ public struct NotificationListView: View {
                 }
             }
         }
-        .task { await model.reload() }
+        .task {
+            await model.reload()
+            await loadScheduleNamesIfNeeded()
+        }
+    }
+
+    /// 通知只帶排程識別碼；開啟通知流時補載排程，讓通知列能顯示名稱。
+    private func loadScheduleNamesIfNeeded() async {
+        let hasUnresolvedName = model.notifications.contains { item in
+            guard let id = item.sourceScheduleId, !id.isEmpty else { return false }
+            return !model.scheduler.schedules.contains { $0.scheduleId == id }
+        }
+        if hasUnresolvedName {
+            await model.scheduler.reload()
+        }
     }
 
     private var notificationsPanel: some View {
@@ -138,7 +152,11 @@ private struct NotificationRow: View {
                 .foregroundStyle(Palette.inkSecondary)
                 .lineLimit(3)
             if let source = item.sourceScheduleId, !source.isEmpty {
-                Text(NotificationL10n.format(.notificationSourceSchedule, value: source, language: nil))
+                Text(NotificationL10n.format(
+                    .notificationSourceScheduleName,
+                    value: scheduleName,
+                    language: nil
+                ))
                     .font(.cardiary(.caption))
                     .foregroundStyle(Palette.inkTertiary)
                     .lineLimit(1)
@@ -174,13 +192,33 @@ private struct NotificationRow: View {
                 .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
                 .disabled(model.actingIds.contains(item.notificationId))
             }
+
+            HStack(spacing: 4) {
+                Image(systemName: "hand.draw")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(NotificationL10n.text(.notificationDragHint))
+                    .font(.cardiary(.caption))
+            }
+            .foregroundStyle(Palette.inkTertiary)
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(DesignTokens.spacingM)
         .background(
             Palette.surface,
             in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius)
         )
-        .draggable(NotificationDrag(notificationId: item.notificationId))
+        .draggable(NotificationDrag(notificationId: item.notificationId, notification: item))
+    }
+
+    /// 通知只帶排程識別碼；名稱從已載入的排程找，找不到時顯示通用名稱而不是 UUID。
+    private var scheduleName: String {
+        if let id = item.sourceScheduleId,
+            let name = model.scheduler.schedules.first(where: { $0.scheduleId == id })?.name,
+            !name.isEmpty
+        {
+            return name
+        }
+        return NotificationL10n.text(.notificationUnknownSchedule)
     }
 
     private var kindLabel: String {

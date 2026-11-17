@@ -3,7 +3,7 @@ import Combine
 import Foundation
 
 /// 一則通知在流裡的樣子。
-public struct NotificationPresentation: Identifiable, Equatable, Sendable {
+public struct NotificationPresentation: Identifiable, Codable, Equatable, Sendable {
     public let notificationId: String
     public let kind: NotificationKind
     public let title: String
@@ -246,14 +246,22 @@ public final class NotificationModel: ObservableObject {
     /// 轉卡：主機去重，介面也擋住同一則的重複提交，成功後記下 cardId。
     @discardableResult
     public func createCard(for item: NotificationPresentation) async -> Bool {
-        guard !actingIds.contains(item.notificationId) else { return false }
         if item.cardId != nil {
             noticeMessage = NotificationL10n.text(.notificationCardReused, language: language)
             return false
         }
+        return await ensureCard(for: item) != nil
+    }
+
+    /// 取得通知對應的卡片；沒有卡片就請主機轉一張，成功後更新載入中的清單。
+    ///
+    /// 拖曳帶來的通知可能不在 `notifications` 裡，所以回傳值不能從清單重新讀取。
+    private func ensureCard(for item: NotificationPresentation) async -> String? {
+        if let cardId = item.cardId { return cardId }
+        guard !actingIds.contains(item.notificationId) else { return nil }
         guard let service else {
             errorMessage = NotificationL10n.text(.notificationServiceUnavailable, language: language)
-            return false
+            return nil
         }
         actingIds.insert(item.notificationId)
         defer { actingIds.remove(item.notificationId) }
@@ -266,12 +274,12 @@ public final class NotificationModel: ObservableObject {
                 ? NotificationL10n.text(.notificationCardReused, language: language)
                 : NotificationL10n.text(.notificationCardCreated, language: language)
             errorMessage = nil
-            return true
+            return response.card.cardId
         } catch {
             errorMessage = NotificationL10n.format(
                 .notificationActionFailed, value: Self.errorText(error), language: language
             )
-            return false
+            return nil
         }
     }
 
@@ -307,18 +315,10 @@ public final class NotificationModel: ObservableObject {
             errorMessage = NotificationL10n.text(.notificationServiceUnavailable, language: language)
             return false
         }
-        var cardId = item.cardId
-        if cardId == nil {
-            guard await createCard(for: item) else { return false }
-            cardId = notifications.first { $0.notificationId == item.notificationId }?.cardId
-        }
+        guard let cardId = await ensureCard(for: item) else { return false }
         actingIds.insert(item.notificationId)
         defer { actingIds.remove(item.notificationId) }
         do {
-            guard let cardId else {
-                errorMessage = NotificationL10n.text(.notificationServiceUnavailable, language: language)
-                return false
-            }
             _ = try await contextService.addCardToContext(sessionId: sessionId, cardId: cardId)
             noticeMessage = NotificationL10n.format(
                 .notificationAddedToConversation,
@@ -335,27 +335,81 @@ public final class NotificationModel: ObservableObject {
         }
     }
 
-    /// 拖曳進對話：依通知識別碼找出目前載入的通知並逐筆加入；回傳實際加入的筆數。
-    ///
-    /// 找不到識別碼的通知直接略過——拖曳的內容可能來自已重新載入的通知流。
+    /// 拖曳進對話：先從載入中的清單找通知，找不到就用拖曳帶來的內容；
+    /// 兩者都沒有時重新整理通知流再找一次，避免因為分頁或尚未載入而靜默失敗。
+    @discardableResult
+    public func addToConversation(
+        drags: [NotificationDrag],
+        sessionId: String,
+        conversationTitle: String? = nil
+    ) async -> Int {
+        let unique = Self.deduplicated(drags)
+        guard !unique.isEmpty else { return 0 }
+        errorMessage = nil
+
+        var items: [NotificationPresentation] = []
+        var missing: [String] = []
+        for drag in unique {
+            if let item = notifications.first(where: { $0.notificationId == drag.notificationId }) {
+                items.append(item)
+            } else if let item = drag.notification {
+                items.append(item)
+            } else {
+                missing.append(drag.notificationId)
+            }
+        }
+        if !missing.isEmpty, service != nil {
+            await reload()
+            for id in missing {
+                if let item = notifications.first(where: { $0.notificationId == id }) {
+                    items.append(item)
+                }
+            }
+            missing = missing.filter { id in !items.contains { $0.notificationId == id } }
+        }
+
+        var added = 0
+        var failures: [String] = []
+        for item in items {
+            if await addToConversation(item, sessionId: sessionId, conversationTitle: conversationTitle) {
+                added += 1
+            } else {
+                failures.append(
+                    errorMessage ?? NotificationL10n.text(.notificationNotFound, language: language)
+                )
+            }
+        }
+        if !missing.isEmpty {
+            failures.append(NotificationL10n.text(.notificationNotFound, language: language))
+        }
+
+        if added == unique.count {
+            errorMessage = nil
+        } else if added > 0 {
+            errorMessage = NotificationL10n.count(.notificationPartiallyAdded, count: added, language: language)
+        } else {
+            errorMessage = failures.first
+        }
+        return added
+    }
+
+    /// 只帶通知識別碼的版本；內容留給通知流查詢。
     @discardableResult
     public func addToConversation(
         notificationIds: [String],
         sessionId: String,
         conversationTitle: String? = nil
     ) async -> Int {
-        var added = 0
-        for id in notificationIds {
-            guard let item = notifications.first(where: { $0.notificationId == id }) else {
-                continue
-            }
-            if await addToConversation(
-                item, sessionId: sessionId, conversationTitle: conversationTitle
-            ) {
-                added += 1
-            }
-        }
-        return added
+        await addToConversation(
+            drags: notificationIds.map { NotificationDrag(notificationId: $0) },
+            sessionId: sessionId,
+            conversationTitle: conversationTitle
+        )
+    }
+
+    private static func deduplicated(_ drags: [NotificationDrag]) -> [NotificationDrag] {
+        var seen = Set<String>()
+        return drags.filter { seen.insert($0.notificationId).inserted }
     }
 
     /// 有權限且設定允許時，送一則系統通知；失敗不擋住通知流程。

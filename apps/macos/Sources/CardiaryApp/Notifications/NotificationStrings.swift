@@ -27,6 +27,11 @@ public enum NotificationString: String, CaseIterable, Sendable {
     case notificationChooseConversationTitle
     case notificationConversationEmpty
     case notificationAddedToConversation
+    case notificationSourceScheduleName
+    case notificationUnknownSchedule
+    case notificationDragHint
+    case notificationNotFound
+    case notificationPartiallyAdded
     case schedulerTitle
     case schedulerEmpty
     case schedulerName
@@ -142,6 +147,11 @@ enum NotificationStringTables {
             "notificationChooseConversationTitle": "選擇要加入的對話",
             "notificationConversationEmpty": "沒有可加入的對話，請先建立一個對話。",
             "notificationAddedToConversation": "已加入「{value}」。",
+            "notificationSourceScheduleName": "來源：{value}",
+            "notificationUnknownSchedule": "排程通知",
+            "notificationDragHint": "拖到左側對話",
+            "notificationNotFound": "找不到這則通知，請重新整理後再試。",
+            "notificationPartiallyAdded": "已加入 {count} 則，其餘沒加入。",
             "schedulerTitle": "排程",
             "schedulerEmpty": "還沒有排程。建立後會照時間執行。",
             "schedulerName": "名稱",
@@ -205,6 +215,11 @@ enum NotificationStringTables {
             "notificationChooseConversationTitle": "Choose a conversation",
             "notificationConversationEmpty": "No conversations yet. Create one first.",
             "notificationAddedToConversation": "Added to “{value}”.",
+            "notificationSourceScheduleName": "Source: {value}",
+            "notificationUnknownSchedule": "Scheduled notification",
+            "notificationDragHint": "Drag onto a conversation on the left",
+            "notificationNotFound": "That notification is no longer available. Refresh and try again.",
+            "notificationPartiallyAdded": "Added {count}; the rest did not get added.",
             "schedulerTitle": "Schedules",
             "schedulerEmpty": "No schedules yet. Created ones run on time.",
             "schedulerName": "Name",

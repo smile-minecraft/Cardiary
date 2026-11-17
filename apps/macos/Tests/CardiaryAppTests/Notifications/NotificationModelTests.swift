@@ -165,11 +165,12 @@ final class NotificationModelTests: XCTestCase {
 
     func testAddToConversationByDragIdsResolvesLoadedNotifications() async {
         let fake = FakeNotificationAndContextService()
+        await fake.setListed([record(id: "n-1"), record(id: "n-2")])
         let model = makeModel()
         model.attach(service: fake)
         model.update(notifications: payload([record(id: "n-1"), record(id: "n-2")], unread: 2))
 
-        // 拖曳只帶識別碼：已知的加入、找不到的略過。
+        // 拖曳只帶識別碼：已知的加入、找不到的重新整理後仍沒有就回報部分失敗。
         let added = await model.addToConversation(
             notificationIds: ["n-2", "n-missing"],
             sessionId: "session-1",
@@ -177,6 +178,7 @@ final class NotificationModelTests: XCTestCase {
         )
 
         XCTAssertEqual(added, 1)
+        XCTAssertEqual(model.errorMessage, "已加入 1 則，其餘沒加入。")
         let calls = await fake.addCardCalls
         XCTAssertEqual(calls.count, 1)
         XCTAssertEqual(calls.first?.sessionId, "session-1")
@@ -196,8 +198,68 @@ final class NotificationModelTests: XCTestCase {
         )
 
         XCTAssertEqual(added, 0)
+        XCTAssertEqual(model.errorMessage, "找不到這則通知，請重新整理後再試。")
         let calls = await fake.addCardCalls
         XCTAssertTrue(calls.isEmpty)
+    }
+
+    func testAddToConversationReloadsWhenNotificationNotLoaded() async {
+        let fake = FakeNotificationAndContextService()
+        await fake.setListed([record(id: "n-9")])
+        let model = makeModel()
+        model.attach(service: fake)
+        model.update(notifications: payload([record(id: "n-1")], unread: 1))
+
+        let added = await model.addToConversation(
+            drags: [NotificationDrag(notificationId: "n-9")],
+            sessionId: "session-1",
+            conversationTitle: "晚餐聊聊"
+        )
+
+        XCTAssertEqual(added, 1)
+        let listCalls = await fake.listCalls
+        XCTAssertEqual(listCalls, 1)
+        XCTAssertEqual(model.notifications.first { $0.notificationId == "n-9" }?.cardId, "card-1")
+        let calls = await fake.addCardCalls
+        XCTAssertEqual(calls.map(\.sessionId), ["session-1"])
+    }
+
+    func testAddToConversationUsesDragPayloadWithoutReload() async {
+        let fake = FakeNotificationAndContextService()
+        let model = makeModel()
+        model.attach(service: fake)
+        model.update(notifications: payload([], unread: 0))
+        let drag = NotificationDrag(
+            notificationId: "n-5",
+            notification: NotificationPresentation(record: record(id: "n-5"))
+        )
+
+        let added = await model.addToConversation(
+            drags: [drag],
+            sessionId: "session-1",
+            conversationTitle: "晚餐聊聊"
+        )
+
+        XCTAssertEqual(added, 1)
+        let listCalls = await fake.listCalls
+        XCTAssertEqual(listCalls, 0)
+        let calls = await fake.addCardCalls
+        XCTAssertEqual(calls.map(\.cardId), ["card-1"])
+    }
+
+    func testAddToConversationByDragIdsDeduplicates() async {
+        let fake = FakeNotificationAndContextService()
+        let model = makeModel()
+        model.attach(service: fake)
+        model.update(notifications: payload([record(id: "n-1")], unread: 1))
+
+        let added = await model.addToConversation(
+            notificationIds: ["n-1", "n-1"], sessionId: "session-1"
+        )
+
+        XCTAssertEqual(added, 1)
+        let calls = await fake.addCardCalls
+        XCTAssertEqual(calls.count, 1)
     }
 
     func testPresentSystemNotificationShowsWhenEnabledAndAuthorized() async {
@@ -324,16 +386,23 @@ private actor FakeNotificationAndContextService: NotificationService, ContextSer
 {
     private(set) var addCardCalls: [(sessionId: String, cardId: String)] = []
     private(set) var createCardCalls: [String] = []
+    private(set) var listCalls = 0
     private var sessions: [SessionSummary] = []
+    private var listed: [CardiaryNotification] = []
 
     func setSessions(_ list: [SessionSummary]) { sessions = list }
+    func setListed(_ list: [CardiaryNotification]) { listed = list }
 
     func listNotifications(
         limit: Int?,
         before: String?,
         unreadOnly: Bool?
     ) async throws -> NotificationListResponsePayload {
-        NotificationListResponsePayload(notifications: [], totalUnread: 0)
+        listCalls += 1
+        return NotificationListResponsePayload(
+            notifications: listed,
+            totalUnread: listed.filter { $0.readAt == nil }.count
+        )
     }
 
     func markNotificationsRead(
