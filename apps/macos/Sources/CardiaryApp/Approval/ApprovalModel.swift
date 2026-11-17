@@ -16,6 +16,8 @@ public struct ApprovalPresentation: Identifiable, Equatable, Sendable {
     public let requestedAt: String
     public let expiresAt: String?
     public let options: [ApprovalOption]
+    /// 來源排程的名稱；只有背景排程任務的審批才會帶。
+    public let sourceScheduleName: String?
 
     public var id: String { approvalId }
 
@@ -34,6 +36,7 @@ public struct ApprovalPresentation: Identifiable, Equatable, Sendable {
         self.requestedAt = request.requestedAt
         self.expiresAt = request.expiresAt
         self.options = request.options
+        self.sourceScheduleName = request.sourceScheduleName
     }
 
     public func option(for effect: ApprovalEffect) -> ApprovalOption? {

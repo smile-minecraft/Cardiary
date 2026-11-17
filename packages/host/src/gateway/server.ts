@@ -1674,6 +1674,7 @@ export class Gateway {
     const options: [ApprovalOption, ...ApprovalOption[]] = (await this.#canAlwaysAllow(request.id))
       ? [approve, always, deny]
       : [approve, deny];
+    const sourceScheduleName = await this.#sourceScheduleName(request.draft.conversationId);
     return {
       approvalId: request.id,
       sessionId: request.draft.conversationId ?? "",
@@ -1691,7 +1692,29 @@ export class Gateway {
       options,
       requestedAt: request.requestedAt,
       ...(request.expiresAt === null ? {} : { expiresAt: request.expiresAt }),
+      ...(sourceScheduleName === undefined ? {} : { sourceScheduleName }),
     };
+  }
+
+  // 背景排程任務的對話標題是「排程：<名稱>」、purpose 是 background-task；
+  // 審批投影從 title 取出排程名稱，讓審批佇列能標明來源排程。
+  async #sourceScheduleName(conversationId: string | undefined): Promise<string | undefined> {
+    if (conversationId === undefined) return undefined;
+    try {
+      const conversation = await this.#options.engine.getConversation(conversationId);
+      if (conversation === null) return undefined;
+      if (conversation.purpose !== "background-task") return undefined;
+      const prefix = "排程：";
+      if (!conversation.title.startsWith(prefix)) return undefined;
+      const name = conversation.title.slice(prefix.length).trim();
+      return name.length === 0 ? undefined : name;
+    } catch (error) {
+      this.#logger.warn("查詢對話用途失敗，審批不帶來源排程", {
+        conversationId,
+        message: errorMessage(error),
+      });
+      return undefined;
+    }
   }
 
   /**

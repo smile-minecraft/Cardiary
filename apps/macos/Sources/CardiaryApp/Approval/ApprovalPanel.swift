@@ -103,6 +103,11 @@ private struct ApprovalCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(approval.title)
                         .font(.cardiary(.callout, weight: .semibold))
+                    if let sourceScheduleName = approval.sourceScheduleName, !sourceScheduleName.isEmpty {
+                        Text(AppL10n.format(.approvalSourceSchedule, value: sourceScheduleName))
+                            .font(.cardiary(.caption))
+                            .foregroundStyle(Palette.inkSecondary)
+                    }
                     if let toolName = approval.toolName {
                         Text(AppL10n.format(.approvalTool, value: toolName))
                             .font(.cardiary(.caption))

@@ -81,7 +81,8 @@ final class ProtocolTypesTests: XCTestCase {
               { "id": "approve", "label": "核准一次", "effect": "approve" },
               { "id": "reject", "label": "拒絕", "effect": "reject" }
             ],
-            "requestedAt": "2026-11-14T10:07:05Z"
+            "requestedAt": "2026-11-14T10:07:05Z",
+            "sourceScheduleName": "每日摘要"
           }
         }
         """
@@ -95,6 +96,7 @@ final class ProtocolTypesTests: XCTestCase {
         XCTAssertEqual(event.payload.options.count, 2)
         XCTAssertEqual(event.payload.options.first?.effect, .approve)
         XCTAssertEqual(event.payload.scope.kind, .toolCall)
+        XCTAssertEqual(event.payload.sourceScheduleName, "每日摘要")
     }
 
     func testDecodesToolResultWithInterruptedDiagnostic() throws {

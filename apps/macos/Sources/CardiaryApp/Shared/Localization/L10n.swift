@@ -78,6 +78,7 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case approvalReject
     case approvalRejected
     case approvalServiceUnavailable
+    case approvalSourceSchedule
     case approvalTool
     case inspectorAgentsTitle
     case inspectorAgentsEmpty

@@ -761,6 +761,7 @@ add(
       expiresAt: str("逾時時間，RFC 3339；省略代表不會自動逾時。", {
         format: "date-time",
       }),
+      sourceScheduleName: str("來源排程的名稱；只有背景排程任務的審批才會帶，其他情境省略。"),
     },
   ),
 );
