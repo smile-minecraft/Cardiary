@@ -139,8 +139,19 @@ final class McpAppHostAuthTests: XCTestCase {
         page.waitForAuthSettled()
 
         let frames = page.jsonArray("window.__frames")
-        let closeCode = page.javaScript("window.__close === null ? null : Number(window.__close)")
+        let closeCode = page.javaScript("typeof window.__close === 'number' ? window.__close : null")
         let opened = page.javaScript("window.__opened === true") as? Bool ?? false
+
+        // 頁面沒送出 WebSocket 或 host 從頭到尾沒有回任何訊框，都代表測試沒有真的
+        // 走完協定路徑；用明確訊息失敗，不要讓 frames=[] 造成「斷言是空的」的誤導。
+        XCTAssertTrue(
+            opened,
+            "WebSocket 必須 opened；收到的診斷：opened=\(opened) frames=\(frames) closeCode=\(String(describing: closeCode))"
+        )
+        XCTAssertFalse(
+            frames.isEmpty,
+            "host 至少要回一個訊框（拒絕或成功皆是）；收到的診斷：opened=\(opened) frames=\(frames) closeCode=\(String(describing: closeCode))"
+        )
 
         // 真正的主張：host 回的是拒絕錯誤，絕對不是成功控制回應。
         let errors = frames.filter { $0["kind"] as? String == "error" }
@@ -259,14 +270,27 @@ private final class WebViewProbe {
 
     func waitForPageLoad() {
         waitUntil(deadline: Date().addingTimeInterval(10)) {
-            (self.javaScript("document.readyState") as? String) == "complete"
+            // loadHTMLString 之後 document.readyState 可能先是 about:blank 的 complete；
+            // 還要等頁面腳本把 window.__frames / window.__close 初始化，才算真的載入完。
+            let ready = (self.javaScript("document.readyState") as? String) == "complete"
+            let framesReady = self.boolValue("Array.isArray(window.__frames)")
+            let closeReady = self.boolValue("window.__close === null || typeof window.__close === 'number'")
+            return ready && framesReady && closeReady
         }
+    }
+
+    private func boolValue(_ script: String) -> Bool {
+        return (self.javaScript(script) as? Bool) ?? false
     }
 
     func waitForAuthSettled() {
         waitUntil(deadline: Date().addingTimeInterval(12)) {
-            let count = self.javaScript("window.__frames ? window.__frames.length : 0") as? Int ?? 0
-            let closed = self.javaScript("window.__close !== null") as? Bool ?? false
+            /// 頁面腳本設的初始值：frames 是陣列、__close 是 null。
+            /// 腳本還沒跑時兩者都是 undefined，等於 about:blank 還沒換成產品頁。
+            let initialized = self.boolValue("Array.isArray(window.__frames)") && self.boolValue("window.__close === null || typeof window.__close === 'number'")
+            guard initialized else { return false }
+            let count = self.javaScript("window.__frames.length") as? Int ?? 0
+            let closed = (self.javaScript("typeof window.__close === 'number'") as? Bool) ?? false
             return count > 0 || closed
         }
     }
