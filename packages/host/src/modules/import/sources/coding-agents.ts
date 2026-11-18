@@ -5,6 +5,7 @@ import {
   isSecretFileName,
   titleFrom,
 } from "../interchange.js";
+import { SourceDecompressionError } from "../fs.js";
 import type { SourceFileSystem } from "../fs.js";
 import type {
   ImportCategory,
@@ -68,8 +69,16 @@ function createAdapter(kind: CodingKind, fs: SourceFileSystem): ImportSourceAdap
         }
         if (options.includeConversations && options.range) {
           for (const file of await filesUnder(fs, root, "sessions", 5)) {
-            if (/\.jsonl(?:\.gz)?$/iu.test(file))
+            const compression = rolloutCompression(file);
+            if (compression === "unsupported") {
+              state.skipped.push({
+                path: file,
+                reason: "unsupported-compression",
+                detail: "只支援 .jsonl、.jsonl.gz 與 .jsonl.zst。",
+              });
+            } else if (compression !== undefined) {
               await readConversation(fs, root, file, kind, options, state);
+            }
           }
         }
       } else {
@@ -95,6 +104,27 @@ function createAdapter(kind: CodingKind, fs: SourceFileSystem): ImportSourceAdap
       return { tool: kind, ...state, skills: [], notes: [], warnings: [] };
     },
   };
+}
+
+/** Codex 的 rollout 檔可能是 `.jsonl`、`.jsonl.gz` 或 `.jsonl.zst`。 */
+type RolloutCompression = "plain" | "gzip" | "zstd" | "unsupported";
+
+/**
+ * 判斷 `sessions/` 底下的檔案是不是 rollout，以及用哪種壓縮。
+ *
+ * 不是 rollout 檔（例如 `.DS_Store`）回 `undefined`；是 rollout 但壓縮格式
+ * 不認得時回 `unsupported`，呼叫端要記進跳過清單，不能讓檔案消失無蹤。
+ */
+function rolloutCompression(path: string): RolloutCompression | undefined {
+  const name = basename(path).toLowerCase();
+  if (name.endsWith(".jsonl")) return "plain";
+  const dot = name.lastIndexOf(".");
+  const stem = dot === -1 ? "" : name.slice(0, dot);
+  if (!stem.endsWith(".jsonl")) return undefined;
+  const extension = name.slice(dot + 1);
+  if (extension === "gz") return "gzip";
+  if (extension === "zst") return "zstd";
+  return "unsupported";
 }
 
 function forbidden(name: string): boolean {
@@ -201,7 +231,14 @@ async function readConversation(
   }
   try {
     const file = await fs.readText(path);
-    if (file.truncated) throw new Error("truncated");
+    if (file.truncated) {
+      state.skipped.push({
+        path: relative,
+        reason: "too-large",
+        detail: "解壓後超過可讀取的大小上限，未匯入。",
+      });
+      return;
+    }
     const rows = file.text
       .split(/\r?\n/u)
       .filter((line) => line.trim() !== "")
@@ -255,7 +292,11 @@ async function readConversation(
       source: { tool: kind, path },
       unverified: true,
     });
-  } catch {
-    state.skipped.push({ path: relative, reason: "unsupported-format" });
+  } catch (error) {
+    state.skipped.push(
+      error instanceof SourceDecompressionError
+        ? { path: relative, reason: "decompress-failed", detail: error.message }
+        : { path: relative, reason: "unsupported-format" },
+    );
   }
 }

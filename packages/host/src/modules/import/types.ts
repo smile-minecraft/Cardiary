@@ -157,6 +157,9 @@ export interface ImportSkipped {
 
 export type ImportSkipReason =
   | "unsupported-format"
+  | "unsupported-compression"
+  | "decompress-failed"
+  | "too-large"
   | "not-readable"
   | "category-not-assigned"
   | "empty-content"
