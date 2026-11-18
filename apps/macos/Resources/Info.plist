@@ -39,5 +39,18 @@
 	<string>Cardiary 需要讀寫外接硬碟上的 Cardiary 資料夾。</string>
 	<key>NSNetworkVolumesUsageDescription</key>
 	<string>Cardiary 需要讀寫網路磁碟上的 Cardiary 資料夾。</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.cardiary.notification</string>
+			<key>UTTypeDescription</key>
+			<string>Cardiary notification</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

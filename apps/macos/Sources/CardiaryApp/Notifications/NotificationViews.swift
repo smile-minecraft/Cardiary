@@ -39,12 +39,15 @@ public struct NotificationListView: View {
                 item: item,
                 model: model
             ) { sessionId, title in
-                Task {
-                    let ok = await model.addToConversation(item, sessionId: sessionId, conversationTitle: title)
-                    if ok {
-                        addingToConversation = nil
-                    }
+                let ok = await model.addToConversation(
+                    item,
+                    sessionId: sessionId,
+                    conversationTitle: title
+                )
+                if ok {
+                    addingToConversation = nil
                 }
+                return ok
             }
         }
         .task {
