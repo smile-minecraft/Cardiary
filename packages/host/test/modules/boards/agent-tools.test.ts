@@ -485,6 +485,7 @@ describe("白板代理工具（完全操作模式）", () => {
     });
     expect(fixture.service.get(boardId).groups).toHaveLength(1);
     expect(groupRetry.changeId).toBeNull();
+    expect(changeIdOf(groupFirst)).toBeTypeOf("string");
   });
 
   it("只能復原最近一筆代理變更；較舊的要先復原新的", async () => {
@@ -586,7 +587,9 @@ describe("白板代理工具（完全操作模式）", () => {
     expect(retry.itemId).toBe(first.itemId);
     expect(retry.cardId).toBe(first.cardId);
     expect(fixture.createCalls).toHaveLength(1);
-    const inbox = fixture.service.get(board.id).inbox.filter((item) => item.cardId === first.cardId);
+    const inbox = fixture.service
+      .get(board.id)
+      .inbox.filter((item) => item.cardId === first.cardId);
     expect(inbox).toHaveLength(1);
   });
 

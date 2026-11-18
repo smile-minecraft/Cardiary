@@ -222,7 +222,7 @@ function moveBoardItemTool(options: BoardsToolsOptions): ToolDefinition {
       required: ["boardId", "itemId", "x", "y"],
       additionalProperties: false,
     },
-    async apply(record, _context) {
+    async apply(record) {
       const itemId = requiredStringOf(record, "itemId");
       const board = await options.service.move({
         boardId: requiredStringOf(record, "boardId"),
@@ -290,7 +290,7 @@ function disconnectBoardItemsTool(options: BoardsToolsOptions): ToolDefinition {
       required: ["boardId", "edgeId"],
       additionalProperties: false,
     },
-    async apply(record, _context) {
+    async apply(record) {
       const edgeId = requiredStringOf(record, "edgeId");
       const board = await options.service.disconnect({
         boardId: requiredStringOf(record, "boardId"),
@@ -352,7 +352,7 @@ function assignBoardItemToGroupTool(options: BoardsToolsOptions): ToolDefinition
       required: ["boardId", "itemId"],
       additionalProperties: false,
     },
-    async apply(record, _context) {
+    async apply(record) {
       const itemId = requiredStringOf(record, "itemId");
       const groupId = stringOf(record, "groupId");
       const board = await options.service.assignToGroup({
@@ -379,7 +379,7 @@ function removeBoardGroupTool(options: BoardsToolsOptions): ToolDefinition {
       required: ["boardId", "groupId"],
       additionalProperties: false,
     },
-    async apply(record, _context) {
+    async apply(record) {
       const groupId = requiredStringOf(record, "groupId");
       const board = await options.service.deleteGroup({
         boardId: requiredStringOf(record, "boardId"),
@@ -407,7 +407,7 @@ function pinBoardItemTool(options: BoardsToolsOptions): ToolDefinition {
       required: ["boardId", "itemId", "pinned"],
       additionalProperties: false,
     },
-    async apply(record, _context) {
+    async apply(record) {
       const itemId = requiredStringOf(record, "itemId");
       const pinned = requiredBooleanOf(record, "pinned");
       const board = await options.service.setPinned({
@@ -436,7 +436,7 @@ function removeBoardItemTool(options: BoardsToolsOptions): ToolDefinition {
       required: ["boardId", "itemId"],
       additionalProperties: false,
     },
-    async apply(record, _context) {
+    async apply(record) {
       const itemId = requiredStringOf(record, "itemId");
       const board = await options.service.removeItem({
         boardId: requiredStringOf(record, "boardId"),

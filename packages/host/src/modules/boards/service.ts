@@ -640,9 +640,7 @@ export class BoardService {
   async #dropDeadProjections(restored: BoardDocument): Promise<BoardDocument> {
     const cards = this.cards;
     if (cards === undefined) return restored;
-    const cardIds = [
-      ...new Set([...restored.items, ...restored.inbox].map((item) => item.cardId)),
-    ];
+    const cardIds = [...new Set([...restored.items, ...restored.inbox].map((item) => item.cardId))];
     const dead = new Set<string>();
     for (const cardId of cardIds) {
       if ((await cards.get(cardId)) == null) {
@@ -698,10 +696,13 @@ export class BoardService {
         }
       }
       if (failures.length > 0) {
+        // 協定的錯誤碼沒有 storage-failed；比照卡片模組把儲存層的失敗
+        // 回報成 unavailable，並在 details 的 reason 保留 storage-failed。
         throw new ProtocolHandlerError(
-          "storage-failed",
+          "unavailable",
           `移除卡片 ${cardId} 的投影時有 ${failures.length} 份白板失敗；重試會略過已處理的白板。`,
           {
+            reason: "storage-failed",
             cardId,
             succeeded: touched,
             failed: failures.map((failure) => failure.boardId),

@@ -12,13 +12,7 @@ import {
   LocalAssetStore,
   Storage,
 } from "@cardiary/storage";
-import {
-  afterEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { StorageError } from "@cardiary/storage";
 
 import { BoardService } from "../../../src/modules/boards/service.js";
@@ -259,7 +253,6 @@ describe("刪卡時移除白板投影", () => {
     const [, second] = [boardA, boardB].sort((left, right) => left.id.localeCompare(right.id));
     if (second === undefined) throw new Error("需要兩份白板");
     const failOnce = { armed: true };
-    // eslint-disable-next-line @typescript-eslint/unbound-method
     const originalWrite = fixture.boardStore.write.bind(fixture.boardStore);
     vi.spyOn(fixture.boardStore, "write").mockImplementation((board, options) => {
       if (failOnce.armed && board.id === second.id) {
@@ -274,18 +267,19 @@ describe("刪卡時移除白板投影", () => {
       (error: unknown) => error,
     );
     expect(failure).toBeInstanceOf(ProtocolHandlerError);
+    expect((failure as ProtocolHandlerError).code).toBe("unavailable");
     const details = (failure as ProtocolHandlerError).details as
-      | { failed?: string[]; succeeded?: string[] }
-      | undefined;
+      { failed?: string[]; succeeded?: string[]; reason?: string } | undefined;
+    expect(details?.reason).toBe("storage-failed");
     const first = [boardA, boardB].find((board) => board.id !== second.id);
     if (first === undefined) throw new Error("需要兩份白板");
     expect(details?.failed).toEqual([second.id]);
     expect(details?.succeeded).toEqual([first.id]);
     expect(fixture.files.read(card.cardId)).toBeDefined();
     const processed = fixture.boards.get(first.id);
-    expect([...processed.items, ...processed.inbox].some((item) => item.cardId === card.cardId)).toBe(
-      false,
-    );
+    expect(
+      [...processed.items, ...processed.inbox].some((item) => item.cardId === card.cardId),
+    ).toBe(false);
     const untouched = fixture.boards.get(second.id);
     expect(
       [...untouched.items, ...untouched.inbox].some((item) => item.cardId === card.cardId),
