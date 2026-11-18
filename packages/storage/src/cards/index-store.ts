@@ -84,6 +84,14 @@ CREATE TABLE IF NOT EXISTS vec_cards (
   card_id TEXT PRIMARY KEY, model TEXT NOT NULL, revision TEXT NOT NULL, vector BLOB NOT NULL
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS vec_cards_usage (
+  card_id TEXT PRIMARY KEY, last_used_at INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS vec_cards_evicted (
+  card_id TEXT PRIMARY KEY, revision TEXT NOT NULL, evicted_at INTEGER NOT NULL
+) STRICT;
+
 CREATE VIRTUAL TABLE IF NOT EXISTS fts_cards USING fts5 (
   card_id UNINDEXED,
   title,
@@ -340,7 +348,9 @@ export class CardIndexStore {
          DELETE FROM card_sources;
          DELETE FROM asset_refs;
          DELETE FROM fts_cards;
-         DELETE FROM vec_cards;`,
+         DELETE FROM vec_cards;
+         DELETE FROM vec_cards_usage;
+         DELETE FROM vec_cards_evicted;`,
       );
       for (const card of cards) {
         this.#writeCard(tx, card);
@@ -494,6 +504,19 @@ export class CardIndexStore {
         normalizeId(cardId),
       )
       .map((row) => row.tag);
+  }
+
+  /** 一次讀出全部卡的標籤；載入常駐索引時用，避免逐卡查詢。 */
+  tagsByCard(): Map<string, string[]> {
+    const tags = new Map<string, string[]>();
+    for (const row of this.#db.all<{ card_id: string; tag: string }>(
+      "SELECT card_id, tag FROM card_tags ORDER BY card_id, rowid",
+    )) {
+      const list = tags.get(row.card_id);
+      if (list === undefined) tags.set(row.card_id, [row.tag]);
+      else list.push(row.tag);
+    }
+    return tags;
   }
 
   /** 血緣：來源卡片識別碼，依卡片檔裡的順序。 */
@@ -714,6 +737,8 @@ export class CardIndexStore {
     tx.run("DELETE FROM asset_refs WHERE card_id = ?", cardId);
     tx.run("DELETE FROM fts_cards WHERE card_id = ?", cardId);
     tx.run("DELETE FROM vec_cards WHERE card_id = ?", cardId);
+    tx.run("DELETE FROM vec_cards_usage WHERE card_id = ?", cardId);
+    tx.run("DELETE FROM vec_cards_evicted WHERE card_id = ?", cardId);
   }
 
   #resolveTarget(

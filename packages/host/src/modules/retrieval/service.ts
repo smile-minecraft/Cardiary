@@ -13,6 +13,12 @@ export interface RetrievalSource {
 
 export interface VectorSource {
   search(query: CardQuery): Promise<readonly CardSearchHit[]>;
+  /**
+   * 全文檢索找到的卡；向量被容量淘汰時可以排回重建。
+   *
+   * 這是提示，不是必要條件：實作可以不處理，檢索結果不受影響。
+   */
+  noteFullTextHits?(cardIds: readonly string[]): void;
 }
 
 export class RetrievalService {
@@ -26,6 +32,11 @@ export class RetrievalService {
       .items;
     let vectors: readonly CardSearchHit[] = [];
     if (this.vectors !== undefined) {
+      try {
+        this.vectors.noteFullTextHits?.(fullText.map((hit) => hit.card.cardId));
+      } catch {
+        // 提示失敗不影響檢索；向量索引會在自己的排程補上。
+      }
       try {
         vectors = await this.vectors.search({ ...query, limit: 40, includeSuperseded: false });
       } catch {

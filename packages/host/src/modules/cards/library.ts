@@ -25,7 +25,7 @@ import {
   type CardVersion,
   type FrontmatterLayoutItem,
 } from "@cardiary/domain";
-import type { ProtocolEventIntent } from "@cardiary/module-api";
+import type { CardChangeKind, ProtocolEventIntent } from "@cardiary/module-api";
 import type { JSONObject } from "@cardiary/protocol";
 import {
   CardVersionsStore,
@@ -56,6 +56,13 @@ import type { CardStateStore } from "./state.js";
  */
 
 const AGENT_KINDS: ReadonlySet<string> = new Set(AGENT_CREATABLE_KINDS);
+
+/** 卡片變更通知；衍生索引用來做增量更新。 */
+export interface CardLibraryChange {
+  readonly cardId: string;
+  readonly change: CardChangeKind;
+  readonly revision?: string;
+}
 
 export interface CardLibraryOptions {
   readonly files: CardFileStore;
@@ -96,6 +103,8 @@ export class CardLibrary {
   readonly #now: () => Date;
   readonly #emit: (intent: ProtocolEventIntent) => void;
   readonly #warn: (message: string, fields?: JSONObject) => void;
+  readonly #changeListeners = new Set<(change: CardLibraryChange) => void>();
+  readonly #rebuildListeners = new Set<() => void>();
   /** 變更一次只做一個：協定請求與檔案監看共用同一條序列。 */
   #tail: Promise<void> = Promise.resolve();
 
@@ -107,8 +116,51 @@ export class CardLibrary {
     this.#now = options.now ?? (() => new Date());
     this.#versionsOverride = options.versions;
     this.#patchesOverride = options.patches;
-    this.#emit = options.emit ?? (() => {});
     this.#warn = options.warn ?? (() => {});
+    const sink = options.emit;
+    this.#emit = (intent) => {
+      sink?.(intent);
+      this.#notifyChange(intent);
+    };
+  }
+
+  /**
+   * 訂閱卡片變更；回傳取消訂閱。
+   *
+   * 檢索模組用它增量更新向量索引，不必每次查詢重讀整份索引。
+   */
+  onChange(listener: (change: CardLibraryChange) => void): () => void {
+    this.#changeListeners.add(listener);
+    return () => {
+      this.#changeListeners.delete(listener);
+    };
+  }
+
+  /** 訂閱整份索引重建；持有索引快照的模組要跟著重新載入。 */
+  onRebuild(listener: () => void): () => void {
+    this.#rebuildListeners.add(listener);
+    return () => {
+      this.#rebuildListeners.delete(listener);
+    };
+  }
+
+  /** 通知衍生索引；聽眾失敗不能影響卡片寫入。 */
+  #notifyChange(intent: ProtocolEventIntent): void {
+    if (intent.kind !== "card-changed") return;
+    const change: CardLibraryChange = {
+      cardId: intent.cardId,
+      change: intent.change,
+      ...(intent.revision === undefined ? {} : { revision: intent.revision }),
+    };
+    for (const listener of this.#changeListeners) {
+      try {
+        listener(change);
+      } catch (error) {
+        this.#warn("卡片變更通知失敗", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   get #versions(): CardVersionsStore {
@@ -198,6 +250,15 @@ export class CardLibrary {
         if (record.broken) broken += 1;
       }
       const result = this.#index().rebuild(records);
+      for (const listener of this.#rebuildListeners) {
+        try {
+          listener();
+        } catch (error) {
+          this.#warn("索引重建通知失敗", {
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       return { indexed: result.indexed, broken };
     });
   }
