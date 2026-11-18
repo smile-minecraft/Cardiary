@@ -739,6 +739,30 @@ export const M8_MIGRATIONS: readonly Migration[] = [
   { version: 9, name: "mcp-server-persistent-write", sql: M9_SCHEMA },
 ];
 
+/**
+ * v10「內建排程宣告」：排程表多記一份模組宣告的正本，以及它是否只剩
+ * 歷史（宣告已消失、排程被停用）。
+ *
+ * 宣告是模組提供的事實，使用者改過的時間與啟停則是排程表上的調整；
+ * 兩者分開存，重啟同步時才分得出哪些欄位該跟著宣告走、哪些要保留。
+ * 人工建立的排程 `builtin_declaration` 是 NULL。
+ */
+const M10_SCHEMA = `
+ALTER TABLE schedules ADD COLUMN builtin_declaration TEXT;
+ALTER TABLE schedules ADD COLUMN builtin_orphaned INTEGER NOT NULL DEFAULT 0 CHECK (builtin_orphaned IN (0, 1));
+`;
+
+/** v10 之後 `schedules` 表多出的欄位。 */
+export const M10_SCHEDULE_COLUMNS = ["builtin_declaration", "builtin_orphaned"] as const;
+
+/**
+ * v10 的遷移清單：在 v9 之後加內建排程宣告欄位。
+ */
+export const M9_MIGRATIONS: readonly Migration[] = [
+  ...M8_MIGRATIONS,
+  { version: 10, name: "builtin-schedule-declarations", sql: M10_SCHEMA },
+];
+
 const SCHEMA_MIGRATIONS_DDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version     INTEGER PRIMARY KEY,
@@ -783,7 +807,7 @@ interface AppliedMigrationRow {
  * - 每個版本在單一交易內完成 SQL、`user_version` 與 `schema_migrations`。
  */
 export function migrate(db: Database, options: MigrateOptions): MigrationOutcome {
-  const migrations = options.migrations ?? M8_MIGRATIONS;
+  const migrations = options.migrations ?? M9_MIGRATIONS;
   const now = options.now ?? (() => new Date());
   db.exec(SCHEMA_MIGRATIONS_DDL);
 

@@ -46,11 +46,14 @@ import { ProtocolHandlerError } from "./contract.js";
  * 模組貢獻的上下文區段與排程。
  *
  * 註冊表以服務名稱 `contributions` 提供這份唯讀檢視：上下文模組在每次組裝
- * 時取得第 3 層內容，主機則在模組載入後同步排程清單。
+ * 時取得第 3 層內容，主機則在模組載入後同步排程清單。排程清單一有變動
+ * （模組啟用、停用或註銷宣告）就通知訂閱者，主機靠它把內建排程寫進排程表。
  */
 export interface ModuleContributions {
   sections(): readonly ContextSectionContribution[];
   schedules(): readonly ScheduleDeclaration[];
+  /** 訂閱排程清單的變動；回傳取消訂閱。 */
+  onSchedulesChanged(listener: () => void): () => void;
 }
 
 /** 貢獻檢視的服務名稱；主機與模組都從服務註冊表取得。 */
@@ -484,6 +487,7 @@ export class HostModuleRegistry implements ModuleHost {
   readonly #hostServices: HostServiceRegistryImpl;
   readonly #contextSections: ContextSectionContribution[] = [];
   readonly #schedules: ScheduleDeclaration[] = [];
+  readonly #scheduleListeners = new Set<() => void>();
   #generation = 0;
   #activationCounter = 0;
   #shuttingDown = false;
@@ -495,6 +499,12 @@ export class HostModuleRegistry implements ModuleHost {
     this.#hostServices.provide(CONTRIBUTIONS_SERVICE_NAME, {
       sections: () => [...this.#contextSections],
       schedules: () => [...this.#schedules],
+      onSchedulesChanged: (listener: () => void) => {
+        this.#scheduleListeners.add(listener);
+        return () => {
+          this.#scheduleListeners.delete(listener);
+        };
+      },
     } satisfies ModuleContributions);
   }
 
@@ -800,12 +810,36 @@ export class HostModuleRegistry implements ModuleHost {
       registerHook: () => handle("hook", () => {}),
       registerSchedule: (schedule: ScheduleDeclaration) => {
         this.#schedules.push(schedule);
+        this.#notifySchedulesChanged();
         return handle("schedule", () => {
           const index = this.#schedules.indexOf(schedule);
-          if (index >= 0) this.#schedules.splice(index, 1);
+          if (index < 0) return;
+          this.#schedules.splice(index, 1);
+          this.#notifySchedulesChanged();
         });
       },
     };
+  }
+
+  /**
+   * 排程清單一有變動就通知訂閱者。
+   *
+   * 訂閱者（排程器）會同步寫入排程表，失敗由訂閱者自己處理；這裡吞掉
+   * 例外只記 warn，模組的啟用與停用不受訂閱者影響。
+   *
+   * 關機時模組依序停用，宣告跟著消失，但那不是宣告被移除：通知下去會把
+   * 內建排程寫成停用，下次啟動就少了一次錯過時段的補跑。使用者停用模組
+   * 不經過 `deactivateAll`，照常通知。
+   */
+  #notifySchedulesChanged(): void {
+    if (this.#shuttingDown) return;
+    for (const listener of [...this.#scheduleListeners]) {
+      try {
+        listener();
+      } catch (error) {
+        this.#options.warn?.("排程變更通知失敗", { message: messageOf(error) });
+      }
+    }
   }
 
   #require(moduleId: string): ModuleEntry {

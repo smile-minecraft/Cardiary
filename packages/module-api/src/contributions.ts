@@ -167,12 +167,22 @@ export type HookDeclaration =
       handler(context: ConversationLifecycleContext): Promise<void> | void;
     };
 
-/** 排程的觸發方式。 */
+/**
+ * 排程的觸發方式。
+ *
+ * `cron` 目前只支援每日一次的簡單運算式 `mm HH * * *`（可省略分、時的前導
+ * 零）與 `timezone: "local"`；主機會把它物化成每日排程，其他運算式不會
+ * 物化，需要更細的週期請改用 `interval` 或 `heartbeat`。
+ */
 export type ScheduleTrigger =
   | { readonly kind: "cron"; readonly expression: string; readonly timezone?: string }
   | { readonly kind: "interval"; readonly everyMs: number }
   /** Heartbeat：固定間隔醒來，沒事就不產生通知。 */
   | { readonly kind: "heartbeat"; readonly everyMs: number; readonly idleOnly?: boolean };
+
+/** 內建排程被執行時交給排程器的工作種類；省略時視為每日蒸餾。 */
+export type ScheduleTaskDeclaration =
+  { readonly type: "distillation" } | { readonly type: "agent"; readonly prompt: string };
 
 /** 排程觸發時的執行環境。 */
 export interface ScheduleRunContext {
@@ -186,6 +196,9 @@ export interface ScheduleRunContext {
  *
  * `requiresApproval` 為 true 時，啟用這個排程要人工核准；代理提出的
  * 排程一律走審批，不能自己新增。`defaultEnabled` 只在模組首次啟用時參考。
+ * 主機會把宣告持久化成排程表的一列，之後使用者改過的時間與啟停狀態
+ * 以排程表為準；宣告帶 `task` 時，主機執行排程就交給它，省略時照既有的
+ * 每日蒸餾行為處理。
  */
 export interface ScheduleDeclaration {
   readonly scheduleId: string;
@@ -194,5 +207,6 @@ export interface ScheduleDeclaration {
   readonly trigger: ScheduleTrigger;
   readonly defaultEnabled: boolean;
   readonly requiresApproval: boolean;
+  readonly task?: ScheduleTaskDeclaration;
   run(context: ScheduleRunContext): Promise<void>;
 }

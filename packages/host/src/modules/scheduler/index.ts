@@ -5,6 +5,7 @@ import type { NotificationService } from "@cardiary/module-api";
 
 import { HOST_SERVICE_NAMES, type CardEnvironment, type DistillationTrigger } from "../contract.js";
 import type { HostEngine } from "../../engine/types.js";
+import { CONTRIBUTIONS_SERVICE_NAME, type ModuleContributions } from "../registry.js";
 import { manifest } from "./manifest.js";
 import { SchedulerService } from "./service.js";
 import { registerNotificationProtocol, registerSchedulerAdminProtocol } from "./protocol.js";
@@ -25,6 +26,7 @@ export const hostModule: HostModule = {
 };
 
 let service: SchedulerService | null = null;
+let unsubscribeSchedules: (() => void) | null = null;
 let engineStatusUnsubscribe: (() => void) | undefined;
 
 async function activate(context: ModuleActivationContext): Promise<void> {
@@ -39,6 +41,19 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   // 記憶模組先於排程模組啟用；蒸餾服務這時已經在服務註冊表裡。沒有記憶模組時
   // 留 undefined，蒸餾任務到點會記 error 並發通知，不會靜默略過。
   const distillation = context.services.host.get<DistillationTrigger>(HOST_SERVICE_NAMES.memory);
+
+  // 排程的來源是模組宣告：先同步一輪，第一次 tick 之前排程表就有內建列。
+  // 同步失敗讓模組啟用失敗（排程少一半比沒有排程更難查）；之後宣告有變動
+  // （模組啟用、停用）再同步，已存在的列保留使用者改過的時間與啟停。
+  const contributions = context.services.host.require<ModuleContributions>(
+    CONTRIBUTIONS_SERVICE_NAME,
+  );
+  const syncBuiltinSchedules = (): void => {
+    schedules.syncBuiltinSchedules(contributions.schedules(), {
+      warn: (message, fields) => logger.warn(message, fields),
+    });
+  };
+  syncBuiltinSchedules();
 
   const emitChanged = (record: Parameters<typeof wireNotification>[0]): void => {
     context.services.protocol.emit({
@@ -57,6 +72,7 @@ async function activate(context: ModuleActivationContext): Promise<void> {
     logger,
     now,
     ...(distillation === undefined ? {} : { distillation }),
+    declarations: () => contributions.schedules(),
   });
   service = scheduler;
 
@@ -99,6 +115,17 @@ async function activate(context: ModuleActivationContext): Promise<void> {
     tools: [scheduleProposeTool({ schedules, now })],
   });
 
+  unsubscribeSchedules = contributions.onSchedulesChanged(() => {
+    try {
+      syncBuiltinSchedules();
+    } catch (error) {
+      // 別的模組正在啟用或停用，不能讓這裡的寫入失敗把它的生命週期拖垮。
+      logger.error("同步內建排程失敗", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   scheduler.start();
   // 模組啟用時引擎還停在 starting，`start()` 裡的立即 tick 會被 isEngineRunning
   // 擋下，錯過的排程要等下一個 30 秒 tick。引擎轉成 running 的當下再補跑一次，
@@ -111,6 +138,9 @@ async function activate(context: ModuleActivationContext): Promise<void> {
 }
 
 function deactivate(): void {
+  const unsubscribe = unsubscribeSchedules;
+  unsubscribeSchedules = null;
+  unsubscribe?.();
   const current = service;
   service = null;
   current?.stop();

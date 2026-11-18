@@ -92,6 +92,16 @@ async function moduleRequest<T>(
   return reply.data;
 }
 
+/**
+ * 主機組裝時內建模組會宣告自己的排程（目前是每日蒸餾）。
+ * 這裡只驗使用者與代理建立的排程；內建排程由 host 的組裝測試涵蓋。
+ */
+const BUILTIN_SCHEDULE_IDS = new Set(["memory.distillation.daily"]);
+
+function externalSchedules<T extends { readonly scheduleId: string }>(schedules: T[]): T[] {
+  return schedules.filter((schedule) => !BUILTIN_SCHEDULE_IDS.has(schedule.scheduleId));
+}
+
 function approvalRequests(client: ProtocolClient) {
   return client.frames.filter((frame) => frame.type === "approval.requested");
 }
@@ -133,12 +143,10 @@ describe("代理提議排程的審批路徑", () => {
     expect(payload.options.map((option) => option.effect)).not.toContain("approve_always");
 
     // 核准前：沒有這個排程。
-    const before = await moduleRequest<{ schedules: Array<Record<string, unknown>> }>(
-      client,
-      "module.scheduler.list",
-      {},
-    );
-    expect(before.schedules).toHaveLength(0);
+    const before = await moduleRequest<{
+      schedules: Array<{ scheduleId: string }>;
+    }>(client, "module.scheduler.list", {});
+    expect(externalSchedules(before.schedules)).toHaveLength(0);
 
     const id = client.request("approval.decide", {
       approvalId: payload.approvalId,
@@ -152,12 +160,13 @@ describe("代理提議排程的審批路徑", () => {
 
     // 核准後：存在，createdBy 是 agent。
     const after = await moduleRequest<{
-      schedules: Array<{ name: string; createdBy: string; kind: string }>;
+      schedules: Array<{ scheduleId: string; name: string; createdBy: string; kind: string }>;
     }>(client, "module.scheduler.list", {});
-    expect(after.schedules).toHaveLength(1);
-    expect(after.schedules[0]?.createdBy).toBe("agent");
-    expect(after.schedules[0]?.name).toBe("每日備份檢查");
-    expect(after.schedules[0]?.kind).toBe("daily");
+    const scheduled = externalSchedules(after.schedules);
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0]?.createdBy).toBe("agent");
+    expect(scheduled[0]?.name).toBe("每日備份檢查");
+    expect(scheduled[0]?.kind).toBe("daily");
   });
 
   it("拒絕後排程不存在；工具結果是拒絕", async () => {
@@ -178,12 +187,12 @@ describe("代理提議排程的審批路徑", () => {
     const result = await waitForToolResult(client);
     expect((result.payload as { status: string }).status).not.toBe("ok");
 
-    const after = await moduleRequest<{ schedules: Array<unknown> }>(
+    const after = await moduleRequest<{ schedules: Array<{ scheduleId: string }> }>(
       client,
       "module.scheduler.list",
       {},
     );
-    expect(after.schedules).toHaveLength(0);
+    expect(externalSchedules(after.schedules)).toHaveLength(0);
   });
 });
 

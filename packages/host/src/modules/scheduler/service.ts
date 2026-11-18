@@ -1,4 +1,4 @@
-import type { BackgroundTaskRunner, ModuleLogger } from "@cardiary/module-api";
+import type { BackgroundTaskRunner, ModuleLogger, ScheduleDeclaration } from "@cardiary/module-api";
 import type { DistillationTrigger } from "../contract.js";
 import type {
   NotificationStore,
@@ -33,6 +33,11 @@ export interface SchedulerServiceOptions {
   readonly emitChanged: (record: NotificationRecord) => void;
   /** 蒸餾入口；由記憶模組提供。缺席時蒸餾任務記 error 並發通知。 */
   readonly distillation?: DistillationTrigger;
+  /**
+   * 模組宣告的排程。執行時以同 `scheduleId` 的宣告為準，找不到才照排程
+   * 列上的任務走；傳函式是為了在模組重載後仍看得到最新的宣告清單。
+   */
+  readonly declarations?: () => readonly ScheduleDeclaration[];
   readonly logger: ModuleLogger;
   readonly now?: () => Date;
   readonly tickIntervalMs?: number;
@@ -60,6 +65,7 @@ export class SchedulerService {
   #timer: ReturnType<typeof setInterval> | undefined;
   #wake: ReturnType<typeof setTimeout> | undefined;
   #running = new Set<string>();
+  #declarationAborts = new Set<AbortController>();
   #lastMaintenanceAt = 0;
   #started = false;
 
@@ -107,6 +113,11 @@ export class SchedulerService {
       clearTimeout(this.#wake);
       this.#wake = undefined;
     }
+    // 進行中的宣告執行收不到新的中止訊號就會被丟著跑；停機時一併中止。
+    for (const controller of this.#declarationAborts) {
+      controller.abort();
+    }
+    this.#declarationAborts.clear();
   }
 
   /** 搶出一輪可執行的排程並開始執行；回傳搶到幾個。公開供啟動後立即補跑與測試使用。 */
@@ -199,6 +210,13 @@ export class SchedulerService {
 
   async #execute(claim: ScheduleClaim): Promise<void> {
     const { schedule } = claim;
+    const declaration = this.#options
+      .declarations?.()
+      .find((candidate) => candidate.scheduleId === schedule.scheduleId);
+    if (declaration !== undefined) {
+      await this.#executeDeclaration(claim, declaration);
+      return;
+    }
     const isHeartbeat = schedule.kind === "heartbeat";
     if (claim.task.type === "distillation") {
       await this.#executeDistillation(claim);
@@ -296,6 +314,56 @@ export class SchedulerService {
       status: "error",
       error: message,
     });
+  }
+
+  /**
+   * 模組宣告的排程：交給宣告自己的 `run`。
+   *
+   * 成功不重複發通知（和蒸餾一樣，需要通知的任務自己發）；失敗記 error、
+   * 發一則失敗通知，run 也記 error。停機中止時記 cancelled。
+   */
+  async #executeDeclaration(claim: ScheduleClaim, declaration: ScheduleDeclaration): Promise<void> {
+    const { schedule } = claim;
+    const base = {
+      runId: claim.runId,
+      scheduleId: schedule.scheduleId,
+      conversationId: null,
+      startedAt: claim.claimedAt,
+    };
+    const controller = new AbortController();
+    this.#declarationAborts.add(controller);
+    let failure: string | null = null;
+    try {
+      await declaration.run({
+        scheduleId: schedule.scheduleId,
+        firedAt: claim.claimedAt,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      failure = errorMessage(error);
+    } finally {
+      this.#declarationAborts.delete(controller);
+    }
+    const finishedAt = nowIso(this.#now);
+    if (controller.signal.aborted) {
+      this.#options.schedules.finishRun({ ...base, finishedAt, status: "cancelled" });
+      return;
+    }
+    if (failure !== null) {
+      this.#options.logger.error("內建排程執行失敗", {
+        scheduleId: schedule.scheduleId,
+        message: failure,
+      });
+      this.#notifyFailure(schedule, false, failure, null);
+      this.#options.schedules.finishRun({
+        ...base,
+        finishedAt,
+        status: "error",
+        error: failure,
+      });
+      return;
+    }
+    this.#options.schedules.finishRun({ ...base, finishedAt, status: "ok" });
   }
 
   /**
