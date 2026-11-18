@@ -226,7 +226,7 @@ describe("生命週期", () => {
     expect(failures[0]?.startsWith("storage_io:")).toBe(true);
     expect(host.host.service.health().state).toBe("storage-failed");
     expect(host.host.service.databasesClosed).toBe(false);
-    await waitUntil(() => client.closed, 4000);
+    await waitUntil(() => client.closeCode !== null, 4000);
     expect(client.closeCode).toBe(1011);
     expect(client.closeReason).toBe("storage_failure");
   });

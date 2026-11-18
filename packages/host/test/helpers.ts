@@ -138,6 +138,10 @@ export class TestClient {
     return this.waitFor((frame) => frame.kind === "event" && frame.type === type, ms);
   }
 
+  /**
+   * 連線正在關閉或已關閉。注意：CLOSING 時就成立，`closeCode` 要等 close 事件才有值；
+   * 要斷言關閉碼時請等 `closeCode !== null`。
+   */
   get closed(): boolean {
     return this.#ws.readyState === WebSocket.CLOSED || this.#ws.readyState === WebSocket.CLOSING;
   }
