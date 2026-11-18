@@ -4,6 +4,7 @@ import { loadLanguage, saveLanguage, translate, type Language } from "./i18n";
 import { h, replaceChildren } from "./lib/dom";
 import { createApprovalsScreen } from "./screens/approvals";
 import { createConversationView } from "./screens/conversation";
+import { headerStatus } from "./screens/header-status";
 import { createNotificationsScreen } from "./screens/notifications";
 import { createPairingView } from "./screens/pairing";
 import { createPauseAllScreen } from "./screens/pause-all";
@@ -69,18 +70,7 @@ function renderHeader(): void {
       click: () => setLanguage(language === "zh-TW" ? "en" : "zh-TW"),
     },
   });
-  const statusClass =
-    app.connectionStatus === "connected"
-      ? "status-dot is-connected"
-      : app.connectionStatus === "connecting"
-        ? "status-dot is-connecting"
-        : "status-dot is-disconnected";
-  const statusText =
-    app.connectionStatus === "connected"
-      ? translate(language, "connection.connected")
-      : app.connectionStatus === "connecting"
-        ? translate(language, "connection.connecting")
-        : translate(language, "connection.disconnected");
+  const status = headerStatus(app, language);
   const logoutButton = h("button", {
     class: "button button-quiet",
     type: "button",
@@ -104,11 +94,11 @@ function renderHeader(): void {
       "div",
       { class: "header-actions" },
       h("span", {
-        class: statusClass,
-        title: statusText,
-        "aria-label": statusText,
+        class: status.dotClass,
+        title: status.label,
+        "aria-label": status.label,
       }),
-      h("span", { class: "connection-label", text: statusText }),
+      h("span", { class: "connection-label", text: status.label }),
       app.needsPairing ? null : logoutButton,
       langButton,
     ),

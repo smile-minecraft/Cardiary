@@ -18,6 +18,7 @@ const zh = {
 
   "connection.connecting": "連線中…",
   "connection.connected": "已連線",
+  "connection.notPaired": "尚未配對",
   "connection.disconnected": "連線中斷，重新連線中…",
   "connection.authFailed": "這台裝置無法通過驗證，請重新配對。",
   "connection.revoked": "這台裝置已在 Mac 上撤銷，請重新配對。",
@@ -117,6 +118,7 @@ const en: Record<MessageKey, string> = {
 
   "connection.connecting": "Connecting…",
   "connection.connected": "Connected",
+  "connection.notPaired": "Not paired",
   "connection.disconnected": "Disconnected, reconnecting…",
   "connection.authFailed": "This device could not be verified. Please pair again.",
   "connection.revoked": "This device was revoked on the Mac. Please pair again.",
