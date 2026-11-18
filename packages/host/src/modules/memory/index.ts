@@ -14,7 +14,7 @@ import type {
   ProtocolRequestContext,
 } from "@cardiary/module-api";
 import type { JsonValue } from "@cardiary/engine-adapter";
-import { clampCoreTokenBudget, CORE_TOKEN_BUDGET_DEFAULT } from "@cardiary/domain";
+import { clampCoreTokenBudget, CORE_TOKEN_BUDGET_DEFAULT, localDayKey } from "@cardiary/domain";
 import { NotificationStore } from "@cardiary/storage";
 import type { CardService } from "@cardiary/domain";
 
@@ -31,6 +31,7 @@ import {
   CardLifecycleStore,
   CoreMemoryStore,
   DistillationStore,
+  INTERRUPTION_THRESHOLD_MS,
   type StorageMaintenance,
 } from "@cardiary/storage";
 import type { UndoOptions } from "./undo.js";
@@ -113,6 +114,8 @@ function activate(context: ModuleActivationContext): void {
       protocol: context.services.protocol,
       state: cabinet.state,
       service,
+      runs,
+      maintenance,
       now,
     });
   }
@@ -131,7 +134,7 @@ function activate(context: ModuleActivationContext): void {
     defaultEnabled: true,
     requiresApproval: false,
     run: async () => {
-      const day = now().toISOString().slice(0, 10);
+      const day = localDayKey(now()) ?? now().toISOString().slice(0, 10);
       await service.runForDay("default", day);
       runDailyMaintenance(cabinet, maintenance);
     },
@@ -177,6 +180,8 @@ function registerMemoryTestProtocol(options: {
   };
   readonly state: { run(sql: string, ...params: readonly unknown[]): unknown };
   readonly service: DistillationService;
+  readonly runs: DistillationStore;
+  readonly maintenance?: StorageMaintenance | undefined;
   readonly now: () => Date;
 }): void {
   options.protocol.registerNamespace("module.memory.test", async (request) => {
@@ -186,16 +191,125 @@ function registerMemoryTestProtocol(options: {
         ? (raw as { data: Record<string, unknown> }).data
         : {};
     if (request.type === "module.memory.test.zero-freshness") {
+      const rawIds = payload["cardIds"];
+      const cardIds = Array.isArray(rawIds)
+        ? rawIds.filter((id): id is string => typeof id === "string")
+        : null;
+      if (cardIds !== null && cardIds.length > 0) {
+        const at = options.now().toISOString();
+        for (const cardId of cardIds) {
+          options.state.run(
+            `INSERT INTO card_state (card_id, persona, freshness, freshness_at, lifecycle, updated_at)
+             VALUES (?, 'default', 0, ?, 'live', ?)
+             ON CONFLICT (card_id) DO UPDATE SET freshness = 0, freshness_at = excluded.freshness_at, updated_at = excluded.updated_at`,
+            cardId,
+            at,
+            at,
+          );
+        }
+        return { data: { zeroed: true, cardIds } } as JsonValue;
+      }
       options.state.run(
         "UPDATE card_state SET freshness = 0, freshness_at = ? WHERE lifecycle = 'live'",
         options.now().toISOString(),
       );
       return { data: { zeroed: true } } as JsonValue;
     }
+    if (request.type === "module.memory.test.seed-interrupted-run") {
+      const sourceCardId =
+        typeof payload["sourceCardId"] === "string" ? payload["sourceCardId"] : null;
+      if (sourceCardId === null) {
+        return { data: { ok: false, reason: "missing-source-card-id" } } as JsonValue;
+      }
+      const text =
+        typeof payload["itemText"] === "string" ? payload["itemText"] : "整合驗收續跑記憶";
+      const requestedDay = typeof payload["day"] === "string" ? payload["day"] : null;
+      if (requestedDay !== null && !/^\d{4}-\d{2}-\d{2}$/.test(requestedDay)) {
+        return { data: { ok: false, reason: "invalid-day" } } as JsonValue;
+      }
+      const day =
+        requestedDay ?? localDayKey(options.now()) ?? options.now().toISOString().slice(0, 10);
+      // 開始時間壓到中斷門檻之前，重開機時才會被視為中斷的 run 續跑。
+      const startedAt = new Date(
+        options.now().getTime() - INTERRUPTION_THRESHOLD_MS - 60_000,
+      ).toISOString();
+      const run = options.runs.createRun({ persona: "default", day, startedAt });
+      const already = options.runs.findBatchItem("default", run.runId, `${sourceCardId}:extract`);
+      if (already === null) {
+        options.runs.upsertItem({
+          runId: run.runId,
+          itemKey: `${sourceCardId}:extract`,
+          batchId: run.runId,
+          persona: "default",
+          sourceCardId,
+          phase: "extract",
+          status: "done",
+          detailJson: JSON.stringify({ items: [{ type: "fact", text }] }),
+        });
+      }
+      return {
+        data: { ok: true, runId: run.runId, day, startedAt },
+      } as JsonValue;
+    }
+    if (request.type === "module.memory.test.seed-overdue-distillation") {
+      // 直接在排程表種一筆早已過期的每日蒸餾排程，讓「下次啟動補跑一次」
+      // 走真正的排程器路徑（claimDue），不重複產生次數由 claimDue 保證。
+      const overdue = "2000-01-01T02:00:00.000Z";
+      const nowIso = options.now().toISOString();
+      options.state.run(
+        `INSERT INTO schedules (schedule_id, persona, name, kind, spec_json, task_json, enabled,
+                                created_by, source_conversation_id, next_run_at, created_at, updated_at)
+         VALUES ('sch_test_overdue_distillation', 'default', '契約測試補跑蒸餾', 'daily', ?, ?, 1,
+                 'agent', NULL, ?, ?, ?)
+         ON CONFLICT (schedule_id) DO NOTHING`,
+        JSON.stringify({ time: "04:00" }),
+        JSON.stringify({ type: "distillation" }),
+        overdue,
+        nowIso,
+        nowIso,
+      );
+      return { data: { ok: true, scheduleId: "sch_test_overdue_distillation" } } as JsonValue;
+    }
+    if (request.type === "module.memory.test.maintenance-daily") {
+      const maintenance = options.maintenance;
+      if (maintenance === undefined) {
+        return { data: { ok: false, reason: "no-maintenance" } } as JsonValue;
+      }
+      const report = maintenance.daily();
+      // ScanReport 是介面，沒有隱含的索引簽名，不能直接當 JsonValue；
+      // 明確挑出純量欄位與 violation 的兩個字串欄位。
+      return {
+        data: {
+          ok: true,
+          scan: {
+            removedUnregistered: report.scan.removedUnregistered,
+            removedExpired: report.scan.removedExpired,
+            removedMissingRows: report.scan.removedMissingRows,
+            removedSymlinks: report.scan.removedSymlinks,
+            skippedOverflow: report.scan.skippedOverflow,
+            skippedHardLinks: report.scan.skippedHardLinks,
+            kept: report.scan.kept,
+            violations: report.scan.violations.map((violation) => ({
+              kind: violation.kind,
+              relPath: violation.relPath,
+            })),
+          },
+          stateSizeBefore: report.stateSizeBefore,
+          stateSizeAfter: report.stateSizeAfter,
+          engineSizeBefore: report.engineSizeBefore,
+          engineSizeAfter: report.engineSizeAfter,
+        },
+      } as JsonValue;
+    }
     if (request.type === "module.memory.test.run-daily") {
       const text = typeof payload["itemText"] === "string" ? payload["itemText"] : "整合驗收記憶";
       const title = typeof payload["title"] === "string" ? payload["title"] : "整合驗收長期記憶";
-      const day = options.now().toISOString().slice(0, 10);
+      const requestedDay = typeof payload["day"] === "string" ? payload["day"] : null;
+      if (requestedDay !== null && !/^\d{4}-\d{2}-\d{2}$/.test(requestedDay)) {
+        return { data: { ok: false, reason: "invalid-day" } } as JsonValue;
+      }
+      const day =
+        requestedDay ?? localDayKey(options.now()) ?? options.now().toISOString().slice(0, 10);
       const run = await options.service.runForDay("default", day, {
         distiller: scriptedDistiller(() => ({
           items: [{ type: "fact", text }],

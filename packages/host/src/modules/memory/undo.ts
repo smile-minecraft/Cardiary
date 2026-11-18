@@ -7,7 +7,13 @@
  */
 
 import type { CardService, DistillationSummaryItem } from "@cardiary/domain";
-import { assertWellFormedItem, planUndoItem, type UndoPlan, type UndoStep } from "@cardiary/domain";
+import {
+  assertWellFormedItem,
+  localDayKey,
+  planUndoItem,
+  type UndoPlan,
+  type UndoStep,
+} from "@cardiary/domain";
 import type { JsonValue } from "@cardiary/engine-adapter";
 
 import { CardLifecycleStore, CoreMemoryStore, DistillationStore } from "@cardiary/storage";
@@ -42,7 +48,7 @@ export async function undoItem(
     return { ok: false, reason: "item-not-found" };
   }
 
-  const day = options.now().toISOString().slice(0, 10);
+  const day = localDayKey(options.now()) ?? options.now().toISOString().slice(0, 10);
   const daily = options.core.getDaily("default", day);
   const checked = assertWellFormedItem(item);
   const plan: UndoPlan = planUndoItem(checked, daily);
@@ -75,6 +81,8 @@ async function applyStep(
   switch (step.type) {
     case "delete-card":
       await options.cards.delete(step.cardId);
+      // 這張卡（建立或取代的產出卡）被刪除後，指向它的 `superseded_by` 全部失效。
+      options.lifecycle.clearSupersededBy(step.cardId);
       break;
     case "restore-sources-live":
     case "uncold":

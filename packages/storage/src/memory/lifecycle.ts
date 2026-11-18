@@ -72,6 +72,52 @@ export class CardLifecycleStore {
   }
 
   /**
+   * 標記 `superseded_by`（取代關係的正本）。蒸餾產生的記憶卡不走卡片建立
+   * 路徑，被取代的一方可能沒有 `card_state` 列；以 upsert 寫入，
+   * 後續批次的跨批去重與候選排除才讀得到。
+   */
+  markSuperseded(targetCardId: string, byCardId: string, at?: string): void {
+    const now = at ?? nowIso(this.#now);
+    this.#db.transaction((tx) => {
+      tx.run(
+        `INSERT INTO card_state (card_id, persona, freshness, freshness_at, lifecycle, superseded_by, updated_at)
+         VALUES (?, 'default', 100, ?, 'live', ?, ?)
+         ON CONFLICT (card_id) DO UPDATE SET superseded_by = excluded.superseded_by, updated_at = excluded.updated_at`,
+        targetCardId,
+        now,
+        byCardId,
+        now,
+      );
+    });
+  }
+
+  /**
+   * 清掉指向 `byCardId` 的取代關係；取代別人的卡被刪除（建立或取代
+   * 被復原）後，`superseded_by` 不能指向已不存在的卡。回傳清掉的列數。
+   */
+  clearSupersededBy(byCardId: string, at?: string): number {
+    const now = at ?? nowIso(this.#now);
+    let cleared = 0;
+    this.#db.transaction((tx) => {
+      cleared = tx.run(
+        "UPDATE card_state SET superseded_by = NULL, updated_at = ? WHERE superseded_by = ?",
+        now,
+        byCardId,
+      ).changes;
+    });
+    return cleared;
+  }
+
+  /** 這張卡被哪張卡取代；沒有 `card_state` 列或未被取代回 `null`。 */
+  getSupersededBy(cardId: string): string | null {
+    const row = this.#db.get<{ superseded_by: string | null }>(
+      "SELECT superseded_by FROM card_state WHERE card_id = ?",
+      cardId,
+    );
+    return row?.superseded_by ?? null;
+  }
+
+  /**
    * 挑選蒸餾候選：`live` 且新鮮度歸零的卡，回傳基本欄位給領域層過濾。
    *
    * 格式錯誤、被取代與核心組成員的過濾由領域層與呼叫端完成（這裡不知道核心組，

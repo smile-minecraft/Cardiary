@@ -25,6 +25,7 @@ export const hostModule: HostModule = {
 };
 
 let service: SchedulerService | null = null;
+let engineStatusUnsubscribe: (() => void) | undefined;
 
 async function activate(context: ModuleActivationContext): Promise<void> {
   const cabinet = context.services.host.require<CardEnvironment>(HOST_SERVICE_NAMES.cardStorage);
@@ -99,10 +100,20 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   });
 
   scheduler.start();
+  // 模組啟用時引擎還停在 starting，`start()` 裡的立即 tick 會被 isEngineRunning
+  // 擋下，錯過的排程要等下一個 30 秒 tick。引擎轉成 running 的當下再補跑一次，
+  // 服務關閉期間錯過的排程才能及時處理；暫停恢復後重新 running 時也適用。
+  engineStatusUnsubscribe = engine?.onStatusChange((status) => {
+    if (status.state === "running") {
+      scheduler.poke();
+    }
+  });
 }
 
 function deactivate(): void {
   const current = service;
   service = null;
   current?.stop();
+  engineStatusUnsubscribe?.();
+  engineStatusUnsubscribe = undefined;
 }

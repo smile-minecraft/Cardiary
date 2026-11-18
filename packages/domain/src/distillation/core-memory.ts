@@ -8,11 +8,12 @@
  * - 順序固定為 `added_day, card_id` 升冪（決定性），不佔發牌預算；
  * - 預算不足時蒸餾「提議」換出最近最少用的核心卡，不自動換出。
  *
- * 日期鍵以 UTC 日期為準；呼叫端傳入 RFC 3339 的時間，測試注入固定時間。
+ * 日期鍵以在地時區的日曆日為準；呼叫端傳入 RFC 3339 的時間，測試注入固定時間。
  */
 
 import type { CardId } from "../cards/index.js";
 import { estimateTokens } from "../context/estimate.js";
+import { localDayKey } from "../time.js";
 
 /** 核心組預算預設值。 */
 export const CORE_TOKEN_BUDGET_DEFAULT = 800;
@@ -27,13 +28,9 @@ export function clampCoreTokenBudget(value: number | null | undefined): number {
   return Math.min(CORE_TOKEN_BUDGET_MAX, Math.max(CORE_TOKEN_BUDGET_MIN, Math.round(value)));
 }
 
-/** 日期鍵（UTC，`YYYY-MM-DD`）；格式不合法回 `null`。 */
-export function coreDayKey(fromRfc3339: string): string | null {
-  const ms = Date.parse(fromRfc3339);
-  if (!Number.isFinite(ms)) {
-    return null;
-  }
-  return new Date(ms).toISOString().slice(0, 10);
+/** 日期鍵（在地時區的 `YYYY-MM-DD`）；格式不合法回 `null`。 */
+export function coreDayKey(fromRfc3339: string, timeZone?: string): string | null {
+  return localDayKey(fromRfc3339, timeZone);
 }
 
 /** 一張要進（或已在）核心組的卡片的估算用內容。 */
