@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -182,9 +184,10 @@ describe("權限模式", () => {
     running.splice(running.indexOf(service), 1);
     const restarted = await boot(service.folder);
     const after = state(await call(restarted.client, "system.permissions.get"));
+    // 授權存成真實路徑（macOS 的暫存目錄經過 /var → /private/var 符號連結）。
     expect(after.categories).toEqual(
       expect.arrayContaining([
-        { category: "read-only-files", paths: [service.folder.path] },
+        { category: "read-only-files", paths: [realpathSync.native(service.folder.path)] },
         { category: "create-card", paths: [] },
       ]),
     );
