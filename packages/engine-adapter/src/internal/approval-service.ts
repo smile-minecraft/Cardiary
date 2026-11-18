@@ -25,7 +25,6 @@ import { engineError } from "./errors.js";
 
 interface Waiter {
   readonly resolve: (resolution: ApprovalResolution) => void;
-  timer: NodeJS.Timeout | null;
 }
 
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
@@ -56,6 +55,10 @@ export class ApprovalServiceImpl implements ApprovalService {
   readonly #requests = new Map<ApprovalRequestId, ApprovalRequest>();
   readonly #waiters = new Map<ApprovalRequestId, Set<Waiter>>();
   readonly #byKey = new Map<string, Promise<ApprovalRequest>>();
+  /** 每個請求最多一個到期計時器；到期、決定或撤回後清掉。 */
+  readonly #expiryTimers = new Map<ApprovalRequestId, NodeJS.Timeout>();
+  /** 正在寫入 expired 的請求；多個計時器同時到期時只處理一次。 */
+  readonly #expiring = new Set<ApprovalRequestId>();
   readonly #listeners = new Set<{
     readonly listener: (update: ApprovalUpdate) => void;
     readonly filter: ApprovalListFilter | undefined;
@@ -186,7 +189,9 @@ export class ApprovalServiceImpl implements ApprovalService {
     this.#requests.set(request.id, request);
     if (outcome.kind === "created") {
       this.#publish({ kind: "requested", request });
-      this.#armExpiry(request);
+      if (request.expiresAt !== null) {
+        this.#scheduleExpiry(request.id, request.expiresAt);
+      }
     }
     return request;
   }
@@ -231,7 +236,7 @@ export class ApprovalServiceImpl implements ApprovalService {
     }
 
     return new Promise<ApprovalResolution>((resolve) => {
-      const waiter: Waiter = { resolve, timer: null };
+      const waiter: Waiter = { resolve };
       const waiters = this.#waiters.get(requestId) ?? new Set<Waiter>();
       waiters.add(waiter);
       this.#waiters.set(requestId, waiters);
@@ -248,12 +253,9 @@ export class ApprovalServiceImpl implements ApprovalService {
         );
       }
 
+      // 重啟後從 ledger 讀回的請求沒有在這個行程排過到期，等待時補上。
       if (request.expiresAt !== null) {
-        const delay = Math.max(0, Date.parse(request.expiresAt) - this.#clock.now().getTime());
-        waiter.timer = setTimeout(() => {
-          void this.#expire(requestId);
-        }, delay);
-        waiter.timer.unref?.();
+        this.#scheduleExpiry(requestId, request.expiresAt);
       }
     });
   }
@@ -354,23 +356,22 @@ export class ApprovalServiceImpl implements ApprovalService {
   }
 
   #settle(requestId: ApprovalRequestId, resolution: ApprovalResolution): void {
+    const timer = this.#expiryTimers.get(requestId);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.#expiryTimers.delete(requestId);
+    }
     const waiters = this.#waiters.get(requestId);
     if (waiters === undefined) {
       return;
     }
     this.#waiters.delete(requestId);
     for (const waiter of waiters) {
-      if (waiter.timer !== null) {
-        clearTimeout(waiter.timer);
-      }
       waiter.resolve(resolution);
     }
   }
 
   #removeWaiter(requestId: ApprovalRequestId, waiter: Waiter): void {
-    if (waiter.timer !== null) {
-      clearTimeout(waiter.timer);
-    }
     const waiters = this.#waiters.get(requestId);
     waiters?.delete(waiter);
     if (waiters !== undefined && waiters.size === 0) {
@@ -378,31 +379,46 @@ export class ApprovalServiceImpl implements ApprovalService {
     }
   }
 
-  #armExpiry(request: ApprovalRequest): void {
-    if (request.expiresAt === null) {
+  /** 依時鐘排一個到期計時器；同一請求已有計時器就不重排。 */
+  #scheduleExpiry(requestId: ApprovalRequestId, expiresAt: string): void {
+    if (this.#expiryTimers.has(requestId)) {
       return;
     }
-    const delay = Math.max(0, Date.parse(request.expiresAt) - this.#clock.now().getTime());
+    const delay = Math.max(0, Date.parse(expiresAt) - this.#clock.now().getTime());
     const timer = setTimeout(() => {
-      void this.#expire(request.id);
+      this.#expiryTimers.delete(requestId);
+      void this.#expire(requestId);
     }, delay);
     timer.unref?.();
+    this.#expiryTimers.set(requestId, timer);
   }
 
   async #expire(requestId: ApprovalRequestId): Promise<void> {
     const request = this.#requests.get(requestId);
-    if (request === undefined || request.status !== "pending") {
+    if (request === undefined || request.status !== "pending" || this.#expiring.has(requestId)) {
       return;
     }
+    // 計時器可能比時鐘早一點觸發（Node 計時器約早 1 ms，或注入的時鐘落後）；
+    // 還沒到期就依剩餘時間重排，不能就此放棄，否則請求永遠停在 pending。
     if (request.expiresAt !== null && Date.parse(request.expiresAt) > this.#clock.now().getTime()) {
+      this.#scheduleExpiry(requestId, request.expiresAt);
       return;
     }
-    const expired: ApprovalRequest = { ...request, status: "expired" };
-    await this.#ledger.update(expired);
-    this.#requests.set(requestId, expired);
-    const resolution: ApprovalResolution = { request: expired, outcome: "expired", decision: null };
-    this.#publish({ kind: "resolved", resolution });
-    this.#settle(requestId, resolution);
+    this.#expiring.add(requestId);
+    try {
+      const expired: ApprovalRequest = { ...request, status: "expired" };
+      await this.#ledger.update(expired);
+      this.#requests.set(requestId, expired);
+      const resolution: ApprovalResolution = {
+        request: expired,
+        outcome: "expired",
+        decision: null,
+      };
+      this.#publish({ kind: "resolved", resolution });
+      this.#settle(requestId, resolution);
+    } finally {
+      this.#expiring.delete(requestId);
+    }
   }
 }
 
