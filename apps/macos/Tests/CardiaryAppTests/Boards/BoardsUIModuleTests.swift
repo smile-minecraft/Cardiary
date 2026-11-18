@@ -54,4 +54,74 @@ final class BoardsUIModuleTests: XCTestCase {
         let deleted = await service.deletedSessions
         XCTAssertEqual(deleted, ["s2"])
     }
+
+    func testFailedSendToNewConversationReturnsToBoardAndRestoresTarget() async {
+        let app = AppModel()
+        let service = FakeCardiaryService(sessions: [
+            Fixtures.summary("s1"),
+            Fixtures.summary("s2"),
+        ])
+        await app.attach(service: service)
+        app.conversations.select("s2")
+        app.selectSlot(AppRegistry.boardsSlotId)
+        BoardsUIModule.install(app)
+        let model = app.contentModels.compactMap { $0 as? BoardModel }.first
+
+        // 「送到新對話」先建立對話，主區域會切過去。
+        let created = await model?.createConversation()
+        XCTAssertEqual(created, "session-new")
+        XCTAssertEqual(app.selection, .conversation("session-new"))
+
+        // 送出失敗，收回對話。
+        await model?.deleteConversation("session-new")
+
+        XCTAssertEqual(app.selection, .slot(AppRegistry.boardsSlotId), "要回到白板，錯誤訊息才看得到")
+        XCTAssertFalse(app.conversations.sessions.contains { $0.id == "session-new" })
+        XCTAssertEqual(model?.currentConversationId, "s2", "送出目標還原成原本選的對話")
+    }
+
+    func testFailedSendReturnsToBoardEvenWhenDeletedEventArrivesFirst() async {
+        let app = AppModel()
+        let service = FakeCardiaryService(sessions: [
+            Fixtures.summary("s1"),
+            Fixtures.summary("s2"),
+        ])
+        await app.attach(service: service)
+        app.conversations.select("s2")
+        app.selectSlot(AppRegistry.boardsSlotId)
+        BoardsUIModule.install(app)
+        let model = app.contentModels.compactMap { $0 as? BoardModel }.first
+        _ = await model?.createConversation()
+
+        // 打包版實測的順序：主機的 session.deleted 事件先到，AppModel 已改選清單第一場。
+        app.handle(sessionEvent: .sessionDeletedEvent(SessionDeletedEvent(
+            stream: "system", seq: 1, emittedAt: "2026-01-10T03:00:00Z",
+            payload: SessionDeletedEventPayload(
+                sessionId: "session-new", deletedSessionIds: ["session-new"], deletedCards: 0, deletedAssets: 0
+            )
+        )))
+        XCTAssertEqual(app.selection, .conversation("s1"))
+
+        await model?.deleteConversation("session-new")
+
+        XCTAssertEqual(app.selection, .slot(AppRegistry.boardsSlotId))
+        XCTAssertEqual(model?.currentConversationId, "s2")
+    }
+
+    func testSuccessfulSendToNewConversationStaysOnTheNewConversation() async {
+        let app = AppModel()
+        let service = FakeCardiaryService(sessions: [Fixtures.summary("s1")])
+        await app.attach(service: service)
+        app.selectSlot(AppRegistry.boardsSlotId)
+        BoardsUIModule.install(app)
+        let model = app.contentModels.compactMap { $0 as? BoardModel }.first
+
+        let created = await model?.createConversation()
+
+        // 送出成功不會呼叫 deleteConversation；照舊停在新對話。
+        XCTAssertEqual(created, "session-new")
+        XCTAssertEqual(app.selection, .conversation("session-new"))
+        let deleted = await service.deletedSessions
+        XCTAssertTrue(deleted.isEmpty)
+    }
 }

@@ -114,6 +114,8 @@ public final class BoardModel: ObservableObject, AppContentModel {
 
     /// 刪掉剛剛建立、還沒送成內容的對話；由掛載點接到主機的刪除流程。
     public var deleteConversation: @MainActor (String) async -> Void = { _ in }
+    /// 目前顯示的錯誤若是載入失敗造成的，記在這裡；重新載入成功時只清這一種。
+    private var loadErrorMessage: String?
 
     /// 白板頁面可以選擇的對話。
     public struct ConversationTarget: Identifiable, Equatable, Sendable {
@@ -202,14 +204,16 @@ public final class BoardModel: ObservableObject, AppContentModel {
                 baseUpdatedAt = nil
                 canvas = BoardCanvas()
             }
-            errorMessage = nil
+            clearLoadError()
         } catch {
             guard generation == loadGeneration else { return }
-            errorMessage = BoardL10n.format(.boardsLoadFailed, value: error.localizedDescription)
+            showLoadError(error)
         }
     }
 
     public func open(_ boardId: String) async {
+        // 使用者自己切換白板：前一個白板的操作訊息不再適用。
+        errorMessage = nil
         loadGeneration += 1
         await open(boardId, generation: loadGeneration)
     }
@@ -221,11 +225,24 @@ public final class BoardModel: ObservableObject, AppContentModel {
             guard generation == loadGeneration else { return }
             selectedBoardId = boardId
             apply(document: response.board)
-            errorMessage = nil
+            clearLoadError()
         } catch {
             guard generation == loadGeneration else { return }
-            errorMessage = BoardL10n.format(.boardsLoadFailed, value: error.localizedDescription)
+            showLoadError(error)
         }
+    }
+
+    /// 重新載入成功時只清掉載入失敗的訊息。畫面重新出現也會重新載入
+    /// （例如「送到新對話」失敗後回到白板），不能把剛發生的操作錯誤一起清掉。
+    private func clearLoadError() {
+        if errorMessage == loadErrorMessage { errorMessage = nil }
+        loadErrorMessage = nil
+    }
+
+    private func showLoadError(_ error: any Error) {
+        let message = BoardL10n.format(.boardsLoadFailed, value: error.localizedDescription)
+        errorMessage = message
+        loadErrorMessage = message
     }
 
     // MARK: - 建立與刪除
