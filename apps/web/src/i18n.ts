@@ -48,7 +48,7 @@ const zh = {
   "conversation.sessionLabel": "選擇對話",
   "conversation.empty": "還沒有訊息。送出第一則訊息開始。",
   "conversation.send": "送出",
-  "conversation.inputPlaceholder": "輸入訊息，Enter 送出，Shift + Enter 換行",
+  "conversation.inputPlaceholder": "輸入訊息",
   "conversation.interrupt": "中斷生成",
   "conversation.interrupting": "正在中斷…",
   "conversation.toolCall": "工具呼叫",
@@ -63,6 +63,15 @@ const zh = {
   "conversation.approvalGo": "前往審批",
   "conversation.sendFailed": "訊息送出失敗：{message}",
   "conversation.loadFailed": "無法載入對話：{message}",
+  "conversation.notSent": "沒有送出",
+  "conversation.retry": "重送",
+  "conversation.discard": "移除",
+  "conversation.replying": "正在回覆…",
+  "conversation.toolInput": "輸入",
+  "conversation.toolOutput": "輸出",
+  "conversation.noSession": "還沒有對話。按「新對話」開始第一段。",
+  "conversation.offline": "連線恢復後才能送出。",
+  "conversation.you": "你",
 
   "notifications.title": "通知",
   "notifications.empty": "沒有通知。",
@@ -85,6 +94,8 @@ const zh = {
   "approvals.scope.tool_call": "工具",
   "approvals.scope.settings_change": "設定變更",
   "approvals.scope.schedule": "排程",
+  "approvals.waiting": "{count} 則等你決定",
+  "approvals.detail": "細節",
 
   "pause.title": "緊急全部暫停",
   "pause.description": "立即中止所有進行中的回合，並暫停所有待審批的工作。配對與撤銷不受影響。",
@@ -95,6 +106,7 @@ const zh = {
   "pause.sending": "正在送出…",
   "pause.done": "已全部暫停，共中止 {count} 個回合。",
   "pause.failed": "暫停失敗：{message}",
+  "pause.activity": "現在有 {running} 段對話在進行，{approvals} 則審批等你決定。",
 
   "logout.button": "登出這個裝置",
   "logout.confirm": "登出只會清除這個瀏覽器上的憑證；要完全撤銷這個裝置，請在 Mac 上操作。",
@@ -147,7 +159,7 @@ const en: Record<MessageKey, string> = {
   "conversation.sessionLabel": "Choose a chat",
   "conversation.empty": "No messages yet. Send the first one to get started.",
   "conversation.send": "Send",
-  "conversation.inputPlaceholder": "Type a message. Enter to send, Shift + Enter for a new line",
+  "conversation.inputPlaceholder": "Message",
   "conversation.interrupt": "Interrupt",
   "conversation.interrupting": "Interrupting…",
   "conversation.toolCall": "Tool call",
@@ -162,6 +174,15 @@ const en: Record<MessageKey, string> = {
   "conversation.approvalGo": "Go to approvals",
   "conversation.sendFailed": "Message failed to send: {message}",
   "conversation.loadFailed": "Could not load the conversation: {message}",
+  "conversation.notSent": "Not sent",
+  "conversation.retry": "Send again",
+  "conversation.discard": "Remove",
+  "conversation.replying": "Replying…",
+  "conversation.toolInput": "Input",
+  "conversation.toolOutput": "Output",
+  "conversation.noSession": "No chats yet. Choose New chat to start one.",
+  "conversation.offline": "You can send once the connection is back.",
+  "conversation.you": "You",
 
   "notifications.title": "Notifications",
   "notifications.empty": "No notifications.",
@@ -184,6 +205,8 @@ const en: Record<MessageKey, string> = {
   "approvals.scope.tool_call": "Tool",
   "approvals.scope.settings_change": "Settings change",
   "approvals.scope.schedule": "Schedule",
+  "approvals.waiting": "{count} waiting for you",
+  "approvals.detail": "Details",
 
   "pause.title": "Emergency pause",
   "pause.description":
@@ -195,6 +218,7 @@ const en: Record<MessageKey, string> = {
   "pause.sending": "Sending…",
   "pause.done": "Everything paused. {count} turns interrupted.",
   "pause.failed": "Pause failed: {message}",
+  "pause.activity": "Right now {running} chats are running and {approvals} approvals are waiting.",
 
   "logout.button": "Sign out this device",
   "logout.confirm":

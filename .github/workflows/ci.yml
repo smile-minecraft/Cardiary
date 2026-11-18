@@ -22,6 +22,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      # 網頁客戶端的端到端測試需要真的 Chromium；沒裝瀏覽器時測試會失敗而不是 skip。
+      - name: 安裝 Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: 網頁客戶端端到端測試
+        run: pnpm test:e2e
 
   macos:
     # 殼與 CardiaryKit 只能在 macOS 建置；與 ubuntu 的 check 平行跑。

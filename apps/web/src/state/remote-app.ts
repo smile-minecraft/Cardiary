@@ -64,6 +64,9 @@ export class RemoteApp {
 
   approvals: ApprovalRequest[] = [];
 
+  /** 送出失敗的本地訊息 id；畫面據此顯示「沒有送出」與重送。 */
+  readonly failedLocalIds = new Set<string>();
+
   /** 事件裡收到、但畫面還沒消化掉的診斷訊息（例如補送缺口）。 */
   diagnostics: string[] = [];
 
@@ -160,19 +163,49 @@ export class RemoteApp {
     await this.selectSession(payload.session.id);
   }
 
+  /**
+   * 送出訊息。使用者自己的訊息先放進逐字稿（樂觀回顯），送出失敗就標成失敗，
+   * 讓畫面留著原文可以重送；主機的快照之後會用同一段文字取代這一筆。
+   */
   async sendMessage(text: string): Promise<void> {
     const client = this.#client;
     const sessionId = this.currentSessionId;
     if (!client || !sessionId) return;
-    await client.request("session.send_message", {
-      sessionId,
-      text,
-      delivery: "queue",
-    });
+    const localId = `local-${randomInstanceId()}`;
+    this.entries = [
+      ...this.entries,
+      {
+        id: localId,
+        role: "user",
+        turnId: localId,
+        createdAt: new Date().toISOString(),
+        text,
+      },
+    ];
+    this.failedLocalIds.delete(localId);
+    this.#emit();
+    try {
+      await client.request("session.send_message", {
+        sessionId,
+        text,
+        delivery: "queue",
+      });
+    } catch (error) {
+      this.failedLocalIds.add(localId);
+      this.#emit();
+      throw error;
+    }
     // 送出後重新整理列表拿到最新標題與狀態；失敗不影響送出本身。
     await this.#refreshSessions().catch((error: unknown) => {
       this.#recordDiagnostic(errorMessage(error));
     });
+  }
+
+  /** 把送出失敗的本地訊息移出逐字稿（使用者選擇重送或放棄時）。 */
+  discardLocalEntry(id: string): void {
+    this.entries = this.entries.filter((entry) => entry.id !== id);
+    this.failedLocalIds.delete(id);
+    this.#emit();
   }
 
   async interrupt(): Promise<void> {
@@ -387,7 +420,14 @@ export class RemoteApp {
     options: { transcript: boolean },
   ): void {
     if (options.transcript) {
-      this.entries = [...snapshot.entries];
+      const hostUserTexts = new Set(
+        snapshot.entries.filter((entry) => entry.role === "user").map((entry) => entry.text),
+      );
+      const pendingLocal = this.entries.filter(
+        (entry) =>
+          entry.role === "user" && entry.id.startsWith("local-") && !hostUserTexts.has(entry.text),
+      );
+      this.entries = [...snapshot.entries, ...pendingLocal];
       this.streaming = snapshot.streaming
         ? {
             messageId: snapshot.streaming.messageId,

@@ -2,6 +2,7 @@ import type { CardiaryNotification } from "@cardiary/protocol";
 
 import { translate, type Language, type MessageKey } from "../i18n";
 import { formatTime, h, replaceChildren } from "../lib/dom";
+import { renderMarkdown } from "../lib/markdown";
 import type { RemoteApp } from "../state/remote-app";
 
 export function renderNotifications(app: RemoteApp, language: Language): HTMLElement {
@@ -14,7 +15,7 @@ export function renderNotifications(app: RemoteApp, language: Language): HTMLEle
   if (app.totalUnread > 0) {
     header.append(
       h("span", {
-        class: "badge badge-accent",
+        class: "count-pill",
         text: translate(language, "notifications.unread", { count: app.totalUnread }),
       }),
     );
@@ -22,7 +23,7 @@ export function renderNotifications(app: RemoteApp, language: Language): HTMLEle
   if (app.notifications.length > 0 && app.totalUnread > 0) {
     header.append(
       h("button", {
-        class: "button button-quiet",
+        class: "link-button header-action",
         type: "button",
         text: translate(language, "notifications.markAllRead"),
         on: {
@@ -40,65 +41,62 @@ export function renderNotifications(app: RemoteApp, language: Language): HTMLEle
     return section;
   }
 
-  const list = h("div", { class: "list" });
+  const list = h("ol", { class: "feed" });
   for (const notification of app.notifications) {
-    list.append(renderNotificationCard(app, language, notification));
+    list.append(renderNotificationItem(app, language, notification));
   }
   section.append(list);
   return section;
 }
 
-function renderNotificationCard(
+function renderNotificationItem(
   app: RemoteApp,
   language: Language,
   notification: CardiaryNotification,
 ): HTMLElement {
-  const card = h("article", {
-    class: notification.readAt ? "card notification-card is-read" : "card notification-card",
+  const item = h("li", {
+    class: notification.readAt
+      ? "feed-item notification-card is-read"
+      : "feed-item notification-card",
   });
-  card.append(
+  item.append(
     h(
       "div",
-      { class: "meta-row" },
+      { class: "feed-meta" },
       h("span", {
-        class: "badge",
+        class: `kind-tag kind-${notification.kind}`,
         text: translate(language, `notifications.kind.${notification.kind}` as MessageKey),
       }),
-      h("span", { class: "muted", text: formatTime(notification.createdAt, language) }),
-      ...(notification.readAt
-        ? []
-        : [
-            h("span", {
-              class: "unread-dot",
-              title: translate(language, "notifications.unread", { count: 1 }),
-            }),
-          ]),
+      h("time", {
+        datetime: notification.createdAt,
+        text: formatTime(notification.createdAt, language),
+      }),
     ),
   );
-  card.append(h("h2", { class: "card-title" }, notification.title));
-  // 內文是 Markdown，但依協定不能直接渲染原始 HTML；純文字顯示最安全。
-  card.append(h("p", { class: "notification-body" }, notification.body));
+  item.append(h("h2", { class: "feed-title" }, notification.title));
+  // 內文是 Markdown；只轉成安全的 DOM 節點，不渲染原始 HTML。
+  const body = h("div", { class: "feed-body" });
+  renderMarkdown(body, notification.body);
+  item.append(body);
 
-  const buttons = h("div", { class: "button-row" });
   if (!notification.readAt) {
-    buttons.append(
+    item.append(
       h("button", {
-        class: "button button-quiet",
+        class: "link-button",
         type: "button",
         text: translate(language, "notifications.markRead"),
         on: {
           click: () => {
             void app
               .markNotificationsRead([notification.notificationId])
-              .catch(showActionError(card, language));
+              .catch(showActionError(item, language));
           },
         },
       }),
     );
   }
   // 網頁只負責對話、通知、審批與緊急暫停；把通知轉成卡片屬於 macOS 應用程式的範圍。
-  if (buttons.childElementCount > 0) card.append(buttons);
-  return card;
+  return item;
 }
 
 function showActionError(container: HTMLElement, language: Language) {
@@ -114,16 +112,28 @@ function showActionError(container: HTMLElement, language: Language) {
   };
 }
 
-/** 建立畫面容器；每次 update 都重建內容以反映最新狀態。 */
+/** 建立畫面容器；通知或語言變了才重建，串流中的 token 不會觸發重繪。 */
 export function createNotificationsScreen(
   app: RemoteApp,
   getLanguage: () => Language,
 ): { readonly element: HTMLElement; update(): void } {
   const element = h("div", { class: "screen" });
+  let lastSignature = "";
   return {
     element,
     update() {
-      updateNotificationsScreen(element, app, getLanguage());
+      const language = getLanguage();
+      const signature = JSON.stringify([
+        language,
+        app.totalUnread,
+        app.notifications.map((notification) => [
+          notification.notificationId,
+          notification.readAt ?? "",
+        ]),
+      ]);
+      if (signature === lastSignature && element.childElementCount > 0) return;
+      lastSignature = signature;
+      updateNotificationsScreen(element, app, language);
     },
   };
 }
