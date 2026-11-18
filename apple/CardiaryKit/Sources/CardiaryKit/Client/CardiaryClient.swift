@@ -330,7 +330,8 @@ public actor CardiaryClient {
         args: [String]? = nil,
         url: String? = nil,
         allowedHosts: [String] = [],
-        clientRequestId: String? = nil
+        clientRequestId: String? = nil,
+        persistentData: Bool? = nil
     ) async throws -> McpServerAddResponsePayload {
         guard let connection else { throw CardiaryClientError.connectionClosed }
         return try await connection.addMcpServer(
@@ -340,7 +341,8 @@ public actor CardiaryClient {
             args: args,
             url: url,
             allowedHosts: allowedHosts,
-            clientRequestId: clientRequestId
+            clientRequestId: clientRequestId,
+            persistentData: persistentData
         )
     }
 

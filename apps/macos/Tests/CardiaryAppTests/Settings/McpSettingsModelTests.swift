@@ -20,7 +20,8 @@ final class McpSettingsModelTests: XCTestCase {
         allowedHosts: [String] = [],
         enabled: Bool = true,
         state: McpServerState = .ready,
-        failure: String? = nil
+        failure: String? = nil,
+        persistentData: McpPersistentDataInfo? = nil
     ) -> McpServerInfo {
         McpServerInfo(
             serverId: id,
@@ -33,6 +34,7 @@ final class McpSettingsModelTests: XCTestCase {
             enabled: enabled,
             state: state,
             failure: failure,
+            persistentData: persistentData,
             createdAt: "2026-01-01T00:00:00Z"
         )
     }
@@ -130,6 +132,81 @@ final class McpSettingsModelTests: XCTestCase {
             McpSettingsModel.hostsIncludingURLHost(["extra.example.com"], url: "https://API.Example.com/mcp"),
             ["extra.example.com", "api.example.com"]
         )
+    }
+
+    func testAddStdioDefaultsToNoPersistentDataGrant() async {
+        let fake = FakeCardiaryService()
+        let model = makeModel()
+        model.attach(service: fake)
+
+        let accepted = await model.add(name: "Filesystem", transport: .stdio, command: "npx")
+
+        XCTAssertTrue(accepted)
+        let add = await fake.mcpAdds.first
+        XCTAssertEqual(add?.persistentData, false, "預設關閉：要明確送出 false，不能靠缺省")
+    }
+
+    func testAddStdioSendsChosenPersistentDataGrant() async {
+        let fake = FakeCardiaryService()
+        let model = makeModel()
+        model.attach(service: fake)
+
+        _ = await model.add(
+            name: "Filesystem", transport: .stdio, command: "npx", persistentData: true
+        )
+
+        let add = await fake.mcpAdds.first
+        XCTAssertEqual(add?.persistentData, true, "使用者勾選授權時要原樣送進審批")
+    }
+
+    func testAddHTTPDoesNotRequestPersistentData() async {
+        let fake = FakeCardiaryService()
+        let model = makeModel()
+        model.attach(service: fake)
+
+        _ = await model.add(name: "Fetch", transport: .http, url: "https://example.com/mcp")
+
+        let add = await fake.mcpAdds.first
+        XCTAssertNil(add?.persistentData, "HTTP 伺服器沒有本機持久資料目錄，不送授權欄位")
+    }
+
+    func testPersistentDataSummaryFollowsHostReportAndLanguage() {
+        let usage = StorageSettingsModel.formattedBytes(2048)
+        let granted = McpPersistentDataInfo(allowed: true, bytes: 2048, files: 3)
+        let denied = McpPersistentDataInfo(allowed: false, bytes: 0, files: 0)
+
+        XCTAssertEqual(
+            McpSettingsModel.persistentDataSummary(granted, language: .zhHant),
+            "已授權寫入；用量 \(usage)，3 個檔案"
+        )
+        XCTAssertEqual(
+            McpSettingsModel.persistentDataSummary(granted, language: .en),
+            "Write access granted; \(usage) used in 3 files"
+        )
+        XCTAssertEqual(
+            McpSettingsModel.persistentDataSummary(denied, language: .zhHant),
+            "未授權寫入"
+        )
+        XCTAssertEqual(
+            McpSettingsModel.persistentDataSummary(denied, language: .en),
+            "Write access not granted"
+        )
+        XCTAssertNil(
+            McpSettingsModel.persistentDataSummary(nil, language: .zhHant),
+            "主機沒帶狀態時要保持未知，不能自己猜成未授權"
+        )
+    }
+
+    func testStatusUpdatesKeepPersistentDataReport() async {
+        let granted = McpPersistentDataInfo(allowed: true, bytes: 512, files: 1)
+        let fake = FakeCardiaryService(mcpServers: [server(persistentData: granted)])
+        let model = makeModel()
+        model.attach(service: fake)
+        await model.load()
+
+        await model.setEnabled(model.servers[0], enabled: false)
+
+        XCTAssertEqual(model.servers[0].persistentData, granted, "啟停不該讓授權與用量消失")
     }
 
     func testInvalidFormDoesNotSendRequest() async {

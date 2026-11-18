@@ -61,7 +61,7 @@ actor FakeCardiaryService:
     private(set) var pauseAllCalls = 0
     private(set) var settingChanges: [[SettingChange]] = []
     private(set) var moduleChanges: [(moduleId: String, enabled: Bool)] = []
-    private(set) var mcpAdds: [(name: String, transport: McpTransport, command: String?, args: [String]?, url: String?, allowedHosts: [String], clientRequestId: String?)] = []
+    private(set) var mcpAdds: [(name: String, transport: McpTransport, command: String?, args: [String]?, url: String?, allowedHosts: [String], clientRequestId: String?, persistentData: Bool?)] = []
     private(set) var mcpRemoves: [String] = []
     private(set) var mcpEnabled: [(serverId: String, enabled: Bool)] = []
     private(set) var mcpAllowedHosts: [(serverId: String, hosts: [String])] = []
@@ -328,9 +328,12 @@ actor FakeCardiaryService:
         args: [String]?,
         url: String?,
         allowedHosts: [String],
-        clientRequestId: String?
+        clientRequestId: String?,
+        persistentData: Bool?
     ) async throws -> McpServerAddResponsePayload {
-        mcpAdds.append((name, transport, command, args, url, allowedHosts, clientRequestId))
+        mcpAdds.append((
+            name, transport, command, args, url, allowedHosts, clientRequestId, persistentData
+        ))
         return McpServerAddResponsePayload(approvalId: "approval-mcp")
     }
 
@@ -360,6 +363,7 @@ actor FakeCardiaryService:
             enabled: enabled,
             state: enabled ? .ready : .disabled,
             failure: enabled ? nil : current.failure,
+            persistentData: current.persistentData,
             createdAt: current.createdAt,
             updatedAt: current.updatedAt
         )
@@ -387,6 +391,7 @@ actor FakeCardiaryService:
             enabled: current.enabled,
             state: current.state,
             failure: current.failure,
+            persistentData: current.persistentData,
             createdAt: current.createdAt,
             updatedAt: current.updatedAt
         )

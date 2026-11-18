@@ -44,6 +44,11 @@ public enum McpString: String, CaseIterable, Sendable {
     case mcpDisabledNotice
     case mcpInvalidForm
     case mcpStdioSecretNote
+    case mcpPersistentDataTitle
+    case mcpPersistentDataToggle
+    case mcpPersistentDataHint
+    case mcpPersistentDataGranted
+    case mcpPersistentDataDenied
 }
 
 public enum McpL10n {
@@ -121,6 +126,11 @@ public enum McpL10n {
             "mcpDisabledNotice": "已停用伺服器。",
             "mcpInvalidForm": "請填寫名稱與必要的連線欄位。",
             "mcpStdioSecretNote": "標準輸入的伺服器由主機執行；環境變數與密鑰不會顯示在這裡。",
+            "mcpPersistentDataTitle": "持久資料目錄",
+            "mcpPersistentDataToggle": "允許寫入自己的持久資料目錄",
+            "mcpPersistentDataHint": "預設不授權。這個選擇會一起送進審批；核准後伺服器才能跨執行保留檔案。",
+            "mcpPersistentDataGranted": "已授權寫入；用量 {bytes}，{files} 個檔案",
+            "mcpPersistentDataDenied": "未授權寫入",
         ],
         .en: [
             "mcpServersTitle": "MCP Servers",
@@ -164,6 +174,11 @@ public enum McpL10n {
             "mcpDisabledNotice": "Server disabled.",
             "mcpInvalidForm": "Fill in the name and the required connection fields.",
             "mcpStdioSecretNote": "Standard-input servers run on the host; environment variables and secrets are not shown here.",
+            "mcpPersistentDataTitle": "Persistent data",
+            "mcpPersistentDataToggle": "Allow writing to its own persistent data directory",
+            "mcpPersistentDataHint": "Not granted by default. This choice is sent with the approval; the server can keep files across runs only after it is approved.",
+            "mcpPersistentDataGranted": "Write access granted; {bytes} used in {files} files",
+            "mcpPersistentDataDenied": "Write access not granted",
         ],
     ]
 }
