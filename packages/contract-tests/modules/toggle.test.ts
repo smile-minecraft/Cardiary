@@ -50,7 +50,9 @@ describe("模組停用與重新啟用", () => {
   let sessionId: string;
 
   beforeAll(async () => {
-    harness = await startHarness();
+    harness = await startHarness({
+      scripts: [[{ kind: "text", text: "收到。" }], [{ kind: "text", text: "收到。" }]],
+    });
     sessionId = await createSession(harness.client);
   }, 30_000);
 

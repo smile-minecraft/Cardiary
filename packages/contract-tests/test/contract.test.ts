@@ -413,13 +413,19 @@ describe("以 node 直接啟動的主機服務", { timeout: 30_000 }, () => {
 
   it("緊急全部暫停回報受影響的會話，回合標成 interrupted", async () => {
     const service = await boot({
-      scripts: [[{ kind: "text", text: "y".repeat(30), chunkSize: 1, delayMs: 15 }]],
+      scripts: [
+        [
+          { kind: "tool", toolName: "demo.echo", input: { text: "緊急暫停探針" } },
+          { kind: "text", text: "核准後完成" },
+        ],
+      ],
     });
     const connected = await client(service);
     const sessionId = await createSession(connected);
     await subscribe(connected, sessionId);
     connected.request("session.send_message", { sessionId, text: "開始", delivery: "queue" });
-    await connected.waitForEvent("stream.text_delta");
+    // 等待審批會讓回合保持可中斷，不依賴模型串流與客戶端排程的速度。
+    await connected.waitForEvent("approval.requested");
     const pause = connected.request("approval.pause_all", { reason: "緊急" });
     const paused = await connected.waitForReply(pause);
     expect((paused.payload as { interruptedSessionIds: string[] }).interruptedSessionIds).toContain(

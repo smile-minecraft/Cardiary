@@ -26,7 +26,7 @@ describe("第一方模組的正式組裝", () => {
   let sessionId: string;
 
   beforeAll(async () => {
-    harness = await startHarness();
+    harness = await startHarness({ scripts: [[{ kind: "text", text: "收到。" }]] });
     sessionId = await createSession(harness.client);
   }, 30_000);
 
