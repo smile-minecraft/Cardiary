@@ -328,6 +328,8 @@ public final class NotificationModel: ObservableObject {
             errorMessage = nil
             return true
         } catch {
+            // 轉卡成功時留下的「已轉成卡片」不能和失敗原因同時出現。
+            noticeMessage = nil
             errorMessage = NotificationL10n.format(
                 .notificationActionFailed, value: Self.errorText(error), language: language
             )

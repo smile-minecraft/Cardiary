@@ -49,6 +49,36 @@ final class ConversationPickerSessionTests: XCTestCase {
         XCTAssertNil(picker.addingId)
     }
 
+    func testSecondPickWhileInFlightIsIgnored() async {
+        let picker = ConversationPickerSession()
+        let gate = Gate()
+        var calls: [String] = []
+
+        let first = Task {
+            await picker.pick("session-1", title: "對話一") { id, _ in
+                calls.append(id)
+                await gate.wait()
+                return true
+            }
+        }
+        while picker.addingId == nil {
+            await Task.yield()
+        }
+
+        // 連點：按鈕還沒來得及停用，第二下又排進來。
+        let second = await picker.pick("session-2", title: "對話二") { id, _ in
+            calls.append(id)
+            return true
+        }
+
+        XCTAssertFalse(second)
+        XCTAssertEqual(picker.addingId, "session-1", "進行中的那一筆不能被第二下蓋掉")
+        await gate.open()
+        _ = await first.value
+        XCTAssertEqual(calls, ["session-1"])
+        XCTAssertNil(picker.addingId)
+    }
+
     func testRetryAfterFailure() async {
         let picker = ConversationPickerSession()
 

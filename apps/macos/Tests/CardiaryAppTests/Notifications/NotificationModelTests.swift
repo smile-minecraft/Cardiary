@@ -163,6 +163,41 @@ final class NotificationModelTests: XCTestCase {
         XCTAssertEqual(model.notifications[0].cardId, "card-1")
     }
 
+    func testAddToConversationFailureDoesNotKeepCardCreatedNotice() async {
+        let fake = FakeNotificationAndContextService()
+        await fake.setFailAddCard(true)
+        let model = makeModel()
+        model.attach(service: fake)
+        model.update(notifications: payload([record(id: "n-1")], unread: 1))
+
+        // 轉卡成功（會留下「已轉成卡片」），接著加入對話失敗。
+        let ok = await model.addToConversation(
+            model.notifications[0],
+            sessionId: "session-1",
+            conversationTitle: "晚餐聊聊"
+        )
+
+        XCTAssertFalse(ok)
+        XCTAssertNotNil(model.errorMessage)
+        XCTAssertNil(model.noticeMessage, "失敗時不能同時顯示成功提示")
+        XCTAssertEqual(model.notifications[0].cardId, "card-1", "卡片已轉好，重試時重用")
+    }
+
+    func testDismissMessagesClearsLeftoversBeforePickerOpens() async {
+        let fake = FakeNotificationAndContextService()
+        let model = makeModel()
+        model.attach(service: fake)
+        model.update(notifications: payload([record(id: "n-1")], unread: 1))
+        // 先在通知面板轉卡，留下提示；選對話的 sheet 打開時會呼叫 dismissMessages。
+        _ = await model.createCard(for: model.notifications[0])
+        XCTAssertNotNil(model.noticeMessage)
+
+        model.dismissMessages()
+
+        XCTAssertNil(model.noticeMessage)
+        XCTAssertNil(model.errorMessage)
+    }
+
     func testAddToConversationByDragIdsResolvesLoadedNotifications() async {
         let fake = FakeNotificationAndContextService()
         await fake.setListed([record(id: "n-1"), record(id: "n-2")])
@@ -392,6 +427,8 @@ private actor FakeNotificationAndContextService: NotificationService, ContextSer
 
     func setSessions(_ list: [SessionSummary]) { sessions = list }
     func setListed(_ list: [CardiaryNotification]) { listed = list }
+    func setFailAddCard(_ fail: Bool) { failAddCard = fail }
+    private var failAddCard = false
 
     func listNotifications(
         limit: Int?,
@@ -440,6 +477,7 @@ private actor FakeNotificationAndContextService: NotificationService, ContextSer
         cardId: String
     ) async throws -> ContextAddCardResponsePayload {
         addCardCalls.append((sessionId, cardId))
+        if failAddCard { throw CardiaryClientError.timeout }
         return ContextAddCardResponsePayload(context: contextView(sessionId: sessionId))
     }
 
