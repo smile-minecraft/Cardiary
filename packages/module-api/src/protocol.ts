@@ -98,6 +98,17 @@ export interface ProtocolRegistrationHandle {
   dispose(): void;
 }
 
+/**
+ * 請求者的身分，由閘道指派。
+ *
+ * 這是模組能信的身分來源；模組一律讀 `request.actor`，不得從
+ * `clientId`（客戶端自填的 instanceId）、payload 或 header 推論身分。
+ */
+export interface ProtocolActor {
+  readonly kind: "human" | "agent" | "system";
+  readonly id?: string;
+}
+
 /** 協定請求的輸入；`payload` 是該型別的 JSON 物件。 */
 export interface ProtocolRequestContext {
   /** 完整型別，例如 `card.patch` 或 `module.cards.search`。 */
@@ -105,8 +116,14 @@ export interface ProtocolRequestContext {
   readonly payload: JsonValue;
   /** 請求涉及的會話；沒有會話的系統訊息省略。 */
   readonly sessionId?: ConversationId;
-  /** 送出請求的客戶端 instanceId。 */
+  /** 送出請求的客戶端 instanceId；客戶端可自填，不能當作身分依據。 */
   readonly clientId: string;
+  /**
+   * 由閘道在建立 context 時指派的身分。
+   * 模組不得自行推斷這個欄位；未指派時（例如單元測試直接呼叫處理器），
+   * 由呼叫端自行帶入。
+   */
+  readonly actor?: ProtocolActor;
 }
 
 /**

@@ -1,10 +1,22 @@
 import type { ProtocolRequestContext, ProtocolEventEmitter } from "@cardiary/module-api";
-import type { JSONObject, JSONValue, SettingItem } from "@cardiary/protocol";
+import type { JSONObject, JSONValue, SettingChangeRecord, SettingItem } from "@cardiary/protocol";
+
+import { decideSettingAction, type SettingTier } from "@cardiary/domain";
 
 import { ProtocolHandlerError } from "../contract.js";
-import { ModelSettingsError, type ModelRuntime } from "../../models/index.js";
+import {
+  ModelSettingsError,
+  normalizeSetInput,
+  readProviders,
+  readRoles,
+  type ModelRuntime,
+} from "../../models/index.js";
 import { MODEL_SETTING_KEYS } from "../../models/types.js";
-import type { SettingsGovernance, GovernanceActor } from "../../settings/index.js";
+import type {
+  SettingsGovernance,
+  GovernanceActor,
+  RecordBatchInput,
+} from "../../settings/index.js";
 import { SettingsGovernanceError } from "../../settings/index.js";
 import type { SettingsService } from "../../settings/index.js";
 
@@ -31,7 +43,7 @@ export function registerSettingsProtocol(options: SettingsProtocolOptions): void
       case "system.models.get":
         return runtime.state as unknown as JSONValue;
       case "system.models.set":
-        return setModels(request, runtime);
+        return setModels(request, runtime, settings, options.governance);
       default:
         throw new ProtocolHandlerError("not_found", `主機不支援 ${request.type}。`);
     }
@@ -52,12 +64,14 @@ export function registerSettingsProtocol(options: SettingsProtocolOptions): void
     }
   });
   if (options.governance !== undefined) {
-    registerTieredSettings(options.governance, protocol, options.now);
+    registerTieredSettings(options.governance, runtime, settings, protocol, options.now);
   }
 }
 
 function registerTieredSettings(
   governance: SettingsGovernance,
+  runtime: ModelRuntime,
+  settings: SettingsService,
   protocol: ProtocolEventEmitter,
   now: () => Date,
 ): void {
@@ -71,7 +85,7 @@ function registerTieredSettings(
       case "settings.changes.list":
         return { changes: governance.changesFor(actor.kind) } as unknown as JSONValue;
       case "settings.change.decide":
-        return decideChange(request, governance, protocol, actor, now);
+        return decideChange(request, governance, settings, runtime, protocol, actor, now);
       default:
         throw new ProtocolHandlerError("not_found", `主機不支援 ${request.type}。`);
     }
@@ -122,13 +136,15 @@ function proposeChange(
   }
 }
 
-function decideChange(
+async function decideChange(
   request: ProtocolRequestContext,
   governance: SettingsGovernance,
+  settings: SettingsService,
+  runtime: ModelRuntime,
   protocol: ProtocolEventEmitter,
   actor: GovernanceActor,
   now: () => Date,
-): JSONValue {
+): Promise<JSONValue> {
   const payload = requireObject(request.payload);
   if (typeof payload.changeId !== "string" || payload.changeId.length === 0) {
     throw new ProtocolHandlerError("invalid_message", "changeId 必須是非空字串。", {
@@ -140,31 +156,144 @@ function decideChange(
       field: "decision",
     });
   }
-  try {
-    const result = governance.decide(payload.changeId, payload.decision, actor);
-    if (result.status === "applied") {
-      const item = governance.itemFor(result.key);
-      if (item !== undefined) {
-        protocol.emit({
-          kind: "settings-changed",
-          payload: {
-            changes: [item],
-            changedBy: actorText(actor),
-            changedAt: result.decidedAt ?? now().toISOString(),
-          } as unknown as JSONValue,
-        });
+  const isModelKey = (key: string): boolean =>
+    key === MODEL_SETTING_KEYS.providers || key === MODEL_SETTING_KEYS.roles;
+  let pending: SettingChangeRecord | undefined;
+  if (payload.decision === "approve") {
+    // 核准模型設定前先檢查形狀；不合法就不寫入任何東西。
+    pending = governance
+      .changesFor(actor.kind)
+      .find((entry) => entry.changeId === payload.changeId && entry.status === "pending");
+    if (pending !== undefined && isModelKey(pending.key)) {
+      try {
+        normalizeSetInput(
+          {
+            ...(pending.key === MODEL_SETTING_KEYS.providers
+              ? { providers: pending.value }
+              : { providers: undefined }),
+            ...(pending.key === MODEL_SETTING_KEYS.roles
+              ? { roles: pending.value }
+              : { roles: undefined }),
+            currentProviders: readProviders(settings.get(MODEL_SETTING_KEYS.providers)),
+            currentRoles: readRoles(settings.get(MODEL_SETTING_KEYS.roles)),
+          },
+          // 聚合平台的模型清單要等引擎重新設定時才抓得到，這裡只驗形狀。
+          { validateReferences: false },
+        );
+      } catch (error) {
+        if (error instanceof ModelSettingsError) {
+          throw new ProtocolHandlerError("invalid_message", error.message, {
+            field: error.field,
+          });
+        }
+        throw error;
       }
     }
-    return { change: result } as unknown as JSONValue;
-  } catch (error) {
-    throw asProtocolError(error);
   }
+  // 代理不能核准生效的變更，模型也永遠不套用（交給治理層拒絕並留稽核）。
+  const applyModel =
+    payload.decision === "approve" &&
+    pending !== undefined &&
+    isModelKey(pending.key) &&
+    actor.kind !== "agent";
+  // 核准模型設定時先讓引擎與儲存區採用新值；失敗時待決提議維持 pending，
+  // 變更紀錄不會無中生有，儲存區也不需要再退回（寫入失敗即整批不生效）。
+  const previous = applyModel
+    ? {
+        providers: settings.get(MODEL_SETTING_KEYS.providers),
+        roles: settings.get(MODEL_SETTING_KEYS.roles),
+      }
+    : undefined;
+  if (applyModel && pending !== undefined) {
+    try {
+      await runtime.apply(
+        pending.key === MODEL_SETTING_KEYS.providers
+          ? { providers: pending.value }
+          : { roles: pending.value },
+        actorText(actor),
+      );
+    } catch (error) {
+      if (error instanceof ModelSettingsError) {
+        throw new ProtocolHandlerError("invalid_message", error.message, {
+          field: error.field,
+        });
+      }
+      throw error;
+    }
+  }
+  // 模型鍵核准時，儲存區裡已經是套用正規化後的值（`runtime.apply` 寫入）；
+  // `decide` 只把待決提議標成已套用，紀錄以儲存區裡的正規化值為準，不覆蓋回去。
+  const appliedModelValue =
+    applyModel && pending !== undefined && isModelKey(pending.key)
+      ? settings.get(pending.key)
+      : undefined;
+  let result: SettingChangeRecord;
+  try {
+    result = governance.decide(
+      payload.changeId,
+      payload.decision,
+      actor,
+      appliedModelValue === undefined ? {} : { appliedValue: appliedModelValue },
+    );
+  } catch (error) {
+    // 模型已套用、治理紀錄卻沒寫出去：依紀錄實際狀態決定要不要退回模型。
+    if (previous === undefined) {
+      throw asProtocolError(error);
+    }
+    const recorded = governance
+      .changesFor(actor.kind)
+      .find((entry) => entry.changeId === payload.changeId);
+    if (recorded?.status === "applied") {
+      // 變更紀錄已落盤（例如稽核寫入失敗）：模型與紀錄一致，保留套用。
+      throw new ProtocolHandlerError(
+        "conflict",
+        "設定已套用並寫入變更紀錄，但核准流程發生錯誤；稽核紀錄可能不完整。",
+      );
+    }
+    const rollbackInput: { providers?: JSONValue; roles?: JSONValue } = {};
+    if (previous.providers !== undefined) rollbackInput.providers = previous.providers;
+    if (previous.roles !== undefined) rollbackInput.roles = previous.roles;
+    if (previous.providers === undefined || previous.roles === undefined) {
+      // 缺核准前的完整快照，等於退不回去；不能只退回一半。
+      throw new ProtocolHandlerError(
+        "conflict",
+        "治理紀錄寫入失敗，且退回原值也失敗了；請以 system.models.set 重新設定模型。",
+      );
+    }
+    try {
+      await runtime.apply(rollbackInput, "system:rollback");
+    } catch {
+      throw new ProtocolHandlerError(
+        "conflict",
+        "治理紀錄寫入失敗，且退回原值也失敗了；請以 system.models.set 重新設定模型。",
+      );
+    }
+    throw new ProtocolHandlerError(
+      "conflict",
+      "治理紀錄寫入失敗，模型設定已退回原設定；請再試一次。",
+    );
+  }
+  if (result.status === "applied") {
+    const item = governance.itemFor(result.key);
+    if (item !== undefined) {
+      protocol.emit({
+        kind: "settings-changed",
+        payload: {
+          changes: [item],
+          changedBy: actorText(actor),
+          changedAt: result.decidedAt ?? now().toISOString(),
+        } as unknown as JSONValue,
+      });
+    }
+  }
+  return { change: result } as unknown as JSONValue;
 }
 
 function actorOf(request: ProtocolRequestContext): GovernanceActor {
-  if (request.clientId.startsWith("agent:")) {
-    return { kind: "agent", id: request.clientId.slice(6) };
-  }
+  if (request.actor !== undefined) return request.actor;
+  // 沒有 actor 代表請求不是經由閘道進來（例如單元測試直接呼叫處理器）。
+  // 這時用 clientId 當人類身分；clientId 是客戶端自填的字串，production
+  // 路徑一律由閘道指派 actor，不會靠它變成代理或繞過 human-only。
   return { kind: "human", id: request.clientId };
 }
 
@@ -180,9 +309,31 @@ function asProtocolError(error: unknown): unknown {
   return error;
 }
 
+/**
+ * `recordBatch` 前的變更紀錄識別快照。
+ *
+ * 失敗後不能用「同一個鍵已有 applied 紀錄」判斷本次是否落盤：同一個鍵
+ * 以前成功寫過，舊紀錄會被誤當成本次的新紀錄，於是保留新值卻沒有對應的
+ * 變更紀錄。只有呼叫後才出現的 changeId 才算這次寫入的紀錄。
+ */
+function changeIds(governance: SettingsGovernance, actor: GovernanceActor): Set<string> {
+  return new Set(governance.changesFor(actor.kind).map((record) => record.changeId));
+}
+
+/** 呼叫 `recordBatch` 後才出現的紀錄；先前就有的紀錄不算本次落盤。 */
+function recordsAddedSince(
+  governance: SettingsGovernance,
+  actor: GovernanceActor,
+  before: ReadonlySet<string>,
+): SettingChangeRecord[] {
+  return governance.changesFor(actor.kind).filter((record) => !before.has(record.changeId));
+}
+
 async function setModels(
   request: ProtocolRequestContext,
   runtime: ModelRuntime,
+  settings: SettingsService,
+  governance: SettingsGovernance | undefined,
 ): Promise<JSONValue> {
   const payload = requireObject(request.payload);
   requireClientRequestId(payload);
@@ -191,21 +342,108 @@ async function setModels(
       field: "providers",
     });
   }
+  const actor = actorOf(request);
+  if (actor.kind === "agent") {
+    // 模型設定在核准前對引擎生效太重，approval 等級必須經人類核准。
+    if (governance !== undefined) {
+      governance.auditDenied(actor, "change", "approval");
+    }
+    throw new ProtocolHandlerError(
+      "permission_denied",
+      "代理不能直接套用模型設定；請先以 settings.propose_change 提出，由人類核准。",
+    );
+  }
+  const previous = {
+    providers: settings.get(MODEL_SETTING_KEYS.providers),
+    roles: settings.get(MODEL_SETTING_KEYS.roles),
+  };
+  let state: Awaited<ReturnType<ModelRuntime["apply"]>>;
   try {
-    const state = await runtime.apply(
+    state = await runtime.apply(
       {
         ...(payload.providers === undefined ? {} : { providers: payload.providers }),
         ...(payload.roles === undefined ? {} : { roles: payload.roles }),
       },
-      `user:${request.clientId}`,
+      actorText(actor),
     );
-    return state as unknown as JSONValue;
   } catch (error) {
     if (error instanceof ModelSettingsError) {
-      throw new ProtocolHandlerError("invalid_message", error.message, { field: error.field });
+      throw new ProtocolHandlerError("invalid_message", error.message, {
+        field: error.field,
+      });
     }
     throw error;
   }
+  if (governance !== undefined) {
+    // approval 等級也要留下治理紀錄；值以寫入後的設定為準。
+    const batch: RecordBatchInput[] = [];
+    for (const key of [MODEL_SETTING_KEYS.providers, MODEL_SETTING_KEYS.roles] as const) {
+      const included =
+        key === MODEL_SETTING_KEYS.providers
+          ? payload.providers !== undefined
+          : payload.roles !== undefined;
+      if (!included) continue;
+      const value = settings.get(key);
+      if (value === undefined) continue;
+      batch.push({
+        key,
+        value,
+        actor,
+        clientRequestId: `${String(payload.clientRequestId)}:${
+          key === MODEL_SETTING_KEYS.providers ? "providers" : "roles"
+        }`,
+      });
+    }
+    if (batch.length > 0) {
+      const before = changeIds(governance, actor);
+      try {
+        governance.recordBatch(batch);
+      } catch {
+        // 治理紀錄沒落盤：只有這次才出現的紀錄才算本次落盤；同一個鍵
+        // 先前的 applied 紀錄屬於更早的變更，不能拿來證明這次寫成功。
+        const landed = new Set(
+          recordsAddedSince(governance, actor, before)
+            .filter((record) => record.status === "applied")
+            .map((record) => record.key),
+        );
+        const missing = batch.map((entry) => entry.key).filter((key) => !landed.has(key));
+        if (missing.length === 0) {
+          // 本次紀錄已落盤（例如稽核寫入失敗）：模型與紀錄一致，保留套用。
+          throw new ProtocolHandlerError(
+            "conflict",
+            "模型設定已套用且本次變更紀錄已落盤，但稽核紀錄不完整；請檢查磁碟後再設定一次。",
+          );
+        }
+        // 只退回本次沒有紀錄的鍵，已落盤的 applied 不會被退回成假紀錄。
+        const rollbackInput: { providers?: JSONValue; roles?: JSONValue } = {};
+        if (missing.includes(MODEL_SETTING_KEYS.providers) && previous.providers !== undefined) {
+          rollbackInput.providers = previous.providers;
+        }
+        if (missing.includes(MODEL_SETTING_KEYS.roles) && previous.roles !== undefined) {
+          rollbackInput.roles = previous.roles;
+        }
+        if (Object.keys(rollbackInput).length !== missing.length) {
+          throw new ProtocolHandlerError(
+            "conflict",
+            "治理紀錄寫入失敗，且退回原值也失敗了；請以 system.models.set 重新設定模型。",
+          );
+        }
+        try {
+          await runtime.apply(rollbackInput, "system:rollback");
+        } catch {
+          throw new ProtocolHandlerError(
+            "conflict",
+            "治理紀錄寫入失敗，且退回原值也失敗了；請以 system.models.set 重新設定模型。",
+          );
+        }
+        throw new ProtocolHandlerError(
+          "conflict",
+          `治理紀錄寫入失敗；${missing.join("、")} 已退回原設定；請再試一次。`,
+        );
+      }
+    }
+  }
+  return state as unknown as JSONValue;
 }
 
 function setSettings(
@@ -224,9 +462,14 @@ function setSettings(
     });
   }
   const actor = actorOf(request);
-  const applied: SettingItem[] = [];
-  let requiresApproval = false;
-  let approvalId: string | undefined;
+  // 第一階段：驗證整批，不寫任何東西；任何一筆不過，整批不生效。
+  const validated: Array<{
+    key: string;
+    value: JSONValue;
+    index: number;
+    tier?: SettingTier;
+    effect?: "apply" | "propose";
+  }> = [];
   for (const [index, change] of changes.entries()) {
     if (typeof change !== "object" || change === null || Array.isArray(change)) {
       throw new ProtocolHandlerError("invalid_message", `changes[${index}] 必須是物件。`, {
@@ -251,28 +494,130 @@ function setSettings(
       });
     }
     validateValue(key, entry.value, `changes[${index}].value`);
-    if (governance === undefined) {
-      applied.push(
-        settings.set({ key, value: entry.value as JSONValue, actor: actorText(actor) }).item,
-      );
-      continue;
-    }
-    try {
-      const result = governance.change({
+    if (governance !== undefined) {
+      // 分級在寫入前先擋掉整批；代理沒有權限的鍵直接拒絕。
+      const tier = governance.tierOf(key);
+      const decision = decideSettingAction(tier, actor.kind, "change");
+      if (!decision.allowed) {
+        governance.auditDenied(actor, "change", tier, key);
+        throw new ProtocolHandlerError(
+          "permission_denied",
+          actor.kind === "agent"
+            ? "設定不存在，或代理沒有權限變更。"
+            : "這個設定不能透過這條路徑變更。",
+        );
+      }
+      validated.push({
         key,
         value: entry.value as JSONValue,
-        actor,
-        clientRequestId: `${String(payload.clientRequestId)}:${index}`,
+        index,
+        tier,
+        effect: decision.effect === "propose" ? "propose" : "apply",
       });
-      if (result.applied) {
-        const item = settings.list().find((candidate) => candidate.key === key);
-        if (item !== undefined) applied.push(item);
-      } else {
+      continue;
+    }
+    validated.push({ key, value: entry.value as JSONValue, index });
+  }
+  // 第二階段：套用項以同一個交易寫入儲存區（全有全無）；
+  // 完整紀錄再一次落盤（單一正本檔寫入）。中間失敗會退回整批設定，
+  // 不會留下沒有紀錄的已套用變更。
+  const applied: SettingItem[] = [];
+  let requiresApproval = false;
+  let approvalId: string | undefined;
+  const writerActor = actorText(actor);
+  if (governance === undefined) {
+    const results = settings.setMany(
+      validated.map((change) => ({ key: change.key, value: change.value, actor: writerActor })),
+    );
+    for (const result of results) applied.push(result.item);
+  } else {
+    const applyItems = validated.filter((change) => change.effect !== "propose");
+    const proposeItems = validated.filter((change) => change.effect === "propose");
+    // 先捕捉整批原值，變更紀錄寫不出去時用來退回。
+    const previousByKey = new Map<string, JSONValue | undefined>(
+      applyItems.map((change) => [change.key, settings.get(change.key)] as const),
+    );
+    // 步驟一：套用項以同一個交易寫入；儲存區交易失敗時一筆都不生效，
+    // 變更紀錄也還沒動。
+    if (applyItems.length > 0) {
+      const results = settings.setMany(
+        applyItems.map((change) => ({
+          key: change.key,
+          value: change.value,
+          actor: writerActor,
+        })),
+      );
+      for (const result of results) applied.push(result.item);
+    }
+    // 步驟二：整批紀錄一次落盤；提議項成為待決紀錄，不寫儲存區。
+    const requestId = String(payload.clientRequestId);
+    const batch: RecordBatchInput[] = [...applyItems, ...proposeItems].map((change) => ({
+      key: change.key,
+      value: change.value,
+      actor,
+      clientRequestId: `${requestId}:${change.index}`,
+    }));
+    const before = changeIds(governance, actor);
+    try {
+      const { pending } = governance.recordBatch(batch);
+      if (pending.length > 0) {
         requiresApproval = true;
-        approvalId ??= result.change.changeId;
+        approvalId = pending[0]?.changeId;
       }
-    } catch (error) {
-      throw asProtocolError(error);
+    } catch {
+      // 紀錄沒落盤：只有這次才出現的紀錄才算本次落盤；先前同鍵的
+      // applied 紀錄不能證明這次寫成功，否則會保留新值卻沒有紀錄。
+      const fresh = recordsAddedSince(governance, actor, before);
+      const landedApplied = new Set(
+        fresh.filter((record) => record.status === "applied").map((record) => record.key),
+      );
+      const landedPending = new Set(
+        fresh.filter((record) => record.status === "pending").map((record) => record.key),
+      );
+      const missingAppliedKeys = applyItems
+        .filter((change) => !landedApplied.has(change.key))
+        .map((change) => change.key)
+        .filter((key, at, keys) => keys.indexOf(key) === at);
+      const missingPending = proposeItems.filter((change) => !landedPending.has(change.key));
+      if (missingAppliedKeys.length === 0 && missingPending.length === 0) {
+        // 本次紀錄已全部落盤（例如稽核寫入失敗）：儲存區與紀錄一致，保留套用。
+        throw new ProtocolHandlerError(
+          "conflict",
+          "設定已套用且本次變更紀錄已落盤，但稽核紀錄不完整；請檢查磁碟後再試一次。",
+        );
+      }
+      // 只退回沒有紀錄的鍵，已落盤的 applied 不會被退回成假紀錄。
+      const restore = missingAppliedKeys
+        .map((key) => ({ key, value: previousByKey.get(key) }))
+        .filter((entry): entry is { key: string; value: JSONValue } => entry.value !== undefined);
+      if (restore.length !== missingAppliedKeys.length) {
+        throw new ProtocolHandlerError(
+          "conflict",
+          "變更紀錄寫入失敗，且部分設定沒有可還原的原值；請檢查設定後重試。",
+        );
+      }
+      if (restore.length > 0) {
+        try {
+          settings.setMany(
+            restore.map((entry) => ({
+              key: entry.key,
+              value: entry.value,
+              actor: "system:rollback",
+            })),
+          );
+        } catch {
+          throw new ProtocolHandlerError(
+            "conflict",
+            "變更紀錄寫入失敗，且退回原值也失敗了；請重新設定這些項目。",
+          );
+        }
+      }
+      throw new ProtocolHandlerError(
+        "conflict",
+        missingAppliedKeys.length > 0
+          ? `變更紀錄寫入失敗；${missingAppliedKeys.join("、")} 已退回原設定。`
+          : "變更紀錄寫入失敗；待決提議沒有建立，設定沒有變更。",
+      );
     }
   }
   const changedAt = now().toISOString();

@@ -4,6 +4,8 @@ export {
   type ChangeInput,
   type ChangeResult,
   type GovernanceActor,
+  type RecordBatchInput,
+  type RecordBatchResult,
   type SettingsGovernanceOptions,
 } from "./governance.js";
 export {
