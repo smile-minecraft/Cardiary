@@ -115,6 +115,7 @@ function activate(context: ModuleActivationContext): void {
       state: cabinet.state,
       service,
       runs,
+      maintenance,
       now,
     });
   }
@@ -180,6 +181,7 @@ function registerMemoryTestProtocol(options: {
   readonly state: { run(sql: string, ...params: readonly unknown[]): unknown };
   readonly service: DistillationService;
   readonly runs: DistillationStore;
+  readonly maintenance?: StorageMaintenance | undefined;
   readonly now: () => Date;
 }): void {
   options.protocol.registerNamespace("module.memory.test", async (request) => {
@@ -249,6 +251,56 @@ function registerMemoryTestProtocol(options: {
         data: { ok: true, runId: run.runId, day, startedAt },
       } as JsonValue;
     }
+    if (request.type === "module.memory.test.seed-overdue-distillation") {
+      // 直接在排程表種一筆早已過期的每日蒸餾排程，讓「下次啟動補跑一次」
+      // 走真正的排程器路徑（claimDue），不重複產生次數由 claimDue 保證。
+      const overdue = "2000-01-01T02:00:00.000Z";
+      const nowIso = options.now().toISOString();
+      options.state.run(
+        `INSERT INTO schedules (schedule_id, persona, name, kind, spec_json, task_json, enabled,
+                                created_by, source_conversation_id, next_run_at, created_at, updated_at)
+         VALUES ('sch_test_overdue_distillation', 'default', '契約測試補跑蒸餾', 'daily', ?, ?, 1,
+                 'agent', NULL, ?, ?, ?)
+         ON CONFLICT (schedule_id) DO NOTHING`,
+        JSON.stringify({ time: "04:00" }),
+        JSON.stringify({ type: "distillation" }),
+        overdue,
+        nowIso,
+        nowIso,
+      );
+      return { data: { ok: true, scheduleId: "sch_test_overdue_distillation" } } as JsonValue;
+    }
+    if (request.type === "module.memory.test.maintenance-daily") {
+      const maintenance = options.maintenance;
+      if (maintenance === undefined) {
+        return { data: { ok: false, reason: "no-maintenance" } } as JsonValue;
+      }
+      const report = maintenance.daily();
+      // ScanReport 是介面，沒有隱含的索引簽名，不能直接當 JsonValue；
+      // 明確挑出純量欄位與 violation 的兩個字串欄位。
+      return {
+        data: {
+          ok: true,
+          scan: {
+            removedUnregistered: report.scan.removedUnregistered,
+            removedExpired: report.scan.removedExpired,
+            removedMissingRows: report.scan.removedMissingRows,
+            removedSymlinks: report.scan.removedSymlinks,
+            skippedOverflow: report.scan.skippedOverflow,
+            skippedHardLinks: report.scan.skippedHardLinks,
+            kept: report.scan.kept,
+            violations: report.scan.violations.map((violation) => ({
+              kind: violation.kind,
+              relPath: violation.relPath,
+            })),
+          },
+          stateSizeBefore: report.stateSizeBefore,
+          stateSizeAfter: report.stateSizeAfter,
+          engineSizeBefore: report.engineSizeBefore,
+          engineSizeAfter: report.engineSizeAfter,
+        },
+      } as JsonValue;
+    }
     if (request.type === "module.memory.test.run-daily") {
       const text = typeof payload["itemText"] === "string" ? payload["itemText"] : "整合驗收記憶";
       const title = typeof payload["title"] === "string" ? payload["title"] : "整合驗收長期記憶";
@@ -257,9 +309,7 @@ function registerMemoryTestProtocol(options: {
         return { data: { ok: false, reason: "invalid-day" } } as JsonValue;
       }
       const day =
-        requestedDay ??
-        localDayKey(options.now()) ??
-        options.now().toISOString().slice(0, 10);
+        requestedDay ?? localDayKey(options.now()) ?? options.now().toISOString().slice(0, 10);
       const run = await options.service.runForDay("default", day, {
         distiller: scriptedDistiller(() => ({
           items: [{ type: "fact", text }],
