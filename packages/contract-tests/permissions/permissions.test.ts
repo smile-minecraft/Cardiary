@@ -114,7 +114,9 @@ async function decide(
   return client.waitForReply(id);
 }
 
-describe("本機檔案與終端機的權限契約", () => {
+// 這裡的案例會啟動真的主機行程，重啟案例一次啟動兩次；每次啟動約 2 秒，
+// 預設的 5 秒會在平行測試或負載高的機器上先逾時，測到的是機器速度而不是行為。
+describe("本機檔案與終端機的權限契約", { timeout: 30_000 }, () => {
   it("讀工作目錄的檔案自動放行，不建立審批", async () => {
     const { service, client } = await boot({
       scripts: [[{ kind: "tool", toolName: "read_file", input: { path: "notes.md" } }]],
