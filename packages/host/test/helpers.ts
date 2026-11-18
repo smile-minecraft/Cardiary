@@ -90,8 +90,14 @@ export class TestClient {
     });
   }
 
-  static async connect(url: string): Promise<TestClient> {
-    const ws = new WebSocket(url);
+  static async connect(
+    url: string,
+    options: { readonly headers?: Record<string, string> } = {},
+  ): Promise<TestClient> {
+    const ws =
+      options.headers === undefined
+        ? new WebSocket(url)
+        : new WebSocket(url, { headers: options.headers });
     await new Promise<void>((resolve, reject) => {
       ws.once("open", () => resolve());
       ws.once("error", reject);
