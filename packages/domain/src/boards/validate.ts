@@ -66,6 +66,7 @@ export function assertValidBoard(input: ValidateBoardInput): void {
 
   const canvasItemIds = new Set(board.items.map((item) => item.id));
   const edgeIds = new Set<string>();
+  const connectedPairs = new Set<string>();
   for (const edge of board.edges) {
     assertId(edge.id, "連線 id");
     if (edgeIds.has(edge.id)) {
@@ -78,6 +79,17 @@ export function assertValidBoard(input: ValidateBoardInput): void {
     if (!canvasItemIds.has(edge.to)) {
       throw new BoardDomainError("unknown_item", `連線終點不是白板上的投影：${edge.to}`);
     }
+    if (edge.from === edge.to) {
+      throw new BoardDomainError("invalid_edge", `連線不能連到同一張投影：${edge.from}`);
+    }
+    const pair = edge.from < edge.to ? `${edge.from} ${edge.to}` : `${edge.to} ${edge.from}`;
+    if (connectedPairs.has(pair)) {
+      throw new BoardDomainError(
+        "invalid_edge",
+        `同一組投影只能有一條連線：${edge.from} 與 ${edge.to}`,
+      );
+    }
+    connectedPairs.add(pair);
   }
 }
 

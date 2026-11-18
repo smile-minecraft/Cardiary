@@ -9,6 +9,7 @@ export type BoardErrorReason =
   | "invalid_id"
   | "invalid_schema_version"
   | "invalid_point"
+  | "invalid_edge"
   | "duplicate_projection"
   | "unknown_item"
   | "unknown_card"

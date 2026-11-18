@@ -112,6 +112,9 @@ public final class BoardModel: ObservableObject, AppContentModel {
     /// 建立一場新對話並回傳識別碼；由掛載點接到 `AppModel.createConversation()`。
     public var createConversation: @MainActor () async -> String? = { nil }
 
+    /// 刪掉剛剛建立、還沒送成內容的對話；由掛載點接到主機的刪除流程。
+    public var deleteConversation: @MainActor (String) async -> Void = { _ in }
+
     /// 白板頁面可以選擇的對話。
     public struct ConversationTarget: Identifiable, Equatable, Sendable {
         public let id: String
@@ -655,7 +658,12 @@ public final class BoardModel: ObservableObject, AppContentModel {
             errorMessage = BoardL10n.text(.boardsNewConversationFailed)
             return false
         }
-        return await sendSelection(to: conversationId)
+        let sent = await sendSelection(to: conversationId)
+        if !sent {
+            // 對話是為了這次送出才建立的；失敗就收回，不留下空對話。
+            await deleteConversation(conversationId)
+        }
+        return sent
     }
 
     /// 用圈選的卡片生成一張新卡，血緣由主機記錄。

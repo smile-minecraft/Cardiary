@@ -267,6 +267,53 @@ describe("驗證", () => {
       assertValidBoard({ board, knownCardIds: new Set([newCardId()]) }),
     );
   });
+
+  it("拒絕連到自己的連線", () => {
+    const board = projectCard({
+      board: emptyBoard(),
+      itemId: newCardId(),
+      cardId: newCardId(),
+      position: { x: 0, y: 0 },
+      now: T1,
+    });
+    const itemId = board.items[0]!.id;
+    rejectWith("invalid_edge", () =>
+      addEdge({
+        board,
+        edge: { id: newCardId(), from: itemId, to: itemId },
+        now: T1,
+      }),
+    );
+  });
+
+  it("拒絕同一組投影之間兩個方向的連線", () => {
+    let board = projectCard({
+      board: emptyBoard(),
+      itemId: newCardId(),
+      cardId: newCardId(),
+      position: { x: 0, y: 0 },
+      now: T1,
+    });
+    board = projectCard({
+      board,
+      itemId: newCardId(),
+      cardId: newCardId(),
+      position: { x: 200, y: 0 },
+      now: T1,
+    });
+    const [first, second] = board.items;
+    rejectWith("invalid_edge", () =>
+      assertValidBoard({
+        board: {
+          ...board,
+          edges: [
+            { id: newCardId(), from: first!.id, to: second!.id },
+            { id: newCardId(), from: second!.id, to: first!.id },
+          ],
+        },
+      }),
+    );
+  });
 });
 
 describe("移動、分組與釘選", () => {
@@ -409,16 +456,24 @@ describe("其他操作", () => {
     expect(board.title).toBe("新名字");
     expect(board.updatedAt).toBe(T1);
     const edgeId = newCardId();
-    const projected = projectCard({
+    let projected = projectCard({
       board,
       itemId: newCardId(),
       cardId: newCardId(),
       position: { x: 0, y: 0 },
       now: T1,
     });
+    projected = projectCard({
+      board: projected,
+      itemId: newCardId(),
+      cardId: newCardId(),
+      position: { x: 200, y: 0 },
+      now: T1,
+    });
+    const [first, second] = projected.items;
     const withEdge = addEdge({
       board: projected,
-      edge: { id: edgeId, from: projected.items[0]!.id, to: projected.items[0]!.id },
+      edge: { id: edgeId, from: first!.id, to: second!.id },
       now: T1,
     });
     const without = removeEdge({ board: withEdge, edgeId, now: T1 });
