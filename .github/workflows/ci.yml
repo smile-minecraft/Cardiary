@@ -85,6 +85,7 @@ jobs:
         run: >-
           pnpm vitest run
           packages/contract-tests/external-agents/external-agents.test.ts
+          packages/contract-tests/external-agents/permission-file.test.ts
           packages/contract-tests/storage/chapter-13-composed.test.ts
       # contract.test.ts 只有這一個案例有 darwin 分支，其餘由 ubuntu 跑；用名稱篩選，不重跑整檔。
       - name: 控制面的 darwin 檢查
