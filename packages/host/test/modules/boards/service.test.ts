@@ -131,6 +131,54 @@ describe("白板服務", () => {
     expect(stored?.updatedAt).not.toBe(board.updatedAt);
   });
 
+  it("拒絕自連與同端點重複的連線，且不寫入檔案", async () => {
+    const { service, store } = setup();
+    const board = await service.create(newCardId(), "白板");
+    const firstItem = newCardId();
+    const secondItem = newCardId();
+    await service.project({
+      boardId: board.id,
+      itemId: firstItem,
+      cardId: newCardId(),
+      position: { x: 0, y: 0 },
+      origin: "canvas",
+      projectedBy: "user",
+    });
+    const current = await service.project({
+      boardId: board.id,
+      itemId: secondItem,
+      cardId: newCardId(),
+      position: { x: 200, y: 0 },
+      origin: "canvas",
+      projectedBy: "user",
+    });
+    const before = store.read(board.id)?.board;
+
+    await expect(
+      service.save(
+        {
+          ...current,
+          edges: [{ id: newCardId(), from: firstItem, to: firstItem }],
+        },
+        current.updatedAt,
+      ),
+    ).rejects.toMatchObject({ reason: "invalid_edge" });
+    await expect(
+      service.save(
+        {
+          ...current,
+          edges: [
+            { id: newCardId(), from: firstItem, to: secondItem },
+            { id: newCardId(), from: secondItem, to: firstItem },
+          ],
+        },
+        current.updatedAt,
+      ),
+    ).rejects.toMatchObject({ reason: "invalid_edge" });
+
+    expect(store.read(board.id)?.board).toEqual(before);
+  });
+
   it("取消投影收件區項目會真的移除", async () => {
     const { service } = setup();
     const board = await service.create(newCardId(), "白板");
