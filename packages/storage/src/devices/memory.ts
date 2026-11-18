@@ -45,6 +45,7 @@ export class MemoryDeviceTokenStore implements DeviceTokenStore {
       ...revokeDeviceToken(record, now),
       deviceName: record.deviceName,
       deviceKind: record.deviceKind,
+      ...(record.prefix === undefined ? {} : { prefix: record.prefix }),
     };
     this.#byHash.set(revoked.tokenHash, revoked);
     this.#byId.set(deviceId, revoked);

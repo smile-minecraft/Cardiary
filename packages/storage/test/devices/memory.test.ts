@@ -39,6 +39,17 @@ describe("MemoryDeviceTokenStore", () => {
     expect(found?.revokedAt).toBe("2026-11-16T01:00:00.000Z");
   });
 
+  it("撤銷後保留顯示前綴", async () => {
+    const store = new MemoryDeviceTokenStore();
+    await store.insert(makeRecord({ prefix: "cdt_abcd1234" }));
+    const revoked = await store.revoke("dev_1", "2026-11-16T01:00:00.000Z");
+    expect(revoked).toMatchObject({
+      revokedAt: "2026-11-16T01:00:00.000Z",
+      prefix: "cdt_abcd1234",
+    });
+    expect((await store.findById("dev_1"))?.prefix).toBe("cdt_abcd1234");
+  });
+
   it("重複撤銷是安全的：保留第一次的撤銷時間", async () => {
     const store = new MemoryDeviceTokenStore();
     await store.insert(makeRecord());

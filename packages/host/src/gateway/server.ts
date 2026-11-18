@@ -183,7 +183,8 @@ export interface GatewayOptions {
   /**
    * 遠端配對堆疊；省略時閘道自己建一份記憶體實作。
    *
-   * 正式實作接上 `device_tokens` 表之前，重啟會讓已配對裝置失效。
+   * 產品組裝在 `startHost` 注入持久化的 `SqliteDeviceTokenStore`，重啟後
+   * 已配對裝置仍然有效；記憶體版只用於沒有狀態資料庫的組裝。
    */
   readonly remote?: RemoteStack;
   /**
