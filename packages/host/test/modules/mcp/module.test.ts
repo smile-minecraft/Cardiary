@@ -302,6 +302,49 @@ describe("MCP 模組的審批與工具註冊", () => {
     await handle.dispose();
   });
 
+  it("重啟後待決審批的 URL 含使用者資訊時撤回，不完成新增", async () => {
+    const root = makeFolder();
+    const store = new McpServerStore(new FolderLayout(root));
+    const approvals = new FakeApprovals();
+    approvals.seed({
+      id: "approval-credentials",
+      status: "pending",
+      requestedAt: "2026-11-18T00:00:00.000Z",
+      expiresAt: null,
+      draft: {
+        action: {
+          kind: "module-enable",
+          summary: "新增 MCP 伺服器「Remote」",
+          toolInput: {
+            name: "Remote",
+            transport: "http",
+            url: "https://user:pw@api.example.com/mcp",
+            allowedHosts: ["api.example.com"],
+          },
+        },
+        risk: "high",
+        requestedBy: { kind: "host", component: "mcp" },
+        hostApproval: { component: "mcp", requestId: "host-credentials" },
+      },
+    });
+    const bundles: ToolBundleDraft[] = [];
+    const handle = await activateMcpModule(makeContext(bundles), {
+      store,
+      engine: makeEngine(approvals),
+      clientFactory: fakeClient([]),
+      folderRoot: root,
+      bindings: openMcpApprovals(),
+    });
+
+    // 帶帳密的請求不能因為跨重啟就重新掛上等待，也不會留下正本或工具。
+    await handle.settled();
+    expect(approvals.waiting()).toEqual([]);
+    expect(await store.list()).toEqual([]);
+    expect(bundles).toEqual([]);
+    expect(approvals.statusOf("approval-credentials")).toBe("withdrawn");
+    await handle.dispose();
+  });
+
   it("已停用伺服器在啟動時不連線", async () => {
     const root = makeFolder();
     const store = new McpServerStore(new FolderLayout(root));

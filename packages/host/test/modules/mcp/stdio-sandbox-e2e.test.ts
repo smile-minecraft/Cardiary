@@ -205,7 +205,9 @@ async function startListener(): Promise<number> {
   return (listener!.address() as AddressInfo).port;
 }
 
-describe.skipIf(process.platform !== "darwin")("stdio MCP 的真正 sandbox-exec 寫入邊界", () => {
+const sandboxAvailable = process.platform === "darwin" && existsSync(SANDBOX_EXEC_PATH);
+
+describe.skipIf(!sandboxAvailable)("stdio MCP 的真正 sandbox-exec 寫入邊界", () => {
   it("子行程只寫得進工作目錄，正本區與資料夾外都寫不進", async () => {
     const { folderRoot, stateFile, outsideDir, workingDir, script } = setup();
     const mcp = await startSandboxedClient(script);
@@ -338,5 +340,23 @@ describe.skipIf(process.platform !== "darwin")("stdio MCP 的真正 sandbox-exec
 
     // host 端另外驗證沒有收到任何連線，不只信子行程自報。
     expect(connections, "host 不應收到子行程的連線").toBe(0);
+  });
+  it("對外部主機的 TCP 連線被拒，失敗後本地初始化與工具仍正常", async () => {
+    const { workingDir, script } = setup();
+    const mcp = await startSandboxedClient(script);
+
+    // 第一次呼叫會先完成 initialize（本地 JSON-RPC），再執行工具。
+    // 192.0.2.1 是 TEST-NET-1，保留給文件；沙盒必須在連線前就拒絕。
+    const denied = writeResult(await mcp.callTool("net_connect", { host: "192.0.2.1", port: 80 }));
+    expect(denied, "沙盒下的外部 TCP 連線應因權限被拒").toEqual({ ok: false, code: "EPERM" });
+
+    // 失敗的連線不影響伺服器：本地協定與工作目錄寫入仍然可用。
+    const tools = await mcp.listTools();
+    expect(tools.map((tool) => tool.name).sort()).toEqual(["net_connect", "write_file"]);
+    const target = join(workingDir, "after-network-denied.txt");
+    expect(
+      writeResult(await mcp.callTool("write_file", { path: target, content: "alive" })),
+    ).toEqual({ ok: true });
+    expect(readFileSync(target, "utf8")).toBe("alive");
   });
 });

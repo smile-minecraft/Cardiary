@@ -64,6 +64,34 @@ describe("MCP 名稱與設定解析", () => {
     ).not.toThrow();
   });
 
+  it("url 含使用者資訊時拒絕，密鑰只能留在 Keychain", () => {
+    for (const url of ["https://user:pw@api.example.com/mcp", "https://user@api.example.com/mcp"]) {
+      expect(() =>
+        validateMcpServerInput({
+          name: "遠端",
+          transport: "http",
+          url,
+          allowedHosts: ["api.example.com"],
+        }),
+      ).toThrow("url 不能含使用者資訊");
+    }
+
+    // 解析正本檔案時走同一條驗證，不會把帶帳密的設定悄悄放進來。
+    const record = {
+      serverId: "remote",
+      name: "遠端",
+      transport: "http",
+      url: "https://user:pw@api.example.com/mcp",
+      allowedHosts: ["api.example.com"],
+      enabled: true,
+      createdAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+    };
+    expect(() => parseMcpServersFile(JSON.stringify({ version: 1, servers: [record] }))).toThrow(
+      "url 不能含使用者資訊",
+    );
+  });
+
   it("序列化與解析來回一致", () => {
     const record = createMcpServerRecord(
       { name: "本機", transport: "stdio", command: "node", allowedHosts: [] },

@@ -88,4 +88,28 @@ describe("MCP 伺服器審批契約", () => {
     await client.waitForReply(removeId);
     expect(await listServers()).toEqual([]);
   }, 20_000);
+
+  it("新增請求的 URL 含使用者資訊時，協定層直接拒絕且不建立審批", async () => {
+    const approvalsBefore = client.frames.filter(
+      (frame) => frame.kind === "event" && frame.type === "approval.requested",
+    ).length;
+
+    const addId = client.request("mcp.server.add", {
+      name: "帶帳密的伺服器",
+      transport: "http",
+      url: "https://user:pw@api.example.com/mcp",
+      allowedHosts: ["api.example.com"],
+    });
+    const reply = await client.waitForReply(addId);
+
+    expect(reply.kind).toBe("error");
+    expect(reply.code).toBe("invalid_message");
+    expect(String(reply.message)).toContain("url 不能含使用者資訊");
+
+    const approvalsAfter = client.frames.filter(
+      (frame) => frame.kind === "event" && frame.type === "approval.requested",
+    ).length;
+    expect(approvalsAfter, "被拒絕的請求不應建立審批").toBe(approvalsBefore);
+    expect(await listServers()).toEqual([]);
+  }, 20_000);
 });
