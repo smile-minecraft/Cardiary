@@ -6,7 +6,8 @@
  * `MemoryDeviceTokenStore`。介面刻意保持非同步，呼叫端不必知道背後是
  * 哪一種。
  *
- * 明文 Token 絕對不落地：這張表只放雜湊與顯示用的指紋。
+ * 明文 Token 絕對不落地：這張表只放雜湊與 8 碼顯示前綴（`cdt_` 加八碼，
+ * 推不回 Token，只給人辨認），不含明文。
  */
 
 import type { DeviceTokenRecord } from "@cardiary/domain";

@@ -81,6 +81,15 @@ describe("遠端裝置跨重啟", () => {
           const hello = await client.waitForReply(helloId);
           expect(hello.kind).toBe("response");
           expect(hello.type).toBe("system.hello");
+
+          // Token 不只用來握手：重啟後的一般請求也要能用。
+          const listId = client.request("session.list", {});
+          const sessionList = await client.waitForReply(listId);
+          expect(sessionList.kind).toBe("response");
+          expect(sessionList.type).toBe("session.list");
+          expect(Array.isArray((sessionList.payload as { sessions?: unknown }).sessions)).toBe(
+            true,
+          );
         } finally {
           await client.close();
         }
