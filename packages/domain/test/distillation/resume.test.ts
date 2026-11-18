@@ -119,9 +119,7 @@ describe("同批次續跑（內容雜湊）", () => {
   const query = { batchId: "dst_batch_1", itemKey: "01SRC:merge:0", sourceCardId: "01SRC" };
 
   it("同 itemKey 但內容雜湊改變：不跳過，視為新單元", () => {
-    const records = [
-      record({ itemKey: "01SRC:merge:0", status: "done", contentHash: "hash-a" }),
-    ];
+    const records = [record({ itemKey: "01SRC:merge:0", status: "done", contentHash: "hash-a" })];
     expect(shouldSkipUnit(records, { ...query, contentHash: "hash-a" })).toBe(true);
     expect(shouldSkipUnit(records, { ...query, contentHash: "hash-b" })).toBe(false);
     expect(findBatchUnit(records, { ...query, contentHash: "hash-b" })).toBeUndefined();
@@ -129,13 +127,9 @@ describe("同批次續跑（內容雜湊）", () => {
   });
 
   it("failed 的單元當日不重跑；extract（無雜湊）以 itemKey 比對", () => {
-    const failed = [
-      record({ itemKey: "01SRC:merge:0", status: "failed", contentHash: "hash-a" }),
-    ];
+    const failed = [record({ itemKey: "01SRC:merge:0", status: "failed", contentHash: "hash-a" })];
     expect(shouldSkipUnit(failed, { ...query, contentHash: "hash-a" })).toBe(true);
-    const extract = [
-      record({ itemKey: "01SRC:extract", phase: "extract", status: "failed" }),
-    ];
+    const extract = [record({ itemKey: "01SRC:extract", phase: "extract", status: "failed" })];
     expect(
       shouldSkipUnit(extract, {
         batchId: "dst_batch_1",
