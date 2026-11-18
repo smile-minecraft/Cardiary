@@ -292,6 +292,10 @@ struct BoardsView: View {
                     Task { await model.sendSelection(to: currentId) }
                 }
                 Divider()
+            } else {
+                Button(BoardL10n.text(.boardsSendUnavailable)) {}
+                    .disabled(true)
+                Divider()
             }
             ForEach(targets.filter { $0.id != currentId }) { target in
                 Button(target.title) {

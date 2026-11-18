@@ -437,6 +437,45 @@ final class BoardModelTests: XCTestCase {
         XCTAssertTrue(adds.isEmpty)
     }
 
+    func testSendSelectionToNewConversationDeletesItWhenSendFails() async {
+        let fake = FakeBoardService(board: makeBoard())
+        let model = BoardModel(boardService: fake, contextService: RejectingContextService())
+        await model.reload()
+        model.canvas.setSelection(["item-1"])
+        var created: [String] = []
+        var deleted: [String] = []
+        model.createConversation = {
+            created.append("conv-new")
+            return "conv-new"
+        }
+        model.deleteConversation = { deleted.append($0) }
+
+        let sent = await model.sendSelectionToNewConversation()
+
+        XCTAssertFalse(sent)
+        XCTAssertEqual(created, ["conv-new"])
+        XCTAssertEqual(deleted, ["conv-new"], "送出失敗時剛建立的對話要收回，不留空對話")
+        XCTAssertNil(model.noticeMessage)
+    }
+
+    func testSendSelectionToNewConversationKeepsItWhenSendSucceeds() async {
+        let fake = FakeBoardService(board: makeBoard())
+        let context = FakeCardiaryService()
+        let model = BoardModel(boardService: fake, contextService: context)
+        await model.reload()
+        model.canvas.setSelection(["item-1"])
+        var deleted: [String] = []
+        model.createConversation = { "conv-new" }
+        model.deleteConversation = { deleted.append($0) }
+
+        let sent = await model.sendSelectionToNewConversation()
+
+        XCTAssertTrue(sent)
+        XCTAssertTrue(deleted.isEmpty, "送出成功不能刪掉對話")
+        let adds = await context.contextAdds
+        XCTAssertEqual(adds.map(\.sessionId), ["conv-new"])
+    }
+
     // MARK: - 釘選多選與新鮮度
 
     func testTogglePinAppliesToEverySelectedCardOnly() async {
@@ -574,5 +613,35 @@ private final class FakeBoardService: BoardService, @unchecked Sendable {
         )
         board = updated
         return BoardCreateCardFromSelectionResponsePayload(board: updated, cardId: "new-card")
+    }
+}
+
+/// 一定失敗的對話內容服務，用來驗證送出失敗後會收回剛建立的對話。
+private struct RejectingContextService: ContextService {
+    struct Failure: Error {}
+
+    func getContext(sessionId: String) async throws -> ContextGetResponsePayload {
+        throw Failure()
+    }
+
+    func addCardToContext(
+        sessionId: String,
+        cardId: String
+    ) async throws -> ContextAddCardResponsePayload {
+        throw Failure()
+    }
+
+    func removeCardFromContext(
+        sessionId: String,
+        cardId: String
+    ) async throws -> ContextRemoveCardResponsePayload {
+        throw Failure()
+    }
+
+    func compactContext(
+        sessionId: String,
+        instructions: String?
+    ) async throws -> ContextCompactResponsePayload {
+        throw Failure()
     }
 }
