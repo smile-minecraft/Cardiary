@@ -246,6 +246,84 @@ describe.skipIf(process.platform !== "darwin")("stdio MCP 的真正 sandbox-exec
     expect(existsSync(outside)).toBe(false);
   });
 
+  it("授權持久資料後可寫自己的目錄，未授權時寫被拒；其他 modules 仍拒絕", async () => {
+    const { folderRoot, script } = setup();
+    // 授權後：沙盒額外放行 modules/mcp/<SERVER_ID>/，子行程寫得進去。
+    const granted = createMcpClient(
+      {
+        serverId: SERVER_ID,
+        name: "E2E",
+        transport: "stdio",
+        command: process.execPath,
+        args: [script],
+        allowedHosts: [],
+        enabled: true,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        folderRoot,
+        spawn: (registry = new SpawnRegistry()),
+        logger: { debug: () => undefined, warn: () => undefined },
+        persistentData: true,
+      },
+    );
+    client = granted;
+    const mine = join(folderRoot, "modules", "mcp", SERVER_ID);
+    const target = join(mine, "notes.txt");
+    expect(
+      writeResult(await granted.callTool("write_file", { path: target, content: "persist" })).ok,
+    ).toBe(true);
+    expect(readFileSync(target, "utf8")).toBe("persist");
+
+    // 授權後也只能寫自己的目錄，其他伺服器的目錄仍拒絕。
+    mkdirSync(join(folderRoot, "modules", "mcp", "other-server"), { recursive: true });
+    const other = join(folderRoot, "modules", "mcp", "other-server", "notes.txt");
+    expect(
+      writeResult(await granted.callTool("write_file", { path: other, content: "no" })).ok,
+    ).toBe(false);
+    expect(existsSync(other)).toBe(false);
+
+    await granted.close();
+    client = null;
+    await registry?.cancelAll(1_000);
+    await registry?.waitAll();
+    registry = null;
+
+    // 未授權：同一個目錄寫不進。
+    const denied = createMcpClient(
+      {
+        serverId: SERVER_ID,
+        name: "E2E",
+        transport: "stdio",
+        command: process.execPath,
+        args: [script],
+        allowedHosts: [],
+        enabled: true,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        folderRoot,
+        spawn: (registry = new SpawnRegistry()),
+        logger: { debug: () => undefined, warn: () => undefined },
+      },
+    );
+    client = denied;
+    const rejected = join(mine, "denied.txt");
+    expect(
+      writeResult(await denied.callTool("write_file", { path: rejected, content: "no" })).ok,
+    ).toBe(false);
+    expect(existsSync(rejected)).toBe(false);
+
+    // 其他伺服器的目錄即使授權後也寫不進。
+    await denied.close();
+    client = null;
+    await registry?.cancelAll(1_000);
+    await registry?.waitAll();
+    registry = null;
+  });
+
   it("子行程無法連到 host 的 localhost TCP server，網路被沙盒封鎖", async () => {
     const { script } = setup();
     const port = await startListener();

@@ -178,7 +178,7 @@ describe("MCP 模組的審批與工具註冊", () => {
       folderRoot: root,
       bindings: openMcpApprovals(),
     });
-    const { approvalId } = await handle.controller.requestAdd(INPUT);
+    const { approvalId } = await handle.controller.requestAdd(INPUT, { persistentData: false });
 
     expect(approvals.calls).toHaveLength(1);
     expect(await store.list()).toEqual([]);
@@ -206,7 +206,7 @@ describe("MCP 模組的審批與工具註冊", () => {
       folderRoot: root,
       bindings: openMcpApprovals(),
     });
-    const { approvalId } = await handle.controller.requestAdd(INPUT);
+    const { approvalId } = await handle.controller.requestAdd(INPUT, { persistentData: false });
     approvals.decide(approvalId, "denied");
     await handle.settled();
 
@@ -414,7 +414,7 @@ describe("MCP 模組的審批與工具註冊", () => {
       folderRoot: root,
       bindings: openMcpApprovals(),
     });
-    const { approvalId } = await handle.controller.requestAdd(INPUT);
+    const { approvalId } = await handle.controller.requestAdd(INPUT, { persistentData: false });
     approvals.decide(approvalId, "approved");
     await handle.settled();
 
