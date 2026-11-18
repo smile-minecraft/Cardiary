@@ -1,20 +1,26 @@
-import { mkdtempSync, realpathSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { promisify } from "node:util";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   SANDBOX_EXEC_PATH,
   buildSandboxProfile,
   createCommandSandbox,
+  type CommandSandbox,
 } from "../../src/permissions/sandbox.js";
+
+const run = promisify(execFile);
 
 /**
  * profile 產生器的單元測試：順序、保護清單與跳脫。
  *
- * 真正的 sandbox 行為（拒絕哪些操作）在 `modules/local-tools/sandbox.test.ts`
+ * 大部分真正的 sandbox 行為（拒絕哪些操作）在 `modules/local-tools/sandbox.test.ts`
  * 用真的 `/bin/sh` 與 `sandbox-exec` 驗證；這裡只固定產生的文字，讓審查的人
- * 不必讀實作就能對照 `docs/design/permissions.md` 第 9.2 節。
+ * 不必讀實作就能對照 `docs/design/permissions.md` 第 9.2 節。檔案後段另外用
+ * 真的 `sandbox-exec` 驗證外部代理的 agent home 邊界。
  */
 describe("sandbox profile", () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cardiary-profile-")));
@@ -83,3 +89,73 @@ describe.skipIf(process.platform !== "darwin")("sandbox 可用性", () => {
     expect(sandbox!.profile).toContain("(version 1)");
   });
 });
+
+let agentRoot = "";
+
+afterEach(() => {
+  if (agentRoot !== "") {
+    rmSync(agentRoot, { recursive: true, force: true });
+    agentRoot = "";
+  }
+});
+
+/** 在沙盒裡執行一段 shell；成功回 true，被 sandbox 拒絕回 false。 */
+async function attempt(sandbox: CommandSandbox, script: string): Promise<boolean> {
+  try {
+    await run(sandbox.executable, ["-p", sandbox.profile, "/bin/sh", "-c", script]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 外部代理服務用同一條 `createCommandSandbox` 路徑啟動代理。這裡用真的
+ * `sandbox-exec` 驗證：Cardiary 正本區寫不進、代理專屬的
+ * `cache/agents/<session>/home` 寫得進，而且同一個工作階段的其他位置仍被拒。
+ */
+describe.skipIf(process.platform !== "darwin" || !existsSync(SANDBOX_EXEC_PATH))(
+  "外部代理的 sandbox-exec 邊界",
+  () => {
+    it("寫入正本區被拒，寫入專屬 agent home 與工作目錄成功", async () => {
+      agentRoot = realpathSync(mkdtempSync(join(tmpdir(), "cardiary-agent-sandbox-")));
+      const folderRoot = join(agentRoot, "Cardiary");
+      const workspace = join(agentRoot, "project");
+      const userHome = join(agentRoot, "user-home");
+      const sessionDir = join(folderRoot, "cache", "agents", "agent-1");
+      const agentHome = join(sessionDir, "home");
+      for (const dir of [folderRoot, workspace, userHome, agentHome]) {
+        mkdirSync(dir, { recursive: true });
+      }
+
+      const sandbox = createCommandSandbox({
+        workingDir: workspace,
+        folderRoot,
+        homeDir: userHome,
+        agentHomeDir: agentHome,
+      });
+      expect(sandbox).not.toBeNull();
+
+      // 正本區（state/cards/assets/modules）一律拒絕，host 端也看不到檔案。
+      for (const name of ["state", "cards", "assets", "modules"]) {
+        const target = join(folderRoot, name, "hacked.txt");
+        expect(await attempt(sandbox!, `printf x > '${target}'`), `${name} 應被拒`).toBe(false);
+        expect(existsSync(target), `${name} 不應出現 hacked.txt`).toBe(false);
+      }
+
+      // 代理自己的家目錄與工作目錄可以寫。
+      const homeTarget = join(agentHome, "notes.txt");
+      expect(await attempt(sandbox!, `printf ok > '${homeTarget}'`)).toBe(true);
+      expect(readFileSync(homeTarget, "utf8")).toBe("ok");
+
+      const workspaceTarget = join(workspace, "notes.txt");
+      expect(await attempt(sandbox!, `printf ok > '${workspaceTarget}'`)).toBe(true);
+      expect(readFileSync(workspaceTarget, "utf8")).toBe("ok");
+
+      // 放行範圍只有 home，同一個工作階段的 session.json 仍然拒絕。
+      const sessionFile = join(sessionDir, "session.json");
+      expect(await attempt(sandbox!, `printf x > '${sessionFile}'`)).toBe(false);
+      expect(existsSync(sessionFile)).toBe(false);
+    });
+  },
+);
