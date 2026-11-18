@@ -58,17 +58,18 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingL) {
-            HStack(spacing: DesignTokens.spacingL) {
-                ThemePageTitle(title: AppL10n.text(.settingsTitle), suit: .spade)
-                Spacer()
-                ThemeSegmented(
-                    selection: Binding(
-                        get: { currentTabId },
-                        set: { selectedTabId = $0 }
-                    ),
-                    options: model.settings.all.map { ($0.id, AppL10n.text($0.titleKey)) }
-                )
-                .fixedSize()
+            // 分頁名稱放不下時（例如英文的七個分頁）改成標題在上、分頁在下，
+            // 不然固定寬度的分頁會把標題擠成逐字換行，整頁也被撐寬裁切。
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DesignTokens.spacingL) {
+                    title
+                    Spacer()
+                    tabs
+                }
+                VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
+                    title
+                    tabs
+                }
             }
             .padding(.horizontal, DesignTokens.spacingL)
             .padding(.top, DesignTokens.spacingL)
@@ -82,6 +83,22 @@ struct SettingsView: View {
         .frame(maxWidth: DesignTokens.settingsMaxWidth, maxHeight: .infinity, alignment: .top)
         .frame(maxWidth: .infinity)
         .background(Palette.canvas)
+    }
+
+    private var title: some View {
+        ThemePageTitle(title: AppL10n.text(.settingsTitle), suit: .spade)
+            .fixedSize()
+    }
+
+    private var tabs: some View {
+        ThemeSegmented(
+            selection: Binding(
+                get: { currentTabId },
+                set: { selectedTabId = $0 }
+            ),
+            options: model.settings.all.map { ($0.id, AppL10n.text($0.titleKey)) }
+        )
+        .fixedSize()
     }
 
     private var currentTabId: String {

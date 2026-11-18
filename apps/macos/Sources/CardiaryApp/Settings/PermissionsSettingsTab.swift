@@ -22,7 +22,11 @@ private struct PermissionsSettingsView: View {
 
     var body: some View {
         ScrollView {
+            // 和其他設定分頁一樣留左右與底部內距。
             PermissionsSettingsContent(model: model)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DesignTokens.spacingL)
+                .padding(.bottom, DesignTokens.spacingL)
         }
         .task { await model.load() }
     }
@@ -91,6 +95,8 @@ private struct AllowAllSection: View {
                         .font(.cardiary(.callout, weight: .regular, monospacedDigits: true))
                 }
                 .fixedSize()
+                // 步進器在 AX 上是獨立元素，名稱要自己帶上，不然只唸出數字。
+                .accessibilityLabel(Text(PermissionL10n.format(.permAllowAllMinutes, value: "\(model.allowAllMinutes)")))
                 Button(PermissionL10n.text(.permAllowAllStart)) {
                     Task { await model.startAllowAll() }
                 }
@@ -129,6 +135,8 @@ private struct SystemOneSection: View {
                         Text(PermissionL10n.text(Self.label(for: category)))
                     }
                     .toggleStyle(.switch)
+                    // macOS 的 switch 樣式把標籤拆成旁邊的文字，開關本身沒有名稱。
+                    .accessibilityLabel(Text(PermissionL10n.text(Self.label(for: category))))
                     .disabled(model.isWorking)
                     if PermissionModesModel.needsFolders(category) {
                         FolderList(
