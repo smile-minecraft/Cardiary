@@ -177,13 +177,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open this address on a paired device. From another network, replace 127.0.0.1 with this Mac's Tailscale address."
+            "value": "Open this address on a paired device. From another network, set up Tailscale Serve or an equivalent forwarder to this Mac's loopback address first; the service only listens on 127.0.0.1, so a direct Tailscale address will not connect."
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "在已配對的裝置上開啟這個位址。從其他網路連線時，把 127.0.0.1 換成這台電腦的 Tailscale 位址。"
+            "value": "在已配對的裝置上開啟這個位址。從其他網路連線時，需要先用 Tailscale Serve 或等價的轉發，把這個位址接到本機的 127.0.0.1；服務只綁定 loopback，直接連 Tailscale 位址不會通。"
           }
         }
       }
