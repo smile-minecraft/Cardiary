@@ -12,9 +12,17 @@ import {
   LocalAssetStore,
   Storage,
 } from "@cardiary/storage";
-import { afterEach, describe, expect, it } from "vitest";
+import {
+  afterEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { StorageError } from "@cardiary/storage";
 
 import { BoardService } from "../../../src/modules/boards/service.js";
+import { ProtocolHandlerError } from "../../../src/modules/contract.js";
 import { CardLibrary } from "../../../src/modules/cards/library.js";
 import { CardStateStore } from "../../../src/modules/cards/state.js";
 
@@ -226,5 +234,104 @@ describe("刪卡時移除白板投影", () => {
     const touched = await fixture.boards.removeCardProjections(card.cardId);
     expect(touched).toEqual([]);
     expect(fixture.boards.get(board.id)).toEqual(before);
+  });
+
+  it("一份白板失敗不影響其他白板，重試後全部移除", async () => {
+    const fixture = setup();
+    const card = await fixture.library.create({ kind: "note", title: "要刪的卡", body: "內容\n" });
+    const boardA = await fixture.boards.create(newCardId(), "白板 A");
+    const boardB = await fixture.boards.create(newCardId(), "白板 B");
+    await projectOnBoard(fixture, {
+      boardId: boardA.id,
+      cardId: card.cardId,
+      origin: "canvas",
+      x: 10,
+      y: 10,
+    });
+    await projectOnBoard(fixture, {
+      boardId: boardB.id,
+      cardId: card.cardId,
+      origin: "inbox",
+      x: 0,
+      y: 0,
+    });
+    // 刪除流程依白板 id 排序處理；讓排在後面的那份失敗。
+    const [, second] = [boardA, boardB].sort((left, right) => left.id.localeCompare(right.id));
+    if (second === undefined) throw new Error("需要兩份白板");
+    const failOnce = { armed: true };
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const originalWrite = fixture.boardStore.write.bind(fixture.boardStore);
+    vi.spyOn(fixture.boardStore, "write").mockImplementation((board, options) => {
+      if (failOnce.armed && board.id === second.id) {
+        failOnce.armed = false;
+        throw new StorageError("storage-failed", "模擬白板寫入失敗");
+      }
+      return originalWrite(board, options);
+    });
+
+    const failure = await fixture.library.delete(card.cardId).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(ProtocolHandlerError);
+    const details = (failure as ProtocolHandlerError).details as
+      | { failed?: string[]; succeeded?: string[] }
+      | undefined;
+    const first = [boardA, boardB].find((board) => board.id !== second.id);
+    if (first === undefined) throw new Error("需要兩份白板");
+    expect(details?.failed).toEqual([second.id]);
+    expect(details?.succeeded).toEqual([first.id]);
+    expect(fixture.files.read(card.cardId)).toBeDefined();
+    const processed = fixture.boards.get(first.id);
+    expect([...processed.items, ...processed.inbox].some((item) => item.cardId === card.cardId)).toBe(
+      false,
+    );
+    const untouched = fixture.boards.get(second.id);
+    expect(
+      [...untouched.items, ...untouched.inbox].some((item) => item.cardId === card.cardId),
+    ).toBe(true);
+
+    await fixture.library.delete(card.cardId);
+
+    expect(fixture.files.read(card.cardId)).toBeUndefined();
+    for (const board of [boardA, boardB]) {
+      const after = fixture.boards.get(board.id);
+      expect([...after.items, ...after.inbox].some((item) => item.cardId === card.cardId)).toBe(
+        false,
+      );
+    }
+  });
+
+  it("復原代理變更時不會復活已刪除卡片的投影", async () => {
+    const fixture = setup();
+    const card = await fixture.library.create({ kind: "note", title: "要刪的卡", body: "內容\n" });
+    const board = await fixture.boards.create(newCardId(), "白板");
+    const itemId = newCardId();
+    await fixture.boards.project({
+      boardId: board.id,
+      itemId,
+      cardId: card.cardId,
+      position: { x: 10, y: 10 },
+      origin: "canvas",
+      projectedBy: "agent",
+      agent: { tool: "project_card_to_board" },
+    });
+    const removal = await fixture.boards.removeItem({
+      boardId: board.id,
+      itemId,
+      agent: { tool: "remove_board_item" },
+    });
+    const changeId = fixture.boards.agentChangeIdFor(removal);
+    if (changeId === undefined) throw new Error("removeItem 應該留下代理變更紀錄");
+
+    await fixture.library.delete(card.cardId);
+    expect(fixture.files.read(card.cardId)).toBeUndefined();
+
+    const undone = await fixture.boards.undo({ boardId: board.id, changeId });
+
+    expect(undone.undone).toBe(true);
+    const after = fixture.boards.get(board.id);
+    expect(after.items.some((item) => item.cardId === card.cardId)).toBe(false);
+    expect(after.inbox.some((item) => item.cardId === card.cardId)).toBe(false);
   });
 });
