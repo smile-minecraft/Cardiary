@@ -278,13 +278,22 @@ export function listPinnedCardIds(boards: readonly BoardDocument[]): readonly st
   return pinned;
 }
 
-/** 含有某張卡投影的白板 id；用來在刪卡時逐一取消投影。 */
+/**
+ * 含有某張卡投影的白板 id；用來在刪卡時逐一取消投影。
+ *
+ * 收件區的投影也指向同一張卡，所以要一起算；只掃畫布會留下指向已刪卡
+ * 的收件區項目。
+ */
 export function listBoardsContainingCard(
   boards: readonly BoardDocument[],
   cardId: string,
 ): readonly string[] {
   return boards
-    .filter((board) => board.items.some((item) => item.cardId === cardId))
+    .filter(
+      (board) =>
+        board.items.some((item) => item.cardId === cardId) ||
+        board.inbox.some((item) => item.cardId === cardId),
+    )
     .map((board) => board.id);
 }
 
