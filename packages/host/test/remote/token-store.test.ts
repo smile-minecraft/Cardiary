@@ -172,6 +172,13 @@ describe("遠端裝置 Token 持久化", () => {
     const hello = await client.waitForReply(helloId);
     expect(hello.kind).toBe("response");
     expect(hello.type).toBe("system.hello");
+
+    // Token 不只用來握手：重啟後的一般請求也要能用。
+    const listId = client.request("session.list", {});
+    const listed = await client.waitForReply(listId);
+    expect(listed.kind).toBe("response");
+    expect(listed.type).toBe("session.list");
+    expect(Array.isArray((listed.payload as { sessions?: unknown }).sessions)).toBe(true);
     await client.close();
     await second.stop();
   });
