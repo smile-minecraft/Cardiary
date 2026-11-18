@@ -37,6 +37,7 @@ interface Fixture {
   readonly bundles: ReturnType<typeof createBoardsToolBundles>;
   readonly audit: AuditEntry[];
   readonly events: Array<{ boardId: string; change: string }>;
+  readonly createCalls: ReadonlyArray<null>;
   readonly setMode: (mode: BoardsAgentMode) => void;
 }
 
@@ -54,13 +55,17 @@ function setup(mode: BoardsAgentMode = "full"): Fixture {
   store.ensureDirectory();
   const audit: AuditEntry[] = [];
   const events: Array<{ boardId: string; change: string }> = [];
+  const createCalls: null[] = [];
   const service = new BoardService(
     store,
     () => clock.now,
     (event) => events.push({ boardId: event.boardId, change: event.change }),
     {
       get: async (cardId: string) => ({ cardId }),
-      create: async () => ({ cardId: newCardId() }),
+      create: async () => {
+        createCalls.push(null);
+        return { cardId: newCardId() };
+      },
     },
     freshness,
   );
@@ -83,6 +88,7 @@ function setup(mode: BoardsAgentMode = "full"): Fixture {
     bundles,
     audit,
     events,
+    createCalls,
     setMode: (next) => {
       currentMode = next;
     },
@@ -463,7 +469,7 @@ describe("白板代理工具（完全操作模式）", () => {
       context,
     );
     expect(fixture.service.get(boardId).edges).toHaveLength(1);
-    expect(retry.changeId).toBe(first.changeId);
+    expect(retry.changeId).toBeNull();
     expect(changeIdOf(first)).toBeTypeOf("string");
 
     const groupId = newCardId();
@@ -478,7 +484,7 @@ describe("白板代理工具（完全操作模式）", () => {
       groupId,
     });
     expect(fixture.service.get(boardId).groups).toHaveLength(1);
-    expect(groupRetry.changeId).toBe(groupFirst.changeId);
+    expect(groupRetry.changeId).toBeNull();
   });
 
   it("只能復原最近一筆代理變更；較舊的要先復原新的", async () => {
@@ -564,5 +570,72 @@ describe("白板代理工具（完全操作模式）", () => {
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.message).toContain("找不到這筆代理變更");
     expect(fixture.service.get(boardId).title).toBe("使用者改名");
+  });
+
+  it("中斷後同一 callId 重跑只建立一張卡與一個投影", async () => {
+    const fixture = setup();
+    const board = await fixture.service.create(newCardId(), "白板");
+    const context = { conversationId: "conversation", callId: "call-restart" };
+    const input = { boardId: board.id, title: "重跑", body: "內容" };
+    const first = jsonOf(
+      await callIn(fixture.bundles.create, "create_card_on_board", input, context),
+    );
+    const retry = jsonOf(
+      await callIn(fixture.bundles.create, "create_card_on_board", input, context),
+    );
+    expect(retry.itemId).toBe(first.itemId);
+    expect(retry.cardId).toBe(first.cardId);
+    expect(fixture.createCalls).toHaveLength(1);
+    const inbox = fixture.service.get(board.id).inbox.filter((item) => item.cardId === first.cardId);
+    expect(inbox).toHaveLength(1);
+  });
+
+  it("無變更的呼叫不回傳前一筆變更的 changeId", async () => {
+    const fixture = setup();
+    const { boardId, itemA, itemB } = await boardWithTwoItems(fixture);
+
+    const moved = await callJson(fixture, "move_board_item", {
+      boardId,
+      itemId: itemA,
+      x: 300,
+      y: 300,
+    });
+    const moveAgain = await callJson(fixture, "move_board_item", {
+      boardId,
+      itemId: itemA,
+      x: 300,
+      y: 300,
+    });
+    expect(moveAgain.changeId).toBeNull();
+    expect(moveAgain.changeId).not.toBe(changeIdOf(moved));
+
+    const edgeId = newCardId();
+    const connected = await callJson(fixture, "connect_board_items", {
+      boardId,
+      from: itemA,
+      to: itemB,
+      edgeId,
+    });
+    const connectAgain = await callJson(fixture, "connect_board_items", {
+      boardId,
+      from: itemA,
+      to: itemB,
+      edgeId,
+    });
+    expect(connectAgain.changeId).toBeNull();
+    expect(connectAgain.changeId).not.toBe(changeIdOf(connected));
+
+    const pinned = await callJson(fixture, "pin_board_item", {
+      boardId,
+      itemId: itemA,
+      pinned: true,
+    });
+    const pinAgain = await callJson(fixture, "pin_board_item", {
+      boardId,
+      itemId: itemA,
+      pinned: true,
+    });
+    expect(pinAgain.changeId).toBeNull();
+    expect(pinAgain.changeId).not.toBe(changeIdOf(pinned));
   });
 });

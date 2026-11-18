@@ -52,7 +52,9 @@ export interface BoardPinStore {
  * 代理變更的來源。
  *
  * 有這個欄位的寫入會進入該白板的復原紀錄；使用者自己的操作不帶它，因此
- * 不會被 `undo` 復原。`tool` 只用在紀錄與除錯，不影響行為。
+ * 不會被 `undo` 復原。`tool` 只記在復原紀錄裡，供除錯與復原後查看；服務
+ * 層不以它過濾變更，這一筆變更的 changeId 由 `agentChangeIdFor` 直接依
+ * 寫入結果查出。
  */
 export interface AgentChangeContext {
   readonly tool: string;
@@ -186,6 +188,8 @@ export class BoardService {
   #queue: Promise<unknown> = Promise.resolve();
   readonly #agentChanges = new Map<string, AgentChange[]>();
   readonly #undoneChanges = new Map<string, string[]>();
+  /** 這一輪寫入產生的白板文件 → 這一筆代理變更的 changeId；文件離開記憶體就不可再查。 */
+  readonly #agentWrites = new WeakMap<BoardDocument, string>();
 
   constructor(
     private readonly store: BoardFileStore,
@@ -597,10 +601,10 @@ export class BoardService {
       }
 
       const pinnedBefore = this.#pinnedCardIds();
-      const restored: BoardDocument = {
+      const restored = await this.#dropDeadProjections({
         ...entry.before,
         updatedAt: this.#nextTimestamp(board),
-      };
+      });
       assertValidBoard({ board: restored });
       this.store.write(restored, { expectedUpdatedAt: board.updatedAt });
       changes.pop();
@@ -626,46 +630,96 @@ export class BoardService {
   }
 
   /**
+   * 復原寫回前，先拿掉指向已刪除卡片的投影。
+   *
+   * 復原是把變更前的快照寫回去；該卡片可能在這期間已被刪除，快照裡的投影
+   * 就會指向不存在的卡。與其把死投影寫回去，不如一併移除它（連帶它的
+   * 連線），復原才會留下一份不含死投影的白板。卡片服務沒接上時無從查證，
+   * 維持原快照。
+   */
+  async #dropDeadProjections(restored: BoardDocument): Promise<BoardDocument> {
+    const cards = this.cards;
+    if (cards === undefined) return restored;
+    const cardIds = [
+      ...new Set([...restored.items, ...restored.inbox].map((item) => item.cardId)),
+    ];
+    const dead = new Set<string>();
+    for (const cardId of cardIds) {
+      if ((await cards.get(cardId)) == null) {
+        dead.add(cardId);
+      }
+    }
+    if (dead.size === 0) return restored;
+    let scrubbed = restored;
+    for (const projection of [...scrubbed.items, ...scrubbed.inbox]) {
+      if (!dead.has(projection.cardId)) continue;
+      scrubbed = unprojectCard({ board: scrubbed, itemId: projection.id, now: scrubbed.updatedAt });
+    }
+    return scrubbed;
+  }
+
+  /**
    * 卡片刪除後移除它在所有白板的投影。
    *
    * 由卡片模組的刪除流程呼叫；只動白板的投影與連線，不碰卡片，也不會
-   * 反過來刪卡。找不到投影的白板不寫入。
+   * 反過來刪卡。找不到投影的白板不寫入。每一份白板各自處理：一份失敗不
+   * 影響其他白板，全部試完後把失敗的白板列在錯誤的 details 裡丟出；已處理
+   * 的白板在重試時自然不會再被列出，所以重試是安全的。
    */
   removeCardProjections(cardId: string): Promise<readonly string[]> {
     return this.#exclusive(async () => {
       const pinnedBefore = this.#pinnedCardIds();
       const touched: string[] = [];
+      const failures: { readonly boardId: string; readonly message: string }[] = [];
       for (const boardId of listBoardsContainingCard(this.list(), cardId)) {
-        const board = this.get(boardId);
-        const projections = [...board.items, ...board.inbox].filter(
-          (item) => item.cardId === cardId,
-        );
-        if (projections.length === 0) continue;
-        let next = board;
-        for (const projection of projections) {
-          next = unprojectCard({
-            board: next,
-            itemId: projection.id,
-            now: this.#nextTimestamp(next),
+        try {
+          const board = this.get(boardId);
+          const projections = [...board.items, ...board.inbox].filter(
+            (item) => item.cardId === cardId,
+          );
+          if (projections.length === 0) continue;
+          let next = board;
+          for (const projection of projections) {
+            next = unprojectCard({
+              board: next,
+              itemId: projection.id,
+              now: this.#nextTimestamp(next),
+            });
+          }
+          this.store.write(next, { expectedUpdatedAt: board.updatedAt });
+          await this.#syncPinned(pinnedBefore);
+          this.emit({ boardId, change: "updated", board: next, cardIds: [cardId] });
+          touched.push(boardId);
+        } catch (error) {
+          failures.push({
+            boardId,
+            message: error instanceof Error ? error.message : String(error),
           });
         }
-        this.store.write(next, { expectedUpdatedAt: board.updatedAt });
-        await this.#syncPinned(pinnedBefore);
-        this.emit({ boardId, change: "updated", board: next, cardIds: [cardId] });
-        touched.push(boardId);
+      }
+      if (failures.length > 0) {
+        throw new ProtocolHandlerError(
+          "storage-failed",
+          `移除卡片 ${cardId} 的投影時有 ${failures.length} 份白板失敗；重試會略過已處理的白板。`,
+          {
+            cardId,
+            succeeded: touched,
+            failed: failures.map((failure) => failure.boardId),
+            failures,
+          },
+        );
       }
       return touched;
     });
   }
 
-  /** 找出產生某個白板版本的代理變更；工具用它把 changeId 回給代理。tool 帶入時只找該工具。 */
-  agentChangeId(boardId: string, updatedAt: string, tool?: string): string | undefined {
-    return this.#agentChanges
-      .get(boardId)
-      ?.find(
-        (change) =>
-          change.after.updatedAt === updatedAt && (tool === undefined || change.tool === tool),
-      )?.changeId;
+  /**
+   * 找出這一輪服務實際寫入的白板文件對應的代理變更 changeId。
+   * 只看文件本身的身分，不依版本或工具查找；目標狀態已是現況、沒有寫入
+   * 時回 undefined。
+   */
+  agentChangeIdFor(board: BoardDocument): string | undefined {
+    return this.#agentWrites.get(board);
   }
 
   /**
@@ -684,7 +738,8 @@ export class BoardService {
     assertValidBoard({ board: input.next });
     this.store.write(input.next, { expectedUpdatedAt: input.before.updatedAt });
     if (input.agent !== undefined) {
-      this.#rememberAgentChange(input.agent.tool, input.before, input.next);
+      const changeId = this.#rememberAgentChange(input.agent.tool, input.before, input.next);
+      this.#agentWrites.set(input.next, changeId);
     }
     await this.#syncPinned(input.pinnedBefore);
     this.emit({
@@ -696,10 +751,11 @@ export class BoardService {
     return input.next;
   }
 
-  #rememberAgentChange(tool: string, before: BoardDocument, after: BoardDocument): void {
+  #rememberAgentChange(tool: string, before: BoardDocument, after: BoardDocument): string {
+    const changeId = newCardId(this.now().getTime());
     const entries = this.#agentChanges.get(after.id) ?? [];
     entries.push({
-      changeId: newCardId(this.now().getTime()),
+      changeId,
       tool,
       before,
       after,
@@ -708,6 +764,7 @@ export class BoardService {
       entries.splice(0, entries.length - AGENT_CHANGE_HISTORY_LIMIT);
     }
     this.#agentChanges.set(after.id, entries);
+    return changeId;
   }
 
   #rememberUndone(boardId: string, changeId: string): void {

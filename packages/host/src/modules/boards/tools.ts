@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 
 import {
+  deterministicCardId,
   isAgentBoardOperationAllowed,
+  newCardId,
   type BoardAgentMode as DomainBoardMode,
   type BoardDocument,
 } from "@cardiary/domain";
@@ -136,7 +138,7 @@ function createCardOnBoardTool(options: BoardsToolsOptions): ToolDefinition {
           cardId: created.cardId,
           itemId: created.item.id,
           inboxSize: created.board.inbox.length,
-          changeId: changeIdOf(options, created.board, "create_card_on_board"),
+          changeId: changeIdOf(options, created.board),
         });
       });
     },
@@ -196,7 +198,7 @@ function projectCardToBoardTool(options: BoardsToolsOptions): ToolDefinition {
           boardId: projected.id,
           itemId: item?.id ?? null,
           inboxSize: projected.inbox.length,
-          changeId: changeIdOf(options, projected, "project_card_to_board"),
+          changeId: changeIdOf(options, projected),
         });
       });
     },
@@ -220,7 +222,7 @@ function moveBoardItemTool(options: BoardsToolsOptions): ToolDefinition {
       required: ["boardId", "itemId", "x", "y"],
       additionalProperties: false,
     },
-    async apply(record, _context, tool) {
+    async apply(record, _context) {
       const itemId = requiredStringOf(record, "itemId");
       const board = await options.service.move({
         boardId: requiredStringOf(record, "boardId"),
@@ -231,7 +233,7 @@ function moveBoardItemTool(options: BoardsToolsOptions): ToolDefinition {
         },
         agent: { tool: "move_board_item" },
       });
-      return boardOutcome(options, board, { itemId }, tool);
+      return boardOutcome(options, board, { itemId });
     },
   });
 }
@@ -257,7 +259,7 @@ function connectBoardItemsTool(options: BoardsToolsOptions): ToolDefinition {
       required: ["boardId", "from", "to"],
       additionalProperties: false,
     },
-    async apply(record, context, tool) {
+    async apply(record, context) {
       const edgeId =
         stringOf(record, "edgeId") ?? callScopedId(context, options.now(), "board-edge");
       const label = stringOf(record, "label");
@@ -269,7 +271,7 @@ function connectBoardItemsTool(options: BoardsToolsOptions): ToolDefinition {
         ...(label === undefined ? {} : { label }),
         agent: { tool: "connect_board_items" },
       });
-      return boardOutcome(options, board, { edgeId }, tool);
+      return boardOutcome(options, board, { edgeId });
     },
   });
 }
@@ -288,14 +290,14 @@ function disconnectBoardItemsTool(options: BoardsToolsOptions): ToolDefinition {
       required: ["boardId", "edgeId"],
       additionalProperties: false,
     },
-    async apply(record, _context, tool) {
+    async apply(record, _context) {
       const edgeId = requiredStringOf(record, "edgeId");
       const board = await options.service.disconnect({
         boardId: requiredStringOf(record, "boardId"),
         edgeId,
         agent: { tool: "disconnect_board_items" },
       });
-      return boardOutcome(options, board, { edgeId, removed: !hasEdge(board, edgeId) }, tool);
+      return boardOutcome(options, board, { edgeId, removed: !hasEdge(board, edgeId) });
     },
   });
 }
@@ -320,7 +322,7 @@ function createBoardGroupTool(options: BoardsToolsOptions): ToolDefinition {
       required: ["boardId", "label"],
       additionalProperties: false,
     },
-    async apply(record, context, tool) {
+    async apply(record, context) {
       const groupId =
         stringOf(record, "groupId") ?? callScopedId(context, options.now(), "board-group");
       const parentId = stringOf(record, "parentId");
@@ -331,7 +333,7 @@ function createBoardGroupTool(options: BoardsToolsOptions): ToolDefinition {
         ...(parentId === undefined ? {} : { parentId }),
         agent: { tool: "create_board_group" },
       });
-      return boardOutcome(options, board, { groupId }, tool);
+      return boardOutcome(options, board, { groupId });
     },
   });
 }
@@ -350,7 +352,7 @@ function assignBoardItemToGroupTool(options: BoardsToolsOptions): ToolDefinition
       required: ["boardId", "itemId"],
       additionalProperties: false,
     },
-    async apply(record, _context, tool) {
+    async apply(record, _context) {
       const itemId = requiredStringOf(record, "itemId");
       const groupId = stringOf(record, "groupId");
       const board = await options.service.assignToGroup({
@@ -359,7 +361,7 @@ function assignBoardItemToGroupTool(options: BoardsToolsOptions): ToolDefinition
         ...(groupId === undefined ? {} : { groupId }),
         agent: { tool: "assign_board_item_to_group" },
       });
-      return boardOutcome(options, board, { itemId, groupId: groupId ?? null }, tool);
+      return boardOutcome(options, board, { itemId, groupId: groupId ?? null });
     },
   });
 }
@@ -377,14 +379,14 @@ function removeBoardGroupTool(options: BoardsToolsOptions): ToolDefinition {
       required: ["boardId", "groupId"],
       additionalProperties: false,
     },
-    async apply(record, _context, tool) {
+    async apply(record, _context) {
       const groupId = requiredStringOf(record, "groupId");
       const board = await options.service.deleteGroup({
         boardId: requiredStringOf(record, "boardId"),
         groupId,
         agent: { tool: "remove_board_group" },
       });
-      return boardOutcome(options, board, { groupId }, tool);
+      return boardOutcome(options, board, { groupId });
     },
   });
 }
@@ -405,7 +407,7 @@ function pinBoardItemTool(options: BoardsToolsOptions): ToolDefinition {
       required: ["boardId", "itemId", "pinned"],
       additionalProperties: false,
     },
-    async apply(record, _context, tool) {
+    async apply(record, _context) {
       const itemId = requiredStringOf(record, "itemId");
       const pinned = requiredBooleanOf(record, "pinned");
       const board = await options.service.setPinned({
@@ -414,7 +416,7 @@ function pinBoardItemTool(options: BoardsToolsOptions): ToolDefinition {
         pinned,
         agent: { tool: "pin_board_item" },
       });
-      return boardOutcome(options, board, { itemId, pinned }, tool);
+      return boardOutcome(options, board, { itemId, pinned });
     },
   });
 }
@@ -434,14 +436,14 @@ function removeBoardItemTool(options: BoardsToolsOptions): ToolDefinition {
       required: ["boardId", "itemId"],
       additionalProperties: false,
     },
-    async apply(record, _context, tool) {
+    async apply(record, _context) {
       const itemId = requiredStringOf(record, "itemId");
       const board = await options.service.removeItem({
         boardId: requiredStringOf(record, "boardId"),
         itemId,
         agent: { tool: "remove_board_item" },
       });
-      return boardOutcome(options, board, { itemId }, tool);
+      return boardOutcome(options, board, { itemId });
     },
   });
 }
@@ -492,7 +494,6 @@ function fullTool(
     readonly apply: (
       input: { readonly [key: string]: JsonValue },
       context: ToolExecutionContext,
-      tool: string,
     ) => Promise<ToolOutcome>;
   },
 ): ToolDefinition {
@@ -506,7 +507,7 @@ function fullTool(
         if (options.agentMode() !== "full") {
           return deny(options, spec.name, input, context, "full-mode-required");
         }
-        return spec.apply(objectOf(input), context, spec.name);
+        return spec.apply(objectOf(input), context);
       });
     },
   };
@@ -516,21 +517,16 @@ function boardOutcome(
   options: BoardsToolsOptions,
   board: BoardDocument,
   fields: { readonly [key: string]: JsonValue },
-  tool: string,
 ): ToolOutcome {
   return jsonOutcome({
     boardId: board.id,
     ...fields,
-    changeId: changeIdOf(options, board, tool),
+    changeId: changeIdOf(options, board),
   });
 }
 
-function changeIdOf(
-  options: BoardsToolsOptions,
-  board: BoardDocument,
-  tool: string,
-): string | null {
-  return options.service.agentChangeId(board.id, board.updatedAt, tool) ?? null;
+function changeIdOf(options: BoardsToolsOptions, board: BoardDocument): string | null {
+  return options.service.agentChangeIdFor(board) ?? null;
 }
 
 function jsonOutcome(value: JsonValue): ToolOutcome {
@@ -573,32 +569,25 @@ function domainMode(mode: BoardsAgentMode): DomainBoardMode {
 }
 
 /**
- * 由這次工具呼叫產生穩定的 ULID。
+ * 由這次工具呼叫產生穩定的投影 id。
  *
- * 重送同一個呼叫（同一個 conversationId 與 callId）會得到同一個 id，服務
- * 就把它當成同一次操作，不會重複建項目、連線或分組。
+ * 同一個 conversationId 與 callId 的重送（含中斷後重跑）會得到同一個 id，
+ * 服務層就把它當成同一次操作，不會重複建項目、連線或分組；不同對話共用
+ * callId 也不會對上同一個 id。conversationId 與 callId 都沒有時退回隨機
+ * id，呼叫端要自行保證重送安全。
  */
 function callScopedId(
   context: ToolExecutionContext | undefined,
   now: Date,
   namespace: string,
 ): string {
-  const time = BigInt(now.getTime());
-  let timePart = "";
-  for (let index = 9; index >= 0; index -= 1) {
-    timePart = `${CROCKFORD[Number((time >> BigInt(index * 5)) & 31n)]}${timePart}`;
+  const conversationId = context?.conversationId;
+  const callId = context?.callId;
+  if (conversationId !== undefined || callId !== undefined) {
+    return deterministicCardId(`${namespace}:${conversationId ?? ""}:${callId ?? ""}`);
   }
-  const digest = createHash("sha256")
-    .update(`${namespace}:${context?.conversationId ?? ""}:${context?.callId ?? ""}`)
-    .digest();
-  let randomPart = "";
-  for (let index = 0; index < 16; index += 1) {
-    randomPart = `${randomPart}${CROCKFORD[digest[index]! & 31]}`;
-  }
-  return `${timePart}${randomPart}`;
+  return newCardId(now.getTime());
 }
-
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 async function run(work: () => Promise<ToolOutcome>): Promise<ToolOutcome> {
   try {
