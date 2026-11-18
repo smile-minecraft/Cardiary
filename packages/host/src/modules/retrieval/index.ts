@@ -5,6 +5,7 @@ import type { SpawnRegistry } from "../../spawn/wrapper.js";
 import type { CardLibrary } from "../cards/library.js";
 import { RetrievalService } from "./service.js";
 import { CardVectors } from "./vectors.js";
+import { testEmbedder } from "./test-seam.js";
 
 const CONSENT_KEY = "retrieval.allowModelDownload";
 
@@ -52,7 +53,10 @@ export const hostModule: HostModule = {
       context.services.protocol.emit(intent);
     const allowed = (): boolean => readConsent(cabinet);
     const spawn = context.services.host.require<SpawnRegistry>(HOST_SERVICE_NAMES.spawn);
+    // 契約測試接縫：只有 CARDIARY_TEST_FAULTS=1 時才會換成假嵌入器。
+    const embedder = testEmbedder();
     const vectors = new CardVectors({
+      ...(embedder === undefined ? {} : { embedder }),
       library: cards,
       database: () => cabinet.cache(),
       allowed,
