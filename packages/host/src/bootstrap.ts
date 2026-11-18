@@ -20,7 +20,7 @@ import type {
   SecretAccess,
 } from "@cardiary/module-api";
 import type { ToolPermissionGate } from "@cardiary/engine-adapter";
-import { FolderLayout } from "@cardiary/storage";
+import { FolderLayout, SqliteDeviceTokenStore } from "@cardiary/storage";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -64,6 +64,7 @@ import {
   EphemeralCardEnvironment,
   persistentCardEnvironment,
 } from "./modules/cards/environment.js";
+import { createRemoteStack } from "./remote/stack.js";
 import { SpawnRegistry } from "./spawn/wrapper.js";
 import { SettingsService } from "./settings/service.js";
 import { TransactionalSettingsStore } from "./settings/store.js";
@@ -410,12 +411,19 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
     hostServices.provide(HOST_SERVICE_NAMES.broker, options.broker);
   }
   let serviceRef: HostService | null = null;
+  // 產品組裝的裝置 Token 跟著資料夾的狀態資料庫走；每次 startHost 只建一組。
+  // 沒有持久資料庫的組裝不傳 `remote`，由閘道自己建記憶體版的堆疊。
+  const remote =
+    persistent === null
+      ? undefined
+      : createRemoteStack({ devices: new SqliteDeviceTokenStore(persistent.storage.state) });
   const gateway = new Gateway({
     engine,
     storage,
     ...(persistent === null
       ? {}
       : { titles: new StoredConversationTitles(() => persistent.storage.state) }),
+    ...(remote === undefined ? {} : { remote }),
     epoch: snapshot.epoch,
     clientToken: options.clientToken,
     logger,

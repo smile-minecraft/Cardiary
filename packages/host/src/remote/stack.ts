@@ -1,9 +1,10 @@
 /**
  * 遠端配對的共用堆疊：裝置 Token 儲存、配對請求代管、現在時間與殼的通知。
  *
- * 閘道預設自己建一份；殼的組合根可以經 `gateway.remote` 接上
- * `notifyPairingRequested`，讓配對請求送到殼顯示核准視窗。正式接上
- * `device_tokens` 表之前，裝置儲存只有記憶體實作。
+ * 閘道預設自己建一份記憶體版；產品組裝在 `startHost` 換上狀態資料庫的
+ * `SqliteDeviceTokenStore`，重啟後已配對裝置仍然有效。殼的組合根可以經
+ * `gateway.remote` 接上 `notifyPairingRequested`，讓配對請求送到殼顯示
+ * 核准視窗。
  */
 
 import { MemoryDeviceTokenStore, type DeviceTokenStore } from "@cardiary/storage";

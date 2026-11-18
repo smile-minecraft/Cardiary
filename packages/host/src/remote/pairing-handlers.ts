@@ -112,6 +112,7 @@ export async function handlePairingComplete(
     ...device.record,
     deviceName: session.deviceName,
     deviceKind: session.deviceKind,
+    prefix: device.prefix,
   });
   return {
     frame: {
