@@ -22,6 +22,17 @@ private struct PermissionsSettingsView: View {
 
     var body: some View {
         ScrollView {
+            PermissionsSettingsContent(model: model)
+        }
+        .task { await model.load() }
+    }
+}
+
+/// 分頁內容本身（不含捲動）；測試可以直接繪製它。
+struct PermissionsSettingsContent: View {
+    @ObservedObject var model: PermissionModesModel
+
+    var body: some View {
             VStack(alignment: .leading, spacing: DesignTokens.spacingL) {
                 AllowAllSection(model: model)
                 Divider()
@@ -34,8 +45,6 @@ private struct PermissionsSettingsView: View {
                     Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.sageInk)
                 }
             }
-        }
-        .task { await model.load() }
     }
 }
 
@@ -237,7 +246,8 @@ struct AllowAllBanner: View {
                     if showsScope, let grant = model.state?.allowAll {
                         Text(PermissionL10n.format(
                             .permAllowAllScope,
-                            value: (grant.tools + grant.paths + grant.domains).joined(separator: "、")
+                            value: (grant.tools + grant.paths + grant.domains)
+                                .joined(separator: AppL10n.language == .zhHant ? "、" : ", ")
                         ))
                         .font(.cardiary(.caption))
                         .foregroundStyle(Palette.inkSecondary)
