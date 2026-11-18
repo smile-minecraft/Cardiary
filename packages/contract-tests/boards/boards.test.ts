@@ -98,6 +98,8 @@ interface BoardPayload {
       readonly origin: string;
       readonly projectedBy?: string;
     }>;
+    readonly edges: readonly unknown[];
+    readonly groups: readonly unknown[];
   };
 }
 
@@ -287,6 +289,63 @@ describe("白板協定", () => {
       boardId: created.id,
     });
     expect(got.board.title).toBe("第一次");
+  }, 20_000);
+
+  it("連線與分組存進檔案正本，重讀文件仍完整", async () => {
+    const { service, client } = await boot();
+    const created = await createBoard(client, "連線與分組");
+    const cardA = await createCard(client);
+    const cardB = await createCard(client);
+    const itemA = newUlid();
+    const itemB = newUlid();
+    const groupId = newUlid();
+    const edgeId = newUlid();
+
+    const saved = await request<BoardPayload>(client, "board.save", {
+      board: {
+        ...created,
+        items: [
+          {
+            id: itemA,
+            cardId: cardA,
+            position: { x: 0, y: 0 },
+            size: { width: 240, height: 160 },
+            pinned: false,
+            origin: "canvas",
+            projectedBy: "user",
+            groupId,
+          },
+          {
+            id: itemB,
+            cardId: cardB,
+            position: { x: 320, y: 0 },
+            size: { width: 240, height: 160 },
+            pinned: false,
+            origin: "canvas",
+            projectedBy: "user",
+            groupId,
+          },
+        ],
+        edges: [{ id: edgeId, from: itemA, to: itemB }],
+        groups: [{ id: groupId, label: "比較組" }],
+      },
+      baseUpdatedAt: created.updatedAt,
+      clientRequestId: `board-save-${Math.random().toString(36).slice(2)}`,
+    });
+    expect(saved.board.edges).toEqual([{ id: edgeId, from: itemA, to: itemB }]);
+    expect(saved.board.groups).toEqual([{ id: groupId, label: "比較組" }]);
+
+    const got = await request<BoardPayload>(client, "board.get", {
+      boardId: created.id,
+    });
+    expect(got.board.edges).toEqual([{ id: edgeId, from: itemA, to: itemB }]);
+    expect(got.board.groups).toEqual([{ id: groupId, label: "比較組" }]);
+
+    const onDisk = JSON.parse(
+      await readFile(join(service.folder.path, "boards", `${created.id}.json`), "utf8"),
+    ) as { edges: unknown[]; groups: unknown[] };
+    expect(onDisk.edges).toEqual([{ id: edgeId, from: itemA, to: itemB }]);
+    expect(onDisk.groups).toEqual([{ id: groupId, label: "比較組" }]);
   }, 20_000);
 
   it("受限模式（預設）新卡投影：代理建卡進收件區，投影標記 agent", async () => {

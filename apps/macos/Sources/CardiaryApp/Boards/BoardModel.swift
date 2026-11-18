@@ -249,35 +249,32 @@ public final class BoardModel: ObservableObject, AppContentModel {
 
     /// 把畫布上的位置、大小與釘選寫回整份白板。手勢結束時呼叫一次。
     public func saveCanvas() async {
-        guard let service, let current = board, let baseUpdatedAt else { return }
+        await commitCanvas { $0 }
+    }
+
+    /// 把目前的畫布狀態併進整份文件，交給 `transform` 調整後存回主機。
+    ///
+    /// 連線與分組沒有獨立的協定指令，只能在這裡跟著整份文件送回去；
+    /// 衝突與失敗沿用 `saveCanvas` 既有的處理。回傳是否存成功。
+    @discardableResult
+    private func commitCanvas(_ transform: (BoardDocument) -> BoardDocument) async -> Bool {
+        guard let service, let baseUpdatedAt, let current = board else { return false }
         let items = current.items.compactMap { original -> BoardItem? in
             guard let value = canvas.item(original.id) else { return nil }
-            return BoardItem(
-                id: original.id,
-                cardId: original.cardId,
-                position: BoardPoint(
-                    x: max(0, Int(value.frame.minX.rounded())),
-                    y: max(0, Int(value.frame.minY.rounded()))
-                ),
-                size: BoardSize(
-                    width: max(1, Int(value.frame.width.rounded())),
-                    height: max(1, Int(value.frame.height.rounded()))
-                ),
-                pinned: value.pinned,
-                origin: original.origin,
-                projectedBy: original.projectedBy,
-                groupId: original.groupId
-            )
+            return Self.updatedItem(original, frame: value.frame, pinned: value.pinned)
         }
-        let document = BoardDocument(
-            id: current.id,
-            title: current.title,
-            createdAt: current.createdAt,
-            updatedAt: current.updatedAt,
-            items: items,
-            inbox: current.inbox,
-            edges: current.edges,
-            groups: current.groups
+        let document = transform(
+            BoardDocument(
+                schema: current.schema,
+                id: current.id,
+                title: current.title,
+                createdAt: current.createdAt,
+                updatedAt: current.updatedAt,
+                items: items,
+                inbox: current.inbox,
+                edges: current.edges,
+                groups: current.groups
+            )
         )
         isSaving = true
         defer { isSaving = false }
@@ -290,6 +287,7 @@ public final class BoardModel: ObservableObject, AppContentModel {
             apply(document: response.board, preserveSelection: true)
             conflictMessage = nil
             errorMessage = nil
+            return true
         } catch {
             if Self.isConflict(error), let boardId = board?.id {
                 conflictMessage = BoardL10n.text(.boardsConflict)
@@ -297,6 +295,7 @@ public final class BoardModel: ObservableObject, AppContentModel {
             } else {
                 errorMessage = BoardL10n.format(.boardsProjectFailed, value: error.localizedDescription)
             }
+            return false
         }
     }
 
@@ -401,6 +400,189 @@ public final class BoardModel: ObservableObject, AppContentModel {
 
     public func zoomToFit() {
         canvas.zoomToFit()
+    }
+
+    // MARK: - 連線與分組
+
+    /// 在畫布上的兩個投影之間建立連線。端點必須是這張白板的畫布投影，
+    /// 同一個方向的連線不重複建立；被拒絕時不送主機。
+    @discardableResult
+    public func createEdge(from: String, to: String) async -> Bool {
+        guard from != to,
+              let current = board,
+              current.items.contains(where: { $0.id == from }),
+              current.items.contains(where: { $0.id == to })
+        else {
+            errorMessage = BoardL10n.text(.boardsEdgeInvalid)
+            return false
+        }
+        if current.edges.contains(where: { Self.connects($0, from: from, to: to) }) {
+            errorMessage = BoardL10n.text(.boardsEdgeDuplicate)
+            return false
+        }
+        let edge = BoardEdge(id: BoardIdentifiers.make(), from: from, to: to)
+        let saved = await commitCanvas { document in
+            Self.updated(document, edges: document.edges + [edge])
+        }
+        if saved {
+            noticeMessage = BoardL10n.text(.boardsEdgeCreated)
+        }
+        return saved
+    }
+
+    /// 圈選剛好兩張卡時建立連線。
+    @discardableResult
+    public func createEdgeBetweenSelection() async -> Bool {
+        let ids = Array(canvas.selectedIds)
+        guard ids.count == 2 else {
+            errorMessage = BoardL10n.text(.boardsEdgeNeedsSelection)
+            return false
+        }
+        return await createEdge(from: ids[0], to: ids[1])
+    }
+
+    @discardableResult
+    public func deleteEdge(_ edgeId: String) async -> Bool {
+        guard let current = board, current.edges.contains(where: { $0.id == edgeId }) else {
+            return false
+        }
+        let saved = await commitCanvas { document in
+            Self.updated(document, edges: document.edges.filter { $0.id != edgeId })
+        }
+        if saved {
+            noticeMessage = BoardL10n.text(.boardsEdgeDeleted)
+        }
+        return saved
+    }
+
+    /// 建立分組並把指定的投影歸進去；沒指定就用目前的選取。
+    @discardableResult
+    public func createGroup(label: String, itemIds: [String]? = nil) async -> Bool {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            errorMessage = BoardL10n.text(.boardsGroupNameRequired)
+            return false
+        }
+        guard let current = board else { return false }
+        let ids = Set(itemIds ?? Array(canvas.selectedIds))
+        guard ids.count >= 2 else {
+            errorMessage = BoardL10n.text(.boardsGroupNeedsSelection)
+            return false
+        }
+        guard ids.isSubset(of: Set(current.items.map(\.id))) else {
+            errorMessage = BoardL10n.text(.boardsGroupInvalidItems)
+            return false
+        }
+        let group = BoardGroup(id: BoardIdentifiers.make(), label: trimmed)
+        let saved = await commitCanvas { document in
+            Self.updated(
+                document,
+                items: document.items.map { ids.contains($0.id) ? Self.assigning(group.id, to: $0) : $0 },
+                groups: document.groups + [group]
+            )
+        }
+        if saved {
+            noticeMessage = BoardL10n.format(
+                .boardsGroupCreated,
+                ["count": "\(ids.count)", "label": trimmed]
+            )
+        }
+        return saved
+    }
+
+    /// 把指定的投影歸進既有分組。
+    @discardableResult
+    public func assignItems(_ itemIds: [String], toGroup groupId: String) async -> Bool {
+        guard let current = board,
+              let group = current.groups.first(where: { $0.id == groupId })
+        else {
+            errorMessage = BoardL10n.text(.boardsGroupInvalidItems)
+            return false
+        }
+        let ids = Set(itemIds)
+        guard !ids.isEmpty, ids.isSubset(of: Set(current.items.map(\.id))) else {
+            errorMessage = BoardL10n.text(.boardsGroupInvalidItems)
+            return false
+        }
+        let saved = await commitCanvas { document in
+            Self.updated(
+                document,
+                items: document.items.map { ids.contains($0.id) ? Self.assigning(groupId, to: $0) : $0 }
+            )
+        }
+        if saved {
+            noticeMessage = BoardL10n.format(
+                .boardsGroupCreated,
+                ["count": "\(ids.count)", "label": group.label]
+            )
+        }
+        return saved
+    }
+
+    /// 把目前選取的投影移出它們所屬的分組；卡片留在畫布上。
+    @discardableResult
+    public func removeSelectionFromGroup() async -> Bool {
+        await removeItemsFromGroup(Array(canvas.selectedIds))
+    }
+
+    /// 把指定的投影移出分組；卡片留在畫布上。
+    @discardableResult
+    public func removeItemsFromGroup(_ itemIds: [String]) async -> Bool {
+        guard let current = board else { return false }
+        let ids = Set(itemIds).intersection(current.items.map(\.id))
+        guard !ids.isEmpty else { return false }
+        let saved = await commitCanvas { document in
+            Self.updated(
+                document,
+                items: document.items.map { ids.contains($0.id) ? Self.assigning(nil, to: $0) : $0 }
+            )
+        }
+        if saved {
+            noticeMessage = BoardL10n.count(.boardsRemovedFromGroup, count: ids.count)
+        }
+        return saved
+    }
+
+    /// 移除分組：卡片留在畫布上，只解除歸屬；子分組改掛回最上層。
+    @discardableResult
+    public func deleteGroup(_ groupId: String) async -> Bool {
+        guard let current = board, current.groups.contains(where: { $0.id == groupId }) else {
+            return false
+        }
+        let saved = await commitCanvas { document in
+            Self.updated(
+                document,
+                items: document.items.map { $0.groupId == groupId ? Self.assigning(nil, to: $0) : $0 },
+                groups: document.groups
+                    .filter { $0.id != groupId }
+                    .map { $0.parentId == groupId ? BoardGroup(id: $0.id, label: $0.label, parentId: nil) : $0 }
+            )
+        }
+        if saved {
+            noticeMessage = BoardL10n.text(.boardsGroupDeleted)
+        }
+        return saved
+    }
+
+    /// 選取某個分組在畫布上的所有投影。
+    public func selectItems(inGroup groupId: String) {
+        guard let current = board else { return }
+        canvas.setSelection(Set(current.items.filter { $0.groupId == groupId }.map(\.id)))
+    }
+
+    /// 目前選取的投影是否全部屬於同一個分組；是的話回傳那個分組。
+    public var selectionGroupId: String? {
+        guard let current = board, !canvas.selectedIds.isEmpty else { return nil }
+        let selected = current.items.filter { canvas.selectedIds.contains($0.id) }
+        guard !selected.isEmpty, selected.allSatisfy({ $0.groupId != nil }) else { return nil }
+        let ids = Set(selected.compactMap(\.groupId))
+        return ids.count == 1 ? ids.first : nil
+    }
+
+    /// 連線端點的顯示名稱；端點不在畫布上時退回識別碼尾段。
+    public func itemTitle(forItemId itemId: String) -> String {
+        guard let item = canvas.item(itemId) else { return String(itemId.suffix(6)) }
+        return title(for: item)
     }
 
     // MARK: - 圈選後的行動
@@ -574,6 +756,66 @@ public final class BoardModel: ObservableObject, AppContentModel {
 
     public func kind(for item: BoardCanvasItem) -> CardKind {
         cardInfo[item.cardId]?.kind ?? .note
+    }
+
+    // MARK: - 文件組裝
+
+    private static func updated(
+        _ document: BoardDocument,
+        items: [BoardItem]? = nil,
+        edges: [BoardEdge]? = nil,
+        groups: [BoardGroup]? = nil
+    ) -> BoardDocument {
+        BoardDocument(
+            schema: document.schema,
+            id: document.id,
+            title: document.title,
+            createdAt: document.createdAt,
+            updatedAt: document.updatedAt,
+            items: items ?? document.items,
+            inbox: document.inbox,
+            edges: edges ?? document.edges,
+            groups: groups ?? document.groups
+        )
+    }
+
+    /// 把畫布上的位置、大小與釘選併回原本的投影，其餘欄位保持主機給的值。
+    private static func updatedItem(_ original: BoardItem, frame: BoardRect, pinned: Bool) -> BoardItem {
+        BoardItem(
+            id: original.id,
+            cardId: original.cardId,
+            position: BoardPoint(
+                x: max(0, Int(frame.minX.rounded())),
+                y: max(0, Int(frame.minY.rounded()))
+            ),
+            size: BoardSize(
+                width: max(1, Int(frame.width.rounded())),
+                height: max(1, Int(frame.height.rounded()))
+            ),
+            pinned: pinned,
+            origin: original.origin,
+            projectedBy: original.projectedBy,
+            groupId: original.groupId
+        )
+    }
+
+    /// 換掉投影的分組歸屬，其餘欄位不動。
+    private static func assigning(_ groupId: String?, to item: BoardItem) -> BoardItem {
+        BoardItem(
+            id: item.id,
+            cardId: item.cardId,
+            position: item.position,
+            size: item.size,
+            pinned: item.pinned,
+            origin: item.origin,
+            projectedBy: item.projectedBy,
+            groupId: groupId
+        )
+    }
+
+    /// 同一對端點不分方向都算同一條連線。
+    private static func connects(_ edge: BoardEdge, from: String, to: String) -> Bool {
+        (edge.from == from && edge.to == to) || (edge.from == to && edge.to == from)
     }
 
     private static func isConflict(_ error: Error) -> Bool {

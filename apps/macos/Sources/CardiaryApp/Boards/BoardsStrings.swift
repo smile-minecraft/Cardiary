@@ -57,6 +57,32 @@ public enum BoardString: String, CaseIterable, Sendable {
     case boardsProjectFailed
     case boardsAgentModeNote
     case boardsCardCount
+    case boardsCreateEdge
+    case boardsDeleteEdgeTo
+    case boardsEdgeCreated
+    case boardsEdgeDeleted
+    case boardsEdgeNeedsSelection
+    case boardsEdgeInvalid
+    case boardsEdgeDuplicate
+    case boardsCreateGroup
+    case boardsGroupNameTitle
+    case boardsGroupNameRequired
+    case boardsGroupNeedsSelection
+    case boardsGroupInvalidItems
+    case boardsGroupCreated
+    case boardsDeleteGroup
+    case boardsSelectGroup
+    case boardsAssignToGroup
+    case boardsRemoveFromGroup
+    case boardsRemovedFromGroup
+    case boardsGroupDeleted
+    case boardsLink
+    case boardsGroupSection
+    case boardsStructure
+    case boardsSendToNewConversation
+    case boardsNothingSelected
+    case boardsNewConversationFailed
+    case boardsSendToCurrentConversation
 }
 
 public enum BoardL10n {
@@ -147,6 +173,32 @@ public enum BoardL10n {
             "boardsProjectFailed": "投影失敗：{value}",
             "boardsAgentModeNote": "代理白板權限切換只影響新開的對話；既有對話保留原本可用的工具。",
             "boardsCardCount": "{count} 張卡",
+            "boardsCreateEdge": "建立連線",
+            "boardsDeleteEdgeTo": "刪除連線：{from} → {to}",
+            "boardsEdgeCreated": "已建立連線。",
+            "boardsEdgeDeleted": "已刪除連線。",
+            "boardsEdgeNeedsSelection": "選取剛好兩張卡，才能建立連線。",
+            "boardsEdgeInvalid": "連線的兩端必須是畫布上的兩張卡，而且不能是同一張。",
+            "boardsEdgeDuplicate": "這兩張卡之間已經有連線。",
+            "boardsCreateGroup": "建立分組",
+            "boardsGroupNameTitle": "分組名稱",
+            "boardsGroupNameRequired": "分組要有名稱。",
+            "boardsGroupNeedsSelection": "選取至少兩張卡，才能建立分組。",
+            "boardsGroupInvalidItems": "分組裡只能放畫布上的卡。",
+            "boardsGroupCreated": "已把 {count} 張卡放進「{label}」。",
+            "boardsDeleteGroup": "刪除分組",
+            "boardsSelectGroup": "選取這個分組",
+            "boardsAssignToGroup": "把選取加入這個分組",
+            "boardsRemoveFromGroup": "移出分組",
+            "boardsRemovedFromGroup": "已把 {count} 張卡移出分組。",
+            "boardsGroupDeleted": "已刪除分組，卡片留在畫布上。",
+            "boardsLink": "連線",
+            "boardsGroupSection": "分組",
+            "boardsStructure": "結構",
+            "boardsSendToNewConversation": "建立新對話並送入",
+            "boardsNothingSelected": "先選取至少一張卡。",
+            "boardsNewConversationFailed": "無法建立新對話，請稍後再試。",
+            "boardsSendToCurrentConversation": "送進目前對話：{title}",
         ],
         .en: [
             "boardsTitle": "Boards",
@@ -203,6 +255,32 @@ public enum BoardL10n {
             "boardsProjectFailed": "Projection failed: {value}",
             "boardsAgentModeNote": "Changing the agent board permission only affects new conversations; existing conversations keep their tools.",
             "boardsCardCount": "{count} cards",
+            "boardsCreateEdge": "Connect",
+            "boardsDeleteEdgeTo": "Delete link: {from} → {to}",
+            "boardsEdgeCreated": "Link created.",
+            "boardsEdgeDeleted": "Link deleted.",
+            "boardsEdgeNeedsSelection": "Select exactly two cards to create a link.",
+            "boardsEdgeInvalid": "Both ends of a link must be two different cards on the canvas.",
+            "boardsEdgeDuplicate": "These two cards are already linked.",
+            "boardsCreateGroup": "Group Cards",
+            "boardsGroupNameTitle": "Group name",
+            "boardsGroupNameRequired": "Give the group a name.",
+            "boardsGroupNeedsSelection": "Select at least two cards to create a group.",
+            "boardsGroupInvalidItems": "Only cards on the canvas can join a group.",
+            "boardsGroupCreated": "Added {count} cards to \"{label}\".",
+            "boardsDeleteGroup": "Delete Group",
+            "boardsSelectGroup": "Select This Group",
+            "boardsAssignToGroup": "Add Selection to This Group",
+            "boardsRemoveFromGroup": "Remove from Group",
+            "boardsRemovedFromGroup": "Removed {count} cards from their group.",
+            "boardsGroupDeleted": "Group deleted; the cards stay on the canvas.",
+            "boardsLink": "Links",
+            "boardsGroupSection": "Groups",
+            "boardsStructure": "Structure",
+            "boardsSendToNewConversation": "New Conversation with Selection",
+            "boardsNothingSelected": "Select at least one card first.",
+            "boardsNewConversationFailed": "Could not create a conversation. Try again.",
+            "boardsSendToCurrentConversation": "Send to Current Conversation: {title}",
         ],
     ]
 }

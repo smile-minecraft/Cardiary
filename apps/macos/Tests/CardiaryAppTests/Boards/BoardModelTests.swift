@@ -30,6 +30,35 @@ final class BoardModelTests: XCTestCase {
         )
     }
 
+    private func makeItem(_ id: String, pinned: Bool = false, groupId: String? = nil) -> BoardItem {
+        BoardItem(
+            id: id,
+            cardId: "card-\(id)",
+            position: BoardPoint(x: 100, y: 80),
+            size: BoardSize(width: 240, height: 160),
+            pinned: pinned,
+            origin: .canvas,
+            projectedBy: .user,
+            groupId: groupId
+        )
+    }
+
+    private func makeBoard(
+        items: [BoardItem],
+        updatedAt: String = "2026-11-16T00:00:00.000Z"
+    ) -> BoardDocument {
+        BoardDocument(
+            id: "board-1",
+            title: "測試白板",
+            createdAt: "2026-11-15T00:00:00.000Z",
+            updatedAt: updatedAt,
+            items: items,
+            inbox: [],
+            edges: [],
+            groups: []
+        )
+    }
+
     private func event(board: BoardDocument, change: BoardChange = .updated) -> ServerFrame {
         .boardChangedEvent(BoardChangedEvent(
             stream: "board",
@@ -193,6 +222,132 @@ final class BoardModelTests: XCTestCase {
             1
         )
     }
+
+    // MARK: - 連線與分組
+
+    func testCreateEdgeRejectsInvalidEndpointsWithoutSaving() async {
+        let fake = FakeBoardService(board: makeBoard())
+        let model = BoardModel(boardService: fake)
+        await model.reload()
+
+        let unknown = await model.createEdge(from: "item-1", to: "missing")
+        XCTAssertFalse(unknown)
+        XCTAssertEqual(model.errorMessage, BoardL10n.text(.boardsEdgeInvalid))
+
+        let selfLoop = await model.createEdge(from: "item-1", to: "item-1")
+        XCTAssertFalse(selfLoop)
+        XCTAssertEqual(model.errorMessage, BoardL10n.text(.boardsEdgeInvalid))
+        XCTAssertEqual(fake.saveCount, 0, "被拒絕的連線不能送到主機")
+    }
+
+    func testCreateEdgeBetweenSelectionSavesOnceAndRejectsDuplicates() async {
+        let fake = FakeBoardService(board: makeBoard(items: [makeItem("item-1"), makeItem("item-2")]))
+        let model = BoardModel(boardService: fake)
+        await model.reload()
+        model.canvas.setSelection(["item-1", "item-2"])
+
+        let created = await model.createEdgeBetweenSelection()
+        XCTAssertTrue(created)
+        let saved = try? XCTUnwrap(fake.savedBoard)
+        XCTAssertEqual(saved?.edges.count, 1)
+        XCTAssertEqual(
+            Set([saved?.edges.first?.from, saved?.edges.first?.to].compactMap { $0 }),
+            ["item-1", "item-2"]
+        )
+        XCTAssertEqual(model.noticeMessage, BoardL10n.text(.boardsEdgeCreated))
+
+        let duplicate = await model.createEdgeBetweenSelection()
+        XCTAssertFalse(duplicate)
+        XCTAssertEqual(model.errorMessage, BoardL10n.text(.boardsEdgeDuplicate))
+        XCTAssertEqual(fake.saveCount, 1, "重複的連線不再送主機")
+
+        let removed = await model.deleteEdge(saved?.edges.first?.id ?? "")
+        XCTAssertTrue(removed)
+        XCTAssertEqual(fake.savedBoard?.edges.count, 0)
+        XCTAssertEqual(model.noticeMessage, BoardL10n.text(.boardsEdgeDeleted))
+    }
+
+    func testCreateGroupAssignsSelectionAndDeleteKeepsCards() async {
+        let fake = FakeBoardService(board: makeBoard(items: [
+            makeItem("item-1"), makeItem("item-2"), makeItem("item-3"),
+        ]))
+        let model = BoardModel(boardService: fake)
+        await model.reload()
+        model.canvas.setSelection(["item-1", "item-2"])
+
+        let created = await model.createGroup(label: "主題")
+        XCTAssertTrue(created)
+        let groupId = fake.savedBoard?.groups.first?.id
+        XCTAssertEqual(fake.savedBoard?.groups.first?.label, "主題")
+        XCTAssertEqual(fake.savedBoard?.items.filter { $0.groupId == groupId }.count, 2)
+        XCTAssertEqual(model.selectionGroupId, groupId)
+        XCTAssertEqual(
+            model.noticeMessage,
+            BoardL10n.format(.boardsGroupCreated, ["count": "2", "label": "主題"])
+        )
+
+        model.canvas.setSelection(["item-3"])
+        let assigned = await model.assignItems(["item-3"], toGroup: groupId ?? "")
+        XCTAssertTrue(assigned)
+        XCTAssertEqual(fake.savedBoard?.items.filter { $0.groupId == groupId }.count, 3)
+        XCTAssertEqual(model.selectionGroupId, groupId)
+
+        let removed = await model.removeSelectionFromGroup()
+        XCTAssertTrue(removed)
+        XCTAssertEqual(fake.savedBoard?.items.filter { $0.groupId == groupId }.count, 2)
+        XCTAssertEqual(fake.savedBoard?.items.count, 3)
+
+        let deleted = await model.deleteGroup(groupId ?? "")
+        XCTAssertTrue(deleted)
+        XCTAssertEqual(fake.savedBoard?.groups.count, 0)
+        XCTAssertEqual(fake.savedBoard?.items.count, 3, "刪除分組不能刪掉卡片")
+        XCTAssertTrue(fake.savedBoard?.items.allSatisfy { $0.groupId == nil } ?? false)
+    }
+
+    func testCreateGroupRequiresNameAndTwoItems() async {
+        let fake = FakeBoardService(board: makeBoard(items: [makeItem("item-1"), makeItem("item-2")]))
+        let model = BoardModel(boardService: fake)
+        await model.reload()
+        model.canvas.setSelection(["item-1"])
+
+        let tooFew = await model.createGroup(label: "主題")
+        XCTAssertFalse(tooFew)
+        XCTAssertEqual(model.errorMessage, BoardL10n.text(.boardsGroupNeedsSelection))
+
+        model.canvas.setSelection(["item-1", "item-2"])
+        let unnamed = await model.createGroup(label: "   ")
+        XCTAssertFalse(unnamed)
+        XCTAssertEqual(model.errorMessage, BoardL10n.text(.boardsGroupNameRequired))
+        XCTAssertEqual(fake.saveCount, 0)
+    }
+
+    func testDeleteGroupPromotesChildGroupsToTopLevel() async {
+        let base = makeBoard(items: [makeItem("item-1"), makeItem("item-2")])
+        let parent = BoardGroup(id: "group-parent", label: "父")
+        let child = BoardGroup(id: "group-child", label: "子", parentId: parent.id)
+        let board = BoardDocument(
+            id: base.id,
+            title: base.title,
+            createdAt: base.createdAt,
+            updatedAt: base.updatedAt,
+            items: [
+                makeItem("item-1", groupId: parent.id),
+                makeItem("item-2", groupId: child.id),
+            ],
+            inbox: [],
+            edges: [],
+            groups: [parent, child]
+        )
+        let fake = FakeBoardService(board: board)
+        let model = BoardModel(boardService: fake)
+        await model.reload()
+
+        let deleted = await model.deleteGroup(parent.id)
+        XCTAssertTrue(deleted)
+        XCTAssertEqual(fake.savedBoard?.groups.map(\.id), [child.id])
+        XCTAssertNil(fake.savedBoard?.groups.first?.parentId)
+        XCTAssertEqual(fake.savedBoard?.items.count, 2)
+    }
 }
 
 // MARK: - 假服務
@@ -200,6 +355,7 @@ final class BoardModelTests: XCTestCase {
 private final class FakeBoardService: BoardService, @unchecked Sendable {
     private var board: BoardDocument
     private(set) var savedBoard: BoardDocument?
+    private(set) var saveCount = 0
     private(set) var createdFromSelection: (
         cardIds: [String],
         title: String,
@@ -251,6 +407,7 @@ private final class FakeBoardService: BoardService, @unchecked Sendable {
         }
         self.board = board
         savedBoard = board
+        saveCount += 1
         return BoardSaveResponsePayload(board: board)
     }
 
