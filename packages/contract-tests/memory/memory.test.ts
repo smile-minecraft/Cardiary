@@ -516,28 +516,32 @@ describe("每日蒸餾的協定契約", () => {
       body: "使用者偏好在週末整理儲藏室。",
       kind: "memory",
     });
-    const { client } = await boot([
-      [sourceId, cardFile({ id: sourceId, title: "日常筆記", body: "週末想整理儲藏室。" })],
-      [memoryId, existing],
+    // 建立對話需要主力模型；Pi 組裝沒有設定模組的模型時，用腳本化模型接上。
+    const { client } = await boot(
       [
-        bedrockId,
-        cardFile({
-          id: bedrockId,
-          title: "基石",
-          body: "使用者偏好的整理方式：先分類再丟棄。",
-          kind: "bedrock",
-        }),
+        [sourceId, cardFile({ id: sourceId, title: "日常筆記", body: "週末想整理儲藏室。" })],
+        [memoryId, existing],
+        [
+          bedrockId,
+          cardFile({
+            id: bedrockId,
+            title: "基石",
+            body: "使用者偏好的整理方式：先分類再丟棄。",
+            kind: "bedrock",
+          }),
+        ],
+        [
+          personaId,
+          cardFile({
+            id: personaId,
+            title: "人格",
+            body: "你是謹慎整理檔案的助手。",
+            kind: "persona",
+          }),
+        ],
       ],
-      [
-        personaId,
-        cardFile({
-          id: personaId,
-          title: "人格",
-          body: "你是謹慎整理檔案的助手。",
-          kind: "persona",
-        }),
-      ],
-    ]);
+      { scripts: [[{ kind: "text", text: "好的" }]] },
+    );
 
     const sessionId = await createSession(client);
     const before = await moduleRequest<{ systemContext: string }>(
