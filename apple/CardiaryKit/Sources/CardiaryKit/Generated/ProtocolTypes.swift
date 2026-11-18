@@ -9805,6 +9805,49 @@ public struct HelloResume: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - McpPersistentDataInfo
+
+public struct McpPersistentDataInfo: Codable, Equatable, Sendable {
+    public let allowed: Bool
+    public let bytes: Int
+    public let files: Int
+
+    public init(
+        allowed: Bool,
+        bytes: Int,
+        files: Int
+    ) {
+        self.allowed = allowed
+        self.bytes = bytes
+        self.files = files
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case allowed = "allowed"
+        case bytes = "bytes"
+        case files = "files"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let allowed = try container.decode(Bool.self, forKey: .allowed)
+        let bytes = try container.decode(Int.self, forKey: .bytes)
+        let files = try container.decode(Int.self, forKey: .files)
+        self.init(
+            allowed: allowed,
+            bytes: bytes,
+            files: files
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(allowed, forKey: .allowed)
+        try container.encode(bytes, forKey: .bytes)
+        try container.encode(files, forKey: .files)
+    }
+}
+
 // MARK: - McpServerAddRequest
 
 public struct McpServerAddRequest: Codable, Equatable, Sendable {
@@ -9881,6 +9924,7 @@ public struct McpServerAddRequestPayload: Codable, Equatable, Sendable {
     public let url: String?
     public let allowedHosts: [String]
     public let clientRequestId: String?
+    public let persistentData: Bool?
 
     public init(
         name: String,
@@ -9889,7 +9933,8 @@ public struct McpServerAddRequestPayload: Codable, Equatable, Sendable {
         args: [String]? = nil,
         url: String? = nil,
         allowedHosts: [String],
-        clientRequestId: String? = nil
+        clientRequestId: String? = nil,
+        persistentData: Bool? = nil
     ) {
         self.name = name
         self.transport = transport
@@ -9898,6 +9943,7 @@ public struct McpServerAddRequestPayload: Codable, Equatable, Sendable {
         self.url = url
         self.allowedHosts = allowedHosts
         self.clientRequestId = clientRequestId
+        self.persistentData = persistentData
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -9908,6 +9954,7 @@ public struct McpServerAddRequestPayload: Codable, Equatable, Sendable {
         case url = "url"
         case allowedHosts = "allowedHosts"
         case clientRequestId = "clientRequestId"
+        case persistentData = "persistentData"
     }
 
     public init(from decoder: Decoder) throws {
@@ -9919,6 +9966,7 @@ public struct McpServerAddRequestPayload: Codable, Equatable, Sendable {
         let url = try container.decodeIfPresent(String.self, forKey: .url)
         let allowedHosts = try container.decode([String].self, forKey: .allowedHosts)
         let clientRequestId = try container.decodeIfPresent(String.self, forKey: .clientRequestId)
+        let persistentData = try container.decodeIfPresent(Bool.self, forKey: .persistentData)
         self.init(
             name: name,
             transport: transport,
@@ -9926,7 +9974,8 @@ public struct McpServerAddRequestPayload: Codable, Equatable, Sendable {
             args: args,
             url: url,
             allowedHosts: allowedHosts,
-            clientRequestId: clientRequestId
+            clientRequestId: clientRequestId,
+            persistentData: persistentData
         )
     }
 
@@ -9939,6 +9988,7 @@ public struct McpServerAddRequestPayload: Codable, Equatable, Sendable {
         try container.encodeIfPresent(url, forKey: .url)
         try container.encode(allowedHosts, forKey: .allowedHosts)
         try container.encodeIfPresent(clientRequestId, forKey: .clientRequestId)
+        try container.encodeIfPresent(persistentData, forKey: .persistentData)
     }
 }
 
@@ -10247,6 +10297,7 @@ public struct McpServerInfo: Codable, Equatable, Sendable {
     public let enabled: Bool
     public let state: McpServerState
     public let failure: String?
+    public let persistentData: McpPersistentDataInfo?
     public let createdAt: String
     public let updatedAt: String?
 
@@ -10261,6 +10312,7 @@ public struct McpServerInfo: Codable, Equatable, Sendable {
         enabled: Bool,
         state: McpServerState,
         failure: String? = nil,
+        persistentData: McpPersistentDataInfo? = nil,
         createdAt: String,
         updatedAt: String? = nil
     ) {
@@ -10274,6 +10326,7 @@ public struct McpServerInfo: Codable, Equatable, Sendable {
         self.enabled = enabled
         self.state = state
         self.failure = failure
+        self.persistentData = persistentData
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -10289,6 +10342,7 @@ public struct McpServerInfo: Codable, Equatable, Sendable {
         case enabled = "enabled"
         case state = "state"
         case failure = "failure"
+        case persistentData = "persistentData"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
     }
@@ -10305,6 +10359,7 @@ public struct McpServerInfo: Codable, Equatable, Sendable {
         let enabled = try container.decode(Bool.self, forKey: .enabled)
         let state = try container.decode(McpServerState.self, forKey: .state)
         let failure = try container.decodeIfPresent(String.self, forKey: .failure)
+        let persistentData = try container.decodeIfPresent(McpPersistentDataInfo.self, forKey: .persistentData)
         let createdAt = try container.decode(String.self, forKey: .createdAt)
         let updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
         self.init(
@@ -10318,6 +10373,7 @@ public struct McpServerInfo: Codable, Equatable, Sendable {
             enabled: enabled,
             state: state,
             failure: failure,
+            persistentData: persistentData,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -10335,6 +10391,7 @@ public struct McpServerInfo: Codable, Equatable, Sendable {
         try container.encode(enabled, forKey: .enabled)
         try container.encode(state, forKey: .state)
         try container.encodeIfPresent(failure, forKey: .failure)
+        try container.encodeIfPresent(persistentData, forKey: .persistentData)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(updatedAt, forKey: .updatedAt)
     }

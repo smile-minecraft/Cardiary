@@ -8307,6 +8307,28 @@
       "enum": ["disabled", "ready", "failed"],
       "description": "MCP 伺服器的狀態。"
     },
+    "McpPersistentDataInfo": {
+      "title": "McpPersistentDataInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "bytes", "files"],
+      "properties": {
+        "allowed": {
+          "type": "boolean",
+          "description": "是否已核准寫入自己的持久資料目錄（modules/mcp/<serverId>/）；核准後手改設定會失效。"
+        },
+        "bytes": {
+          "type": "integer",
+          "description": "目錄內檔案的容量總和（bytes）。",
+          "minimum": 0
+        },
+        "files": {
+          "type": "integer",
+          "description": "目錄內檔案與符號連結的數量；子目錄不計入。",
+          "minimum": 0
+        }
+      }
+    },
     "McpServerInfo": {
       "title": "McpServerInfo",
       "type": "object",
@@ -8366,6 +8388,9 @@
         "failure": {
           "type": "string",
           "description": "啟動失敗或沙盒無法套用時的原因。"
+        },
+        "persistentData": {
+          "$ref": "#/$defs/McpPersistentDataInfo"
         },
         "createdAt": {
           "type": "string",
@@ -8442,6 +8467,10 @@
         "clientRequestId": {
           "type": "string",
           "description": "冪等鍵；重送只提出一次審批。"
+        },
+        "persistentData": {
+          "type": "boolean",
+          "description": "是否在核准時一併授權這個伺服器寫入自己的持久資料目錄（modules/mcp/<serverId>/）；預設不授權。"
         }
       }
     },

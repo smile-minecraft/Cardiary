@@ -3208,6 +3208,17 @@ add("McpTransport", stringEnum(["stdio", "http"], "MCP 伺服器的傳輸方式�
 add("McpServerState", stringEnum(["disabled", "ready", "failed"], "MCP 伺服器的狀態。"));
 
 add(
+  "McpPersistentDataInfo",
+  objectOf("McpPersistentDataInfo", ["allowed", "bytes", "files"], {
+    allowed: bool(
+      "是否已核准寫入自己的持久資料目錄（modules/mcp/<serverId>/）；核准後手改設定會失效。",
+    ),
+    bytes: int("目錄內檔案的容量總和（bytes）。", { minimum: 0 }),
+    files: int("目錄內檔案與符號連結的數量；子目錄不計入。", { minimum: 0 }),
+  }),
+);
+
+add(
   "McpServerInfo",
   objectOf(
     "McpServerInfo",
@@ -3226,6 +3237,7 @@ add(
       enabled: bool("使用者是否啟用。"),
       state: ref("McpServerState"),
       failure: str("啟動失敗或沙盒無法套用時的原因。"),
+      persistentData: ref("McpPersistentDataInfo"),
       createdAt: str("建立時間，RFC 3339。", { format: "date-time" }),
       updatedAt: str("最後更新時間，RFC 3339。", { format: "date-time" }),
     },
@@ -3257,6 +3269,9 @@ add(
       "HTTP 傳輸允許連線的主機；stdio 傳輸不需要外連，可以空陣列。",
     ),
     clientRequestId: str("冪等鍵；重送只提出一次審批。"),
+    persistentData: bool(
+      "是否在核准時一併授權這個伺服器寫入自己的持久資料目錄（modules/mcp/<serverId>/）；預設不授權。",
+    ),
   }),
 );
 
