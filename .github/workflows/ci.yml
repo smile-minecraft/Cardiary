@@ -81,6 +81,9 @@ jobs:
       - name: 殼測試
         working-directory: apps/macos
         run: swift test
+      # build-app.sh 會把 apps/web/dist 打包進 App 的 Resources/web；CI 沒有開發用的 dist，要先建置。
+      - name: 建置網頁客戶端
+        run: pnpm --filter web build
       - name: 組裝 App
         working-directory: apps/macos
         run: ./Scripts/build-app.sh

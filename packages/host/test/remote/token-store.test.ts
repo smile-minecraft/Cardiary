@@ -10,6 +10,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ControlChannel } from "../../src/control/channel.js";
 import { startHost, UnavailableCredentials, type RunningHost } from "../../src/bootstrap.js";
+import { REMOTE_ACCESS_SETTING_KEY } from "../../src/gateway/remote-access.js";
+import { HOST_SERVICE_NAMES, type CardEnvironment } from "../../src/modules/contract.js";
 import { registerRemoteControlRoutes } from "../../src/remote/control.js";
 import { TestClient, waitUntil } from "../helpers.js";
 
@@ -63,6 +65,13 @@ async function boot(folderPath: string, initializeFolder: boolean): Promise<Boot
     initializeFolder,
     credentials: new UnavailableCredentials(),
     logger: collectingLogger(lines),
+  });
+  // 這一組驗證 Token 持久化；遠端開關本身由 access.test.ts 驗證。
+  host.hostServices.require<CardEnvironment>(HOST_SERVICE_NAMES.cardStorage).settings.set({
+    key: REMOTE_ACCESS_SETTING_KEY,
+    value: "true",
+    level: "human-only",
+    updatedBy: "test",
   });
   const booted: Booted = {
     host,

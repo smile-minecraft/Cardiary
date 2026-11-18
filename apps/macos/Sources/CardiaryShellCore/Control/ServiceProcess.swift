@@ -23,7 +23,8 @@ public struct ServiceLaunchPlan: Equatable, Sendable {
     ///
     /// - `TMPDIR`／`TMP`／`TEMP` 指到 `<folder>/tmp`。
     /// - `HOME` 與 `PATH` 明確指定，不繼承殼的環境。
-    /// - `arguments` 只有 Node 的旗標與服務腳本路徑；Token 不進 argv。
+    /// - `CARDIARY_WEB_ROOT` 指到內嵌網頁；`--port` 傳偏好埠，被占用時服務往上找。
+    /// - `arguments` 只有 Node 的旗標、服務腳本路徑與埠；Token 不進 argv。
     ///
     /// `initializeFolder` 會加上 `--initialize-folder`：空的資料夾由服務建立
     /// `state/folder.json` 與三個資料庫；已有身分的資料夾不受影響。
@@ -32,23 +33,29 @@ public struct ServiceLaunchPlan: Equatable, Sendable {
         scriptURL: URL,
         folderPath: String,
         initializeFolder: Bool = false,
+        servicePort: UInt16? = nil,
+        webRoot: URL? = nil,
         homeDirectory: String = NSHomeDirectory()
     ) -> ServiceLaunchPlan {
         let tmp = URL(fileURLWithPath: folderPath, isDirectory: true)
             .appendingPathComponent("tmp", isDirectory: true)
             .path
+        var arguments = ["--disable-warning=ExperimentalWarning", scriptURL.path]
+        if initializeFolder { arguments.append("--initialize-folder") }
+        if let servicePort { arguments += ["--port", String(servicePort)] }
+        var environment = [
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "HOME": homeDirectory,
+            "TMPDIR": tmp,
+            "TMP": tmp,
+            "TEMP": tmp,
+            "CARDIARY_SHELL": "1",
+        ]
+        if let webRoot { environment["CARDIARY_WEB_ROOT"] = webRoot.path }
         return ServiceLaunchPlan(
             executableURL: nodeURL,
-            arguments: ["--disable-warning=ExperimentalWarning", scriptURL.path]
-                + (initializeFolder ? ["--initialize-folder"] : []),
-            environment: [
-                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-                "HOME": homeDirectory,
-                "TMPDIR": tmp,
-                "TMP": tmp,
-                "TEMP": tmp,
-                "CARDIARY_SHELL": "1",
-            ],
+            arguments: arguments,
+            environment: environment,
             workingDirectory: URL(fileURLWithPath: folderPath, isDirectory: true)
         )
     }

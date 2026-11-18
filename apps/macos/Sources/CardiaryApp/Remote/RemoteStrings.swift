@@ -29,6 +29,18 @@ public enum RemoteString: String, CaseIterable, Sendable {
     case remoteDevicesFingerprint
     case remoteAccessUnavailable
     case remoteDevicesRefresh
+    case remoteAccessTitle
+    case remoteAccessToggle
+    case remoteAccessBody
+    case remoteAccessDisabledHint
+    case remoteAccessSaved
+    case remoteAccessLoadFailed
+    case remoteAccessSaveFailed
+    case remoteAddressTitle
+    case remoteAddressHint
+    case remoteAddressCopy
+    case remoteAddressCopied
+    case remoteAddressUnavailable
 }
 
 /// 遠端介面的字串查詢。
@@ -100,6 +112,18 @@ enum RemoteStringTables {
             "remoteDevicesFingerprint": "指紋：{value}",
             "remoteAccessUnavailable": "還沒連上服務，遠端存取需要連線。",
             "remoteDevicesRefresh": "重新整理",
+            "remoteAccessTitle": "遠端存取",
+            "remoteAccessToggle": "允許遠端裝置連線",
+            "remoteAccessBody": "開啟後，經加密通道的配對請求與已配對裝置才能連到這台電腦；關閉時只接受本機連線。",
+            "remoteAccessDisabledHint": "遠端存取已關閉，新的配對與遠端連線都會被拒絕。已配對裝置仍會列在下面。",
+            "remoteAccessSaved": "已更新遠端存取設定。",
+            "remoteAccessLoadFailed": "讀取遠端存取設定失敗：{value}",
+            "remoteAccessSaveFailed": "儲存遠端存取設定失敗：{value}",
+            "remoteAddressTitle": "服務位址",
+            "remoteAddressHint": "在已配對的裝置上開啟這個位址。從其他網路連線時，需要先用 Tailscale Serve 或等價的轉發，把這個位址接到本機的 127.0.0.1；服務只綁定 loopback，直接連 Tailscale 位址不會通。",
+            "remoteAddressCopy": "複製位址",
+            "remoteAddressCopied": "已複製位址。",
+            "remoteAddressUnavailable": "服務啟動後會顯示位址。",
         ],
         .en: [
             "remotePairingTitle": "Approve a new device",
@@ -127,6 +151,18 @@ enum RemoteStringTables {
             "remoteDevicesFingerprint": "Fingerprint: {value}",
             "remoteAccessUnavailable": "Not connected; remote access needs a service connection.",
             "remoteDevicesRefresh": "Refresh",
+            "remoteAccessTitle": "Remote access",
+            "remoteAccessToggle": "Allow remote devices",
+            "remoteAccessBody": "When on, pairing requests and paired devices can reach this Mac over an encrypted channel. When off, only local connections are accepted.",
+            "remoteAccessDisabledHint": "Remote access is off. New pairings and remote connections are refused; paired devices stay listed below.",
+            "remoteAccessSaved": "Remote access setting updated.",
+            "remoteAccessLoadFailed": "Could not read the remote access setting: {value}",
+            "remoteAccessSaveFailed": "Could not save the remote access setting: {value}",
+            "remoteAddressTitle": "Service address",
+            "remoteAddressHint": "Open this address on a paired device. From another network, set up Tailscale Serve or an equivalent forwarder to this Mac's loopback address first; the service only listens on 127.0.0.1, so a direct Tailscale address will not connect.",
+            "remoteAddressCopy": "Copy address",
+            "remoteAddressCopied": "Address copied.",
+            "remoteAddressUnavailable": "The address appears once the service starts.",
         ],
     ]
 }

@@ -398,7 +398,9 @@ final class ShellController: NSObject {
                 scriptURL: script,
                 folderPath: path,
                 // 空的資料夾由服務初始化；已有 state/folder.json 時這個旗標不影響。
-                initializeFolder: true
+                initializeFolder: true,
+                servicePort: AppPaths.preferredServicePort,
+                webRoot: AppPaths.webRoot()
             )
             let configuration = ServiceSupervisorConfiguration(launchPlan: plan)
             let broker = brokerService
@@ -433,6 +435,8 @@ final class ShellController: NSObject {
 
     private func applyServiceSnapshot(_ snapshot: ServiceStatusSnapshot) {
         serviceSnapshot = snapshot
+        // 設定頁顯示的遠端位址跟著服務實際監聽的埠。
+        appModel?.remote.update(servicePort: snapshot.phase == .running ? snapshot.clientPort : nil)
 
         if let folderId = snapshot.folderId, authorization?.folderId != folderId {
             authorization?.folderId = folderId

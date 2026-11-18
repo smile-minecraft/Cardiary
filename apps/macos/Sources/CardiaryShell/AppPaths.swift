@@ -7,6 +7,30 @@ enum AppPaths {
         Bundle.main.bundleURL
     }
 
+    /// 服務偏好埠。被占用時服務會往上找，真正的埠由 ready frame 回報。
+    static let preferredServicePort: UInt16 = 63_715
+
+    /// 內嵌的網頁客戶端：`Contents/Resources/web`。
+    static func webRoot(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
+        if let override = environment["CARDIARY_WEB_ROOT"], !override.isEmpty {
+            return URL(fileURLWithPath: override)
+        }
+        let bundled = bundleURL.appendingPathComponent("Contents/Resources/web")
+        if FileManager.default.fileExists(atPath: bundled.appendingPathComponent("index.html").path) {
+            return bundled
+        }
+        // 開發時直接跑 .build/debug/CardiaryShell：找 repo 裡的 apps/web/dist。
+        var directory = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
+        for _ in 0..<6 {
+            let candidate = directory.appendingPathComponent("apps/web/dist")
+            if FileManager.default.fileExists(atPath: candidate.appendingPathComponent("index.html").path) {
+                return candidate
+            }
+            directory = directory.deletingLastPathComponent()
+        }
+        return nil
+    }
+
     /// 內嵌的 Node 執行檔：`Contents/Helpers/Node/node`。
     static func nodeExecutable(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
         if let override = environment["CARDIARY_NODE"], !override.isEmpty {

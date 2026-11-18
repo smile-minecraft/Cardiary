@@ -36,12 +36,33 @@ public final class RemoteModel: ObservableObject {
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var noticeMessage: String?
 
+    /// 主機的人類專屬設定 `remote.accessEnabled`。還沒讀到之前一律當作關閉。
+    @Published public private(set) var accessEnabled = false
+    @Published public private(set) var accessLoaded = false
+    @Published public private(set) var savingAccess = false
+    @Published public private(set) var accessError: String?
+    @Published public private(set) var accessNotice: String?
+    /// 服務實際監聽的埠；由殼在服務就緒後填入。
+    @Published public private(set) var servicePort: UInt16?
+
     private var service: (any RemoteControlService)?
+    private var settingsService: (any SettingsService)?
     private let language: AppLanguage
+
+    /// 主機設定鍵；關閉時閘道只接受本機連線。
+    public static let accessSettingKey = "remote.accessEnabled"
 
     public init(language: AppLanguage = AppL10n.language) {
         self.language = language
     }
+
+    /// 遠端裝置要打開的位址。沒有服務埠時為 `nil`。
+    public var remoteAddress: String? {
+        servicePort.map { "http://127.0.0.1:\($0)" }
+    }
+
+    /// 遠端存取關閉時，新的配對與遠端連線都會被主機拒絕；已配對裝置仍可列出。
+    public var isPairingPaused: Bool { accessLoaded && !accessEnabled }
 
     public func attach(service: any RemoteControlService) {
         self.service = service
@@ -54,6 +75,77 @@ public final class RemoteModel: ObservableObject {
         isKnown = false
         decidingIds = []
         revokingIds = []
+    }
+
+    /// 設定請求走客戶端協定；殼在連線建立後一起接上。
+    public func attachSettings(service: any SettingsService) {
+        settingsService = service
+    }
+
+    public func detachSettings() {
+        settingsService = nil
+        accessEnabled = false
+        accessLoaded = false
+        savingAccess = false
+        accessError = nil
+        accessNotice = nil
+    }
+
+    /// 殼回報服務實際監聽的埠。
+    public func update(servicePort: UInt16?) {
+        self.servicePort = servicePort
+    }
+
+    /// 從主機讀取 `remote.accessEnabled`。
+    public func loadAccessSetting() async {
+        guard let settingsService else { return }
+        do {
+            let payload = try await settingsService.getSettings()
+            let item = payload.settings.first { $0.key == Self.accessSettingKey }
+            if case .bool(let enabled)? = item?.value {
+                accessEnabled = enabled
+            } else {
+                accessEnabled = false
+            }
+            accessLoaded = true
+            accessError = nil
+        } catch {
+            accessError = RemoteL10n.format(
+                .remoteAccessLoadFailed, value: Self.errorText(error), language: language
+            )
+        }
+    }
+
+    /// 寫入 `remote.accessEnabled`。成功後以主機回傳的值為準。
+    public func setAccessEnabled(_ enabled: Bool) async {
+        guard !savingAccess else { return }
+        guard let settingsService else {
+            accessError = RemoteL10n.text(.remoteAccessUnavailable, language: language)
+            return
+        }
+        savingAccess = true
+        defer { savingAccess = false }
+        do {
+            let payload = try await settingsService.setSettings(
+                changes: [
+                    SettingChange(key: Self.accessSettingKey, value: .bool(enabled))
+                ],
+                clientRequestId: ClientRequestID.next("remote-access")
+            )
+            let applied = payload.applied.first { $0.key == Self.accessSettingKey }
+            if case .bool(let saved)? = applied?.value {
+                accessEnabled = saved
+            } else {
+                accessEnabled = enabled
+            }
+            accessLoaded = true
+            accessError = nil
+            accessNotice = RemoteL10n.text(.remoteAccessSaved, language: language)
+        } catch {
+            accessError = RemoteL10n.format(
+                .remoteAccessSaveFailed, value: Self.errorText(error), language: language
+            )
+        }
     }
 
     /// 服務送來新的配對請求；同一個識別碼重複送來時不產生第二個視窗。

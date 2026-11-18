@@ -77,14 +77,22 @@ final class GeneralSettingsModelTests: XCTestCase {
                 title: "模型角色",
                 updatedAt: "2026-01-01T00:00:00Z"
             ),
+            SettingItem(
+                key: "remote.accessEnabled",
+                value: .bool(false),
+                level: .humanOnly,
+                title: "允許遠端裝置連線",
+                updatedAt: "2026-01-01T00:00:00Z"
+            ),
         ]
         model.attach(service: FakeCardiaryService(settings: settings))
 
         await model.load()
 
-        XCTAssertEqual(model.items.count, 3, "供應商與角色只出現在模型分頁")
+        XCTAssertEqual(model.items.count, 3, "供應商、角色與遠端開關只在各自的分頁")
         XCTAssertNil(model.drafts["models.providers"])
         XCTAssertNil(model.drafts["models.roles"])
+        XCTAssertNil(model.drafts["remote.accessEnabled"])
         XCTAssertNil(model.errorMessage)
     }
 

@@ -127,6 +127,142 @@ final class RemoteModelTests: XCTestCase {
         XCTAssertTrue(model.devices.isEmpty)
         XCTAssertFalse(model.isKnown)
     }
+
+    // MARK: - 遠端存取開關與位址
+
+    private func accessItem(_ enabled: Bool) -> SettingItem {
+        SettingItem(
+            key: "remote.accessEnabled",
+            value: .bool(enabled),
+            level: .humanOnly,
+            updatedAt: "2026-01-01T00:00:00Z"
+        )
+    }
+
+    func testLoadAccessSettingReadsHumanSetting() async {
+        let settings = FakeSettingsService(items: [accessItem(true)])
+        let model = makeModel()
+        model.attachSettings(service: settings)
+
+        await model.loadAccessSetting()
+
+        XCTAssertTrue(model.accessEnabled)
+        XCTAssertTrue(model.accessLoaded)
+        XCTAssertFalse(model.isPairingPaused)
+        XCTAssertNil(model.accessError)
+    }
+
+    func testSetAccessEnabledWritesSetting() async {
+        let settings = FakeSettingsService()
+        let model = makeModel()
+        model.attachSettings(service: settings)
+
+        await model.setAccessEnabled(true)
+
+        let changes = await settings.changes
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(changes.first?.first?.key, "remote.accessEnabled")
+        XCTAssertEqual(changes.first?.first?.value, .bool(true))
+        XCTAssertTrue(model.accessEnabled)
+        XCTAssertEqual(model.accessNotice, "已更新遠端存取設定。")
+    }
+
+    func testSetAccessEnabledFailureKeepsPreviousValue() async {
+        let settings = FakeSettingsService()
+        await settings.failNextSave()
+        let model = makeModel()
+        model.attachSettings(service: settings)
+
+        await model.setAccessEnabled(true)
+
+        XCTAssertFalse(model.accessEnabled)
+        XCTAssertNotNil(model.accessError)
+        XCTAssertNil(model.accessNotice)
+    }
+
+    func testDisabledAccessKeepsDevicesListAndPausesPairing() async {
+        let settings = FakeSettingsService(items: [accessItem(false)])
+        let model = makeModel()
+        model.attachSettings(service: settings)
+        await model.loadAccessSetting()
+        let fake = FakeRemoteControlService()
+        await fake.setDevices([device()])
+        model.attach(service: fake)
+
+        await model.refreshDevices()
+
+        XCTAssertTrue(model.isPairingPaused)
+        XCTAssertEqual(model.devices.map(\.deviceId), ["dev-1"])
+    }
+
+    func testRemoteAddressFollowsServicePort() {
+        let model = makeModel()
+        XCTAssertNil(model.remoteAddress)
+
+        model.update(servicePort: 63_715)
+        XCTAssertEqual(model.remoteAddress, "http://127.0.0.1:63715")
+
+        model.update(servicePort: nil)
+        XCTAssertNil(model.remoteAddress)
+    }
+
+    func testDetachSettingsClearsAccessState() async {
+        let settings = FakeSettingsService(items: [accessItem(true)])
+        let model = makeModel()
+        model.attachSettings(service: settings)
+        await model.loadAccessSetting()
+
+        model.detachSettings()
+
+        XCTAssertFalse(model.accessEnabled)
+        XCTAssertFalse(model.accessLoaded)
+        XCTAssertFalse(model.isPairingPaused)
+    }
+}
+
+private actor FakeSettingsService: SettingsService {
+    private var items: [SettingItem]
+    private var shouldFailNextSave = false
+    private(set) var changes: [[SettingChange]] = []
+
+    init(items: [SettingItem] = []) {
+        self.items = items
+    }
+
+    func failNextSave() {
+        shouldFailNextSave = true
+    }
+
+    func getSettings() async throws -> SystemSettingsGetResponsePayload {
+        SystemSettingsGetResponsePayload(settings: items)
+    }
+
+    func setSettings(
+        changes: [SettingChange],
+        clientRequestId: String
+    ) async throws -> SystemSettingsSetResponsePayload {
+        if shouldFailNextSave {
+            shouldFailNextSave = false
+            throw FakeError.failed
+        }
+        self.changes.append(changes)
+        var applied: [SettingItem] = []
+        for change in changes {
+            let item = SettingItem(
+                key: change.key,
+                value: change.value,
+                level: .humanOnly,
+                updatedAt: "2026-01-01T00:00:00Z"
+            )
+            if let index = items.firstIndex(where: { $0.key == change.key }) {
+                items[index] = item
+            } else {
+                items.append(item)
+            }
+            applied.append(item)
+        }
+        return SystemSettingsSetResponsePayload(applied: applied, requiresApproval: false)
+    }
 }
 
 private actor FakeRemoteControlService: RemoteControlService {

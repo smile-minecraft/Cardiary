@@ -71,6 +71,12 @@ const HUMAN_ONLY_DEFINITIONS = [
     defaultValue: null,
   },
   {
+    key: "remote.accessEnabled",
+    title: "允許遠端裝置連線",
+    description: "允許經加密通道的遠端裝置配對與連線；關閉時只接受本機連線。",
+    defaultValue: false,
+  },
+  {
     key: "retrieval.allowModelDownload",
     title: "允許下載本機嵌入模型",
     description:

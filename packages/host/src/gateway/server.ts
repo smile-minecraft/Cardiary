@@ -92,6 +92,7 @@ import {
 } from "@cardiary/domain";
 import { settingLevel } from "../settings/catalog.js";
 import { mapEventIntent, validateEventPayload } from "./events.js";
+import { isLoopbackAddress } from "./remote-access.js";
 import { DEFAULT_LIMITS, type GatewayLimits } from "./limits.js";
 import { systemStatus, type HostStatusInput } from "./status.js";
 import { StreamLog, type StoredEvent } from "./streams.js";
@@ -194,6 +195,14 @@ export interface GatewayOptions {
    * （以目前的工作目錄解析）。
    */
   readonly webRoot?: string | null;
+  /**
+   * 遠端存取開關的當下值；省略時視為開啟（只影響直接建立閘道的測試）。
+   *
+   * 正式組裝由組合根接上設定儲存；關閉時配對、裝置 Token 認證與
+   * 既有裝置的每個請求都會被拒，已連線的裝置也會立刻被切斷，
+   * 殼的 `clientToken` 不受影響。
+   */
+  readonly remoteAccessEnabled?: () => boolean;
 }
 
 export class RequestFailure extends Error {
@@ -287,6 +296,7 @@ export class Gateway {
   /** 宿主審批（沒有對話）轉成 system 串流事件的訂閱。 */
   readonly #systemApprovals: Unsubscribe;
   readonly #remote: RemoteStack;
+  readonly #remoteAccessEnabled: () => boolean;
   readonly #staticHandler: StaticHandler | null;
   #http: Server | null = null;
   #wss: WebSocketServer | null = null;
@@ -307,6 +317,7 @@ export class Gateway {
     this.#clock = options.clock ?? { now: () => new Date() };
     this.#faultSkipComplete = options.faultSkipDedupeComplete === true;
     this.#remote = options.remote ?? createRemoteStack();
+    this.#remoteAccessEnabled = options.remoteAccessEnabled ?? (() => true);
     const webRoot =
       options.webRoot === undefined
         ? (process.env.CARDIARY_WEB_ROOT ?? "apps/web/dist")
@@ -354,12 +365,31 @@ export class Gateway {
    * 回傳關閉的連線數；連線關閉前會先把訂閱清空（`close` 的語義）。
    */
   closeDeviceConnections(deviceId: string): number {
+    return this.#closeConnections(
+      (connection) => connection.deviceId === deviceId,
+      "device_revoked",
+    );
+  }
+
+  /**
+   * 關閉所有遠端裝置連線；遠端存取關閉時呼叫。
+   *
+   * 「遠端」以裝置 Token 認證區分，不看對端位址：閘道只綁 127.0.0.1，
+   * 遠端裝置是經 Tailscale Serve 之類的轉發從 loopback 進來的。
+   */
+  #closeRemoteConnections(): number {
+    return this.#closeConnections(
+      (connection) => connection.deviceTokenHash !== null,
+      "remote_access_disabled",
+    );
+  }
+
+  #closeConnections(match: (connection: ClientConnection) => boolean, reason: string): number {
     let closed = 0;
     for (const connection of this.#connections.values()) {
-      if (connection.deviceId === deviceId) {
-        connection.close(1008, "device_revoked");
-        closed += 1;
-      }
+      if (!match(connection)) continue;
+      connection.close(1008, reason);
+      closed += 1;
     }
     return closed;
   }
@@ -407,20 +437,46 @@ export class Gateway {
     });
     this.#http = http;
     this.#wss = wss;
-    await new Promise<void>((resolve, reject) => {
-      http.once("error", reject);
-      http.listen(port, "127.0.0.1", () => {
-        http.removeListener("error", reject);
-        resolve();
-      });
-    });
-    const address = http.address();
-    this.#port = typeof address === "object" && address !== null ? address.port : 0;
+    this.#port = await this.#listenOn(http, port);
     this.#heartbeat = setInterval(() => {
       this.heartbeatTick();
     }, this.limits.heartbeatSeconds * 1000);
     this.#heartbeat.unref?.();
     return this.#port;
+  }
+
+  /**
+   * 綁定 127.0.0.1；指定偏好埠時，被占用就依序往上找。
+   *
+   * 殼固定傳 63715，實際埠可能因其他程式占用而往後移；
+   * 真正的監聽埠由 `listen` 回傳並經 ready frame 交給殼。
+   */
+  async #listenOn(http: Server, port: number): Promise<number> {
+    const first = port === 0 ? 0 : port;
+    const last = port === 0 ? 0 : Math.min(port + 99, 65_535);
+    for (let candidate = first; ; candidate += 1) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const onError = (error: NodeJS.ErrnoException): void => {
+            http.removeListener("listening", onListening);
+            reject(error);
+          };
+          const onListening = (): void => {
+            http.removeListener("error", onError);
+            resolve();
+          };
+          http.once("error", onError);
+          http.once("listening", onListening);
+          http.listen(candidate, "127.0.0.1");
+        });
+        const address = http.address();
+        return typeof address === "object" && address !== null ? address.port : candidate;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (candidate < last && code === "EADDRINUSE") continue;
+        throw error;
+      }
+    }
   }
 
   /** pause／shutdown：停止受理新的客戶端請求，既有連線保留。 */
@@ -619,6 +675,10 @@ export class Gateway {
   // ---- 連線與驗證 -------------------------------------------------------
 
   #onConnection(request: IncomingMessage, ws: WebSocket): void {
+    if (!isLoopbackAddress(request.socket.remoteAddress)) {
+      ws.close(1008, "loopback_required");
+      return;
+    }
     const origin = request.headers.origin;
     const headerAuth = parseBearer(request.headers.authorization);
     const connection = new ClientConnection({
@@ -742,6 +802,19 @@ export class Gateway {
     }
     if (!connection.authenticated) {
       // 未認證連線只允許配對開始與（同連線）完成；其餘一律拒絕。
+      if (
+        (type === "pairing.begin" || type === "pairing.complete") &&
+        !this.#remoteAccessEnabled()
+      ) {
+        await this.#sendError(
+          connection,
+          protocolError("permission_denied", "遠端存取已關閉。", {
+            details: { reason: "remote_access_disabled" },
+          }),
+          id,
+        );
+        return;
+      }
       try {
         if (type === "pairing.begin") {
           const frame = await handlePairingBegin(this.#remote, connection.id, request);
@@ -770,6 +843,18 @@ export class Gateway {
       return;
     }
     if (connection.deviceTokenHash !== null) {
+      // 開關關閉時，既有裝置的每個請求立刻被拒，不必等服務重啟。
+      if (!this.#remoteAccessEnabled()) {
+        await this.#sendError(
+          connection,
+          protocolError("permission_denied", "遠端存取已關閉。", {
+            details: { reason: "remote_access_disabled" },
+          }),
+          id,
+        );
+        connection.close(1008, "remote_access_disabled");
+        return;
+      }
       // 撤銷後下一個請求就失敗，不只關既有連線。
       const check = await checkDeviceTokenActive(this.#remote, connection.deviceTokenHash);
       if (!check.ok) {
@@ -812,6 +897,11 @@ export class Gateway {
       this.#logger.error("請求處理失敗", { type, message: errorMessage(error) });
       await this.#sendError(connection, protocolError("internal", "主機發生未預期的錯誤。"), id);
       return;
+    }
+    // 遠端存取是唯一會影響既有連線的設定：人一關掉，裝置連線立刻斷，
+    // 不必等它們送出下一個請求或下一則事件。
+    if (type === "system.settings.set" && !this.#remoteAccessEnabled()) {
+      this.#closeRemoteConnections();
     }
     if (isHandled(response)) return;
     cache?.set(id, response);
@@ -878,7 +968,12 @@ export class Gateway {
     const matchesClient = token !== null && constantTimeEqual(token, this.#options.clientToken);
     let deviceId: string | null = null;
     let deviceTokenHash: string | null = null;
-    if (!matchesClient && token !== null && isDeviceTokenShape(token)) {
+    if (
+      !matchesClient &&
+      token !== null &&
+      isDeviceTokenShape(token) &&
+      this.#remoteAccessEnabled()
+    ) {
       // 裝置 Token：雜湊比對 + 撤銷／到期檢查（`verifyDeviceToken` fail closed）。
       const hash = hashDeviceToken(token);
       const record = await this.#remote.devices.findByHash(hash);
@@ -2679,8 +2774,20 @@ export class Gateway {
   }
 
   #broadcastFrame(stream: string, frame: Unknown): void {
+    // 遠端存取關閉後，裝置連線不該再收到事件（可能含對話與記憶內容）；
+    // 這裡順手切斷，讓關閉不必等下一個請求。非 loopback 的連線在建線時
+    // 就被拒絕，遠端裝置一律經 loopback 轉入，所以以裝置 Token 認證判斷。
+    // 沒有裝置連線時不讀設定，因為文字增量每秒數十次，不能每次都查儲存。
+    let remoteAccessEnabled: boolean | null = null;
     for (const connection of this.#connections.values()) {
       if (!connection.authenticated) continue;
+      if (connection.deviceTokenHash !== null) {
+        remoteAccessEnabled ??= this.#remoteAccessEnabled();
+        if (!remoteAccessEnabled) {
+          connection.close(1008, "remote_access_disabled");
+          continue;
+        }
+      }
       if (!connection.subscriptions.has(stream)) continue;
       void connection.send(frame);
     }
@@ -2729,7 +2836,7 @@ export class Gateway {
     const auth = parseBearer(request.headers.authorization);
     const clientOk = auth !== null && constantTimeEqual(auth, this.#options.clientToken);
     let deviceOk = false;
-    if (!clientOk && auth !== null && isDeviceTokenShape(auth)) {
+    if (!clientOk && auth !== null && isDeviceTokenShape(auth) && this.#remoteAccessEnabled()) {
       const hash = hashDeviceToken(auth);
       const record = await this.#remote.devices.findByHash(hash);
       deviceOk = verifyDeviceToken(auth, record, this.#remote.now()).ok;
