@@ -348,6 +348,94 @@ final class BoardModelTests: XCTestCase {
         XCTAssertNil(fake.savedBoard?.groups.first?.parentId)
         XCTAssertEqual(fake.savedBoard?.items.count, 2)
     }
+
+    // MARK: - 圈選送進對話
+
+    func testSendSelectionUsesChosenConversation() async {
+        let fake = FakeBoardService(board: makeBoard())
+        let context = FakeCardiaryService()
+        let model = BoardModel(boardService: fake, contextService: context)
+        await model.reload()
+        model.canvas.setSelection(["item-1"])
+
+        let sent = await model.sendSelection(to: "conv-other")
+
+        XCTAssertTrue(sent)
+        let adds = await context.contextAdds
+        XCTAssertEqual(adds.map(\.sessionId), ["conv-other"])
+        XCTAssertEqual(adds.map(\.cardId), ["card-1"])
+        XCTAssertEqual(model.noticeMessage, BoardL10n.count(.boardsSentToConversation, count: 1))
+    }
+
+    func testSendSelectionToCurrentConversationKeepsExistingPath() async {
+        let fake = FakeBoardService(board: makeBoard())
+        let context = FakeCardiaryService()
+        let model = BoardModel(boardService: fake, contextService: context)
+        await model.reload()
+        model.canvas.setSelection(["item-1"])
+        model.selectedConversationId = { "conv-current" }
+
+        await model.sendSelectionToConversation()
+
+        let adds = await context.contextAdds
+        XCTAssertEqual(adds.map(\.sessionId), ["conv-current"])
+        XCTAssertEqual(adds.map(\.cardId), ["card-1"])
+    }
+
+    func testSendSelectionWithoutConversationKeepsExistingHint() async {
+        let fake = FakeBoardService(board: makeBoard())
+        let context = FakeCardiaryService()
+        let model = BoardModel(boardService: fake, contextService: context)
+        await model.reload()
+        model.canvas.setSelection(["item-1"])
+
+        await model.sendSelectionToConversation()
+
+        XCTAssertEqual(model.errorMessage, BoardL10n.text(.boardsSendUnavailable))
+        let adds = await context.contextAdds
+        XCTAssertTrue(adds.isEmpty)
+    }
+
+    func testSendSelectionCreatesConversationOnlyWhenCardsSelected() async {
+        let fake = FakeBoardService(board: makeBoard())
+        let context = FakeCardiaryService()
+        let model = BoardModel(boardService: fake, contextService: context)
+        await model.reload()
+        var created = 0
+        model.createConversation = {
+            created += 1
+            return "conv-new"
+        }
+
+        let empty = await model.sendSelectionToNewConversation()
+        XCTAssertFalse(empty)
+        XCTAssertEqual(created, 0, "沒有選取卡片時不能建立空對話")
+        XCTAssertEqual(model.errorMessage, BoardL10n.text(.boardsNothingSelected))
+
+        model.canvas.setSelection(["item-1"])
+        let sent = await model.sendSelectionToNewConversation()
+        XCTAssertTrue(sent)
+        XCTAssertEqual(created, 1)
+        let adds = await context.contextAdds
+        XCTAssertEqual(adds.map(\.sessionId), ["conv-new"])
+        XCTAssertEqual(adds.map(\.cardId), ["card-1"])
+    }
+
+    func testSendSelectionReportsConversationCreationFailure() async {
+        let fake = FakeBoardService(board: makeBoard())
+        let context = FakeCardiaryService()
+        let model = BoardModel(boardService: fake, contextService: context)
+        await model.reload()
+        model.canvas.setSelection(["item-1"])
+        model.createConversation = { nil }
+
+        let sent = await model.sendSelectionToNewConversation()
+
+        XCTAssertFalse(sent)
+        XCTAssertEqual(model.errorMessage, BoardL10n.text(.boardsNewConversationFailed))
+        let adds = await context.contextAdds
+        XCTAssertTrue(adds.isEmpty)
+    }
 }
 
 // MARK: - 假服務

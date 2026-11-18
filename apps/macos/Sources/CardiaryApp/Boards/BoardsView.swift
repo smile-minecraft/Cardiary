@@ -257,12 +257,7 @@ struct BoardsView: View {
                 }
                 .buttonStyle(ThemeButtonStyle(kind: .soft))
 
-                Button {
-                    Task { await model.sendSelectionToConversation() }
-                } label: {
-                    Label(BoardL10n.text(.boardsSendToConversation), systemImage: "bubble.left.and.text.bubble.right")
-                }
-                .buttonStyle(ThemeButtonStyle(kind: .soft))
+                sendMenu
             }
             Button {
                 model.undo()
@@ -281,6 +276,37 @@ struct BoardsView: View {
             .disabled(!model.canvas.canRedo)
             .help(BoardL10n.text(.boardsRedo))
         }
+    }
+
+    /// 送進對話：目前對話、清單上的其他對話，或先建立一場新對話。
+    private var sendMenu: some View {
+        let targets = model.conversationTargets()
+        let currentId = model.currentConversationId
+        return Menu {
+            if let currentId {
+                Button(
+                    model.currentConversationTitle.map {
+                        BoardL10n.format(.boardsSendToCurrentConversation, ["title": $0])
+                    } ?? BoardL10n.text(.boardsSendToConversation)
+                ) {
+                    Task { await model.sendSelection(to: currentId) }
+                }
+                Divider()
+            }
+            ForEach(targets.filter { $0.id != currentId }) { target in
+                Button(target.title) {
+                    Task { await model.sendSelection(to: target.id) }
+                }
+            }
+            Divider()
+            Button(BoardL10n.text(.boardsSendToNewConversation)) {
+                Task { await model.sendSelectionToNewConversation() }
+            }
+        } label: {
+            Label(BoardL10n.text(.boardsSendToConversation), systemImage: "bubble.left.and.text.bubble.right")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     private func presentNewGroup() {

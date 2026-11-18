@@ -106,6 +106,23 @@ public final class BoardModel: ObservableObject, AppContentModel {
     /// 目前選取的對話；由掛載點提供，白板不自己管對話選擇。
     public var selectedConversationId: @MainActor () -> String? = { nil }
 
+    /// 白板上可以送進的對話清單；由掛載點讀目前看得到的對話。
+    public var conversationTargets: @MainActor () -> [ConversationTarget] = { [] }
+
+    /// 建立一場新對話並回傳識別碼；由掛載點接到 `AppModel.createConversation()`。
+    public var createConversation: @MainActor () async -> String? = { nil }
+
+    /// 白板頁面可以選擇的對話。
+    public struct ConversationTarget: Identifiable, Equatable, Sendable {
+        public let id: String
+        public let title: String
+
+        public init(id: String, title: String) {
+            self.id = id
+            self.title = title
+        }
+    }
+
     private var service: (any BoardService)?
     private var cardService: (any CardService)?
     private var contextService: (any ContextService)?
@@ -587,23 +604,56 @@ public final class BoardModel: ObservableObject, AppContentModel {
 
     // MARK: - 圈選後的行動
 
-    public func sendSelectionToConversation() async {
-        guard let contextService else { return }
-        guard let conversationId = selectedConversationId() else {
-            errorMessage = BoardL10n.text(.boardsSendUnavailable)
-            return
-        }
+    public var currentConversationId: String? { selectedConversationId() }
+
+    public var currentConversationTitle: String? {
+        guard let id = currentConversationId else { return nil }
+        return conversationTargets().first { $0.id == id }?.title
+    }
+
+    /// 把圈選的卡片加入指定對話的上下文。沒有選取時不送，也不建立任何東西。
+    @discardableResult
+    public func sendSelection(to conversationId: String) async -> Bool {
+        guard let contextService else { return false }
         let cardIds = selectedCardIds
-        guard !cardIds.isEmpty else { return }
+        guard !cardIds.isEmpty else {
+            errorMessage = BoardL10n.text(.boardsNothingSelected)
+            return false
+        }
         do {
             for cardId in cardIds {
                 _ = try await contextService.addCardToContext(sessionId: conversationId, cardId: cardId)
             }
             noticeMessage = BoardL10n.count(.boardsSentToConversation, count: cardIds.count)
             errorMessage = nil
+            return true
         } catch {
             errorMessage = BoardL10n.format(.boardsProjectFailed, value: error.localizedDescription)
+            return false
         }
+    }
+
+    /// 送進目前打開的對話；沒有選對話時提示先選一場。
+    public func sendSelectionToConversation() async {
+        guard let conversationId = selectedConversationId() else {
+            errorMessage = BoardL10n.text(.boardsSendUnavailable)
+            return
+        }
+        await sendSelection(to: conversationId)
+    }
+
+    /// 建立一場新對話再送進去；沒有選取任何卡片時不建立空對話。
+    @discardableResult
+    public func sendSelectionToNewConversation() async -> Bool {
+        guard !selectedCardIds.isEmpty else {
+            errorMessage = BoardL10n.text(.boardsNothingSelected)
+            return false
+        }
+        guard let conversationId = await createConversation() else {
+            errorMessage = BoardL10n.text(.boardsNewConversationFailed)
+            return false
+        }
+        return await sendSelection(to: conversationId)
     }
 
     /// 用圈選的卡片生成一張新卡，血緣由主機記錄。
