@@ -6,6 +6,7 @@ import { chromium, expect, test } from "@playwright/test";
 
 import {
   connect,
+  connectAndHello,
   spawnService,
   type ProtocolClient,
   type SpawnedService,
@@ -60,6 +61,16 @@ test.beforeAll(async () => {
     ],
   });
   baseUrl = `http://127.0.0.1:${service.ready.clientPort}`;
+
+  // 遠端存取預設關閉；比照 Mac 設定頁，由本機客戶端打開人類專屬開關。
+  const local = await connectAndHello(service);
+  const enableId = local.request("system.settings.set", {
+    changes: [{ key: "remote.accessEnabled", value: true }],
+    clientRequestId: "web-e2e-remote-access",
+  });
+  const enableReply = await local.waitForReply(enableId, SETUP_TIMEOUT);
+  expect(enableReply.kind, JSON.stringify(enableReply)).toBe("response");
+  await local.close();
 
   // 未認證連線：pairing.begin → 殼從私有控制通道核准 → 同連線 pairing.complete。
   const pairing = await connect(`ws://127.0.0.1:${service.ready.clientPort}/v1/ws`);
