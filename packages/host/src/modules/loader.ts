@@ -180,27 +180,56 @@ export async function loadFirstPartyModules(options: LoadModulesOptions): Promis
   // 掃描付出這個代價。
   const disabled = candidates.length === 0 ? new Set<string>() : new Set(await settings.disabled());
   const enabledState = (moduleId: string): boolean => !disabled.has(moduleId);
+  /** 必要相依（非 optional）都已經在啟用狀態。 */
+  const requiredDependenciesActive = (
+    dependencies: HostModule["manifest"]["dependencies"],
+  ): boolean =>
+    dependencies
+      .filter((dependency) => dependency.optional !== true)
+      .every((dependency) => registry.record(dependency.moduleId)?.state === "active");
+  /**
+   * 把設定為啟用、但因為相依而被留在 inactive 的模組補回來。
+   *
+   * 一次掃描只能處理排序在相依之後的模組；dealing 這種相依再相依的模組
+   * 要反覆掃描到沒有進展為止。
+   */
+  const activateRestoredModules = async (): Promise<void> => {
+    let activated = true;
+    while (activated) {
+      activated = false;
+      for (const record of registry.list()) {
+        const moduleId = record.identity.id;
+        if (record.state !== "inactive") continue;
+        if (disabled.has(moduleId) || failures.has(moduleId)) continue;
+        const manifest = registry.manifestOf(moduleId);
+        if (manifest === null || !requiredDependenciesActive(manifest.dependencies)) continue;
+        await registry.activate(moduleId);
+        activated = true;
+      }
+    }
+  };
   for (const module of ordered) {
-    const isDisabled = disabled.has(module.manifest.id);
+    const moduleId = module.manifest.id;
+    // 相依被停用或啟動失敗時，模組只能停在 inactive；硬啟用會讓它拿不到
+    // 服務而變成 failed，之後就無法隨相依恢復。
+    const dependencyReady = requiredDependenciesActive(module.manifest.dependencies);
+    const isDisabled = disabled.has(moduleId);
     try {
-      await registry.load(module, { inactive: isDisabled });
+      await registry.load(module, { inactive: isDisabled || !dependencyReady });
     } catch (error) {
-      failures.set(module.manifest.id, {
-        moduleId: module.manifest.id,
+      failures.set(moduleId, {
+        moduleId,
         name: module.manifest.name,
         version: module.manifest.version,
         failure: messageOf(error),
       });
       options.warn?.("模組描述檔不合法", {
-        moduleId: module.manifest.id,
+        moduleId,
         message: messageOf(error),
       });
+      continue;
     }
-  }
-
-  for (const module of ordered) {
-    const moduleId = module.manifest.id;
-    if (disabled.has(moduleId) || failures.has(moduleId)) continue;
+    if (isDisabled || failures.has(moduleId) || !dependencyReady) continue;
     await registry.activate(moduleId);
   }
 
@@ -257,7 +286,9 @@ export async function loadFirstPartyModules(options: LoadModulesOptions): Promis
         );
       }
       const current = infoOf(moduleId);
-      if (current.enabled === enabled) {
+      // 同一個狀態重複設定是安全的，但不把「enabled 為真、實際卻沒在跑」
+      // 當成已經啟用：相依恢復後要能重試，failed 也不能被永久鎖住。
+      if (enabled ? current.enabled && current.state === "active" : !current.enabled) {
         return current;
       }
       const nextDisabled = new Set(await settings.disabled());
@@ -274,9 +305,18 @@ export async function loadFirstPartyModules(options: LoadModulesOptions): Promis
       }
       if (enabled) {
         const record = registry.record(moduleId);
-        if (record !== null && record.state !== "active") {
+        const manifest = registry.manifestOf(moduleId);
+        if (
+          record !== null &&
+          record.state !== "active" &&
+          manifest !== null &&
+          requiredDependenciesActive(manifest.dependencies)
+        ) {
           await registry.activate(moduleId);
         }
+        // 停用被相依的模組時，相依者只是被連帶停用；重新啟用它們時要一起
+        // 回到 active，使用者不必手動先關再開。
+        await activateRestoredModules();
       } else {
         const record = registry.record(moduleId);
         if (record !== null && record.state === "active") {
