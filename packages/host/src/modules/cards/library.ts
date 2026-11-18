@@ -31,6 +31,7 @@ import {
   CardVersionsStore,
   PendingPatchesStore,
   StorageError,
+  type CardFileContent,
   type CardFileEntry,
   type CardFileStore,
   type PendingCardPatch,
@@ -90,6 +91,8 @@ interface CreateCardInput {
   readonly kind: CardKind;
   readonly title: string;
   readonly body: string;
+  /** 呼叫端指定的穩定識別碼；檔案已存在時沿用該卡，供重試與冪等建立使用。 */
+  readonly cardId?: string;
   readonly summary?: string;
   readonly tags?: readonly string[];
   readonly persona?: string;
@@ -426,7 +429,12 @@ export class CardLibrary {
           kind,
         });
       }
-      const cardId = this.#newUniqueId();
+      const requestedId = input.cardId === undefined ? undefined : normalizeCardId(input.cardId);
+      if (requestedId !== undefined) {
+        const existing = this.#files.read(requestedId);
+        if (existing !== undefined) return this.#adoptCard(requestedId, existing);
+      }
+      const cardId = requestedId ?? this.#newUniqueId();
       const now = this.#now().toISOString();
       const frontmatter: CardFrontmatter = {
         id: cardId,
@@ -1073,6 +1081,36 @@ export class CardLibrary {
       });
     }
     return `assets/${basename(target)}`;
+  }
+
+  /**
+   * 沿用一個已經存在的卡片檔。
+   *
+   * 建立卡片後的後續步驟失敗（例如白板寫入中斷）時，重試會帶著同一個
+   * 識別碼再建一次。檔案是正本，這裡不重寫它，只補索引、狀態與版本
+   * 檢查點；索引原本沒有這張卡時才補一筆 created 事件，避免重複通知。
+   */
+  #adoptCard(cardId: string, content: CardFileContent): Card {
+    const parsed = parseCardText(content.text, { expectedCardId: cardId });
+    if (!parsed.ok) {
+      throw new ProtocolHandlerError("conflict", `卡片檔格式不符：${parsed.reason}`, {
+        reason: "broken_card",
+        cardId,
+      });
+    }
+    const known = this.#index().get(cardId) !== undefined;
+    const { frontmatter, body } = parsed;
+    this.#index().upsert(this.#indexedRecord(content, frontmatter, body));
+    this.#state.ensure(cardId, frontmatter.persona);
+    if (frontmatter.supersedes !== undefined) {
+      this.#state.setSupersededBy(frontmatter.supersedes, cardId);
+    }
+    const revision = computeRevision(frontmatter, body);
+    this.#repairVersion(cardId, body, revision);
+    if (!known) {
+      this.#emit({ kind: "card-changed", cardId, change: "created", revision });
+    }
+    return { cardId, frontmatter, body, revision };
   }
 
   #newUniqueId(): string {
