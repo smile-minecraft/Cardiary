@@ -203,6 +203,11 @@ export interface GatewayOptions {
    * 殼的 `clientToken` 不受影響。
    */
   readonly remoteAccessEnabled?: () => boolean;
+  /**
+   * 緊急全部暫停時撤銷「全部允許」。規格第 11 章：緊急全部暫停優先，
+   * 暫停之後代理不能再靠先前開的全部允許自動放行。
+   */
+  readonly revokeAllowAll?: () => void;
 }
 
 export class RequestFailure extends Error {
@@ -2717,6 +2722,9 @@ export class Gateway {
 
   async #pauseAll(request: ParsedRequest): Promise<Unknown> {
     const reason = optionalString(request.payload, "reason") ?? "使用者緊急暫停";
+    // 先撤銷全部允許，再中止回合：中止期間若有工具呼叫進到權限閘道，
+    // 也不會被全部允許放行。
+    this.#options.revokeAllowAll?.();
     const paused = await this.#options.engine.pauseAll(reason);
     // 外部代理不在引擎的回合裡：撤回它們等待中的審批並中止行程，
     // 否則緊急暫停之後核准仍會冒出新的代理。
