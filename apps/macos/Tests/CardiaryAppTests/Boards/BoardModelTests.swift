@@ -436,6 +436,30 @@ final class BoardModelTests: XCTestCase {
         let adds = await context.contextAdds
         XCTAssertTrue(adds.isEmpty)
     }
+
+    // MARK: - 釘選多選與新鮮度
+
+    func testTogglePinAppliesToEverySelectedCardOnly() async {
+        let fake = FakeBoardService(board: makeBoard(items: [
+            makeItem("item-1"), makeItem("item-2"), makeItem("item-3"),
+        ]))
+        let model = BoardModel(boardService: fake)
+        await model.reload()
+        model.canvas.setSelection(["item-1", "item-2"])
+
+        await model.togglePinSelected()
+        let pinnedIds = Set(fake.savedBoard?.items.filter(\.pinned).map(\.id) ?? [])
+        XCTAssertEqual(pinnedIds, ["item-1", "item-2"])
+
+        await model.togglePinSelected()
+        XCTAssertTrue(fake.savedBoard?.items.allSatisfy { !$0.pinned } ?? false)
+
+        XCTAssertEqual(BoardCanvas.opacity(pinned: true, freshness: 0), 1)
+        XCTAssertEqual(
+            BoardCanvas.opacity(pinned: false, freshness: 40),
+            CardFreshnessStyle.appearance(for: 40).opacity
+        )
+    }
 }
 
 // MARK: - 假服務

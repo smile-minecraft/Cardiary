@@ -173,6 +173,31 @@ final class BoardCanvasTests: XCTestCase {
 
     // MARK: - 復原重做
 
+    func testSetPinnedTouchesOnlyGivenItemsAndUndoes() {
+        var canvas = BoardCanvas(items: [
+            item("a", x: 0, y: 0),
+            item("b", x: 300, y: 0),
+            item("c", x: 600, y: 0),
+        ])
+
+        XCTAssertTrue(canvas.setPinned(["a", "b"], pinned: true))
+        XCTAssertEqual(canvas.items.map(\.pinned), [true, true, false])
+
+        XCTAssertTrue(canvas.undo())
+        XCTAssertEqual(canvas.items.map(\.pinned), [false, false, false])
+        XCTAssertFalse(canvas.canUndo, "沒有實際變更時不記錄復原點")
+    }
+
+    func testUnpinnedOpacityFollowsFreshness() {
+        XCTAssertEqual(BoardCanvas.opacity(pinned: true, freshness: 0), 1)
+        XCTAssertEqual(BoardCanvas.opacity(pinned: false, freshness: 100), 1)
+        XCTAssertEqual(
+            BoardCanvas.opacity(pinned: false, freshness: 40),
+            CardFreshnessStyle.appearance(for: 40).opacity
+        )
+        XCTAssertLessThan(BoardCanvas.opacity(pinned: false, freshness: 0), 1)
+    }
+
     func testUndoRedoMove() {
         var canvas = BoardCanvas(items: [item("a", x: 100, y: 100)])
         canvas.select("a")

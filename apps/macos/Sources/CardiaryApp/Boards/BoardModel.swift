@@ -391,10 +391,12 @@ public final class BoardModel: ObservableObject, AppContentModel {
         Task { await saveCanvas() }
     }
 
-    public func togglePinSelected() {
-        guard let first = canvas.selectedItems.first else { return }
-        _ = canvas.togglePinned(first.id)
-        Task { await saveCanvas() }
+    public func togglePinSelected() async {
+        guard !canvas.selectedIds.isEmpty else { return }
+        // 混合狀態時先全部釘選；全部已釘選才一起取消。
+        let pinned = !canvas.selectedItems.allSatisfy(\.pinned)
+        guard canvas.setPinned(canvas.selectedIds, pinned: pinned) else { return }
+        await saveCanvas()
     }
 
     public func undo() {

@@ -237,10 +237,10 @@ struct BoardsView: View {
                 }
 
                 Button {
-                    model.togglePinSelected()
+                    Task { await model.togglePinSelected() }
                 } label: {
                     Label(
-                        model.canvas.selectedItems.first?.pinned == true
+                        model.canvas.selectedItems.allSatisfy(\.pinned)
                             ? BoardL10n.text(.boardsUnpin)
                             : BoardL10n.text(.boardsPin),
                         systemImage: "pin"
