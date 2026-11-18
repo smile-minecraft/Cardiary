@@ -2,8 +2,9 @@
  * 遠端存取的設定鍵與判斷。
  *
  * 設定頁的開關寫入 `remote.accessEnabled`（human-only，預設 false）；
- * 閘道在配對、裝置 Token 認證與每個裝置請求前讀取當下值，
- * 所以切換會立刻生效，不必重啟服務。
+ * 閘道在配對、裝置 Token 認證與每個裝置請求前讀取當下值，廣播時只在
+ * 有裝置連線的情況下讀取。設定一關掉就切斷既有裝置連線，所以切換會
+ * 立刻生效，不必重啟服務。
  */
 export const REMOTE_ACCESS_SETTING_KEY = "remote.accessEnabled";
 

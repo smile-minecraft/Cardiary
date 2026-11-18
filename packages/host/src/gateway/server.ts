@@ -199,7 +199,8 @@ export interface GatewayOptions {
    * 遠端存取開關的當下值；省略時視為開啟（只影響直接建立閘道的測試）。
    *
    * 正式組裝由組合根接上設定儲存；關閉時配對、裝置 Token 認證與
-   * 既有裝置的每個請求都會被拒，殼的 `clientToken` 不受影響。
+   * 既有裝置的每個請求都會被拒，已連線的裝置也會立刻被切斷，
+   * 殼的 `clientToken` 不受影響。
    */
   readonly remoteAccessEnabled?: () => boolean;
 }
@@ -364,12 +365,31 @@ export class Gateway {
    * 回傳關閉的連線數；連線關閉前會先把訂閱清空（`close` 的語義）。
    */
   closeDeviceConnections(deviceId: string): number {
+    return this.#closeConnections(
+      (connection) => connection.deviceId === deviceId,
+      "device_revoked",
+    );
+  }
+
+  /**
+   * 關閉所有遠端裝置連線；遠端存取關閉時呼叫。
+   *
+   * 「遠端」以裝置 Token 認證區分，不看對端位址：閘道只綁 127.0.0.1，
+   * 遠端裝置是經 Tailscale Serve 之類的轉發從 loopback 進來的。
+   */
+  #closeRemoteConnections(): number {
+    return this.#closeConnections(
+      (connection) => connection.deviceTokenHash !== null,
+      "remote_access_disabled",
+    );
+  }
+
+  #closeConnections(match: (connection: ClientConnection) => boolean, reason: string): number {
     let closed = 0;
     for (const connection of this.#connections.values()) {
-      if (connection.deviceId === deviceId) {
-        connection.close(1008, "device_revoked");
-        closed += 1;
-      }
+      if (!match(connection)) continue;
+      connection.close(1008, reason);
+      closed += 1;
     }
     return closed;
   }
@@ -877,6 +897,11 @@ export class Gateway {
       this.#logger.error("請求處理失敗", { type, message: errorMessage(error) });
       await this.#sendError(connection, protocolError("internal", "主機發生未預期的錯誤。"), id);
       return;
+    }
+    // 遠端存取是唯一會影響既有連線的設定：人一關掉，裝置連線立刻斷，
+    // 不必等它們送出下一個請求或下一則事件。
+    if (type === "system.settings.set" && !this.#remoteAccessEnabled()) {
+      this.#closeRemoteConnections();
     }
     if (isHandled(response)) return;
     cache?.set(id, response);
@@ -2749,8 +2774,20 @@ export class Gateway {
   }
 
   #broadcastFrame(stream: string, frame: Unknown): void {
+    // 遠端存取關閉後，裝置連線不該再收到事件（可能含對話與記憶內容）；
+    // 這裡順手切斷，讓關閉不必等下一個請求。非 loopback 的連線在建線時
+    // 就被拒絕，遠端裝置一律經 loopback 轉入，所以以裝置 Token 認證判斷。
+    // 沒有裝置連線時不讀設定，因為文字增量每秒數十次，不能每次都查儲存。
+    let remoteAccessEnabled: boolean | null = null;
     for (const connection of this.#connections.values()) {
       if (!connection.authenticated) continue;
+      if (connection.deviceTokenHash !== null) {
+        remoteAccessEnabled ??= this.#remoteAccessEnabled();
+        if (!remoteAccessEnabled) {
+          connection.close(1008, "remote_access_disabled");
+          continue;
+        }
+      }
       if (!connection.subscriptions.has(stream)) continue;
       void connection.send(frame);
     }
