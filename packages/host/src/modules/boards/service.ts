@@ -4,6 +4,7 @@ import {
   assertValidBoard,
   assignGroup,
   createBoard,
+  deterministicCardId,
   listBoardsContainingCard,
   listPinnedCardIds,
   moveItem,
@@ -34,6 +35,8 @@ export interface BoardChangedEvent {
 export interface BoardCardGateway {
   get(cardId: string): Promise<unknown | null>;
   create(input: {
+    /** 白板項目的穩定識別碼；重試時卡片庫據此沿用同一張卡。 */
+    readonly cardId: string;
     readonly kind: "note";
     readonly title: string;
     readonly body: string;
@@ -313,8 +316,8 @@ export class BoardService {
   /**
    * 用圈選的卡片建立新卡並投影到白板。
    *
-   * 建卡成功、投影失敗時卡片會留在卡片庫：這是保守的方向，寧可多一張卡，
-   * 也不要出現投影指向不存在的卡。
+   * 建卡成功、投影失敗時卡片會留在卡片庫。重試帶的是同一個穩定識別碼，
+   * 卡片庫會沿用同一張卡，所以不會多出重複的卡片。
    */
   createCard(input: CreateCardOnBoardInput): Promise<CreatedCardProjection> {
     return this.#exclusive(async () => {
@@ -326,6 +329,7 @@ export class BoardService {
       }
       const cards = this.#requireCards();
       const card = await cards.create({
+        cardId: cardIdForBoardItem(input.boardId, input.itemId),
         kind: "note",
         title: input.title,
         body: input.body,
@@ -851,6 +855,15 @@ export class BoardService {
 
 function findItem(board: BoardDocument, itemId: string): BoardItem | undefined {
   return [...board.items, ...board.inbox].find((item) => item.id === itemId);
+}
+
+/**
+ * 白板項目的穩定卡片識別碼。
+ *
+ * 同一個白板與項目永遠得到同一個 id，建卡後中斷重試時才不會多建一張。
+ */
+function cardIdForBoardItem(boardId: string, itemId: string): string {
+  return deterministicCardId(`board-item:${boardId}:${itemId}`);
 }
 
 /** 兩份白板擁有的卡片；事件用它提示釘選與新鮮度可能要更新。 */

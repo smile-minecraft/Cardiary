@@ -57,6 +57,7 @@ function setup(): Fixture {
       get: async (cardId: string) => (files.read(cardId) === undefined ? null : { cardId }),
       create: async (input) => {
         const card = await library.create({
+          cardId: input.cardId,
           kind: "note",
           title: input.title,
           body: input.body,

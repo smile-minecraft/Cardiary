@@ -62,9 +62,9 @@ function setup(mode: BoardsAgentMode = "full"): Fixture {
     (event) => events.push({ boardId: event.boardId, change: event.change }),
     {
       get: async (cardId: string) => ({ cardId }),
-      create: async () => {
+      create: async (input: { readonly cardId: string }) => {
         createCalls.push(null);
-        return { cardId: newCardId() };
+        return { cardId: input.cardId };
       },
     },
     freshness,

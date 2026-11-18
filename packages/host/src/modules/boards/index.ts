@@ -80,6 +80,7 @@ function cardGateway(cards: CardService): BoardCardGateway {
     get: (cardId) => cards.get(cardId),
     create: (input) =>
       cards.create({
+        cardId: input.cardId,
         kind: input.kind,
         title: input.title,
         body: input.body,
