@@ -69,6 +69,7 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   });
   context.registerToolBundle(bundles.create);
   context.registerToolBundle(bundles.project);
+  context.registerToolBundle(bundles.full);
 
   context.services.host.provide(HOST_SERVICE_NAMES.boards, service);
 }

@@ -13,8 +13,16 @@ export const BOARDS_AGENT_MODE_DEFAULT: BoardsAgentMode = "respect-user-content"
 
 /** 投影既有卡片的工具組；只有 `full` 模式的新對話會釘選它。 */
 export const BOARDS_PROJECT_BUNDLE_ID = "module.boards.project";
+/** 移動、連線、分組、釘選、移除與復原的工具組；只有 `full` 模式看得到。 */
+export const BOARDS_FULL_BUNDLE_ID = "module.boards.full";
 /** 建卡並投影到收件區的工具組；兩種模式都曝光。 */
 export const BOARDS_BUNDLE_ID = "module.boards";
+
+/** 受限模式不釘選的工具組；執行期另外逐次檢查目前模式。 */
+const FULL_MODE_BUNDLE_IDS: ReadonlySet<string> = new Set([
+  BOARDS_PROJECT_BUNDLE_ID,
+  BOARDS_FULL_BUNDLE_ID,
+]);
 
 /**
  * 從設定儲存讀到的原始文字取出模式。
@@ -45,5 +53,5 @@ export function pinToolBundles<T extends { readonly bundleId: string }>(
   pins: readonly T[],
   mode: BoardsAgentMode,
 ): readonly T[] {
-  return mode === "full" ? pins : pins.filter((pin) => pin.bundleId !== BOARDS_PROJECT_BUNDLE_ID);
+  return mode === "full" ? pins : pins.filter((pin) => !FULL_MODE_BUNDLE_IDS.has(pin.bundleId));
 }
