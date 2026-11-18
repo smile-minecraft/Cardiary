@@ -94,7 +94,7 @@ async function createSession(client: ProtocolClient): Promise<string> {
   return created.session.id;
 }
 
-describe("M2 記憶閉環（真主机行程 + 協定）", () => {
+describe("M2 記憶閉環（真主機行程 + 協定）", () => {
   it("卡片老化→蒸餾→冷封存與血緣→每日摘要→通知轉卡→新對話發牌", async () => {
     const { service, client } = await boot();
     const marker = Math.random().toString(36).slice(2, 8);
