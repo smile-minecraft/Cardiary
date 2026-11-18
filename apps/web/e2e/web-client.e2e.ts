@@ -37,8 +37,6 @@ if (!existsSync(chromiumPath)) {
 // 主機與瀏覽器在忙碌的機器上啟動較慢；設定與等待留寬一點，避免把負載當成失敗。
 const SETUP_TIMEOUT = 30_000;
 
-const SEED_TEXT = "暖身訊息：讓網頁啟動時逐字稿已經有內容。";
-const SEED_REPLY = "暖身回覆。";
 const STREAM_REPLY = "這是串流回覆的內容，會一段一段出現在對話裡。";
 const APPROVED_REPLY = "核准後完成";
 const TOOL_OUTPUT = "工具輸出內容";
@@ -54,7 +52,6 @@ test.beforeAll(async () => {
     demo: true,
     env: { CARDIARY_WEB_ROOT: webRoot },
     scripts: [
-      [{ kind: "text", text: SEED_REPLY }],
       [{ kind: "text", text: STREAM_REPLY, chunkSize: 1, delayMs: 25 }],
       [
         { kind: "tool", toolName: "demo.echo", input: { text: TOOL_OUTPUT } },
@@ -90,7 +87,7 @@ test.beforeAll(async () => {
   expect(deviceToken).toBeTruthy();
   await pairing.close();
 
-  // 先建一個會話，讓網頁啟動後自動選取；腳本的第一個回合留給瀏覽器送出的訊息。
+  // 先建一個「沒有訊息」的空會話，讓網頁啟動後自動選取；第一個回合留給瀏覽器送出的訊息。
   const api: ProtocolClient = await connect(`ws://127.0.0.1:${service.ready.clientPort}/v1/ws`);
   const helloId = await api.hello(deviceToken);
   const helloReply = await api.waitForReply(helloId, SETUP_TIMEOUT);
@@ -100,23 +97,6 @@ test.beforeAll(async () => {
   expect(createReply.kind, JSON.stringify(createReply)).toBe("response");
   sessionId = (createReply.payload as { session: { id: string } }).session.id;
 
-  // 先送一則暖身訊息並等它完成再關閉。網頁啟動後會選取這個會話，逐字稿
-  // 已經有內容，畫面才會重建出會話下拉選單；否則選取完成後才送出的訊息
-  // 可能被較晚到達的空快照覆蓋。
-  const subscribeId = api.request("session.subscribe", { sessionId });
-  await api.waitForReply(subscribeId, SETUP_TIMEOUT);
-  const sendId = api.request("session.send_message", {
-    sessionId,
-    text: SEED_TEXT,
-    delivery: "queue",
-  });
-  await api.waitForReply(sendId, SETUP_TIMEOUT);
-  await api.waitFor(
-    (frame) =>
-      frame.type === "stream.message_completed" &&
-      (frame.payload as { entry: { role: string } }).entry.role === "assistant",
-    SETUP_TIMEOUT,
-  );
   await api.close();
 });
 
@@ -154,7 +134,7 @@ test("配對後在網頁對話、核准審批與緊急暫停", async ({ browser 
   try {
     await page.goto(`${baseUrl}/index.html`);
 
-    // 已帶 Token：hello 通過，並自動選取暖身會話（選取完成後下拉選單才有值）。
+    // 已帶 Token：hello 通過，並自動選取剛建立的空會話。
     await expect(page.locator(".connection-label")).toHaveText("已連線");
     await expect(page.locator("select.session-select")).toHaveValue(sessionId);
 
@@ -166,8 +146,6 @@ test("配對後在網頁對話、核准審批與緊急暫停", async ({ browser 
     await expect(
       page.locator(".message-assistant .message-text").filter({ hasText: STREAM_REPLY }),
     ).toBeVisible();
-    // 逐字稿有內容後，畫面重建時才會把會話列進下拉選單（目前產品行為）。
-    await expect(page.locator("select.session-select")).toHaveValue(sessionId);
 
     // 第二回合：工具呼叫要審批；對話頁顯示待審批提示。
     await page.locator(".message-input").fill("請執行需要審批的工具");
