@@ -535,7 +535,10 @@ export async function connect(url: string): Promise<ProtocolClient> {
         ...(token === null ? {} : { auth: { token } }),
       });
     },
-    async waitFor(predicate, ms = 4000) {
+    // 契約測試對真的主機行程講話：行程啟動、模組初始化與機器負載都會讓
+    // 單一 frame 比 4 秒更晚到。預設值對齊測試裡既有的 10 秒預算，避免在
+    // 負載高時因為耗時而不是行為失敗。
+    async waitFor(predicate, ms = 10_000) {
       const deadline = Date.now() + ms;
       while (Date.now() < deadline) {
         const found = frames.find(predicate);
