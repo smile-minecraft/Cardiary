@@ -266,7 +266,9 @@ describe("排程提議工具", () => {
       },
       conversationId: "conv_agent",
       turnId: "turn_1",
-      callId: "call_1",
+      toolCallId: "call_1",
+      replay: "unsafe",
+      permissionMode: "hard-rules",
     });
 
     expect(verdict.kind).toBe("ask-human");

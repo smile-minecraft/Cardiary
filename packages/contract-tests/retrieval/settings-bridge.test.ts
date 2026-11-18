@@ -14,6 +14,7 @@ describe("模組設定變更通知", () => {
     const { db } = openStateDatabase({
       filePath: join(temp.folder, "state", "cardiary.sqlite"),
       appVersion: "0.1.0",
+      backupDirectory: join(temp.folder, "tmp"),
     });
     try {
       const storage = new SettingsStore(db);

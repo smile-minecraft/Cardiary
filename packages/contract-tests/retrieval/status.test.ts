@@ -324,15 +324,19 @@ function changeFor(value: boolean): SettingChange {
 }
 
 function retrievalStatuses(events: readonly ProtocolEventIntent[]) {
-  return events
-    .filter((intent) => intent.type === "module.retrieval.status")
-    .map((intent) => intent.payload as Record<string, unknown>);
+  return events.flatMap((intent) =>
+    intent.kind === "module-event" && intent.type === "module.retrieval.status"
+      ? [intent.payload as Record<string, unknown>]
+      : [],
+  );
 }
 
 function retrievalProgress(events: readonly ProtocolEventIntent[]) {
-  return events
-    .filter((intent) => intent.type === "module.retrieval.progress")
-    .map((intent) => intent.payload as Record<string, unknown>);
+  return events.flatMap((intent) =>
+    intent.kind === "module-event" && intent.type === "module.retrieval.progress"
+      ? [intent.payload as Record<string, unknown>]
+      : [],
+  );
 }
 
 function vectorCount(cache: Database): number {
