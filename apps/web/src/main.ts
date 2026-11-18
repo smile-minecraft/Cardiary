@@ -1,6 +1,6 @@
 import "./style.css";
 
-import { loadLanguage, saveLanguage, translate, type Language } from "./i18n";
+import { loadLanguage, saveLanguage, translate, type Language, type MessageKey } from "./i18n";
 import { h, replaceChildren } from "./lib/dom";
 import { createApprovalsScreen } from "./screens/approvals";
 import { createConversationView } from "./screens/conversation";
@@ -17,6 +17,30 @@ const ROUTES: Route[] = ["conversation", "notifications", "approvals", "pause-al
 function routeFromHash(): Route {
   const raw = globalThis.location?.hash.replace(/^#\/?/, "") ?? "";
   return ROUTES.find((route) => route === raw) ?? "conversation";
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** 導覽與頁首用的線條圖示；路徑只用 stroke，顏色跟著文字色。 */
+const ICONS: Record<Route | "logout" | "heart", string> = {
+  conversation: "M4 5.5h16v10H9l-5 4z",
+  notifications: "M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20h4",
+  approvals: "M5 4h11l3 3v13H5zM9 13l2.5 2.5L16 11",
+  "pause-all": "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M10 9v6M14 9v6",
+  logout: "M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10",
+  heart:
+    "M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z",
+};
+
+function icon(name: keyof typeof ICONS): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", "icon");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", ICONS[name]);
+  svg.append(path);
+  return svg;
 }
 
 const root = document.getElementById("app");
@@ -55,13 +79,22 @@ function setLanguage(next: Language): void {
   pairingView?.dispose();
   pairingView = null;
   pairingKey = "";
+  headerSignature = "";
+  navSignature = "";
   createViews();
   render();
 }
 
+let headerSignature = "";
+
 function renderHeader(): void {
+  const status = headerStatus(app, language);
+  const signature = [language, status.state, app.needsPairing].join("|");
+  if (signature === headerSignature) return;
+  headerSignature = signature;
+
   const langButton = h("button", {
-    class: "button button-quiet lang-button",
+    class: "chrome-button lang-button",
     type: "button",
     text: translate(language, "lang.toggle"),
     title: translate(language, "lang.toggleLabel"),
@@ -70,74 +103,98 @@ function renderHeader(): void {
       click: () => setLanguage(language === "zh-TW" ? "en" : "zh-TW"),
     },
   });
-  const status = headerStatus(app, language);
   const logoutButton = h("button", {
-    class: "button button-quiet",
+    class: "chrome-button logout-button",
     type: "button",
-    text: translate(language, "logout.button"),
-    title: translate(language, "logout.confirm"),
+    title: translate(language, "logout.button"),
+    "aria-label": translate(language, "logout.button"),
     on: {
       click: () => {
         if (globalThis.confirm(translate(language, "logout.confirm"))) app.logout();
       },
     },
   });
+  logoutButton.append(
+    icon("logout"),
+    h("span", { class: "chrome-label", text: translate(language, "logout.button") }),
+  );
+
+  const mark = h("span", { class: "brand-mark" });
+  mark.append(icon("heart"));
   replaceChildren(
     header,
     h(
       "div",
       { class: "brand" },
-      h("img", { class: "brand-mark", src: "/favicon.svg", alt: "" }),
-      h("strong", { text: translate(language, "app.title") }),
+      mark,
+      h("span", { class: "brand-name", text: translate(language, "app.title") }),
     ),
     h(
       "div",
       { class: "header-actions" },
-      h("span", {
-        class: status.dotClass,
-        title: status.label,
-        "aria-label": status.label,
-      }),
-      h("span", { class: "connection-label", text: status.label }),
-      app.needsPairing ? null : logoutButton,
+      h(
+        "span",
+        { class: `connection connection-${status.state}`, role: "status" },
+        h("span", { class: status.dotClass, "aria-hidden": "true" }),
+        h("span", { class: "connection-label", text: status.label }),
+      ),
       langButton,
+      app.needsPairing ? null : logoutButton,
     ),
   );
 }
 
+let navSignature = "";
+
 function renderNav(): void {
-  const items: Array<{
-    route: Route;
-    key: "nav.conversation" | "nav.notifications" | "nav.approvals" | "nav.pauseAll";
-    hash: string;
-    badge?: number;
-  }> = [
-    { route: "conversation", key: "nav.conversation", hash: "#/conversation" },
-    {
-      route: "notifications",
-      key: "nav.notifications",
-      hash: "#/notifications",
-      badge: app.totalUnread,
-    },
-    { route: "approvals", key: "nav.approvals", hash: "#/approvals", badge: app.approvals.length },
-    { route: "pause-all", key: "nav.pauseAll", hash: "#/pause-all" },
+  const signature = [language, route, app.needsPairing, app.totalUnread, app.approvals.length].join(
+    "|",
+  );
+  if (signature === navSignature) return;
+  navSignature = signature;
+  nav.hidden = app.needsPairing;
+
+  const items: Array<{ route: Route; key: MessageKey; badge?: number; urgent?: boolean }> = [
+    { route: "conversation", key: "nav.conversation" },
+    { route: "notifications", key: "nav.notifications", badge: app.totalUnread },
+    { route: "approvals", key: "nav.approvals", badge: app.approvals.length, urgent: true },
+    { route: "pause-all", key: "nav.pauseAll" },
   ];
   const links = items.map((item) => {
+    const active = route === item.route;
     const link = h("a", {
-      class: route === item.route ? "nav-item is-active" : "nav-item",
-      href: item.hash,
-      text: translate(language, item.key),
-      "aria-current": route === item.route ? "page" : "false",
+      class: active ? `nav-item nav-${item.route} is-active` : `nav-item nav-${item.route}`,
+      href: `#/${item.route}`,
+      "aria-current": active ? "page" : "false",
     });
+    link.append(
+      icon(item.route),
+      h("span", { class: "nav-label", text: translate(language, item.key) }),
+    );
     if (item.badge && item.badge > 0) {
-      link.append(h("span", { class: "nav-badge", text: String(item.badge) }));
+      link.append(
+        h("span", {
+          class: item.urgent ? "nav-badge is-urgent" : "nav-badge",
+          text: item.badge > 99 ? "99+" : String(item.badge),
+        }),
+      );
     }
     return link;
   });
   replaceChildren(nav, ...links);
 }
 
+let mounted: Element | null = null;
+
+/** 只有換畫面時才換 main 的子節點；同一個畫面只呼叫 update，保留焦點與捲動位置。 */
+function mount(element: Element): void {
+  if (mounted === element) return;
+  mounted = element;
+  replaceChildren(main, element);
+}
+
 function render(): void {
+  root!.setAttribute("data-route", app.needsPairing ? "pairing" : route);
   renderHeader();
   renderNav();
   if (app.needsPairing) {
@@ -147,7 +204,7 @@ function render(): void {
       pairingView = createPairingView(app, language);
       pairingKey = key;
     }
-    replaceChildren(main, pairingView.element);
+    mount(pairingView.element);
     return;
   }
   pairingView?.dispose();
@@ -155,20 +212,20 @@ function render(): void {
   pairingKey = "";
   switch (route) {
     case "notifications":
-      replaceChildren(main, notificationsView.element);
+      mount(notificationsView.element);
       notificationsView.update();
       return;
     case "approvals":
-      replaceChildren(main, approvalsView.element);
+      mount(approvalsView.element);
       approvalsView.update();
       return;
     case "pause-all":
-      replaceChildren(main, pauseView.element);
+      mount(pauseView.element);
       pauseView.update();
       return;
     case "conversation":
     default:
-      replaceChildren(main, conversationView.element);
+      mount(conversationView.element);
       conversationView.update();
       return;
   }
@@ -180,6 +237,9 @@ app.subscribe(() => {
 globalThis.addEventListener("hashchange", () => {
   route = routeFromHash();
   render();
+  if (route === "notifications" && app.connectionStatus === "connected") {
+    void app.refreshNotifications().catch(() => undefined);
+  }
 });
 document.documentElement.lang = language === "zh-TW" ? "zh-Hant" : "en";
 app.start();

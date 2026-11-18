@@ -39,7 +39,7 @@ const SETUP_TIMEOUT = 30_000;
 
 const STREAM_REPLY = "這是串流回覆的內容，會一段一段出現在對話裡。";
 const APPROVED_REPLY = "核准後完成";
-const TOOL_OUTPUT = "工具輸出內容";
+const TOOL_OUTPUT = "e2e 工具回顯 7f3a";
 
 let service: SpawnedService;
 let sessionId: string;
@@ -130,6 +130,8 @@ test("配對後在網頁對話、核准審批與緊急暫停", async ({ browser 
   page.on("pageerror", (error) => consoleErrors.push(`pageerror: ${error.message}`));
   const requestUrls: string[] = [];
   page.on("request", (request) => requestUrls.push(request.url()));
+  const websocketUrls: string[] = [];
+  page.on("websocket", (ws) => websocketUrls.push(ws.url()));
 
   try {
     await page.goto(`${baseUrl}/index.html`);
@@ -139,18 +141,23 @@ test("配對後在網頁對話、核准審批與緊急暫停", async ({ browser 
     await expect(page.locator("select.session-select")).toHaveValue(sessionId);
 
     // 第一回合：送出訊息，先看到串流中的訊息，再看到完成後的文字。
-    await page.locator(".message-input").fill("請開始第一則測試訊息");
+    await page.locator(".message-input").fill("請開始第一則 ea71");
     await page.locator('.composer button[type="submit"]').click();
     await expect(page.locator(".message-input")).toHaveValue("");
+    await expect(page.locator(".message-user .message-text").first()).toContainText("ea71");
+    await expect(page.locator(".message-user")).toHaveCount(1);
     await expect(page.locator(".message-assistant.is-streaming")).toBeVisible();
     await expect(
       page.locator(".message-assistant .message-text").filter({ hasText: STREAM_REPLY }),
     ).toBeVisible();
 
     // 第二回合：工具呼叫要審批；對話頁顯示待審批提示。
-    await page.locator(".message-input").fill("請執行需要審批的工具");
+    await page.locator(".message-input").fill("請執行 e30c");
     await page.locator('.composer button[type="submit"]').click();
     await expect(page.locator(".inline-notice")).toContainText("有一則審批等你決定。");
+    // 等待審批時工具呼叫已經出現，但還沒有輸出。
+    await expect(page.locator(".message-tool .tool-name")).toHaveText("demo.echo");
+    await expect(page.locator(".message-tool .tool-output")).toHaveCount(0);
 
     // 審批頁：一張卡、按「核准」；核准後卡片消失。
     await page.locator('a.nav-item[href="#/approvals"]').click();
@@ -165,7 +172,9 @@ test("配對後在網頁對話、核准審批與緊急暫停", async ({ browser 
     await expect(
       page.locator(".message-assistant .message-text").filter({ hasText: APPROVED_REPLY }),
     ).toBeVisible();
-    await expect(page.locator(".message-tool").filter({ hasText: TOOL_OUTPUT })).toBeVisible();
+    // 工具輸出要出現在輸出區塊，不能只靠輸入 JSON 裡剛好有同一段文字。
+    await expect(page.locator(".message-tool .tool-output")).toContainText(TOOL_OUTPUT);
+    await expect(page.locator(".message-assistant.is-streaming")).toHaveCount(0);
 
     // 緊急全部暫停：第一次點擊進入確認，第二次才送出；閒置時中斷數為 0。
     await page.locator('a.nav-item[href="#/pause-all"]').click();
@@ -182,6 +191,8 @@ test("配對後在網頁對話、核准審批與緊急暫停", async ({ browser 
     expect(consoleErrors, `console errors:\n${consoleErrors.join("\n")}`).toEqual([]);
     expect(page.url()).not.toContain(deviceToken);
     expect(requestUrls.filter((url) => url.includes(deviceToken))).toEqual([]);
+    expect(websocketUrls.length).toBeGreaterThanOrEqual(1);
+    expect(websocketUrls.filter((url) => url.includes(deviceToken))).toEqual([]);
   } finally {
     await context.close();
   }

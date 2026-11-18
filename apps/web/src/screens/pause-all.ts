@@ -1,16 +1,28 @@
 import { translate, type Language } from "../i18n";
-import { h, replaceChildren } from "../lib/dom";
+import { h } from "../lib/dom";
 import type { RemoteApp } from "../state/remote-app";
 
-export function renderPauseAll(app: RemoteApp, language: Language): HTMLElement {
+/**
+ * 緊急全部暫停。
+ *
+ * 畫面只建一次：按第一下進入確認後，串流中的狀態通知不能把確認狀態重設掉。
+ * 「目前在跑什麼」那一行在每次 update 時更新。
+ */
+export function createPauseAllScreen(
+  app: RemoteApp,
+  getLanguage: () => Language,
+): { readonly element: HTMLElement; update(): void } {
+  const language = getLanguage();
+  const element = h("div", { class: "screen" });
   const section = h("section", { class: "panel" });
   section.append(
     h("header", { class: "panel-header" }, h("h1", { text: translate(language, "pause.title") })),
+    h("p", { class: "lead", text: translate(language, "pause.description") }),
   );
-  section.append(h("p", { class: "lead", text: translate(language, "pause.description") }));
 
+  const activity = h("p", { class: "pause-activity", role: "status" });
   const danger = h("div", { class: "danger-zone" });
-  danger.append(h("p", { class: "warning", text: translate(language, "pause.warning") }));
+  danger.append(h("p", { class: "warning", text: translate(language, "pause.warning") }), activity);
 
   let confirming = false;
   const button = h("button", {
@@ -25,19 +37,26 @@ export function renderPauseAll(app: RemoteApp, language: Language): HTMLElement 
   });
   cancel.hidden = true;
 
-  const notice = h("p", { class: "form-note" });
+  const notice = h("p", { class: "form-note", role: "status" });
   notice.hidden = true;
+
+  const resetButton = (): void => {
+    confirming = false;
+    cancel.hidden = true;
+    button.textContent = translate(language, "pause.button");
+    button.setAttribute("class", "button button-danger button-large");
+  };
 
   button.addEventListener("click", () => {
     if (!confirming) {
       confirming = true;
       button.textContent = translate(language, "pause.confirm");
+      button.setAttribute("class", "button button-danger button-large is-armed");
       cancel.hidden = false;
       return;
     }
-    confirming = false;
+    resetButton();
     button.disabled = true;
-    cancel.hidden = true;
     button.textContent = translate(language, "pause.sending");
     void app
       .pauseAll()
@@ -58,35 +77,22 @@ export function renderPauseAll(app: RemoteApp, language: Language): HTMLElement 
         button.textContent = translate(language, "pause.button");
       });
   });
-  cancel.addEventListener("click", () => {
-    confirming = false;
-    cancel.hidden = true;
-    button.textContent = translate(language, "pause.button");
-  });
+  cancel.addEventListener("click", resetButton);
 
-  danger.append(h("div", { class: "button-row" }, button, cancel), notice);
+  danger.append(h("div", { class: "pause-actions" }, button, cancel), notice);
   section.append(danger);
-  return section;
-}
+  element.append(section);
 
-/** 建立畫面容器；每次 update 都重建內容以反映最新狀態。 */
-export function createPauseAllScreen(
-  app: RemoteApp,
-  getLanguage: () => Language,
-): { readonly element: HTMLElement; update(): void } {
-  const element = h("div", { class: "screen" });
   return {
     element,
     update() {
-      updatePauseAllScreen(element, app, getLanguage());
+      const running = app.sessions.filter(
+        (session) => session.status === "running" || session.status === "waiting_approval",
+      ).length;
+      activity.textContent = translate(language, "pause.activity", {
+        running,
+        approvals: app.approvals.length,
+      });
     },
   };
-}
-
-export function updatePauseAllScreen(
-  container: HTMLElement,
-  app: RemoteApp,
-  language: Language,
-): void {
-  replaceChildren(container, renderPauseAll(app, language));
 }
