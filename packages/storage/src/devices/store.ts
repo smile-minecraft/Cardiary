@@ -1,9 +1,10 @@
 /**
  * 裝置 Token 的儲存介面。
  *
- * v3 遷移（排程工作）才會建立 `device_tokens` 表；在那之前主機用
- * `MemoryDeviceTokenStore`，重啟後裝置需要重新配對。介面刻意保持非同步，
- * 正式實作換成 SQLite 時呼叫端不必改。
+ * 狀態資料庫從 v3 起有 `device_tokens` 表；正式組裝用
+ * `SqliteDeviceTokenStore`，沒有狀態資料庫的組裝與測試用
+ * `MemoryDeviceTokenStore`。介面刻意保持非同步，呼叫端不必知道背後是
+ * 哪一種。
  *
  * 明文 Token 絕對不落地：這張表只放雜湊與顯示用的指紋。
  */
@@ -11,13 +12,16 @@
 import type { DeviceTokenRecord } from "@cardiary/domain";
 
 export const DEVICE_KINDS = ["web", "ios"] as const;
-export type StoredDeviceKind = (typeof DEVICE_KINDS)[number];
+/** 裝置種類；從狀態資料庫讀回時可能是 `unknown`（資料表沒有種類欄位）。 */
+export type StoredDeviceKind = (typeof DEVICE_KINDS)[number] | "unknown";
 
 /** 存進狀態資料庫的裝置紀錄；不含明文 Token。 */
 export interface StoredDeviceToken extends DeviceTokenRecord {
   /** 使用者在配對當下看到的名稱；只供顯示。 */
   readonly deviceName: string;
   readonly deviceKind: StoredDeviceKind;
+  /** 顯示用前綴（`cdt_` 加八碼）；推不回 Token，只給人辨認。 */
+  readonly prefix?: string;
 }
 
 export interface DeviceTokenStore {

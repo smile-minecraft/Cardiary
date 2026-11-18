@@ -52,7 +52,9 @@ async function subscribe(connected: ProtocolClient, sessionId: string): Promise<
   await connected.waitForReply(id);
 }
 
-describe("以 node 直接啟動的主機服務", () => {
+// 這裡的案例會啟動真的主機行程，重啟案例一次啟動兩次；每次啟動約 2 秒，
+// 預設的 5 秒會在平行測試或負載高的機器上先逾時，測到的是機器速度而不是行為。
+describe("以 node 直接啟動的主機服務", { timeout: 30_000 }, () => {
   it("hello、系統訂閱與 schema 驗證；含系統狀態與檢索狀態兩個開機事件", async () => {
     const service = await boot();
     const connected = await client(service);
