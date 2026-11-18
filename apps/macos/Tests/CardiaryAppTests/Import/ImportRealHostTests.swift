@@ -12,13 +12,15 @@ import XCTest
 @MainActor
 final class ImportRealHostTests: XCTestCase {
     func testGenericImportThroughRealHostCreatesCardsAndSecondRunCreatesNothing() async throws {
-        let harness = try await Self.startFakeService()
+        let harness = try await RealHostService.start { _, _ in
+            .unavailable("這個測試不需要代理")
+        }
         defer {
             harness.supervisor.stopImmediately()
             Task { await harness.client.stop() }
         }
 
-        let source = try Self.makeTemporaryFolder(prefix: "cardiary-import-source")
+        let source = try RealHostService.makeTemporaryFolder(prefix: "cardiary-import-source")
         try Self.write("# 人格\n\n語氣溫和，先講結論。\n", to: source, name: "persona.md")
         try Self.write("# 記憶\n\n- 喜歡喝咖啡\n- 住在新竹\n", to: source, name: "memory.md")
         try Self.write("# 規則\n\n先確認再動手。\n", to: source, name: "rules.md")
@@ -95,119 +97,6 @@ final class ImportRealHostTests: XCTestCase {
         XCTAssertEqual(try Self.cardFiles(in: harness.folder).count, 4, "第二次不能多出卡片")
     }
 
-    // MARK: - 啟動主機服務
-
-    private struct Harness {
-        let folder: URL
-        let supervisor: ServiceSupervisor
-        let client: CardiaryClient
-    }
-
-    private static var repositoryRoot: URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()  // Import
-            .deletingLastPathComponent()  // CardiaryAppTests
-            .deletingLastPathComponent()  // Tests
-            .deletingLastPathComponent()  // macos
-            .deletingLastPathComponent()  // apps
-            .deletingLastPathComponent()  // repo
-    }
-
-    private static func startFakeService() async throws -> Harness {
-        let hostEntry = repositoryRoot.appendingPathComponent("packages/host/dist/main.js")
-        guard FileManager.default.fileExists(atPath: hostEntry.path) else {
-            throw XCTSkip("找不到主機服務；先跑 pnpm build")
-        }
-        guard let node = nodeLaunch() else {
-            throw XCTSkip("找不到 Node")
-        }
-
-        let folder = try makeTemporaryFolder(prefix: "cardiary-import-folder")
-        let stateDirectory = folder.appendingPathComponent("state", isDirectory: true)
-        try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
-        let identity: [String: Any] = [
-            "format": 1,
-            "folderId": "01TESTFOLDER00000000000000",
-            "createdAt": "2026-01-01T00:00:00.000Z",
-            "createdBy": "import-e2e",
-        ]
-        try JSONSerialization.data(withJSONObject: identity, options: [.prettyPrinted])
-            .write(to: stateDirectory.appendingPathComponent("folder.json"))
-
-        let tmp = folder.appendingPathComponent("tmp", isDirectory: true).path
-        let plan = ServiceLaunchPlan(
-            executableURL: node.executable,
-            arguments: node.prefix + [hostEntry.path, "--engine", "fake"],
-            environment: [
-                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-                "HOME": NSHomeDirectory(),
-                "TMPDIR": tmp,
-                "TMP": tmp,
-                "TEMP": tmp,
-            ],
-            workingDirectory: folder
-        )
-        let supervisor = ServiceSupervisor(
-            configuration: ServiceSupervisorConfiguration(launchPlan: plan),
-            folder: FolderSnapshot(
-                state: .ready,
-                path: folder.path,
-                displayName: folder.lastPathComponent,
-                writable: true
-            ),
-            brokerHandler: { _, _ in .unavailable("這個測試不需要代理") }
-        )
-        let tokenBox = TokenBox()
-        supervisor.onClientToken = { tokenBox.set($0) }
-
-        await supervisor.start(folder: supervisor.folderSnapshot)
-        do {
-            try await waitUntil(timeout: 30) { supervisor.snapshot.phase == .running }
-        } catch {
-            supervisor.stopImmediately()
-            throw error
-        }
-        let token = try XCTUnwrap(tokenBox.current)
-        let port = try XCTUnwrap(supervisor.snapshot.clientPort)
-
-        let client = CardiaryClient(configuration: .init(
-            endpoint: URL(string: "ws://127.0.0.1:\(port)/v1/ws")!,
-            clientToken: token,
-            client: ClientInfo(
-                name: "cardiary-import-e2e",
-                version: "0",
-                platform: .macos,
-                instanceId: "import-e2e-1"
-            ),
-            subscribeActiveSessions: false
-        ))
-        await client.start()
-        try await waitUntil(timeout: 20) {
-            if case .connected = await client.currentState { return true }
-            return false
-        }
-        return Harness(folder: folder, supervisor: supervisor, client: client)
-    }
-
-    private static func nodeLaunch() -> (executable: URL, prefix: [String])? {
-        if let override = ProcessInfo.processInfo.environment["CARDIARY_NODE"],
-            FileManager.default.isExecutableFile(atPath: override)
-        {
-            return (URL(fileURLWithPath: override), [])
-        }
-        for candidate in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"]
-        where FileManager.default.isExecutableFile(atPath: candidate) {
-            return (URL(fileURLWithPath: candidate), [])
-        }
-        return nil
-    }
-
-    private static func makeTemporaryFolder(prefix: String) throws -> URL {
-        let url = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
 
     private static func write(_ text: String, to folder: URL, name: String) throws {
         try text.write(to: folder.appendingPathComponent(name), atomically: true, encoding: .utf8)
@@ -221,33 +110,4 @@ final class ImportRealHostTests: XCTestCase {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    private static func waitUntil(
-        timeout: TimeInterval,
-        _ condition: @MainActor () async -> Bool
-    ) async throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if await condition() { return }
-            try await Task.sleep(nanoseconds: 25_000_000)
-        }
-        XCTFail("等待逾時")
-        throw NSError(domain: "CardiaryImportE2E", code: 1)
-    }
-}
-
-private final class TokenBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var token: String?
-
-    var current: String? {
-        lock.lock()
-        defer { lock.unlock() }
-        return token
-    }
-
-    func set(_ value: String) {
-        lock.lock()
-        token = value
-        lock.unlock()
-    }
 }
