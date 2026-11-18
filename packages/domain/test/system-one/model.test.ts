@@ -58,6 +58,50 @@ describe("小型模型的提示", () => {
     expect(prompt).toContain('"p"');
   });
 
+  it("開局發牌只帶請求與對應卡的標題、摘要，不帶正文、其他卡與其他狀態", () => {
+    const state = {
+      request: "幫我規劃花蓮行程",
+      secret: "不該出現的共用狀態",
+      cards: [
+        { id: "card-1", title: "花蓮民宿", summary: "七星潭附近", body: "正文：訂房密碼 1234" },
+        { id: "card-2", title: "台北咖啡店", summary: "大安區", body: "另一張卡的正文" },
+      ],
+    };
+
+    const prompt = buildProbabilityPrompt(yesNo, state);
+
+    expect(prompt).toContain("幫我規劃花蓮行程");
+    expect(prompt).toContain("花蓮民宿");
+    expect(prompt).toContain("七星潭附近");
+    expect(prompt).not.toContain("訂房密碼");
+    expect(prompt).not.toContain("正文");
+    expect(prompt).not.toContain("台北咖啡店");
+    expect(prompt).not.toContain("大安區");
+    expect(prompt).not.toContain("不該出現的共用狀態");
+  });
+
+  it("卡片沒有摘要時只帶標題", () => {
+    const prompt = buildProbabilityPrompt(yesNo, {
+      request: "花蓮",
+      cards: [{ id: "card-1", title: "花蓮民宿" }],
+    });
+
+    expect(prompt).toContain("花蓮民宿");
+    expect(prompt).not.toContain('"summary"');
+  });
+
+  it.each([
+    ["沒有狀態", undefined],
+    ["狀態是 null", null],
+    ["請求不是字串", { request: 1, cards: [{ id: "card-1", title: "t" }] }],
+    ["cards 不是陣列", { request: "r", cards: { id: "card-1" } }],
+    ["找不到對應的卡", { request: "r", cards: [{ id: "card-9", title: "別張" }] }],
+    ["標題不是字串", { request: "r", cards: [{ id: "card-1", title: 3 }] }],
+  ])("狀態形狀不對（%s）時不帶判斷資料，提示與沒有狀態時相同", (_label, state) => {
+    expect(buildProbabilityPrompt(yesNo, state)).toBe(buildProbabilityPrompt(yesNo));
+    expect(buildProbabilityPrompt(yesNo, state)).not.toContain("別張");
+  });
+
   it("schema 固定是只有一個 0–1 數字的物件", () => {
     expect(PROBABILITY_SCHEMA).toMatchObject({
       type: "object",
@@ -81,6 +125,28 @@ describe("ModelInvoker", () => {
     ]);
     expect(result.missing).toEqual([]);
     expect(call.requests[0]?.jsonSchema).toBe(PROBABILITY_SCHEMA);
+  });
+
+  it("每一題的提示只帶自己那張卡", async () => {
+    const call = scriptedCall(['{"p": 0.9}', '{"p": 0.2}']);
+    const invoker = createModelInvoker({ call });
+
+    await invoker.judge({
+      state: {
+        request: "規劃行程",
+        cards: [
+          { id: "card-1", title: "第一張標題", summary: "第一張摘要" },
+          { id: "card-2", title: "第二張標題", summary: "第二張摘要" },
+        ],
+      },
+      questions: [yesNo, yesNo2],
+    });
+
+    expect(call.requests[0]?.prompt).toContain("第一張摘要");
+    expect(call.requests[0]?.prompt).not.toContain("第二張摘要");
+    expect(call.requests[1]?.prompt).toContain("第二張摘要");
+    expect(call.requests[1]?.prompt).not.toContain("第一張摘要");
+    expect(call.requests.every((request) => request.prompt.includes("規劃行程"))).toBe(true);
   });
 
   it("單選與評分題不送給模型，直接記入 missing", async () => {

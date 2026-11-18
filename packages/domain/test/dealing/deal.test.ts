@@ -15,7 +15,10 @@ import {
 import {
   JEV_PROFILE,
   MODEL_PROFILE,
+  PROBABILITY_SCHEMA,
   SystemOneError,
+  createModelInvoker,
+  type SystemOneModelCallRequest,
   type SystemOneJudgeRequest,
   type SystemOneJudgeResult,
 } from "../../src/system-one/index.js";
@@ -295,6 +298,43 @@ describe("完整發牌流程", () => {
       ],
     });
     expect(invoker.requests[0]?.timeoutMs).toBe(JEV_PROFILE.timeoutMs);
+  });
+
+  it("小模型路徑的提示看得到請求與該卡標題、摘要，看不到正文；門檻仍是 0.75", async () => {
+    const requests: SystemOneModelCallRequest[] = [];
+    const answers: Record<string, string> = { a: '{"p": 0.9}', b: '{"p": 0.74}', c: '{"p": 0.8}' };
+    const invoker = createModelInvoker({
+      call: async (request) => {
+        requests.push(request);
+        const key = ["a", "b", "c"].find((id) => request.prompt.includes(`標題 ${id}`));
+        return { text: key === undefined ? "" : answers[key]! };
+      },
+    });
+    const withBody = cards.map((card) => ({ ...card, body: `${card.cardId} 的正文不送出` }));
+
+    const deal = await planOpeningDeal({
+      requestText: "幫我規劃花蓮行程",
+      candidates: withBody,
+      budgetTokens: 100,
+      judge: { profile: MODEL_PROFILE, invoker },
+    });
+
+    expect(MODEL_PROFILE.threshold).toBe(0.75);
+    expect(requests).toHaveLength(3);
+    for (const [index, request] of requests.entries()) {
+      const id = ["a", "b", "c"][index]!;
+      expect(request.purpose).toBe("system-one");
+      expect(request.jsonSchema).toBe(PROBABILITY_SCHEMA);
+      expect(request.prompt).toContain("幫我規劃花蓮行程");
+      expect(request.prompt).toContain(`${id} 的摘要`);
+      expect(request.prompt).not.toContain("正文");
+      for (const other of ["a", "b", "c"].filter((entry) => entry !== id)) {
+        expect(request.prompt).not.toContain(`${other} 的摘要`);
+      }
+    }
+    // 0.74 低於小模型門檻 0.75，不發。
+    expect(deal.source).toBe("system-one");
+    expect(deal.cards.map((card) => card.cardId)).toEqual(["a", "c"]);
   });
 
   it("Jev 路徑最多送 20 張，模型路徑最多送 5 張", async () => {

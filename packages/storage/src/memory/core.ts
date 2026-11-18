@@ -111,6 +111,8 @@ export class CoreMemoryStore {
    *
    * `add` 時回傳是否真的加入（主鍵去重）；`remove` 時回傳是否真的移除。
    * 沒變動就不標記每日計數，避免「嘗試加入已在組內的卡」也算一次變動。
+   * `respectDailyLimit` 時在同一交易內先查當日計數，當天已變動過就不變動、回傳 false；
+   * 蒸餾用它守住「一天最多一次」，不怕讀卡估算期間有別的操作先改了核心組。
    */
   change(input: {
     readonly persona: string;
@@ -118,8 +120,10 @@ export class CoreMemoryStore {
     readonly op: "add" | "remove";
     readonly cardId: string;
     readonly source?: CoreMemorySource;
+    readonly respectDailyLimit?: boolean;
   }): boolean {
     return this.#db.transaction((tx) => {
+      if (input.respectDailyLimit && this.getDaily(input.persona, input.day)?.changed) return false;
       const changed =
         input.op === "add"
           ? this.#addOn(tx, {

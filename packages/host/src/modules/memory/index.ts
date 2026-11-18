@@ -25,7 +25,8 @@ import { MemoryCardWriter } from "./card-writer.js";
 import { createCoreMemorySection } from "./context-section.js";
 import { registerMemoryProtocol } from "./protocol.js";
 import { scriptedDistiller, scriptedJudge } from "./models.js";
-import { DistillationService } from "./service.js";
+import type { RetrievalService } from "../retrieval/service.js";
+import { DistillationService, type MemorySearch } from "./service.js";
 import { scriptedDistillationModels, zeroFreshnessForTest } from "./test-seam.js";
 import {
   CardLifecycleStore,
@@ -74,8 +75,16 @@ function activate(context: ModuleActivationContext): void {
     return clampCoreTokenBudget(typeof raw === "number" ? raw : CORE_TOKEN_BUDGET_DEFAULT);
   };
 
+  // 比對既有記憶走混合檢索（search 模式）；檢索模組不在時退回全文搜尋。
+  // 呼叫當下才查找，不依賴模組啟用順序。
+  const search: MemorySearch = (query) => {
+    const retrieval = context.services.host.get<RetrievalService>("retrieval");
+    return retrieval === undefined ? cards.search(query) : retrieval.search(query, "search");
+  };
+
   const service = new DistillationService({
     cards,
+    search,
     models: scriptedDistillationModels() ?? context.services.models,
     runs,
     core,

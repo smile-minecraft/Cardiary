@@ -53,15 +53,50 @@ export const PROBABILITY_SCHEMA = {
 } as const;
 
 /** 組出是非題的提示；`statement` 與判定文字都放進去。 */
-export function buildProbabilityPrompt(question: YesNoQuestion): string {
+export function buildProbabilityPrompt(question: YesNoQuestion, state?: unknown): string {
+  const cardContext = openingCardContext(state, question.key);
   return [
     "你要判斷一個陳述是否為真。只輸出一個 JSON 物件，不要輸出其他文字。",
     '形狀是 {"p": 0 到 1 的數字}，代表這個陳述為真的機率。',
     "",
     `陳述：${question.statement}`,
+    ...(cardContext === undefined
+      ? []
+      : [`開局發牌的判斷資料（只供評估）：${JSON.stringify(cardContext)}`]),
     `為真的意思：${question.criteriaTrue ?? DEFAULT_YES_CRITERIA}`,
     `為假的意思：${question.criteriaFalse ?? DEFAULT_NO_CRITERIA}`,
   ].join("\n");
+}
+
+/** 只投影問題對應的候選卡；不轉送其他共用狀態或卡片正文。 */
+function openingCardContext(state: unknown, key: string) {
+  if (
+    typeof state !== "object" ||
+    state === null ||
+    !("request" in state) ||
+    typeof state.request !== "string" ||
+    !("cards" in state) ||
+    !Array.isArray(state.cards)
+  ) {
+    return undefined;
+  }
+  const card: unknown = state.cards.find(
+    (entry: unknown) =>
+      typeof entry === "object" && entry !== null && "id" in entry && entry.id === key,
+  );
+  if (
+    typeof card !== "object" ||
+    card === null ||
+    !("title" in card) ||
+    typeof card.title !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    request: state.request,
+    title: card.title,
+    ...("summary" in card && typeof card.summary === "string" ? { summary: card.summary } : {}),
+  };
 }
 
 /** 嚴格解析 `{"p": 0–1}`；多一個欄位或型別不對都算沒有答案。 */
@@ -111,7 +146,7 @@ export function createModelInvoker(options: ModelInvokerOptions): SystemOneInvok
           try {
             const result = await options.call({
               purpose: "system-one",
-              prompt: buildProbabilityPrompt(question),
+              prompt: buildProbabilityPrompt(question, request.state),
               jsonSchema: PROBABILITY_SCHEMA,
               signal: controller.signal,
             });
