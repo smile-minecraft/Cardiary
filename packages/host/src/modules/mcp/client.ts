@@ -46,6 +46,11 @@ export interface McpClientContext {
   readonly homeDir?: string;
   /** HTTP 請求的逾期毫秒數；測試可縮短，正式執行沿用 30 秒。 */
   readonly requestTimeoutMs?: number;
+  /**
+   * 這次啟動是否經核准取得該伺服器自己的持久資料目錄
+   * （`modules/mcp/<serverId>/`）的寫入授權；只有 stdio 沙盒用得到。
+   */
+  readonly persistentData?: boolean;
 }
 
 export type McpClientFactory = (server: McpServerRecord, context: McpClientContext) => McpClient;
@@ -148,6 +153,7 @@ class StdioMcpClient implements McpClient {
       folderRoot: this.#context.folderRoot,
       serverId: this.#server.serverId,
       ...(this.#context.homeDir === undefined ? {} : { homeDir: this.#context.homeDir }),
+      ...(this.#context.persistentData === true ? { persistentData: true } : {}),
     });
     if (sandbox === null) {
       // 沒有沙盒就不啟動：不能假裝網路限制有效。

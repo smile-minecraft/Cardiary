@@ -37,6 +37,12 @@ export interface SandboxProfileOptions {
   readonly agentHomeDir?: string;
   /** 外部代理專屬：額外允許寫入的目錄（例如代理自己的暫存目錄）。 */
   readonly extraWritableDirs?: readonly string[];
+  /**
+   * 額外允許寫入的目錄，規則是「後面的規則覆蓋前面的」：這裡的放行排在
+   * 正本區的拒絕之後，所以只會蓋過被拒絕的 `modules/` 子路徑，不放寬其他
+   * 正本區。呼叫端必須先確認路徑已經過 realpath 與符號連結檢查。
+   */
+  readonly persistentWritableDirs?: readonly string[];
 }
 
 /**
@@ -165,6 +171,8 @@ function walkRegularFiles(
 export function findProtectedAliases(options: {
   readonly workingDir: string;
   readonly folderRoot: string;
+  /** 其他可寫入的根目錄（例如經核准的持久資料目錄）。 */
+  readonly extraScanRoots?: readonly string[];
 }): ProtectedAlias[] {
   const stateInodes = new Set<string>();
   walkRegularFiles(
@@ -184,6 +192,9 @@ export function findProtectedAliases(options: {
   // workingDir 通常在 tmp 底下，兩處都掃並用路徑去重，兼具通用性。
   walkRegularFiles(options.workingDir, collect, true);
   walkRegularFiles(join(options.folderRoot, "tmp"), collect, true);
+  for (const root of options.extraScanRoots ?? []) {
+    walkRegularFiles(root, collect, true);
+  }
   return aliases;
 }
 
@@ -207,8 +218,8 @@ export function createCommandSandbox(options: SandboxProfileOptions): CommandSan
  * 產生 Seatbelt profile。
  *
  * 規則是後面的規則覆蓋前面的：先預設拒絕寫入，再放行工作目錄與資料夾的
- * `tmp/`，最後把保護路徑與系統目錄蓋回去。讀取維持 `allow default`，只拒絕
- * 憑證路徑。
+ * `tmp/`，再把保護路徑與系統目錄蓋回去，最後放行呼叫端指定的持久資料目錄
+ * （只蓋過 `modules/` 子路徑）。讀取維持 `allow default`，只拒絕憑證路徑。
  */
 export function buildSandboxProfile(options: SandboxProfileOptions): string {
   const workingDir = canonical(options.workingDir);
@@ -223,6 +234,7 @@ export function buildSandboxProfile(options: SandboxProfileOptions): string {
     ...(agentHome ? [agentHome] : []),
     ...(options.extraWritableDirs ?? []).map(canonical),
   ];
+  const persistentWrites = (options.persistentWritableDirs ?? []).map(canonical);
   const protectedWrites = [
     ...PROTECTED_FOLDERS.map((name) => join(folderRoot, name)),
     ...SYSTEM_FOLDERS,
@@ -245,6 +257,9 @@ export function buildSandboxProfile(options: SandboxProfileOptions): string {
     `(allow file-write* ${allowedWrites.map((path) => subpath(path)).join(" ")})`,
     '(allow file-write-data (literal "/dev/null"))',
     `(deny file-write* ${[...protectedWrites.map((path) => subpath(path)), ...protectedFiles.map((path) => literal(path))].join(" ")})`,
+    ...(persistentWrites.length === 0
+      ? []
+      : [`(allow file-write* ${persistentWrites.map((path) => subpath(path)).join(" ")})`]),
     `(deny file-read* ${sensitiveReads.map((path) => subpath(path)).join(" ")})`,
     `(deny file-read-data file-read-xattr (regex ${quote(CREDENTIAL_FILE_REGEX)}))`,
     "",

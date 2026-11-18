@@ -42,7 +42,13 @@ import {
   type McpClientFactory,
 } from "./client.js";
 import { manifest } from "./manifest.js";
-import { registerMcpProtocol, toServerInfo, type McpController } from "./protocol.js";
+import { mcpPersistentDataUsage, removeMcpPersistentDir } from "./persistent-data.js";
+import {
+  registerMcpProtocol,
+  toServerInfo,
+  type McpAddRequest,
+  type McpController,
+} from "./protocol.js";
 import { McpToolCache } from "./tool-cache.js";
 import { buildBundleDraft, type McpServerRuntime } from "./tools.js";
 
@@ -186,7 +192,12 @@ export async function activateMcpModule(
 
     let client: McpClient;
     try {
-      client = clientFactory(record, clientContext);
+      // 授權跟著核准紀錄走：設定雜湊一致、且核准時勾選了持久資料，
+      // stdio 沙盒才會建立並放行這一個伺服器自己的目錄。
+      client = clientFactory(record, {
+        ...clientContext,
+        ...(bindings !== null && bindings.persistentWrite(record) ? { persistentData: true } : {}),
+      });
     } catch (error) {
       reportFailure(record.serverId, describeError(error));
       emitChanged(infoOf(record));
@@ -368,10 +379,32 @@ export async function activateMcpModule(
           ? null
           : { state: "failed", failure }
         : { state: entry.runtime.state, ...(failure === undefined ? {} : { failure }) },
+      persistentDataInfo(record),
     );
   };
 
-  const decideAdd = async (approvalId: string, input: McpServerInput): Promise<void> => {
+  /**
+   * 協定上顯示的持久資料狀態：有沒有授權、目前用掉多少。
+   * 用量只算這個伺服器自己的目錄，掃描失敗就當 0，不讓列表整個壞掉。
+   */
+  const persistentDataInfo = (
+    record: McpServerRecord,
+  ): { allowed: boolean; bytes: number; files: number } => {
+    const allowed = bindings !== null && bindings.persistentWrite(record);
+    try {
+      const usage = mcpPersistentDataUsage(folderRoot, record.serverId);
+      return { allowed, bytes: usage.bytes, files: usage.files };
+    } catch (error) {
+      logger.warn("MCP 持久資料用量讀取失敗", {
+        serverId: record.serverId,
+        message: describeError(error),
+      });
+      return { allowed, bytes: 0, files: 0 };
+    }
+  };
+
+  const decideAdd = async (approvalId: string, request: McpAddRequest): Promise<void> => {
+    const { input, persistentData } = request;
     try {
       const resolution = await engine.approvals.waitForDecision(approvalId);
       if (disposed) {
@@ -402,12 +435,13 @@ export async function activateMcpModule(
         emitChanged(infoOf(record));
         return;
       }
-      // 只有走過核准的寫入會把設定內容綁定進受保護的狀態庫。
-      bindings.approve(record);
+      // 只有走過核准的寫入會把設定內容綁定進受保護的狀態庫；持久資料
+      // 授權也在這裡一併登記，之後手改正本會讓整筆綁定失效。
+      bindings.approve(record, { persistentData });
       protocol.emit({
         kind: "notification",
         title: "MCP 伺服器已新增",
-        body: `「${record.name}」已核准；工具會在對話第一次載入時出現。`,
+        body: `「${record.name}」已核准${persistentData ? "，並授權寫入自己的資料目錄" : ""}；工具會在對話第一次載入時出現。`,
         level: "info",
       });
       emitChanged(infoOf(record));
@@ -422,8 +456,8 @@ export async function activateMcpModule(
     }
   };
 
-  const trackAdd = (approvalId: string, input: McpServerInput): void => {
-    const task = decideAdd(approvalId, input);
+  const trackAdd = (approvalId: string, request: McpAddRequest): void => {
+    const task = decideAdd(approvalId, request);
     pendingAdds.set(approvalId, task);
   };
 
@@ -464,9 +498,9 @@ export async function activateMcpModule(
         await withdrawInvalidPendingAdd(request.id);
         continue;
       }
-      let input: McpServerInput;
+      let add: McpAddRequest;
       try {
-        input = validateMcpServerInput(raw as unknown as McpServerInput);
+        add = parseStoredAdd(raw);
       } catch (error) {
         logger.warn("待決的 MCP 新增審批設定內容無效，不會重新等待", {
           approvalId: request.id,
@@ -475,7 +509,7 @@ export async function activateMcpModule(
         await withdrawInvalidPendingAdd(request.id);
         continue;
       }
-      trackAdd(request.id, input);
+      trackAdd(request.id, add);
     }
   };
 
@@ -485,15 +519,22 @@ export async function activateMcpModule(
       return records.map((record) => infoOf(record));
     },
 
-    async requestAdd(input: McpServerInput): Promise<{ approvalId: string }> {
+    async requestAdd(
+      input: McpServerInput,
+      options: { readonly persistentData: boolean },
+    ): Promise<{ approvalId: string }> {
       const approval = await engine.approvals.request({
         action: {
           kind: "module-enable",
           summary: `新增 MCP 伺服器「${input.name}」`,
-          details: describeTarget(input),
+          details: describeTarget(input, options.persistentData),
           // 輸入跟著審批列持久化：主機重啟後要靠它重新等待、完成原本的新增。
-          // 內容與 details 相同（名稱、傳輸、目標、允許網域），不含任何秘密。
-          toolInput: input as unknown as JsonValue,
+          // 內容與 details 相同（名稱、傳輸、目標、允許網域與資料目錄授權），
+          // 不含任何秘密。
+          toolInput: {
+            server: input,
+            persistentData: options.persistentData,
+          } as unknown as JsonValue,
         },
         risk: "high",
         requestedBy: { kind: "host", component: "mcp" },
@@ -503,10 +544,10 @@ export async function activateMcpModule(
       protocol.emit({
         kind: "notification",
         title: "MCP 伺服器等待審批",
-        body: `要新增「${input.name}」；核准前不會啟動，也不會註冊任何工具。`,
+        body: `要新增「${input.name}」${options.persistentData ? "，並授權它寫入自己的資料目錄" : ""}；核准前不會啟動，也不會註冊任何工具。`,
         level: "warning",
       });
-      trackAdd(approval.id, input);
+      trackAdd(approval.id, { input, persistentData: options.persistentData });
       return { approvalId: approval.id };
     },
 
@@ -528,6 +569,23 @@ export async function activateMcpModule(
         });
       }
       bindings?.revoke(serverId);
+      // 持久資料目錄屬於這個伺服器，移除伺服器時整個刪掉；刪不掉只回報，
+      // 不能讓核准撤銷與其他清理跟著失敗。撤銷已經完成，之後就算目錄還
+      // 留著，新的伺服器也拿不到舊授權。
+      try {
+        removeMcpPersistentDir(folderRoot, serverId);
+      } catch (error) {
+        logger.warn("MCP 持久資料目錄刪除失敗", {
+          serverId,
+          message: describeError(error),
+        });
+        protocol.emit({
+          kind: "notification",
+          title: "MCP 持久資料目錄未刪除",
+          body: `「${last.name}」已移除，但它的資料目錄刪除失敗，殘留在 modules/mcp/${serverId}/：${describeError(error)}`,
+          level: "error",
+        });
+      }
       emitChanged(last, true);
       return true;
     },
@@ -548,9 +606,10 @@ export async function activateMcpModule(
       }
       const record = await store.setEnabled(serverId, enabled);
       // 只有改動前就已經通過綁定比對的紀錄才重新綁定；不能用停用順手替
-      // 手改過的內容背書。
+      // 手改過的內容背書。重新綁定要保留原本的持久資料授權，否則切一次
+      // 啟用就把人的授權默默撤銷了。
       if (approvedBefore && bindings !== null) {
-        bindings.approve(record);
+        bindings.approve(record, { persistentData: bindings.persistentWrite(current) });
       }
       if (enabled) {
         await startServer(record);
@@ -579,8 +638,9 @@ export async function activateMcpModule(
         );
       }
       const record = await store.setAllowedHosts(serverId, allowedHosts);
-      // 通過綁定比對後才是使用者這次要求的變更，重新綁定新的內容。
-      bindings.approve(record);
+      // 通過綁定比對後才是使用者這次要求的變更，重新綁定新的內容；
+      // 持久資料授權沿用既有的核准。
+      bindings.approve(record, { persistentData: bindings.persistentWrite(current) });
       if (record.enabled && record.transport === "http") {
         // 網域白名單改變後重新連線；舊連線不能沿用先前的判斷。`stopServer`
         // 也會讓進行中的啟動失效，避免用舊白名單完成啟動。
@@ -689,7 +749,10 @@ function sameList(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function describeTarget(input: McpServerInput): { label: string; value: string }[] {
+function describeTarget(
+  input: McpServerInput,
+  persistentData: boolean,
+): { label: string; value: string }[] {
   const target =
     input.transport === "stdio"
       ? [input.command ?? "", ...(input.args ?? [])].join(" ")
@@ -702,7 +765,35 @@ function describeTarget(input: McpServerInput): { label: string; value: string }
       label: "允許網域",
       value: input.allowedHosts.length === 0 ? "（無）" : input.allowedHosts.join(", "),
     },
+    {
+      label: "持久資料目錄",
+      value: persistentData ? "允許寫入自己的 modules/mcp 目錄" : "不允許",
+    },
   ];
+}
+
+/**
+ * 解析審批列裡持久化的新增內容。
+ *
+ * 舊版的 toolInput 是純 `McpServerInput`；新版多包一層，帶上持久資料授權。
+ * 兩種都要接得住，否則升級前送出的待決審批會在重啟後被當成無效撤回。
+ */
+function parseStoredAdd(raw: unknown): McpAddRequest {
+  const record = raw as Record<string, unknown>;
+  if (isRecord(record.server)) {
+    return {
+      input: validateMcpServerInput(record.server as unknown as McpServerInput),
+      persistentData: record.persistentData === true,
+    };
+  }
+  return {
+    input: validateMcpServerInput(raw as unknown as McpServerInput),
+    persistentData: false,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
