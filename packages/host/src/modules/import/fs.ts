@@ -1,6 +1,6 @@
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import { gunzipSync } from "node:zlib";
+import { gunzipSync, zstdDecompressSync } from "node:zlib";
 import { readZipEntry } from "./zip.js";
 
 /**
@@ -16,8 +16,10 @@ export interface SourceFileSystem {
   /** 列出目錄項目；不存在或不是目錄時丟 `SourceAccessError`。 */
   list(path: string): Promise<readonly SourceEntry[]>;
   /**
-   * 讀文字檔。超過 `maxBytes` 時只回前段並標記 `truncated`；
-   * 二進位檔由呼叫端以 `isBinary` 判斷後跳過。
+   * 讀文字檔。`.jsonl.gz` 與 `.jsonl.zst` 會先解壓，上限看解壓後的大小。
+   *
+   * 超過 `maxBytes` 時標記 `truncated`：未壓縮檔回前段文字，壓縮檔無法只解
+   * 前段，回空字串。二進位檔由呼叫端以 `isBinary` 判斷後跳過。
    */
   readText(path: string, options?: { readonly maxBytes?: number }): Promise<SourceTextFile>;
   /** 只解開指定的 ZIP 項目，其他項目不解壓。 */
@@ -41,6 +43,7 @@ export interface SourceEntry {
 export interface SourceTextFile {
   readonly text: string;
   readonly truncated: boolean;
+  /** 解壓後的大小；超過上限又無法只解前段時，記的是下限。 */
   readonly sizeBytes: number;
 }
 
@@ -52,6 +55,18 @@ export class SourceAccessError extends Error {
     super(message);
     this.name = "SourceAccessError";
     this.path = path;
+  }
+}
+
+/**
+ * 解壓失敗；轉接器據此回報 `decompress-failed`。
+ *
+ * 格式錯誤與壓縮檔損壞要分開，使用者才知道是換個檔案就好，還是資料真的壞了。
+ */
+export class SourceDecompressionError extends SourceAccessError {
+  constructor(path: string, message: string) {
+    super(path, message);
+    this.name = "SourceDecompressionError";
   }
 }
 
@@ -97,9 +112,15 @@ export const nodeSourceFileSystem: SourceFileSystem = {
         throw new SourceAccessError(path, "不是一般檔案");
       }
       const raw = await readFile(path);
-      const bytes = path.toLowerCase().endsWith(".jsonl.gz")
-        ? gunzipSync(raw, { maxOutputLength: maxBytes + 1 })
-        : raw;
+      let bytes: Buffer;
+      try {
+        bytes = decompress(path, raw, maxBytes + 1);
+      } catch (error) {
+        if (isTooLarge(error)) {
+          return { text: "", truncated: true, sizeBytes: maxBytes + 1 };
+        }
+        throw new SourceDecompressionError(path, describe(error));
+      }
       const slice = bytes.subarray(0, maxBytes);
       return {
         text: new TextDecoder("utf-8", { fatal: false }).decode(slice),
@@ -107,6 +128,7 @@ export const nodeSourceFileSystem: SourceFileSystem = {
         sizeBytes: bytes.byteLength,
       };
     } catch (error) {
+      if (error instanceof SourceAccessError) throw error;
       throw new SourceAccessError(path, describe(error));
     }
   },
@@ -164,4 +186,22 @@ export const nodeReadonlyDatabase: ReadonlyDatabaseOpener = (path) => {
 function describe(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+/**
+ * 依副檔名解壓；目前只認得 Codex rollout 的 `.gz` 與 `.zst`。
+ *
+ * `maxOutputLength` 讓壓縮炸彈在超過上限時就停下，不會先把整個輸出放進記憶體。
+ */
+function decompress(path: string, raw: Buffer, maxOutputBytes: number): Buffer {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".jsonl.gz")) return gunzipSync(raw, { maxOutputLength: maxOutputBytes });
+  if (lower.endsWith(".jsonl.zst"))
+    return zstdDecompressSync(raw, { maxOutputLength: maxOutputBytes });
+  return raw;
+}
+
+/** node:zlib 在輸出超過 `maxOutputLength` 時丟的錯誤。 */
+function isTooLarge(error: unknown): boolean {
+  return (error as { readonly code?: unknown } | null)?.code === "ERR_BUFFER_TOO_LARGE";
 }
