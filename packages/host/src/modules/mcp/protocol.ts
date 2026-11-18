@@ -24,10 +24,20 @@ import { ProtocolHandlerError } from "../contract.js";
 /** 模組提供給協定層的動作；實作在 `index.ts`。 */
 export interface McpController {
   listServers(): Promise<McpServerInfo[]>;
-  requestAdd(input: McpServerInput): Promise<{ approvalId: string }>;
+  requestAdd(
+    input: McpServerInput,
+    options: { readonly persistentData: boolean },
+  ): Promise<{ approvalId: string }>;
   removeServer(serverId: string): Promise<boolean>;
   setEnabled(serverId: string, enabled: boolean): Promise<McpServerInfo>;
   setAllowedHosts(serverId: string, allowedHosts: readonly string[]): Promise<McpServerInfo>;
+}
+
+/** 新增伺服器請求解析後的內容。 */
+export interface McpAddRequest {
+  readonly input: McpServerInput;
+  /** 核准時要不要一併授權寫入 `modules/mcp/<serverId>/`；缺省不授權。 */
+  readonly persistentData: boolean;
 }
 
 /** 註冊 `mcp` 命名空間；回傳的 handle 由模組主機在停用時撤銷。 */
@@ -39,8 +49,12 @@ export function registerMcpProtocol(
     switch (request.type) {
       case "mcp.servers.list":
         return { servers: await controller.listServers() } as unknown as JsonValue;
-      case "mcp.server.add":
-        return (await controller.requestAdd(parseAddInput(request))) as unknown as JsonValue;
+      case "mcp.server.add": {
+        const parsed = parseAddInput(request);
+        return (await controller.requestAdd(parsed.input, {
+          persistentData: parsed.persistentData,
+        })) as unknown as JsonValue;
+      }
       case "mcp.server.remove": {
         const serverId = requiredString(request.payload, "serverId");
         const removed = await controller.removeServer(serverId);
@@ -70,6 +84,11 @@ export function registerMcpProtocol(
 export function toServerInfo(
   record: McpServerRecord,
   runtime: { readonly state: "disabled" | "ready" | "failed"; readonly failure?: string } | null,
+  persistentData?: {
+    readonly allowed: boolean;
+    readonly bytes: number;
+    readonly files: number;
+  },
 ): McpServerInfo {
   const state = !record.enabled ? "disabled" : (runtime?.state ?? "disabled");
   const failure = state === "failed" ? runtime?.failure : undefined;
@@ -84,22 +103,27 @@ export function toServerInfo(
     enabled: record.enabled,
     state,
     ...(failure === undefined ? {} : { failure }),
+    ...(persistentData === undefined ? {} : { persistentData }),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
 }
 
-function parseAddInput(request: ProtocolRequestContext): McpServerInput {
+function parseAddInput(request: ProtocolRequestContext): McpAddRequest {
   const payload = asRecord(request.payload, "payload");
   try {
-    return validateMcpServerInput({
-      name: requiredString(payload, "name"),
-      transport: requiredTransport(payload),
-      ...(payload.command === undefined ? {} : { command: requiredString(payload, "command") }),
-      ...(payload.args === undefined ? {} : { args: requiredStringArray(payload, "args") }),
-      ...(payload.url === undefined ? {} : { url: requiredString(payload, "url") }),
-      allowedHosts: requiredStringArray(payload, "allowedHosts"),
-    });
+    return {
+      input: validateMcpServerInput({
+        name: requiredString(payload, "name"),
+        transport: requiredTransport(payload),
+        ...(payload.command === undefined ? {} : { command: requiredString(payload, "command") }),
+        ...(payload.args === undefined ? {} : { args: requiredStringArray(payload, "args") }),
+        ...(payload.url === undefined ? {} : { url: requiredString(payload, "url") }),
+        allowedHosts: requiredStringArray(payload, "allowedHosts"),
+      }),
+      persistentData:
+        payload.persistentData === undefined ? false : requiredBoolean(payload, "persistentData"),
+    };
   } catch (error) {
     if (error instanceof McpConfigError) {
       throw new ProtocolHandlerError("invalid_message", error.message);

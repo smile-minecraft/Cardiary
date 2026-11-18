@@ -309,7 +309,7 @@ describe("MCP 核准綁定：設定與核准紀錄不符就不啟動", () => {
       bindings,
     });
 
-    const { approvalId } = await handle.controller.requestAdd(INPUT);
+    const { approvalId } = await handle.controller.requestAdd(INPUT, { persistentData: false });
     // 核准前不寫正本、不註冊工具；決定的 waiter 還沒解析，不能等 settled。
     expect(await store.list()).toEqual([]);
     expect(bundles).toEqual([]);

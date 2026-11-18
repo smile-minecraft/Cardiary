@@ -2098,6 +2098,10 @@ export interface McpServerAddRequestPayload {
    * 冪等鍵；重送只提出一次審批。
    */
   clientRequestId?: string;
+  /**
+   * 是否在核准時一併授權這個伺服器寫入自己的持久資料目錄（modules/mcp/<serverId>/）；預設不授權。
+   */
+  persistentData?: boolean;
 }
 /**
  * 移除一個 MCP 伺服器。
@@ -5224,6 +5228,7 @@ export interface McpServerInfo {
    * 啟動失敗或沙盒無法套用時的原因。
    */
   failure?: string;
+  persistentData?: McpPersistentDataInfo;
   /**
    * 建立時間，RFC 3339。
    */
@@ -5232,6 +5237,20 @@ export interface McpServerInfo {
    * 最後更新時間，RFC 3339。
    */
   updatedAt?: string;
+}
+export interface McpPersistentDataInfo {
+  /**
+   * 是否已核准寫入自己的持久資料目錄（modules/mcp/<serverId>/）；核准後手改設定會失效。
+   */
+  allowed: boolean;
+  /**
+   * 目錄內檔案的容量總和（bytes）。
+   */
+  bytes: number;
+  /**
+   * 目錄內檔案與符號連結的數量；子目錄不計入。
+   */
+  files: number;
 }
 /**
  * 已送出人工審批。

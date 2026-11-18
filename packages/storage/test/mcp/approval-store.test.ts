@@ -62,6 +62,7 @@ describe("MCP 核准綁定存取", () => {
       configDigest: expect.any(String),
       configJson: expect.any(String),
       approvedAt: "2026-11-16T01:02:03.000Z",
+      persistentWrite: false,
     });
     store.revoke("srv-1");
     expect(store.isApproved(record)).toBe(false);
