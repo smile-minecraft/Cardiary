@@ -1,4 +1,12 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -58,5 +66,30 @@ describe("委派設定", () => {
     expect(store.reserve("a")).toBe(false);
     expect(new AgentPermissions(state).status("a", 0).remaining).toBe(0);
     expect(store.status("b", 0).remaining).toBe(20);
+  });
+});
+
+describe("授權路徑存成真實路徑", () => {
+  it("經過符號連結的資料夾與還不存在的子路徑，都換成真實路徑", () => {
+    const base = realpathSync.native(mkdtempSync(join(tmpdir(), "cardiary-perm-real-")));
+    try {
+      const real = join(base, "real");
+      mkdirSync(real);
+      const link = join(base, "link");
+      symlinkSync(real, link);
+      const state = join(base, "state");
+      mkdirSync(state);
+      const permissions = new AgentPermissions(state);
+      permissions.grantAllowAll(
+        { tools: ["write_file"], paths: [link, join(link, "later")] },
+        0,
+        15,
+      );
+      expect(permissions.allowAllFor(0)?.paths).toEqual([real, join(real, "later")]);
+      permissions.setCategory("read-only-files", true, [link]);
+      expect(permissions.allowsCategory("read-only-files", join(real, "notes.md"))).toBe(true);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });

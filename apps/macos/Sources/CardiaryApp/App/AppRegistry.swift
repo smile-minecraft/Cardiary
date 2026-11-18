@@ -105,5 +105,6 @@ enum AppRegistry {
             AnyView(NotificationListView(model: app.notifications))
         }
         app.settings.register(RemoteSettingsTab(remote: app.remote))
+        app.settings.register(PermissionsSettingsTab(model: app.permissions))
     }
 }

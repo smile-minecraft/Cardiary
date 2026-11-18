@@ -307,6 +307,114 @@ public actor CardiaryConnection {
         return response.payload
     }
 
+    // MARK: - 權限模式（只有本機 Mac 客戶端能呼叫）
+
+    public func getPermissionModes(
+        options: RequestOptions = .default
+    ) async throws -> PermissionModesState {
+        let request = SystemPermissionsGetRequest(
+            id: RequestID.next(),
+            payload: SystemPermissionsGetRequestPayload()
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .systemPermissionsGetResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "system.permissions.get 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func setPermissionCategory(
+        _ category: DelegatedCategory,
+        enabled: Bool,
+        paths: [String],
+        clientRequestId: String,
+        options: RequestOptions = .default
+    ) async throws -> PermissionModesState {
+        let request = SystemPermissionsSetCategoryRequest(
+            id: RequestID.next(),
+            payload: SystemPermissionsSetCategoryRequestPayload(
+                category: category,
+                enabled: enabled,
+                paths: paths,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .systemPermissionsSetCategoryResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "system.permissions.set_category 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func setPermissionDomains(
+        _ domains: [String],
+        clientRequestId: String,
+        options: RequestOptions = .default
+    ) async throws -> PermissionModesState {
+        let request = SystemPermissionsSetDomainsRequest(
+            id: RequestID.next(),
+            payload: SystemPermissionsSetDomainsRequestPayload(
+                domains: domains,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .systemPermissionsSetDomainsResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "system.permissions.set_domains 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func grantAllowAll(
+        tools: [String],
+        paths: [String],
+        domains: [String],
+        minutes: Int,
+        clientRequestId: String,
+        options: RequestOptions = .default
+    ) async throws -> PermissionModesState {
+        let request = SystemPermissionsGrantAllowAllRequest(
+            id: RequestID.next(),
+            payload: SystemPermissionsGrantAllowAllRequestPayload(
+                tools: tools,
+                paths: paths,
+                domains: domains,
+                minutes: minutes,
+                clientRequestId: clientRequestId
+            )
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .systemPermissionsGrantAllowAllResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "system.permissions.grant_allow_all 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
+    public func revokeAllowAll(
+        clientRequestId: String,
+        options: RequestOptions = .default
+    ) async throws -> PermissionModesState {
+        let request = SystemPermissionsRevokeAllowAllRequest(
+            id: RequestID.next(),
+            payload: SystemPermissionsRevokeAllowAllRequestPayload(clientRequestId: clientRequestId)
+        )
+        let frame = try await perform(id: request.id, encode: request, options: options)
+        guard case .systemPermissionsRevokeAllowAllResponse(let response) = frame else {
+            throw CardiaryClientError.invalidFrame(
+                "system.permissions.revoke_allow_all 收到 \(frame.kindLabel) 而不是回應。"
+            )
+        }
+        return response.payload
+    }
+
     public func setSettings(
         changes: [SettingChange],
         clientRequestId: String,

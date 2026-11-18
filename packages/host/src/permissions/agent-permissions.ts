@@ -10,8 +10,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
   DELEGABLE_CATEGORIES,
@@ -230,7 +230,28 @@ function validPaths(paths: readonly string[]): string[] {
   ) {
     throw new Error("委派路徑必須是絕對路徑");
   }
-  return [...new Set(paths.map((path) => resolve(path)))];
+  return [...new Set(paths.map((path) => canonicalPath(resolve(path))))];
+}
+
+/**
+ * 授權路徑存成真實路徑。權限閘道比對的是工具路徑解析後的真實路徑；
+ * 如果授權存的是經過符號連結的路徑（例如 macOS 的 `/var` → `/private/var`），
+ * 範圍永遠比對不到，授權等於沒開。路徑還不存在時，用最近一個存在的上層
+ * 的真實路徑接回剩下的部分。
+ */
+function canonicalPath(path: string): string {
+  const missing: string[] = [];
+  let current = path;
+  for (;;) {
+    try {
+      return join(realpathSync.native(current), ...missing.reverse());
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return path;
+      missing.push(basename(current));
+      current = parent;
+    }
+  }
 }
 
 function validState(value: unknown): value is StoredPermissions {

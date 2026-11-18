@@ -3825,6 +3825,23 @@
           }
         }
       }
+    },
+    "settingsPermissionsTab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Permissions"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "代理權限"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

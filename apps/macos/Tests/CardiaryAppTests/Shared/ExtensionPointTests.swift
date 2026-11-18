@@ -53,7 +53,7 @@ final class ExtensionPointTests: XCTestCase {
         let model = AppModel(setupCompleted: true)
         XCTAssertEqual(
             model.settings.all.map(\.id),
-            ["models", "general", "modules", "storage", "mcp", "remote"]
+            ["models", "general", "modules", "storage", "mcp", "remote", "permissions"]
         )
 
         model.settings.register(PlaceholderSettingsTab(
@@ -63,7 +63,7 @@ final class ExtensionPointTests: XCTestCase {
         ))
         XCTAssertEqual(
             model.settings.all.map(\.id),
-            ["models", "general", "modules", "storage", "mcp", "remote", "freshness"]
+            ["models", "general", "modules", "storage", "mcp", "remote", "permissions", "freshness"]
         )
 
         model.settings.register(PlaceholderSettingsTab(
@@ -73,7 +73,7 @@ final class ExtensionPointTests: XCTestCase {
         ))
         XCTAssertEqual(
             model.settings.all.map(\.id),
-            ["models", "general", "modules", "storage", "mcp", "remote", "freshness"]
+            ["models", "general", "modules", "storage", "mcp", "remote", "permissions", "freshness"]
         )
     }
 

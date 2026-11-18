@@ -90,6 +90,7 @@ extension ServerFrame {
         case .sessionUnarchivedEvent(let frame): return frame.stream
         case .sessionDeletedEvent(let frame): return frame.stream
         case .systemSettingsChangedEvent(let frame): return frame.stream
+        case .systemPermissionsChangedEvent(let frame): return frame.stream
         case .systemModulesChangedEvent(let frame): return frame.stream
         case .systemModelsChangedEvent(let frame): return frame.stream
         case .moduleEvent(let frame): return frame.stream
@@ -124,6 +125,7 @@ extension ServerFrame {
         case .sessionUnarchivedEvent(let frame): return frame.seq
         case .sessionDeletedEvent(let frame): return frame.seq
         case .systemSettingsChangedEvent(let frame): return frame.seq
+        case .systemPermissionsChangedEvent(let frame): return frame.seq
         case .systemModulesChangedEvent(let frame): return frame.seq
         case .systemModelsChangedEvent(let frame): return frame.seq
         case .moduleEvent(let frame): return frame.seq
@@ -185,6 +187,11 @@ extension ServerFrame {
         case .contextCompactResponse(let frame): return frame.replyTo
         case .systemSettingsGetResponse(let frame): return frame.replyTo
         case .systemSettingsSetResponse(let frame): return frame.replyTo
+        case .systemPermissionsGetResponse(let frame): return frame.replyTo
+        case .systemPermissionsSetCategoryResponse(let frame): return frame.replyTo
+        case .systemPermissionsSetDomainsResponse(let frame): return frame.replyTo
+        case .systemPermissionsGrantAllowAllResponse(let frame): return frame.replyTo
+        case .systemPermissionsRevokeAllowAllResponse(let frame): return frame.replyTo
         case .systemModulesGetResponse(let frame): return frame.replyTo
         case .systemModulesSetEnabledResponse(let frame): return frame.replyTo
         case .systemModelsGetResponse(let frame): return frame.replyTo
@@ -204,6 +211,7 @@ extension ServerFrame {
         case .sessionUnarchivedEvent: return nil
         case .sessionDeletedEvent: return nil
         case .systemSettingsChangedEvent: return nil
+        case .systemPermissionsChangedEvent: return nil
         case .systemModulesChangedEvent: return nil
         case .systemModelsChangedEvent: return nil
         case .approvalRequestedEvent: return nil
@@ -289,6 +297,11 @@ extension ServerFrame {
         case .contextCompactResponse: return "context.compact"
         case .systemSettingsGetResponse: return "system.settings.get"
         case .systemSettingsSetResponse: return "system.settings.set"
+        case .systemPermissionsGetResponse: return "system.permissions.get"
+        case .systemPermissionsSetCategoryResponse: return "system.permissions.set_category"
+        case .systemPermissionsSetDomainsResponse: return "system.permissions.set_domains"
+        case .systemPermissionsGrantAllowAllResponse: return "system.permissions.grant_allow_all"
+        case .systemPermissionsRevokeAllowAllResponse: return "system.permissions.revoke_allow_all"
         case .systemModulesGetResponse: return "system.modules.get"
         case .systemModulesSetEnabledResponse: return "system.modules.set_enabled"
         case .systemModelsGetResponse: return "system.models.get"
@@ -317,6 +330,7 @@ extension ServerFrame {
         case .sessionUnarchivedEvent: return "session.unarchived"
         case .sessionDeletedEvent: return "session.deleted"
         case .systemSettingsChangedEvent: return "system.settings.changed"
+        case .systemPermissionsChangedEvent: return "system.permissions.changed"
         case .systemModulesChangedEvent: return "system.modules.changed"
         case .systemModelsChangedEvent: return "system.models.changed"
         case .agentStartResponse: return "agent.start"

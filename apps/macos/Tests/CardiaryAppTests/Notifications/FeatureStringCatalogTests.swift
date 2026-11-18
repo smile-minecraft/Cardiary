@@ -26,6 +26,16 @@ final class FeatureStringCatalogTests: XCTestCase {
         }
     }
 
+    func testPermissionCatalogMatchesSourceAndHasBothLanguages() throws {
+        for key in PermissionString.allCases {
+            XCTAssertFalse(PermissionL10n.text(key, language: .zhHant).isEmpty, "\(key.rawValue) 缺繁體中文")
+            XCTAssertFalse(PermissionL10n.text(key, language: .en).isEmpty, "\(key.rawValue) 缺英文")
+        }
+        try assertCatalogMatches("Permissions", keys: PermissionL10n.catalogKeys()) { key, language in
+            PermissionL10n.table(language)[key]
+        }
+    }
+
     func testRemoteCatalogMatchesSource() throws {
         try assertCatalogMatches("Remote", keys: RemoteL10n.catalogKeys()) { key, language in
             RemoteL10n.table(language)[key]

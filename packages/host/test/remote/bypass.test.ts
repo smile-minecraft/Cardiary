@@ -150,4 +150,25 @@ describe("遠端存取的繞過嘗試", () => {
       }
     },
   );
+  it.each([
+    ["system.permissions.get", {}],
+    ["system.permissions.grant_allow_all", { tools: ["write_file"], paths: ["/tmp"], minutes: 60 }],
+    ["system.permissions.set_category", { category: "create-card", enabled: true, paths: [] }],
+    ["system.permissions.set_domains", { domains: ["example.com"] }],
+    ["system.permissions.revoke_allow_all", {}],
+  ])("已配對的遠端裝置不能讀寫權限模式：%s", async (type, payload) => {
+    const host = await boot(true);
+    const { deviceToken } = await pair(host);
+    const client = await TestClient.connect(host.url);
+    await client.waitForReply(await client.hello(deviceToken));
+    const reply = await client.waitForReply(
+      client.request(type, { clientRequestId: `remote-${type}`, ...payload }),
+    );
+    expect(reply.code).toBe("permission_denied");
+    expect((reply.details as { reason: string }).reason).toBe("local_only");
+    await client.close();
+    const now = Date.now();
+    expect(host.host.agentPermissions.allowAllFor(now)).toBeNull();
+    expect(host.host.agentPermissions.status("", now).categories).toEqual([]);
+  });
 });

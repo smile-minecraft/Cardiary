@@ -447,6 +447,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
     // 人的開關；閘道在每次配對、認證與裝置請求時重讀，切換立刻生效。
     remoteAccessEnabled: () => isRemoteAccessEnabled(cardEnvironment.settings),
     revokeAllowAll: () => agentPermissions.revokeAllowAll(),
+    agentPermissions: () => agentPermissions,
     cancelToolProcesses: (deadlineMs) => spawn.cancelAll(deadlineMs),
     // 「一律允許」由權限模組提供；模組可能在閘道建立後才啟用，所以用取值函式。
     permissionDecision: () => hostServices.get(HOST_SERVICE_NAMES.permissionDecision),
