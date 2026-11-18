@@ -96,34 +96,8 @@ function renderNotificationCard(
       }),
     );
   }
-  const createButton = h("button", {
-    class: "button button-primary",
-    type: "button",
-    text: translate(language, "notifications.createCard"),
-    on: {
-      click: () => {
-        createButton.disabled = true;
-        void app
-          .createCardFromNotification(notification.notificationId)
-          .then((result) => {
-            card.append(
-              h("p", {
-                class: "form-note",
-                text: translate(
-                  language,
-                  result.deduped ? "notifications.cardDeduped" : "notifications.cardCreated",
-                  { title: result.card.title },
-                ),
-              }),
-            );
-            void app.refreshNotifications().catch(showActionError(card, language));
-          })
-          .catch(showActionError(card, language));
-      },
-    },
-  });
-  buttons.append(createButton);
-  card.append(buttons);
+  // 網頁只負責對話、通知、審批與緊急暫停；把通知轉成卡片屬於 macOS 應用程式的範圍。
+  if (buttons.childElementCount > 0) card.append(buttons);
   return card;
 }
 

@@ -12,7 +12,6 @@ import type {
   ApprovalRequest,
   AssistantTranscriptEntry,
   CardiaryNotification,
-  NotificationCreateCardResponsePayload,
   NotificationListResponsePayload,
   NotificationMarkReadResponsePayload,
   SessionListResponsePayload,
@@ -239,16 +238,6 @@ export class RemoteApp {
     }
     this.totalUnread = payload.totalUnread;
     this.#emit();
-  }
-
-  async createCardFromNotification(
-    notificationId: string,
-  ): Promise<NotificationCreateCardResponsePayload> {
-    const client = this.#client;
-    if (!client) throw new ProtocolRequestError("connection_closed", "連線尚未就緒。");
-    return client.request<NotificationCreateCardResponsePayload>("notification.create_card", {
-      notificationId,
-    });
   }
 
   // ---- 連線 ---------------------------------------------------------------

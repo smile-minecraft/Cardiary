@@ -101,27 +101,42 @@ export function createConversationView(
     }
   });
 
-  let lastSignature = "";
+  let lastSessionSignature = "";
+  let lastTranscriptSignature = "";
   let streamingText: HTMLElement | null = null;
 
   return {
     element,
     update() {
+      // 會話列和逐字稿分開判斷：建立或切換會話時逐字稿可能沒變，
+      // 但會話列一定要跟著更新。
+      const sessionSignature = sessionBarSignature(app);
+      if (sessionSignature !== lastSessionSignature) {
+        lastSessionSignature = sessionSignature;
+        renderSessionBar(sessionBar, context);
+      }
       const signature = transcriptSignature(app);
-      if (signature === lastSignature) {
+      if (signature === lastTranscriptSignature) {
         if (streamingText && app.streaming) streamingText.textContent = app.streaming.text;
         return;
       }
-      lastSignature = signature;
+      lastTranscriptSignature = signature;
       const wasAtBottom =
         transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 80;
-      renderSessionBar(sessionBar, context);
       streamingText = renderTranscript(transcript, context);
       const busy = app.activeTurn?.state === "running" || app.activeTurn?.state === "queued";
       interruptButton.disabled = !busy;
       if (wasAtBottom) transcript.scrollTop = transcript.scrollHeight;
     },
   };
+}
+
+/** 會話列的內容：清單順序、標題與目前選取的會話。 */
+function sessionBarSignature(app: RemoteApp): string {
+  return JSON.stringify([
+    app.sessions.map((session) => [session.id, session.title]),
+    app.currentSessionId,
+  ]);
 }
 
 /**
