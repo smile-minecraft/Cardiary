@@ -64,7 +64,7 @@ export function mcpPersistentDataUsage(
   if (!isMcpServerId(serverId)) {
     throw new McpPersistentDirError(`MCP 伺服器識別碼不安全：${serverId}`);
   }
-  const layout = new FolderLayout(folderRoot);
+  const layout = new FolderLayout(realFolderRoot(folderRoot));
   const absolute = layout.absolute(`modules/mcp/${serverId}`);
   if (!existsSync(absolute)) {
     return { bytes: 0, files: 0 };
@@ -88,8 +88,12 @@ export function mcpPersistentDataUsage(
 }
 
 /**
- * 刪除整個持久資料目錄；符號連結不跟隨、硬連結不刪。回傳是否真的刪掉目錄。
+ * 刪除整個持久資料目錄；符號連結不跟隨、硬連結不刪。
  *
+ * 目錄原本不存在時回傳 false，不算錯誤。任何殘留都丟 `McpPersistentDirError`：
+ * 硬連結（`skippedHardLinks`）不能強刪，只能回報；FIFO／socket 這類特殊檔案
+ * `removeTreeSafely` 也不會動，留著時 `rmdir` 失敗記成 `keptDirectories`；
+ * 任何一項非零、或刪除後用 `lstat` 看目標仍存在，呼叫端都要發「MCP 持久資料目錄未刪除」通知。
  * 上層路徑出現符號連結時 `removeTreeSafely` 會丟出 `protected-path`，
  * 呼叫端要捕捉並只回報，不影響其他清理步驟。
  */
@@ -97,7 +101,7 @@ export function removeMcpPersistentDir(folderRoot: string, serverId: string): bo
   if (!isMcpServerId(serverId)) {
     throw new McpPersistentDirError(`MCP 伺服器識別碼不安全：${serverId}`);
   }
-  const layout = new FolderLayout(folderRoot);
+  const layout = new FolderLayout(realFolderRoot(folderRoot));
   const absolute = layout.absolute(`modules/mcp/${serverId}`);
   // 上層出現符號連結時 fail closed：丟出去讓呼叫端回報，不能靜靜回傳
   // 「不存在」讓人以為目錄沒留下。上層缺段（modules 還沒建）時照常
@@ -106,7 +110,23 @@ export function removeMcpPersistentDir(folderRoot: string, serverId: string): bo
   if (!existsSync(absolute) && !isSymbolicLink(absolute)) {
     return false;
   }
-  removeTreeSafely(layout, absolute, ["origin"]);
+  const report = removeTreeSafely(layout, absolute, ["origin"]);
+  // removeTreeSafely 不會動 nlink > 1 的硬連結，也會略過 FIFO／socket；
+  // 兩種都留著時連 rmdir 都會失敗。這裡再用 lstat 確認目標真的消失，
+  // 任何殘留都回報，不能回傳 true 讓人以為目錄刪乾淨了。
+  let targetRemains = true;
+  try {
+    lstatSync(absolute);
+  } catch {
+    targetRemains = false;
+  }
+  if (report.skippedHardLinks > 0 || report.keptDirectories > 0 || targetRemains) {
+    throw new McpPersistentDirError(
+      `MCP 持久資料目錄未完全刪除：${absolute}` +
+        `（硬連結保留 ${report.skippedHardLinks} 個、目錄保留 ${report.keptDirectories} 個` +
+        `${targetRemains ? "，目標仍存在" : ""}）`,
+    );
+  }
   return true;
 }
 
