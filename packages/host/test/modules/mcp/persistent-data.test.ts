@@ -9,8 +9,10 @@
  * - 停用保留目錄；移除伺服器連同目錄一起刪除；刪除失敗只回報，
  *   核准照樣撤銷、其他清理不受影響。
  */
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -20,6 +22,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import net from "node:net";
 import type { ToolBundleDraft } from "@cardiary/engine-adapter";
 import type { ModuleActivationContext, ProtocolEventIntent } from "@cardiary/module-api";
 import { FolderLayout, McpServerStore } from "@cardiary/storage";
@@ -386,5 +389,145 @@ describe("MCP 持久資料目錄的沙盒防線", () => {
     const usage = mcpPersistentDataUsage(root, "demo");
     expect(usage.bytes).toBeGreaterThanOrEqual(11);
     expect(usage.files).toBe(3);
+  });
+
+  it("folderRoot 是符號連結時，建立、用量與刪除一致走實際路徑", () => {
+    // 模擬 macOS 的 /var -> /private/var：呼叫端給的是連結路徑，三個函式
+    // 都要走實際路徑，不能把連結本身當成鏈上的一段而拒絕。
+    const real = realpathSync(mkdtempSync(join(tmpdir(), "cardiary-mcp-real-")));
+    const link = join(tmpdir(), `cardiary-mcp-link-${process.pid}-${Date.now()}`);
+    symlinkSync(real, link);
+    try {
+      mkdirSync(join(real, "state"), { recursive: true });
+      const dir = ensureMcpPersistentDir(link, "demo");
+      expect(dir).toBe(join(real, "modules", "mcp", "demo"));
+      writeFileSync(join(dir, "a.bin"), "abc", "utf8");
+      expect(mcpPersistentDataUsage(link, "demo")).toEqual({ bytes: 3, files: 1 });
+      expect(removeMcpPersistentDir(link, "demo")).toBe(true);
+      expect(existsSync(dir)).toBe(false);
+    } finally {
+      rmSync(link, { force: true });
+      rmSync(real, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("MCP 持久資料目錄的殘留回報", () => {
+  async function runRemoveServerWithResidue(createResidue: (dir: string) => void | Promise<void>) {
+    makeFolder();
+    const store = new McpServerStore(folderLayout());
+    const record = await store.add(INPUT);
+    const bindings = openMcpApprovals();
+    bindings.approve(record, { persistentData: true });
+
+    const notifications: ProtocolEventIntent[] = [];
+    const handle = await activateMcpModule(makeContext(notifications, []), {
+      store,
+      folderRoot: root,
+      clientFactory: spyingClient([]),
+      bindings,
+    });
+    await handle.settled();
+
+    const dir = ensureMcpPersistentDir(root, record.serverId);
+    writeFileSync(join(dir, "data.bin"), "bytes", "utf8");
+    await createResidue(dir);
+
+    await expect(handle.controller.removeServer(record.serverId)).resolves.toBe(true);
+    await handle.dispose();
+    return { store, bindings, notifications, record, dir };
+  }
+
+  function expectErrorNotification(notifications: ProtocolEventIntent[]): void {
+    expect(notifications).toContainEqual(
+      expect.objectContaining({
+        kind: "notification",
+        title: "MCP 持久資料目錄未刪除",
+        level: "error",
+      }),
+    );
+  }
+
+  it("目錄內有硬連結時，其他清理完成、發出錯誤通知，檔案保留", async () => {
+    const { store, bindings, notifications, record, dir } = await runRemoveServerWithResidue(
+      (dir) => {
+        linkSync(join(dir, "data.bin"), join(dir, "alias.bin"));
+      },
+    );
+
+    expect(await store.get(record.serverId)).toBeNull();
+    expect(bindings.approvalOf(record.serverId)).toBeUndefined();
+    expect(existsSync(join(dir, "data.bin"))).toBe(true);
+    expect(existsSync(join(dir, "alias.bin"))).toBe(true);
+    expectErrorNotification(notifications);
+  });
+
+  it("目錄內有 FIFO 時，其他清理完成、發出錯誤通知，FIFO 保留", async () => {
+    const { store, bindings, notifications, record, dir } = await runRemoveServerWithResidue(
+      (dir) => {
+        execFileSync("mkfifo", [join(dir, "pipe")]);
+      },
+    );
+
+    expect(await store.get(record.serverId)).toBeNull();
+    expect(bindings.approvalOf(record.serverId)).toBeUndefined();
+    expect(existsSync(join(dir, "pipe"))).toBe(true);
+    expectErrorNotification(notifications);
+  });
+
+  it("目錄內有 Unix socket 時，其他清理完成、發出錯誤通知，socket 保留", async () => {
+    // Node 的 server.close() 會刪掉 socket 檔，所以測試全程保持監聽，最後才關。
+    const holder: { server?: net.Server } = {};
+    const { store, bindings, notifications, record, dir } = await runRemoveServerWithResidue(
+      (dir) =>
+        new Promise<void>((resolve, reject) => {
+          const server = net.createServer();
+          holder.server = server;
+          server.once("error", reject);
+          server.listen(join(dir, "app.sock"), resolve);
+        }),
+    );
+
+    expect(await store.get(record.serverId)).toBeNull();
+    expect(bindings.approvalOf(record.serverId)).toBeUndefined();
+    expect(existsSync(join(dir, "app.sock"))).toBe(true);
+    expectErrorNotification(notifications);
+    await new Promise<void>((resolve) => holder.server!.close(() => resolve()));
+  });
+
+  it("removeMcpPersistentDir 對硬連結丟 McpPersistentDirError，不強刪", () => {
+    makeFolder();
+    const dir = ensureMcpPersistentDir(root, "demo");
+    writeFileSync(join(dir, "data.bin"), "bytes", "utf8");
+    linkSync(join(dir, "data.bin"), join(dir, "alias.bin"));
+
+    expect(() => removeMcpPersistentDir(root, "demo")).toThrow(McpPersistentDirError);
+    expect(existsSync(join(dir, "data.bin"))).toBe(true);
+  });
+
+  it("removeMcpPersistentDir 對 FIFO 丟 McpPersistentDirError", () => {
+    makeFolder();
+    const dir = ensureMcpPersistentDir(root, "demo");
+    execFileSync("mkfifo", [join(dir, "pipe")]);
+
+    expect(() => removeMcpPersistentDir(root, "demo")).toThrow(McpPersistentDirError);
+    expect(existsSync(join(dir, "pipe"))).toBe(true);
+  });
+
+  it("removeMcpPersistentDir 對 Unix socket 丟 McpPersistentDirError", async () => {
+    makeFolder();
+    const dir = ensureMcpPersistentDir(root, "demo");
+    const server = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      // server.close() 會刪 socket 檔，這裡保持監聽，結束才關。
+      server.listen(join(dir, "app.sock"), resolve);
+    });
+    try {
+      expect(() => removeMcpPersistentDir(root, "demo")).toThrow(McpPersistentDirError);
+      expect(existsSync(join(dir, "app.sock"))).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
