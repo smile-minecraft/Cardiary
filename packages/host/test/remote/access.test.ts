@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { JSONObject } from "@cardiary/protocol";
@@ -9,6 +11,9 @@ import { registerRemoteControlRoutes } from "../../src/remote/control.js";
 import type { RemoteStack } from "../../src/remote/stack.js";
 import { TestClient, startTestHost, waitUntil, type TestHost } from "../helpers.js";
 
+/** 設定模組從建置產物載入；`pnpm check` 會先建置再跑測試。 */
+const MODULES_DIRECTORY = fileURLToPath(new URL("../../dist/modules", import.meta.url));
+
 const hosts: TestHost[] = [];
 
 afterEach(async () => {
@@ -19,7 +24,7 @@ afterEach(async () => {
 });
 
 async function boot(): Promise<TestHost> {
-  const host = await startTestHost();
+  const host = await startTestHost({ modulesDirectory: MODULES_DIRECTORY });
   hosts.push(host);
   return host;
 }
@@ -131,6 +136,80 @@ describe("遠端存取開關", () => {
     const createId = client.request("session.create", { clientRequestId: "cr-local" });
     expect((await client.waitForReply(createId)).kind).toBe("response");
     await client.close();
+  });
+});
+
+async function connectAuthed(url: string, token: string): Promise<TestClient> {
+  const client = await TestClient.connect(url);
+  const helloId = await client.hello(token);
+  expect((await client.waitForReply(helloId)).kind).toBe("response");
+  const subscribeId = client.request("system.subscribe", {});
+  expect((await client.waitForReply(subscribeId)).kind).toBe("response");
+  return client;
+}
+
+describe("遠端存取關閉時切斷裝置", () => {
+  it("人關掉開關時，已連線的裝置立刻被關閉且不再收到事件", async () => {
+    const host = await boot();
+    setRemoteAccess(host, true);
+    const { deviceToken } = await pairDevice(host);
+    const device = await connectAuthed(host.url, deviceToken);
+    const local = await connectAuthed(host.url, host.token);
+
+    const offId = local.request("system.settings.set", {
+      changes: [{ key: REMOTE_ACCESS_SETTING_KEY, value: false }],
+      clientRequestId: "cr-remote-off",
+    });
+    const off = await local.waitForReply(offId);
+    expect(off.kind).toBe("response");
+
+    await waitUntil(() => device.closed, 3000);
+    expect(device.closeCode).toBe(1008);
+    expect(device.closeReason).toBe("remote_access_disabled");
+
+    const before = device.frames.length;
+    await host.host.gateway.emitSystemStatus();
+    await local.waitForEvent("system.status");
+    expect(device.frames.length).toBe(before);
+    await local.close();
+  });
+
+  it("開關關閉後，廣播不再送給仍連線的裝置並切斷連線", async () => {
+    const host = await boot();
+    setRemoteAccess(host, true);
+    const { deviceToken } = await pairDevice(host);
+    const device = await connectAuthed(host.url, deviceToken);
+    const local = await connectAuthed(host.url, host.token);
+
+    // 直接寫儲存，不經過會主動斷線的 system.settings.set 路徑，
+    // 單獨驗證廣播前的開關檢查。
+    setRemoteAccess(host, false);
+    await host.host.gateway.emitSystemStatus();
+    await local.waitForEvent("system.status");
+
+    await waitUntil(() => device.closed, 3000);
+    expect(device.closeCode).toBe(1008);
+    expect(device.closeReason).toBe("remote_access_disabled");
+    expect(
+      device.frames.some((frame) => frame.kind === "event" && frame.type === "system.status"),
+    ).toBe(false);
+    await local.close();
+  });
+
+  it("關閉後 HTTP 裝置 Token 被拒", async () => {
+    const host = await boot();
+    setRemoteAccess(host, true);
+    const { deviceToken } = await pairDevice(host);
+    const url = `http://127.0.0.1:${host.host.port}/v1/remote-check`;
+    const headers = { authorization: `Bearer ${deviceToken}` };
+
+    const enabled = await fetch(url, { headers });
+    expect(enabled.status).toBe(404);
+
+    setRemoteAccess(host, false);
+    const disabled = await fetch(url, { headers });
+    expect(disabled.status).toBe(401);
+    expect(await disabled.json()).toMatchObject({ code: "auth_invalid" });
   });
 });
 
