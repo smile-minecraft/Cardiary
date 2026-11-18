@@ -4,11 +4,12 @@ import { join } from "node:path";
 
 import type {
   CardService,
+  CardQuery,
   DistillationSourceCard,
   ExtractedMemoryItem,
   MemoryJudge,
 } from "@cardiary/domain";
-import { deterministicCardId, memoryContentHash } from "@cardiary/domain";
+import { deterministicCardId, estimateCoreMemoryTokens, memoryContentHash } from "@cardiary/domain";
 import type { ModuleLogger, NotificationInput } from "@cardiary/module-api";
 import {
   CardFileStore,
@@ -26,7 +27,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CardLibrary } from "../../src/modules/cards/library.js";
 import { CardStateStore } from "../../src/modules/cards/state.js";
 import { MemoryCardWriter } from "../../src/modules/memory/card-writer.js";
-import { DistillationService } from "../../src/modules/memory/service.js";
+import { DistillationService, type MemorySearch } from "../../src/modules/memory/service.js";
 import { undoItem, type UndoOutcome } from "../../src/modules/memory/undo.js";
 
 /**
@@ -82,7 +83,14 @@ interface Fixture {
   undo(notificationId: string, itemId: string): Promise<UndoOutcome>;
 }
 
-async function makeFixture(): Promise<Fixture> {
+interface FixtureOptions {
+  /** 核心組預算；預設刻意比一張卡小，核心組提議不會混進摘要。 */
+  readonly tokenBudget?: () => number;
+  /** 比對既有記憶的搜尋；預設走卡片服務的全文搜尋。 */
+  readonly search?: (library: CardLibrary) => MemorySearch;
+}
+
+async function makeFixture(options: FixtureOptions = {}): Promise<Fixture> {
   const path = await mkdtemp(join(tmpdir(), "cardiary-distillation-"));
   const storage = Storage.open({ path, initialize: true });
   const clock = { now: new Date(T0) };
@@ -136,6 +144,7 @@ async function makeFixture(): Promise<Fixture> {
 
   const service = new DistillationService({
     cards: library as unknown as CardService,
+    ...(options.search === undefined ? {} : { search: options.search(library) }),
     models: {
       async invoke() {
         throw new Error("這個測試不呼叫真的模型");
@@ -149,8 +158,7 @@ async function makeFixture(): Promise<Fixture> {
     notifications,
     logger,
     now,
-    // 預算刻意留得比一張卡小，核心組提議不會混進摘要。
-    tokenBudget: () => 1,
+    tokenBudget: () => options.tokenBudget?.() ?? 1,
   });
 
   const fixture: Fixture = {
@@ -495,6 +503,367 @@ describe("蒸餾續跑", () => {
     const outcome = await fx.undo(notification.notificationId, String(superseded?.id));
     expect(outcome.ok).toBe(true);
     expect(await fx.library.get(outputId)).toBeNull();
+    expect(fx.lifecycleOf(CARD_S)).toBe("live");
+  });
+});
+
+/** 測試卡的 ULID；N 開頭是同主題的雜訊筆記，C 開頭是同日多張來源卡。 */
+const NOISE = Array.from({ length: 6 }, (_, n) => `01J000000000000000000000N${n}`);
+const SOURCES = [
+  "01J0000000000000000000C001",
+  "01J0000000000000000000C002",
+  "01J0000000000000000000C003",
+];
+const CARD_CORE = "01J0000000000000000000K001";
+
+function setLifecycle(fx: Fixture, cardId: string, lifecycle: "live" | "cold"): void {
+  fx.storage.state.run(
+    `INSERT INTO card_state (card_id, persona, freshness, freshness_at, lifecycle, updated_at)
+     VALUES (?, 'default', 0, ?, ?, ?)
+     ON CONFLICT (card_id) DO UPDATE SET lifecycle = excluded.lifecycle`,
+    cardId,
+    fx.clock.now.toISOString(),
+    lifecycle,
+    fx.clock.now.toISOString(),
+  );
+}
+
+/** 記下每次比對的候選；候選文字含 `needle` 時判定矛盾。 */
+function recordingJudge(needle: string): MemoryJudge & {
+  readonly compared: string[];
+} {
+  const compared: string[] = [];
+  return {
+    compared,
+    sameAs: () => false,
+    contradicts: (existing: string) => {
+      compared.push(existing);
+      return existing.includes(needle);
+    },
+  };
+}
+
+describe("比對既有記憶", () => {
+  const yarnMemory = "使用者偏好所有前端與 Node.js 專案統一使用 Yarn 管理套件。";
+  const pnpmItem: ExtractedMemoryItem = {
+    type: "decision",
+    text: "所有前端與 TypeScript 專案統一改用 pnpm 取代 Yarn 管理依賴。",
+  };
+
+  it("整句、用詞不同的新決定找得到冷封存的舊記憶並取代（Magpie D-SUP-01 重現）", async () => {
+    const fx = await makeFixture();
+    await fx.seed([
+      [
+        CARD_S,
+        cardFile({
+          id: CARD_S,
+          title: "套件管理工具切換決定",
+          body: "從本週起全面改用 pnpm 管理所有前端與 TypeScript 專案依賴，不再使用 Yarn。",
+        }),
+      ],
+      [
+        CARD_OLD,
+        cardFile({
+          id: CARD_OLD,
+          kind: "memory",
+          title: "套件管理偏好使用 Yarn",
+          summary: "所有前端與 Node.js 專案統一使用 Yarn 管理套件",
+          body: yarnMemory,
+        }),
+      ],
+      // 同主題的筆記比舊記憶更像查詢句；種類要在上限之前過濾，才不會被擠掉。
+      ...NOISE.map(
+        (id) => [id, cardFile({ id, title: "套件管理工具切換決定", body: pnpmItem.text })] as const,
+      ),
+    ]);
+    setLifecycle(fx, CARD_OLD, "cold");
+    fx.zero([CARD_S]);
+    const judge = recordingJudge("Yarn 管理套件");
+
+    const run = await fx.service.runForDay("default", DAY, {
+      distiller: scriptedDistiller({ [CARD_S]: [pnpmItem] }),
+      judge,
+      titler: simpleTitle,
+    });
+
+    expect(judge.compared.some((text) => text.includes("Yarn 管理套件"))).toBe(true);
+    expect(JSON.parse(run!.statsJson ?? "{}")).toMatchObject({ created: 0, superseded: 1 });
+    const payload = digestPayload(fx.notifications.created.at(-1)!);
+    const superseded = payload.items.find((item) => item.action === "superseded");
+    expect(superseded).toMatchObject({ supersedes: CARD_OLD, sources: [CARD_S] });
+    expect(fx.lifecycle.getSupersededBy(CARD_OLD)).toBe(superseded?.cardId);
+  });
+
+  it("走注入的混合檢索：任一詞、含冷封存、只要記憶卡，並濾掉別的種類與人格", async () => {
+    const queries: CardQuery[] = [];
+    const fx = await makeFixture({
+      search: (library) => async (query) => {
+        queries.push(query);
+        const page = await library.search({ ...query, kinds: undefined });
+        // 語意一路不分人格與種類；服務自己要再守一次。
+        return {
+          items: page.items.flatMap((hit) => [
+            hit,
+            { ...hit, card: { ...hit.card, persona: "other" } },
+          ]),
+        };
+      },
+    });
+    await fx.seed([
+      [CARD_S, cardFile({ id: CARD_S, title: "套件", body: "改用 pnpm。" })],
+      [
+        CARD_OLD,
+        cardFile({
+          id: CARD_OLD,
+          kind: "memory",
+          title: "套件管理偏好使用 Yarn",
+          body: yarnMemory,
+        }),
+      ],
+      [CARD_A, cardFile({ id: CARD_A, title: "雜訊", body: yarnMemory })],
+    ]);
+    fx.zero([CARD_S]);
+    const judge = recordingJudge("不會命中");
+
+    await fx.service.runForDay("default", DAY, {
+      distiller: scriptedDistiller({ [CARD_S]: [pnpmItem] }),
+      judge,
+      titler: simpleTitle,
+    });
+
+    expect(queries).toEqual([
+      expect.objectContaining({
+        query: pnpmItem.text,
+        kinds: ["memory"],
+        persona: "default",
+        lifecycle: "all",
+        includeSuperseded: false,
+        anyTerm: true,
+      }),
+    ]);
+    // 只有本人格的那張記憶卡進到判定；筆記與別的人格都被濾掉。
+    expect(judge.compared).toHaveLength(1);
+    expect(judge.compared[0]).toContain("Yarn");
+  });
+});
+
+describe("核心組提議", () => {
+  function itemFor(cardId: string): ExtractedMemoryItem {
+    return { type: "fact", text: `這是來源卡 ${cardId} 的長期事實。` };
+  }
+
+  async function seedSources(fx: Fixture): Promise<void> {
+    await fx.seed(SOURCES.map((id) => [id, cardFile({ id, title: id, body: itemFor(id).text })]));
+    fx.zero(SOURCES);
+  }
+
+  const distiller = scriptedDistiller(Object.fromEntries(SOURCES.map((id) => [id, [itemFor(id)]])));
+
+  it("同日多張新記憶卡最多加入一張，當日計數只記一次", async () => {
+    const fx = await makeFixture({ tokenBudget: () => 800 });
+    await seedSources(fx);
+
+    const run = await fx.service.runForDay("default", DAY, {
+      distiller,
+      judge: noMergeJudge,
+      titler: simpleTitle,
+    });
+
+    expect(JSON.parse(run!.statsJson ?? "{}")).toMatchObject({ created: 3, coreAdded: 1 });
+    expect(fx.core.list("default")).toHaveLength(1);
+    expect(fx.core.getDaily("default", DAY)?.changed).toBe(true);
+    const payload = digestPayload(fx.notifications.created.at(-1)!);
+    expect(payload.items.filter((item) => item.action === "core-added")).toHaveLength(1);
+  });
+
+  it("當天已有人手動變動核心組時，蒸餾不再加入", async () => {
+    const fx = await makeFixture({ tokenBudget: () => 800 });
+    await seedSources(fx);
+    await fx.seed([[CARD_CORE, memoryCardFile(CARD_CORE, "既有核心", "既有核心卡。")]]);
+    expect(
+      fx.core.change({
+        persona: "default",
+        day: DAY,
+        op: "add",
+        cardId: CARD_CORE,
+        source: "user",
+      }),
+    ).toBe(true);
+
+    const run = await fx.service.runForDay("default", DAY, {
+      distiller,
+      judge: noMergeJudge,
+      titler: simpleTitle,
+    });
+
+    expect(JSON.parse(run!.statsJson ?? "{}")).toMatchObject({ created: 3, coreAdded: 0 });
+    expect(fx.core.list("default").map((entry) => entry.cardId)).toEqual([CARD_CORE]);
+  });
+
+  it("預算以既有成員與新卡累加估算；既有成員已接近預算時不加入", async () => {
+    // 預算夾在 400–1,500；用下限 400。既有成員估算到 395，新卡再小也放不下；
+    // 不累加既有成員（舊行為是當作 0）就會誤判成放得下。
+    let longBody = "";
+    while (estimateCoreMemoryTokens([{ title: "既有核心", body: longBody }]) < 395) {
+      longBody += "核心組既有成員的完整內文。";
+    }
+    expect(estimateCoreMemoryTokens([{ title: "既有核心", body: longBody }])).toBeLessThanOrEqual(
+      400,
+    );
+    const fx = await makeFixture({ tokenBudget: () => 400 });
+    await fx.seed([
+      [CARD_CORE, memoryCardFile(CARD_CORE, "既有核心", longBody)],
+      [SOURCES[0]!, cardFile({ id: SOURCES[0]!, title: "來源", body: itemFor(SOURCES[0]!).text })],
+    ]);
+    fx.zero([SOURCES[0]!]);
+    expect(
+      fx.core.change({ persona: "default", day: "2025-12-31", op: "add", cardId: CARD_CORE }),
+    ).toBe(true);
+
+    const run = await fx.service.runForDay("default", DAY, {
+      distiller,
+      judge: noMergeJudge,
+      titler: simpleTitle,
+    });
+
+    expect(JSON.parse(run!.statsJson ?? "{}")).toMatchObject({ created: 1, coreAdded: 0 });
+    expect(fx.core.list("default").map((entry) => entry.cardId)).toEqual([CARD_CORE]);
+    expect(fx.core.getDaily("default", DAY)?.changed ?? false).toBe(false);
+  });
+
+  it("新卡內文也算進預算：標題＋摘要放得下、加上內文放不下就不加入", async () => {
+    const item: ExtractedMemoryItem = { type: "fact", text: "內文".repeat(245) };
+    const titled = { title: "新記憶", summary: "摘要".repeat(300) };
+    const withoutBody = estimateCoreMemoryTokens([titled]);
+    const withBody = estimateCoreMemoryTokens([{ ...titled, body: item.text }]);
+    expect(withoutBody).toBeLessThanOrEqual(400);
+    expect(withBody).toBeGreaterThan(400);
+    const fx = await makeFixture({ tokenBudget: () => 400 });
+    await fx.seed([[SOURCES[0]!, cardFile({ id: SOURCES[0]!, title: "來源", body: "來源內文" })]]);
+    fx.zero([SOURCES[0]!]);
+
+    const run = await fx.service.runForDay("default", DAY, {
+      distiller: scriptedDistiller({ [SOURCES[0]!]: [item] }),
+      judge: noMergeJudge,
+      titler: async () => titled,
+    });
+
+    expect(JSON.parse(run!.statsJson ?? "{}")).toMatchObject({ created: 1, coreAdded: 0 });
+    expect(fx.core.list("default")).toEqual([]);
+  });
+});
+
+describe("提煉重試", () => {
+  /** 依序回傳給定結果的提煉替身；Error 代表丟例外。 */
+  function flakyDistiller(outputs: readonly unknown[]): {
+    readonly calls: string[];
+    distill(cards: readonly DistillationSourceCard[]): Promise<unknown>;
+  } {
+    const calls: string[] = [];
+    return {
+      calls,
+      async distill(cards) {
+        calls.push(cards[0]?.cardId ?? "");
+        const output = outputs[calls.length - 1];
+        if (output instanceof Error) throw output;
+        return output;
+      },
+    };
+  }
+
+  const item: ExtractedMemoryItem = { type: "preference", text: "我喜歡綠茶。" };
+
+  it("第一次失敗會重試一次，成功就照常建立記憶卡", async () => {
+    const fx = await makeFixture();
+    await fx.seed([[CARD_S, cardFile({ id: CARD_S, title: "茶", body: "我喜歡綠茶。" })]]);
+    fx.zero([CARD_S]);
+    const distiller = flakyDistiller([new Error("provider down"), { items: [item] }]);
+
+    const run = await fx.service.runForDay("default", DAY, {
+      distiller,
+      judge: noMergeJudge,
+      titler: simpleTitle,
+    });
+
+    expect(distiller.calls).toEqual([CARD_S, CARD_S]);
+    expect(run?.status).toBe("completed");
+    expect(JSON.parse(run!.statsJson ?? "{}")).toMatchObject({ created: 1, failed: 0 });
+    expect(fx.lifecycleOf(CARD_S)).toBe("cold");
+    expect(fx.notifications.created.at(-1)?.input.title).not.toContain("失敗");
+  });
+
+  it("重試仍失敗：只試兩次，來源保留 live，摘要標明失敗數與卡片識別碼", async () => {
+    const fx = await makeFixture();
+    await fx.seed([
+      [CARD_S, cardFile({ id: CARD_S, title: "茶", body: "我喜歡綠茶。" })],
+      [CARD_A, cardFile({ id: CARD_A, title: "咖啡", body: "我喜歡咖啡。" })],
+    ]);
+    fx.zero([CARD_S, CARD_A]);
+    const coffee: ExtractedMemoryItem = { type: "preference", text: "我喜歡咖啡。" };
+    const calls: string[] = [];
+    const distiller = {
+      async distill(cards: readonly DistillationSourceCard[]): Promise<unknown> {
+        const cardId = cards[0]?.cardId ?? "";
+        calls.push(cardId);
+        if (cardId === CARD_A) return { items: [coffee] };
+        // 先丟例外，再回格式不對的輸出：兩種失敗都算一次嘗試。
+        if (calls.filter((id) => id === CARD_S).length === 1) throw new Error("provider down");
+        return { items: [{ type: "mood", text: "不合法" }] };
+      },
+    };
+
+    const run = await fx.service.runForDay("default", DAY, {
+      distiller,
+      judge: noMergeJudge,
+      titler: simpleTitle,
+    });
+
+    expect(calls.filter((id) => id === CARD_S)).toHaveLength(2);
+    expect(run?.status).toBe("partial");
+    expect(JSON.parse(run!.statsJson ?? "{}")).toMatchObject({ created: 1, failed: 1 });
+    expect(fx.lifecycleOf(CARD_S)).toBe("live");
+    expect(fx.lifecycleOf(CARD_A)).toBe("cold");
+    expect(fx.runs.getItem(run!.runId, `${CARD_S}:extract`)).toMatchObject({ status: "failed" });
+    const notification = fx.notifications.created.at(-1)!;
+    expect(notification.input.title).toContain("失敗 1");
+    expect(notification.input.body).toContain(CARD_S);
+    expect(notification.input.body).not.toContain(`卡片 ${CARD_A}`);
+
+    // 同一天再跑不重新呼叫模型。
+    await fx.service.runForDay("default", DAY, {
+      distiller,
+      judge: noMergeJudge,
+      titler: simpleTitle,
+    });
+    expect(calls.filter((id) => id === CARD_S)).toHaveLength(2);
+  });
+
+  it("第一次失敗後中斷，續跑只再試一次", async () => {
+    const fx = await makeFixture();
+    await fx.seed([[CARD_S, cardFile({ id: CARD_S, title: "茶", body: "我喜歡綠茶。" })]]);
+    fx.zero([CARD_S]);
+    const run = fx.runs.createRun({
+      persona: "default",
+      day: DAY,
+      startedAt: new Date(Date.parse(T0) - RESUME_AFTER_MS).toISOString(),
+    });
+    fx.runs.upsertItem({
+      runId: run.runId,
+      itemKey: `${CARD_S}:extract`,
+      batchId: run.runId,
+      persona: "default",
+      sourceCardId: CARD_S,
+      phase: "extract",
+      status: "pending",
+      detailJson: JSON.stringify({ failedAttempts: 1 }),
+    });
+    const distiller = flakyDistiller([new Error("still down"), { items: [item] }]);
+
+    await fx.service.resumeInterrupted({ distiller, judge: noMergeJudge, titler: simpleTitle });
+
+    expect(distiller.calls).toEqual([CARD_S]);
+    expect(fx.runs.getRun(run.runId)?.status).toBe("partial");
+    expect(fx.runs.getItem(run.runId, `${CARD_S}:extract`)).toMatchObject({ status: "failed" });
     expect(fx.lifecycleOf(CARD_S)).toBe("live");
   });
 });

@@ -82,6 +82,11 @@ export interface CardQuery {
   readonly lifecycle?: CardLifecycle | "all";
   readonly includeSuperseded?: boolean;
   readonly query?: string;
+  /**
+   * 搜尋時任一詞命中即可，依相關度排序；預設全部詞都要命中。
+   * 給拿整句文字找相關卡的內部呼叫用（例如蒸餾比對既有記憶），協定不開放。
+   */
+  readonly anyTerm?: boolean;
   readonly cursor?: string;
   readonly limit?: number;
 }

@@ -9,6 +9,9 @@
  */
 
 import type {
+  CardPage,
+  CardQuery,
+  CardSearchHit,
   CardService,
   DistillationCandidateCard,
   DistillationSourceCard,
@@ -92,8 +95,18 @@ export interface DistillationNotificationPayload {
   readonly items: readonly DistillationSummaryItem[];
 }
 
+/** 比對既有記憶用的搜尋；設計上是混合檢索的 `search` 模式。 */
+export type MemorySearch = (query: CardQuery) => Promise<CardPage<CardSearchHit>>;
+
+/** 比對既有記憶時送給模型判定的候選數。 */
+const MATCH_CANDIDATE_LIMIT = 5;
+
 export interface DistillationServiceOptions {
   readonly cards: CardService;
+  /**
+   * 比對既有記憶的搜尋。主機有檢索模組時接混合檢索；沒有就退回卡片服務的全文搜尋。
+   */
+  readonly search?: MemorySearch;
   readonly models: ModelInvoker;
   readonly runs: DistillationStore;
   readonly core: CoreMemoryStore;
@@ -199,7 +212,7 @@ export class DistillationService {
     }
 
     // 步驟 6：核心組提議（新記憶卡可提議加入；一天最多一次）。
-    this.#proposeCore(run, items, stats);
+    await this.#proposeCore(run, items, stats);
 
     // 步驟 7：摘要通知（一則）。
     await this.#notify(run, stats, items);
@@ -319,50 +332,20 @@ export class DistillationService {
         body: card.body,
         persona: candidate.persona,
       };
-      let raw: unknown;
-      try {
-        raw = await distiller.distill([source]);
-      } catch (error) {
-        this.#warn("提煉失敗", { cardId: candidate.cardId, error: messageOf(error) });
-        this.#options.runs.upsertItem({
-          runId: run.runId,
-          itemKey: extractKey,
-          batchId,
-          persona: run.persona,
-          sourceCardId: candidate.cardId,
-          phase: "extract",
-          status: "failed",
-        });
+      const firstFailed = batch.storage.find(
+        (row) => row.itemKey === extractKey && row.status === "pending" && row.detailJson !== null,
+      );
+      const result = await this.#extractWithRetry(
+        run,
+        source,
+        distiller,
+        firstFailed !== undefined,
+      );
+      if (result === null) {
         stats.failed += 1;
         return;
       }
-      const validation = validateDistillationOutput(raw);
-      if (!validation.ok) {
-        this.#options.runs.upsertItem({
-          runId: run.runId,
-          itemKey: extractKey,
-          batchId,
-          persona: run.persona,
-          sourceCardId: candidate.cardId,
-          phase: "extract",
-          status: "failed",
-          detailJson: stableJson(raw),
-        });
-        stats.failed += 1;
-        return;
-      }
-      extracted = validation.items;
-      // 先落地再繼續。
-      this.#options.runs.upsertItem({
-        runId: run.runId,
-        itemKey: extractKey,
-        batchId,
-        persona: run.persona,
-        sourceCardId: candidate.cardId,
-        phase: "extract",
-        status: "done",
-        detailJson: stableJson({ items: extracted }),
-      });
+      extracted = result;
     }
     stats.extracted += extracted.length;
 
@@ -371,6 +354,47 @@ export class DistillationService {
       const item = extracted[index] as ExtractedMemoryItem;
       await this.#processItem(run, candidate, item, index, stats, items, judge, titler);
     }
+  }
+
+  async #extractWithRetry(
+    run: DistillationRunRecord,
+    source: DistillationSourceCard,
+    distiller: import("@cardiary/domain").MemoryDistiller,
+    retryOnly: boolean,
+  ): Promise<readonly ExtractedMemoryItem[] | null> {
+    const unit = {
+      runId: run.runId,
+      itemKey: extractItemKey(source.cardId),
+      batchId: run.runId,
+      persona: run.persona,
+      sourceCardId: source.cardId,
+      phase: "extract",
+    } as const;
+    for (let attempt = retryOnly ? 2 : 1; attempt <= 2; attempt += 1) {
+      let validation: ReturnType<typeof validateDistillationOutput>;
+      try {
+        validation = validateDistillationOutput(await distiller.distill([source]));
+      } catch (error) {
+        validation = { ok: false, reason: messageOf(error) };
+      }
+      if (validation.ok) {
+        // 結果先落地。續跑時不再呼叫模型。
+        this.#options.runs.upsertItem({
+          ...unit,
+          status: "done",
+          detailJson: stableJson({ items: validation.items }),
+        });
+        return validation.items;
+      }
+      const reason = validation.reason;
+      this.#warn("提煉失敗", { cardId: source.cardId, attempt, error: reason });
+      this.#options.runs.upsertItem({
+        ...unit,
+        status: attempt === 1 ? "pending" : "failed",
+        detailJson: stableJson({ failedAttempts: attempt }),
+      });
+    }
+    return null;
   }
 
   async #processItem(
@@ -591,20 +615,33 @@ export class DistillationService {
     });
   }
 
-  /** 搜尋比對候選：search 模式、kind=memory、含冷封存（lifecycle=all）。 */
+  /**
+   * 搜尋比對候選：search 模式、kind=memory、含冷封存（lifecycle=all）。
+   *
+   * 查詢是整句 item.text，要找的是講同一件事、用詞卻不同的舊記憶（矛盾的
+   * 更是如此），所以全文一路用任一詞命中、依相關度排序；全部詞都要命中的
+   * 一般搜尋幾乎找不到它們。
+   */
   async #searchMemoryCandidates(
     text: string,
     persona: string,
   ): Promise<readonly MemoryMatchCandidate[]> {
-    const page = await this.#options.cards.search({
+    const search: MemorySearch =
+      this.#options.search ?? ((query) => this.#options.cards.search(query));
+    const page = await search({
       kinds: ["memory"],
       persona,
       lifecycle: "all",
       includeSuperseded: false,
       query: text,
-      limit: 5,
+      anyTerm: true,
+      limit: MATCH_CANDIDATE_LIMIT,
     });
-    return page.items.map((hit) => ({
+    // 語意一路不分人格；種類與人格在這裡再守一次。
+    const hits = page.items
+      .filter((hit) => hit.card.kind === "memory" && hit.card.persona === persona)
+      .slice(0, MATCH_CANDIDATE_LIMIT);
+    return hits.map((hit) => ({
       cardId: hit.card.cardId,
       kind: hit.card.kind,
       text: `${hit.card.title} ${hit.card.summary ?? ""} ${hit.snippet}`.trim(),
@@ -718,36 +755,31 @@ export class DistillationService {
   }
 
   /** 步驟 6：為新記憶卡提議加入核心組（組未滿、當日未變動、預算內）。 */
-  #proposeCore(
+  async #proposeCore(
     run: DistillationRunRecord,
     items: DistillationSummaryItem[],
     stats: DistillationStats,
-  ): void {
+  ): Promise<void> {
     const persona = run.persona;
     const day = coreDayKey(this.#options.now().toISOString()) ?? run.day;
-    const daily = this.#options.core.getDaily(persona, day);
-    if (!coreChangeAllowed(daily)) {
-      this.#options.logger.info("核心組當日已變動，提議順延", { persona, day });
-      return;
-    }
-    const entries = this.#options.core.list(persona);
     const budget = this.#options.tokenBudget() || CORE_TOKEN_BUDGET_DEFAULT;
-    const currentTokens = this.#coreTokens(entries);
     for (const output of this.#options.runs.listItems(run.runId)) {
       if (output.phase !== "core" || output.status !== "done" || output.outputCardId === null)
         continue;
+      const daily = this.#options.core.getDaily(persona, day);
+      if (!coreChangeAllowed(daily)) {
+        this.#options.logger.info("核心組當日已變動，提議順延", { persona, day });
+        return;
+      }
       const candidateId = output.outputCardId;
+      const entries = this.#options.core.list(persona);
       if (entries.some((entry) => entry.cardId === candidateId)) continue;
-      const detail = safeParse(output.detailJson ?? "{}") as {
-        title?: string;
-        summary?: string | null;
-      };
-      const tokens = estimateCoreMemoryTokens([
-        {
-          title: detail.title ?? candidateId,
-          ...(detail.summary ? { summary: detail.summary } : {}),
-        },
-      ]);
+      const tokens = await this.#coreCardTokens(candidateId);
+      if (tokens === null) continue;
+      let currentTokens = 0;
+      for (const entry of entries) {
+        currentTokens += (await this.#coreCardTokens(entry.cardId)) ?? 0;
+      }
       const decision = planCoreChange({
         entries,
         currentTokens,
@@ -755,37 +787,35 @@ export class DistillationService {
         daily,
         request: { kind: "add", cardId: candidateId, tokens },
       });
-      if (decision.kind === "apply") {
-        if (
-          this.#options.core.change({
-            persona,
-            day,
-            op: "add",
-            cardId: candidateId,
-            source: "distillation",
-          })
-        ) {
-          stats.coreAdded += 1;
-          items.push({
-            id: `core_${run.runId}_${candidateId}`,
-            action: "core-added",
-            cardId: candidateId,
-            recovery: "core-remove",
-          });
-        }
-      } else if (decision.kind === "defer") {
-        this.#options.logger.info("核心組變動順延", { persona, day });
-        break;
+      if (decision.kind !== "apply") continue;
+      // 讀卡時可能有其他操作先變動核心組，在寫入交易內重新檢查每日額度。
+      if (
+        this.#options.core.change({
+          persona,
+          day,
+          op: "add",
+          cardId: candidateId,
+          source: "distillation",
+          respectDailyLimit: true,
+        })
+      ) {
+        stats.coreAdded += 1;
+        items.push({
+          id: `core_${run.runId}_${candidateId}`,
+          action: "core-added",
+          cardId: candidateId,
+          recovery: "core-remove",
+        });
       }
     }
   }
 
-  #coreTokens(entries: readonly { readonly cardId: string }[]): number {
-    // 核心組的實際 token 用標題＋摘要估算；此處保守以 cardId 數量上限計，
-    // 真正的預算把關在 planCoreChange 的逐張估算。為避免過度估計，這裡回 0，
-    // 讓每張新卡的估算與預算直接比較（蒸餾只提議加入，不換出）。
-    void entries;
-    return 0;
+  async #coreCardTokens(cardId: string): Promise<number | null> {
+    const card = await this.#options.cards.get(cardId);
+    if (card === null) return null;
+    return estimateCoreMemoryTokens([
+      { title: card.frontmatter.title, summary: card.frontmatter.summary, body: card.body },
+    ]);
   }
 
   /**
@@ -801,7 +831,14 @@ export class DistillationService {
   ): Promise<void> {
     const day = coreDayKey(this.#options.now().toISOString()) ?? run.day;
     const summary = buildDistillationSummary({ day, runId: run.runId, items });
-    const title = `蒸餾 ${day}：新增 ${stats.created}、合併 ${stats.merged}、取代 ${stats.superseded}、冷封存 ${stats.cold}、核心組 +${stats.coreAdded}/-${stats.coreRemoved}`;
+    const failedCardIds = new Set(
+      this.#options.runs
+        .listItems(run.runId)
+        .filter((item) => item.status === "failed" && !item.undone)
+        .map((item) => item.sourceCardId),
+    );
+    const failures = failedCardIds.size > 0 ? `、失敗 ${failedCardIds.size}` : "";
+    const title = `蒸餾 ${day}：新增 ${stats.created}、合併 ${stats.merged}、取代 ${stats.superseded}、冷封存 ${stats.cold}、核心組 +${stats.coreAdded}/-${stats.coreRemoved}${failures}`;
     const body = items
       .map((item) => {
         const label: Record<DistillationSummaryItem["action"], string> = {
@@ -814,6 +851,7 @@ export class DistillationService {
         };
         return `- ${label[item.action]}（${item.id}）`;
       })
+      .concat([...failedCardIds].map((cardId) => `- 蒸餾失敗（卡片 ${cardId}）`))
       .join("\n");
     await this.#options.notifications.create({
       kind: "distillation",

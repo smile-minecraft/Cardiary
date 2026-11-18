@@ -193,6 +193,14 @@ export interface CardSearchQuery {
   readonly query: string;
   readonly limit?: number;
   readonly includeSuperseded?: boolean;
+  /** 只搜這些種類；在 SQL 內過濾，上限只算符合的卡。 */
+  readonly kinds?: readonly string[];
+  /**
+   * 任一詞命中即可，依 bm25 排序；預設全部詞都要命中。
+   *
+   * 給「拿一整句去找相關的卡」用，例如蒸餾比對既有記憶；標點不會讓查詢退回 LIKE。
+   */
+  readonly anyTerm?: boolean;
 }
 
 export interface CardSearchResult {
@@ -425,16 +433,22 @@ export class CardIndexStore {
     }
     const limit = clampLimit(query.limit);
     const excludeSuperseded = query.includeSuperseded !== true;
-    if ([...text].length >= 2 && /^[\p{L}\p{N}\s]+$/u.test(text)) {
+    const kinds = query.kinds ?? [];
+    const kindFilter =
+      kinds.length === 0 ? "" : `AND card_index.kind IN (${kinds.map(() => "?").join(", ")})`;
+    const anyTerm = query.anyTerm === true && ftsTokens(text).length > 0;
+    if (anyTerm || ([...text].length >= 2 && /^[\p{L}\p{N}\s]+$/u.test(text))) {
       const rows = this.#db.all<CardRow & { score: number; snippet: string }>(
         `SELECT card_index.*, -bm25(fts_cards) AS score,
                 snippet(fts_cards, -1, '', '', '…', 24) AS snippet
          FROM fts_cards JOIN card_index ON card_index.card_id = fts_cards.card_id
          WHERE fts_cards MATCH ? AND card_index.broken = 0
            ${excludeSuperseded ? `AND ${SUPERSEDED_EXCLUSION("card_index")}` : ""}
+           ${kindFilter}
          ORDER BY score DESC, card_index.created_at DESC, card_index.card_id DESC
          LIMIT ?`,
-        ftsQuery(text),
+        ftsQuery(text, anyTerm ? "OR" : "AND"),
+        ...kinds,
         limit,
       );
       return rows.map((row) => ({
@@ -448,12 +462,14 @@ export class CardIndexStore {
       `SELECT card_index.* FROM card_index JOIN fts_cards ON fts_cards.card_id = card_index.card_id
        WHERE broken = 0 AND (fts_cards.title LIKE ? ESCAPE '\\' OR fts_cards.summary LIKE ? ESCAPE '\\' OR fts_cards.body LIKE ? ESCAPE '\\' OR fts_cards.tags LIKE ? ESCAPE '\\')
          ${excludeSuperseded ? `AND ${SUPERSEDED_EXCLUSION("card_index")}` : ""}
+         ${kindFilter}
        ORDER BY created_at DESC, card_index.card_id DESC
        LIMIT ?`,
       pattern,
       pattern,
       pattern,
       pattern,
+      ...kinds,
       limit,
     );
     return rows.map((row) => {
@@ -845,18 +861,24 @@ function rawText(text: string): string {
   return text.split(GRAM_SEPARATOR)[0] ?? "";
 }
 
-/** 將查詢切成索引採用的詞，全部詞都要命中。 */
-function ftsQuery(text: string): string {
+/** 將查詢切成索引採用的詞：中日韓連續字切成兩字詞，其他文字以字詞為單位。 */
+function ftsTokens(text: string): string[] {
   const parts =
     text.match(
       /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+|[\p{L}\p{N}]+/gu,
     ) ?? [];
-  const tokens = parts.flatMap((part) =>
+  return parts.flatMap((part) =>
     /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(part)
       ? grams(part)
       : [part],
   );
-  return tokens.map((part) => `"${part.replaceAll('"', '""')}"`).join(" AND ");
+}
+
+/** 組 FTS5 查詢；`AND` 要全部詞命中，`OR` 任一詞命中即可。重複的詞只留一個。 */
+function ftsQuery(text: string, joiner: "AND" | "OR"): string {
+  return [...new Set(ftsTokens(text))]
+    .map((part) => `"${part.replaceAll('"', '""')}"`)
+    .join(` ${joiner} `);
 }
 
 function escapeLike(text: string): string {

@@ -389,6 +389,9 @@ export class CardLibrary {
       ...(query.includeSuperseded === undefined
         ? {}
         : { includeSuperseded: query.includeSuperseded }),
+      // 種類在 SQL 內先過濾，上限才不會被其他種類的卡佔滿。
+      ...(query.kinds === undefined || query.kinds.length === 0 ? {} : { kinds: query.kinds }),
+      ...(query.anyTerm === true ? { anyTerm: true } : {}),
       ...(query.limit === undefined ? {} : { limit: query.limit }),
     });
     return {

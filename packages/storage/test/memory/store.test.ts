@@ -146,6 +146,49 @@ describe("CoreMemoryStore", () => {
     expect(core.getDaily("default", "2026-11-17")?.changed).toBe(true);
   });
 
+  it("respectDailyLimit：當天已變動就不再增刪，也不重複標記", () => {
+    const { core } = setup();
+    const day = "2026-11-16";
+    // 使用者手動加入一張卡，用掉當日額度。
+    expect(
+      core.change({ persona: "default", day, op: "add", cardId: "card_a", source: "user" }),
+    ).toBe(true);
+    expect(
+      core.change({
+        persona: "default",
+        day,
+        op: "add",
+        cardId: "card_b",
+        source: "distillation",
+        respectDailyLimit: true,
+      }),
+    ).toBe(false);
+    expect(
+      core.change({
+        persona: "default",
+        day,
+        op: "remove",
+        cardId: "card_a",
+        respectDailyLimit: true,
+      }),
+    ).toBe(false);
+    expect(core.list("default").map((entry) => entry.cardId)).toEqual(["card_a"]);
+    // 其他人格與隔天不受影響。
+    expect(
+      core.change({ persona: "other", day, op: "add", cardId: "card_b", respectDailyLimit: true }),
+    ).toBe(true);
+    expect(
+      core.change({
+        persona: "default",
+        day: "2026-11-17",
+        op: "add",
+        cardId: "card_b",
+        respectDailyLimit: true,
+      }),
+    ).toBe(true);
+    expect(core.list("default").map((entry) => entry.cardId)).toEqual(["card_a", "card_b"]);
+  });
+
   it("固定順序 added_day, card_id 升冪", () => {
     const { core } = setup();
     core.add({ persona: "default", cardId: "card_z", addedDay: "2026-11-15", source: "import" });
