@@ -28,6 +28,8 @@ import {
   M7_TABLES,
   M8_MIGRATIONS,
   M8_TABLES,
+  M9_MIGRATIONS,
+  M10_SCHEDULE_COLUMNS,
   RESERVED_M1_TABLES,
   STATE_APPLICATION_ID,
   StorageError,
@@ -70,7 +72,7 @@ describe("資料庫 header 與表結構", () => {
     expect(Number(storage.state.pragma("application_id"))).toBe(STATE_APPLICATION_ID);
     expect(Number(storage.state.pragma("page_size"))).toBe(4096);
     expect(Number(storage.state.pragma("auto_vacuum"))).toBe(2);
-    expect(Number(storage.state.pragma("user_version"))).toBe(9);
+    expect(Number(storage.state.pragma("user_version"))).toBe(10);
     expect(String(storage.state.pragma("journal_mode"))).toBe("wal");
     expect(Number(storage.state.pragma("secure_delete"))).toBe(1);
     expect(Number(storage.state.pragma("foreign_keys"))).toBe(1);
@@ -99,10 +101,16 @@ describe("資料庫 header 與表結構", () => {
     for (const column of M4_CONTEXT_ENTRY_DEAL_COLUMNS) {
       expect(entryColumns, column).toContain(column);
     }
+    const scheduleColumns = storage.state
+      .all<{ name: string }>("PRAGMA table_info(schedules)")
+      .map((column) => column.name);
+    for (const column of M10_SCHEDULE_COLUMNS) {
+      expect(scheduleColumns, column).toContain(column);
+    }
     const migrations = storage.state.all<{ version: number; checksum: string }>(
       "SELECT version, checksum FROM schema_migrations ORDER BY version",
     );
-    expect(migrations).toHaveLength(9);
+    expect(migrations).toHaveLength(10);
     expect(migrations[0]?.version).toBe(1);
     expect(migrations[0]?.checksum).toBe(sha256(M0_MIGRATIONS[0]?.sql ?? ""));
     expect(migrations[1]?.version).toBe(2);
@@ -121,6 +129,8 @@ describe("資料庫 header 與表結構", () => {
     expect(migrations[7]?.checksum).toBe(sha256(M7_MIGRATIONS[7]?.sql ?? ""));
     expect(migrations[8]?.version).toBe(9);
     expect(migrations[8]?.checksum).toBe(sha256(M8_MIGRATIONS[8]?.sql ?? ""));
+    expect(migrations[9]?.version).toBe(10);
+    expect(migrations[9]?.checksum).toBe(sha256(M9_MIGRATIONS[9]?.sql ?? ""));
     const approvalColumns = storage.state
       .all<{ name: string }>("PRAGMA table_info(mcp_server_approvals)")
       .map((column) => column.name);
@@ -165,7 +175,7 @@ describe("資料庫 header 與表結構", () => {
     const second = openTestStorage(tempRoot);
     cleanups.push(() => second.close());
     expect(second.state.countRows("schema_migrations")).toBe(count);
-    expect(Number(second.state.pragma("user_version"))).toBe(9);
+    expect(Number(second.state.pragma("user_version"))).toBe(10);
   });
 
   it("資料庫檔是符號連結時拒絕開啟，不碰外部檔案", () => {
@@ -209,7 +219,7 @@ describe("遷移", () => {
       appVersion: "test",
       backupDirectory: directory,
     });
-    expect(first.migration.appliedVersions).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(first.migration.appliedVersions).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     first.db.close();
 
     const second = openStateDatabase({
@@ -307,8 +317,8 @@ describe("遷移", () => {
     });
     try {
       expect(upgraded.migration.fromVersion).toBe(1);
-      expect(upgraded.migration.toVersion).toBe(9);
-      expect(upgraded.migration.appliedVersions).toEqual([2, 3, 4, 5, 6, 7, 8, 9]);
+      expect(upgraded.migration.toVersion).toBe(10);
+      expect(upgraded.migration.appliedVersions).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10]);
       expect(backupSeen).not.toBeNull();
       expect(existsSync(backupSeen as unknown as string)).toBe(false);
 
@@ -383,8 +393,8 @@ describe("遷移", () => {
     });
     try {
       expect(upgraded.migration.fromVersion).toBe(2);
-      expect(upgraded.migration.toVersion).toBe(9);
-      expect(upgraded.migration.appliedVersions).toEqual([3, 4, 5, 6, 7, 8, 9]);
+      expect(upgraded.migration.toVersion).toBe(10);
+      expect(upgraded.migration.appliedVersions).toEqual([3, 4, 5, 6, 7, 8, 9, 10]);
       expect(backupSeen).not.toBeNull();
 
       for (const table of M2_TABLES) {
@@ -482,8 +492,8 @@ describe("遷移", () => {
     });
     try {
       expect(upgraded.migration.fromVersion).toBe(3);
-      expect(upgraded.migration.toVersion).toBe(9);
-      expect(upgraded.migration.appliedVersions).toEqual([4, 5, 6, 7, 8, 9]);
+      expect(upgraded.migration.toVersion).toBe(10);
+      expect(upgraded.migration.appliedVersions).toEqual([4, 5, 6, 7, 8, 9, 10]);
       for (const table of [...M3_TABLES, ...M6_TABLES, ...M7_TABLES, ...M8_TABLES]) {
         expect(upgraded.db.tableExists(table), table).toBe(true);
       }
@@ -503,7 +513,7 @@ describe("遷移", () => {
       const rows = upgraded.db.all<{ version: number; checksum: string }>(
         "SELECT version, checksum FROM schema_migrations ORDER BY version",
       );
-      expect(rows).toHaveLength(9);
+      expect(rows).toHaveLength(10);
       expect(rows[2]?.checksum).toBe(sha256(M2_MIGRATIONS[2]?.sql ?? ""));
       expect(rows[3]?.checksum).toBe(sha256(M3_MIGRATIONS[3]?.sql ?? ""));
       expect(rows[4]?.checksum).toBe(sha256(M4_MIGRATIONS[4]?.sql ?? ""));
@@ -511,6 +521,7 @@ describe("遷移", () => {
       expect(rows[6]?.checksum).toBe(sha256(M6_MIGRATIONS[6]?.sql ?? ""));
       expect(rows[7]?.checksum).toBe(sha256(M7_MIGRATIONS[7]?.sql ?? ""));
       expect(rows[8]?.checksum).toBe(sha256(M8_MIGRATIONS[8]?.sql ?? ""));
+      expect(rows[9]?.checksum).toBe(sha256(M9_MIGRATIONS[9]?.sql ?? ""));
 
       // 四張表的基本約束：run 一天一次、item 的 phase/status CHECK、核心組一天一次。
       upgraded.db.run(
@@ -581,8 +592,8 @@ describe("遷移", () => {
     });
     try {
       expect(upgraded.migration.fromVersion).toBe(4);
-      expect(upgraded.migration.toVersion).toBe(9);
-      expect(upgraded.migration.appliedVersions).toEqual([5, 6, 7, 8, 9]);
+      expect(upgraded.migration.toVersion).toBe(10);
+      expect(upgraded.migration.appliedVersions).toEqual([5, 6, 7, 8, 9, 10]);
       const columns = upgraded.db
         .all<{ name: string }>("PRAGMA table_info(context_entries)")
         .map((column) => column.name);
@@ -603,13 +614,14 @@ describe("遷移", () => {
       const rows = upgraded.db.all<{ version: number; checksum: string }>(
         "SELECT version, checksum FROM schema_migrations ORDER BY version",
       );
-      expect(rows).toHaveLength(9);
+      expect(rows).toHaveLength(10);
       expect(rows[3]?.checksum).toBe(sha256(M3_MIGRATIONS[3]?.sql ?? ""));
       expect(rows[4]?.checksum).toBe(sha256(M4_MIGRATIONS[4]?.sql ?? ""));
       expect(rows[5]?.checksum).toBe(sha256(M5_MIGRATIONS[5]?.sql ?? ""));
       expect(rows[6]?.checksum).toBe(sha256(M6_MIGRATIONS[6]?.sql ?? ""));
       expect(rows[7]?.checksum).toBe(sha256(M7_MIGRATIONS[7]?.sql ?? ""));
       expect(rows[8]?.checksum).toBe(sha256(M8_MIGRATIONS[8]?.sql ?? ""));
+      expect(rows[9]?.checksum).toBe(sha256(M9_MIGRATIONS[9]?.sql ?? ""));
       for (const table of [...M6_TABLES, ...M7_TABLES, ...M8_TABLES]) {
         expect(upgraded.db.tableExists(table), table).toBe(true);
       }

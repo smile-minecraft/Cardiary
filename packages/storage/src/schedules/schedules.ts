@@ -29,6 +29,12 @@ import { newUlid } from "../ids.js";
 import { StorageError } from "../errors.js";
 import { nowIso } from "../util.js";
 import type { Database } from "../db.js";
+import {
+  syncBuiltinDeclarations,
+  type BuiltinScheduleDeclaration,
+  type BuiltinSyncOptions,
+  type BuiltinSyncResult,
+} from "./builtin.js";
 
 export interface ScheduleStoreOptions {
   readonly now?: () => Date;
@@ -104,6 +110,23 @@ export class ScheduleStore {
   constructor(db: Database, options: ScheduleStoreOptions = {}) {
     this.#db = db;
     this.#now = options.now ?? (() => new Date());
+  }
+
+  /**
+   * 把模組宣告的內建排程同步到排程表。
+   *
+   * 已存在的內建列只有在宣告變更時才更新，使用者改過的時間與啟停保留；
+   * 宣告消失就停用，不刪列。同步本身在單一交易內完成，見
+   * `builtin.ts` 的 `syncBuiltinDeclarations`。
+   */
+  syncBuiltinSchedules(
+    declarations: readonly BuiltinScheduleDeclaration[],
+    options: Omit<BuiltinSyncOptions, "now"> = {},
+  ): BuiltinSyncResult {
+    return syncBuiltinDeclarations(this.#db, declarations, {
+      now: this.#now,
+      ...(options.warn === undefined ? {} : { warn: options.warn }),
+    });
   }
 
   create(input: CreateScheduleInput): ScheduleRecord {
