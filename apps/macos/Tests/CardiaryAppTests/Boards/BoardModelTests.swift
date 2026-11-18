@@ -458,6 +458,39 @@ final class BoardModelTests: XCTestCase {
         XCTAssertNil(model.noticeMessage)
     }
 
+    func testFailedSendErrorSurvivesReloadWhenReturningToBoard() async {
+        let fake = FakeBoardService(board: makeBoard())
+        let model = BoardModel(boardService: fake, contextService: RejectingContextService())
+        await model.reload()
+        model.canvas.setSelection(["item-1"])
+        model.createConversation = { "conv-new" }
+        model.deleteConversation = { _ in }
+
+        _ = await model.sendSelectionToNewConversation()
+        let error = model.errorMessage
+        XCTAssertNotNil(error)
+
+        // 回到白板時畫面的 .task 會重新載入；送出失敗的訊息要留著。
+        await model.reload()
+
+        XCTAssertEqual(model.errorMessage, error)
+    }
+
+    func testOpeningAnotherBoardClearsThePreviousError() async {
+        let fake = FakeBoardService(board: makeBoard())
+        let model = BoardModel(boardService: fake, contextService: RejectingContextService())
+        await model.reload()
+        model.canvas.setSelection(["item-1"])
+        model.createConversation = { "conv-new" }
+        model.deleteConversation = { _ in }
+        _ = await model.sendSelectionToNewConversation()
+        XCTAssertNotNil(model.errorMessage)
+
+        await model.open(makeBoard().id)
+
+        XCTAssertNil(model.errorMessage)
+    }
+
     func testSendSelectionToNewConversationKeepsItWhenSendSucceeds() async {
         let fake = FakeBoardService(board: makeBoard())
         let context = FakeCardiaryService()
