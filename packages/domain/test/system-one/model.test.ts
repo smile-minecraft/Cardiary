@@ -102,6 +102,30 @@ describe("小型模型的提示", () => {
     expect(buildProbabilityPrompt(yesNo, state)).not.toContain("別張");
   });
 
+  it("帶機率校準準則與嚴格輸出格式（m2-model-eval §4.5）", () => {
+    const prompt = buildProbabilityPrompt(yesNo);
+
+    expect(prompt).toContain("你是一個嚴格校準的機率判斷器");
+    expect(prompt).toContain("- 0.90–1.00：證據完整、語意明確無歧義");
+    expect(prompt).toContain("- 0.00–0.69：不符合、資訊遭截斷／不完整");
+    expect(prompt).toContain('僅輸出一行純 JSON 物件，只允許唯一鍵 "p"：{"p":0.0}');
+    expect(prompt).toContain("嚴禁輸出 markdown 圍欄");
+    // 陳述在判定文字之前，判定文字在輸出規定之前。
+    expect(prompt.indexOf("陳述：")).toBeLessThan(prompt.indexOf("為真的意思："));
+    expect(prompt.indexOf("為假的意思：")).toBeLessThan(prompt.indexOf("輸出規定："));
+  });
+
+  it("開局發牌的判斷資料放在陳述與判定文字之間", () => {
+    const prompt = buildProbabilityPrompt(yesNo, {
+      request: "花蓮",
+      cards: [{ id: "card-1", title: "花蓮民宿", summary: "七星潭" }],
+    });
+
+    const context = prompt.indexOf("開局發牌的判斷資料");
+    expect(context).toBeGreaterThan(prompt.indexOf("陳述："));
+    expect(context).toBeLessThan(prompt.indexOf("為真的意思："));
+  });
+
   it("schema 固定是只有一個 0–1 數字的物件", () => {
     expect(PROBABILITY_SCHEMA).toMatchObject({
       type: "object",
