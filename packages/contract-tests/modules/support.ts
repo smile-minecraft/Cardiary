@@ -10,6 +10,7 @@ import {
   makeFolder,
   spawnService,
   type ProtocolClient,
+  type ServiceOptions,
   type SpawnedService,
   type TestFolder,
 } from "../test/support.js";
@@ -97,6 +98,14 @@ export interface ProbeCase {
   /** 模組停用時的預期結果。 */
   readonly disabled: ProbeExpectation;
 }
+
+/**
+ * 需要腳本化回合、檔案或連帶停用才觀察得到的模組。
+ *
+ * 它們的共同探針不適用，另外用 `special.test.ts` 的行為案例驗證；
+ * 這個清單和 `PROBE_CASES` 的模組集合加起來必須剛好是 `MODULE_IDS`。
+ */
+export const SPECIAL_PROBE_MODULE_IDS = ["emotion", "local-tools", "retrieval"] as const;
 
 /**
  * 13 個有協定命名空間（或核心入口）的模組。
@@ -217,9 +226,14 @@ export const PROBE_CASES: readonly ProbeCase[] = [
   },
 ];
 
-export async function startHarness(): Promise<Harness> {
+export async function startHarness(
+  options: { readonly scripts?: ServiceOptions["scripts"] } = {},
+): Promise<Harness> {
   const folder = await makeFolder();
-  const service = await spawnService({ folder });
+  const service = await spawnService({
+    folder,
+    ...(options.scripts === undefined ? {} : { scripts: options.scripts }),
+  });
   const client = await connectAndHello(service);
   return { folder, service, client };
 }
@@ -329,6 +343,65 @@ export async function createSession(client: ProtocolClient): Promise<string> {
     throw new Error("session.create 沒有回 sessionId");
   }
   return sessionId;
+}
+
+/** 訂閱對話串流；工具呼叫與回合狀態要靠它才會送到這個客戶端。 */
+export async function subscribeSession(client: ProtocolClient, sessionId: string): Promise<void> {
+  await request(client, "session.subscribe", { sessionId });
+}
+
+/** 送一則訊息並等受理；回合內容另外從串流觀察。 */
+export async function sendMessage(
+  client: ProtocolClient,
+  sessionId: string,
+  text: string,
+): Promise<string> {
+  const reply = await request(client, "session.send_message", {
+    sessionId,
+    text,
+    delivery: "queue",
+    clientMessageId: `msg-${Math.random().toString(36).slice(2)}`,
+  });
+  const turnId = (reply.payload as { turnId?: string } | undefined)?.turnId;
+  if (typeof turnId !== "string") {
+    throw new Error("session.send_message 沒有回 turnId");
+  }
+  return turnId;
+}
+
+export function toolResults(client: ProtocolClient): Record<string, unknown>[] {
+  return client.frames.filter((frame) => frame.type === "stream.tool_result");
+}
+
+/** 等到第 `count` 個工具結果出現。 */
+export async function waitForToolResult(
+  client: ProtocolClient,
+  count: number,
+  timeoutMs = 10_000,
+): Promise<Record<string, unknown>> {
+  await client.waitFor(() => toolResults(client).length >= count, timeoutMs);
+  const result = toolResults(client)[count - 1];
+  if (result === undefined) {
+    throw new Error(`等不到第 ${count} 個工具結果`);
+  }
+  return result;
+}
+
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/** 產生協定要求的 ULID；契約測試不引其他套件，維持和現有測試相同的做法。 */
+export function newUlid(nowMs: number = Date.now()): string {
+  let time = BigInt(nowMs);
+  const timePart = new Array<string>(10);
+  for (let index = 9; index >= 0; index -= 1) {
+    timePart[index] = CROCKFORD[Number(time & 31n)] as string;
+    time >>= 5n;
+  }
+  const randomPart = new Array<string>(16);
+  for (let index = 0; index < 16; index += 1) {
+    randomPart[index] = CROCKFORD[Math.floor(Math.random() * 32)] as string;
+  }
+  return `${timePart.join("")}${randomPart.join("")}`;
 }
 
 export async function createNoteCard(client: ProtocolClient, title: string): Promise<string> {

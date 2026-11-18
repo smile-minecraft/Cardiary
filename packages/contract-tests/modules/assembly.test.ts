@@ -11,6 +11,7 @@ import {
   EXPECTED_PROTOCOL_PREFIXES,
   MODULE_IDS,
   PROBE_CASES,
+  SPECIAL_PROBE_MODULE_IDS,
   createSession,
   expectProbe,
   mapModules,
@@ -49,6 +50,15 @@ describe("第一方模組的正式組裝", () => {
       ]);
     }
   }, 20_000);
+
+  it("每個第一方模組都有停用探針", () => {
+    const covered = [
+      ...PROBE_CASES.map((probeCase) => probeCase.moduleId),
+      ...SPECIAL_PROBE_MODULE_IDS,
+    ];
+    expect(new Set(covered).size, "同一個模組不能重複列探針").toBe(covered.length);
+    expect([...covered].sort()).toEqual([...(MODULE_IDS as readonly string[])]);
+  });
 
   it.each(PROBE_CASES)(
     "$moduleId：$title",
