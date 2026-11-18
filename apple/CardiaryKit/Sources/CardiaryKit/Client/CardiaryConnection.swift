@@ -1011,6 +1011,9 @@ public actor CardiaryConnection {
     // MARK: - 媒體
 
     /// 以已上傳的 blob 匯入圖片或音訊；主機同步完成後才回應。
+    ///
+    /// 預設用 `MediaImportLimits` 的期限：主機會等殼端辨識完才回應，
+    /// 一般請求的 10 秒不夠。
     public func importMedia(
         blobId: String,
         locale: String? = nil,
@@ -1018,7 +1021,7 @@ public actor CardiaryConnection {
         title: String? = nil,
         tags: [String]? = nil,
         persona: String? = nil,
-        options: RequestOptions = .default
+        options: RequestOptions = MediaImportLimits.requestOptions
     ) async throws -> MediaImportResponsePayload {
         let request = MediaImportRequest(
             id: RequestID.next(),
