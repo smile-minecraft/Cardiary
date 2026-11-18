@@ -15,12 +15,16 @@ final class ConversationPickerSession: ObservableObject {
     public var isAdding: Bool { addingId != nil }
 
     /// 先鎖住該列按鈕、執行加入、不管成敗都解鎖；回傳加入是否成功。
+    ///
+    /// 已經有一個加入在進行時直接回 false、不呼叫 `onPick`：按鈕的 `disabled`
+    /// 要等下一次繪製才生效，快速連點仍可能在那之前排進第二個 Task。
     @discardableResult
     public func pick(
         _ sessionId: String,
         title: String,
         _ onPick: (String, String) async -> Bool
     ) async -> Bool {
+        guard addingId == nil else { return false }
         addingId = sessionId
         let ok = await onPick(sessionId, title)
         addingId = nil
@@ -35,6 +39,7 @@ struct NotificationConversationPicker: View {
     let onPick: (String, String) async -> Bool
 
     @StateObject private var picker = ConversationPickerSession()
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
@@ -112,11 +117,19 @@ struct NotificationConversationPicker: View {
                     .padding(.horizontal, DesignTokens.spacingM)
                     .multilineTextAlignment(.leading)
             }
-            if model.errorMessage != nil || model.noticeMessage != nil {
-                Spacer().frame(height: DesignTokens.spacingXS)
+
+            // 加入一直失敗時也要能離開；Esc 走同一個按鈕。
+            HStack {
+                Spacer()
+                Button(NotificationL10n.text(.notificationPickerCancel)) { dismiss() }
+                    .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
+                    .keyboardShortcut(.cancelAction)
             }
+            .padding([.horizontal, .bottom], DesignTokens.spacingM)
         }
         .frame(minWidth: 420, minHeight: 340)
+        // 訊息是通知模型共用的；先清掉，sheet 才不會一打開就顯示之前動作留下的提示。
+        .onAppear { model.dismissMessages() }
         .task { await model.loadConversations() }
     }
 }

@@ -26,6 +26,7 @@ public enum NotificationString: String, CaseIterable, Sendable {
     case notificationAddToConversation
     case notificationChooseConversationTitle
     case notificationConversationEmpty
+    case notificationPickerCancel
     case notificationAddedToConversation
     case notificationSourceScheduleName
     case notificationUnknownSchedule
@@ -146,6 +147,7 @@ enum NotificationStringTables {
             "notificationAddToConversation": "加入對話",
             "notificationChooseConversationTitle": "選擇要加入的對話",
             "notificationConversationEmpty": "沒有可加入的對話，請先建立一個對話。",
+            "notificationPickerCancel": "取消",
             "notificationAddedToConversation": "已加入「{value}」。",
             "notificationSourceScheduleName": "來源：{value}",
             "notificationUnknownSchedule": "排程通知",
@@ -214,6 +216,7 @@ enum NotificationStringTables {
             "notificationAddToConversation": "Add to conversation",
             "notificationChooseConversationTitle": "Choose a conversation",
             "notificationConversationEmpty": "No conversations yet. Create one first.",
+            "notificationPickerCancel": "Cancel",
             "notificationAddedToConversation": "Added to “{value}”.",
             "notificationSourceScheduleName": "Source: {value}",
             "notificationUnknownSchedule": "Scheduled notification",

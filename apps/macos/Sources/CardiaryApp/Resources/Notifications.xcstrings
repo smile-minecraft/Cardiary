@@ -375,6 +375,23 @@
         }
       }
     },
+    "notificationPickerCancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消"
+          }
+        }
+      }
+    },
     "notificationAddedToConversation": {
       "extractionState": "manual",
       "localizations": {
