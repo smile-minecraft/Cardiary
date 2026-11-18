@@ -14,6 +14,7 @@ afterEach(() => {
 });
 
 interface CreatedCard {
+  readonly cardId: string;
   readonly kind: "note";
   readonly title: string;
   readonly body: string;
@@ -33,7 +34,7 @@ function setup() {
     },
     async create(input: CreatedCard) {
       createdCards.push(input);
-      return { cardId: newCardId() };
+      return { cardId: input.cardId };
     },
   };
   const service = new BoardService(
@@ -211,7 +212,13 @@ describe("白板服務", () => {
       derivedFrom: [source],
     });
     expect(createdCards).toEqual([
-      { kind: "note", title: "整理", body: "整理後的內容", sources: [source] },
+      {
+        cardId: created.cardId,
+        kind: "note",
+        title: "整理",
+        body: "整理後的內容",
+        sources: [source],
+      },
     ]);
     expect(created.board.items[0]).toMatchObject({ id: itemId, cardId: created.cardId });
 

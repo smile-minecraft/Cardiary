@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -91,15 +91,31 @@ interface BoardPayload {
     readonly title: string;
     readonly updatedAt: string;
     readonly createdAt: string;
-    readonly items: readonly unknown[];
+    readonly items: ReadonlyArray<{
+      readonly id: string;
+      readonly cardId: string;
+      readonly position: { readonly x: number; readonly y: number };
+      readonly origin: string;
+      readonly projectedBy?: string;
+      readonly groupId?: string;
+    }>;
     readonly inbox: ReadonlyArray<{
       readonly id: string;
       readonly cardId: string;
       readonly origin: string;
       readonly projectedBy?: string;
     }>;
-    readonly edges: readonly unknown[];
-    readonly groups: readonly unknown[];
+    readonly edges: ReadonlyArray<{
+      readonly id: string;
+      readonly from: string;
+      readonly to: string;
+      readonly label?: string;
+    }>;
+    readonly groups: ReadonlyArray<{
+      readonly id: string;
+      readonly label: string;
+      readonly parentId?: string;
+    }>;
   };
 }
 
@@ -507,4 +523,195 @@ describe("白板協定", () => {
     expect(removed.board.inbox).toHaveLength(0);
     expect(removed.board.items).toHaveLength(0);
   }, 20_000);
+
+  it("board.project_card 放上畫布；重送不重複，兩個客戶端都收到 updated", async () => {
+    const { service } = await boot();
+    const client = clients[clients.length - 1] as ProtocolClient;
+    const second = await connectAndHello(service);
+    clients.push(second);
+    await subscribeSystem(client);
+    await subscribeSystem(second);
+
+    const cardId = await createCard(client);
+    const board = await createBoard(client, "投影白板");
+    const itemId = newUlid();
+    const projection = {
+      boardId: board.id,
+      itemId,
+      cardId,
+      position: { x: 120, y: 80 },
+    };
+    const first = await request<BoardPayload>(client, "board.project_card", projection);
+    await boardChangedNext(client, board.id, "updated");
+    await boardChangedNext(second, board.id, "updated");
+    expect(first.board.items).toHaveLength(1);
+    expect(first.board.items[0]).toMatchObject({
+      id: itemId,
+      cardId,
+      origin: "canvas",
+      projectedBy: "user",
+      position: { x: 120, y: 80 },
+    });
+
+    const retry = await request<BoardPayload>(client, "board.project_card", projection);
+    expect(retry.board.items).toHaveLength(1);
+    expect(retry.board.updatedAt).toBe(first.board.updatedAt);
+  }, 20_000);
+
+  it("create_card_from_selection 的新卡帶三張來源；重送回傳同一張卡", async () => {
+    const { service } = await boot();
+    const client = clients[clients.length - 1] as ProtocolClient;
+    const second = await connectAndHello(service);
+    clients.push(second);
+    await subscribeSystem(client);
+    await subscribeSystem(second);
+
+    const cardIds = [await createCard(client), await createCard(client), await createCard(client)];
+    const board = await createBoard(client, "圈選整理");
+    const itemId = newUlid();
+    const selection = {
+      boardId: board.id,
+      itemId,
+      title: "三張卡的整理",
+      body: "把三張卡的內容整理成一張。",
+      position: { x: 40, y: 60 },
+      cardIds,
+    };
+    const created = await request<BoardPayload & { cardId: string }>(
+      client,
+      "board.create_card_from_selection",
+      selection,
+    );
+    await boardChangedNext(client, board.id, "updated");
+    await boardChangedNext(second, board.id, "updated");
+    expect(created.board.items).toHaveLength(1);
+    expect(created.board.items[0]).toMatchObject({ id: itemId, cardId: created.cardId });
+
+    const card = await request<{ card: { cardId: string; sources: readonly string[] } }>(
+      client,
+      "card.get",
+      { cardId: created.cardId },
+    );
+    expect(card.card.sources).toEqual(cardIds);
+
+    const retry = await request<BoardPayload & { cardId: string }>(
+      client,
+      "board.create_card_from_selection",
+      selection,
+    );
+    expect(retry.cardId).toBe(created.cardId);
+    expect(retry.board.items).toHaveLength(1);
+
+    const files = await readdir(join(service.folder.path, "cards"));
+    expect(files.filter((name) => name === `${created.cardId}.md`)).toHaveLength(1);
+    const sourceFiles = files.filter((name) => name.endsWith(".md"));
+    expect(sourceFiles).toHaveLength(4);
+  }, 20_000);
+
+  it("同一張卡投影到兩個白板只存一份；刪掉一個白板不影響另一個", async () => {
+    const { service, client } = await boot();
+    const cardId = await createCard(client);
+    const first = await createBoard(client, "甲白板");
+    const second = await createBoard(client, "乙白板");
+    for (const board of [first, second]) {
+      await request<BoardPayload>(client, "board.project_card", {
+        boardId: board.id,
+        itemId: newUlid(),
+        cardId,
+        position: { x: 0, y: 0 },
+      });
+    }
+
+    const before = await readdir(join(service.folder.path, "cards"));
+    expect(before.filter((name) => name === `${cardId}.md`)).toHaveLength(1);
+
+    const deleted = await request<{ deleted: boolean }>(client, "board.delete", {
+      boardId: first.id,
+    });
+    expect(deleted.deleted).toBe(true);
+
+    const remaining = await request<BoardPayload>(client, "board.get", { boardId: second.id });
+    expect(remaining.board.items).toHaveLength(1);
+    expect(remaining.board.items[0]).toMatchObject({ cardId });
+    const card = await request<{ card: { cardId: string } }>(client, "card.get", { cardId });
+    expect(card.card.cardId).toBe(cardId);
+    const after = await readdir(join(service.folder.path, "cards"));
+    expect(after.filter((name) => name === `${cardId}.md`)).toHaveLength(1);
+  }, 20_000);
+
+  it("full 模式：代理移動、連線、分組都寫進真行程的白板", async () => {
+    const boardId = newUlid();
+    const firstItemId = newUlid();
+    const secondItemId = newUlid();
+    const edgeId = newUlid();
+    const groupId = newUlid();
+    const { service, client } = await boot({
+      scripts: [
+        [
+          {
+            kind: "tool",
+            toolName: "move_board_item",
+            input: { boardId, itemId: firstItemId, x: 300, y: 200 },
+          },
+          {
+            kind: "tool",
+            toolName: "connect_board_items",
+            input: { boardId, from: firstItemId, to: secondItemId, edgeId, label: "相關" },
+          },
+          {
+            kind: "tool",
+            toolName: "create_board_group",
+            input: { boardId, label: "整理", groupId },
+          },
+          {
+            kind: "tool",
+            toolName: "assign_board_item_to_group",
+            input: { boardId, itemId: firstItemId, groupId },
+          },
+          { kind: "text", text: "白板整理完成。" },
+        ],
+      ],
+    });
+    const second = await connectAndHello(service);
+    clients.push(second);
+    await subscribeSystem(client);
+    await subscribeSystem(second);
+
+    await request<BoardPayload>(client, "board.create", {
+      boardId,
+      title: "代理操作白板",
+      clientRequestId: `board-create-${Math.random().toString(36).slice(2)}`,
+    });
+    for (const itemId of [firstItemId, secondItemId]) {
+      await request<BoardPayload>(client, "board.project_card", {
+        boardId,
+        itemId,
+        cardId: await createCard(client),
+        position: { x: 0, y: 0 },
+      });
+    }
+
+    await setSetting(client, "boards.agentMode", "full");
+    const sessionId = await createSession(client);
+    await subscribeSession(client, sessionId);
+    const turnId = await send(client, sessionId, "整理白板");
+    for (let index = 1; index <= 4; index += 1) {
+      await approveNext(client, index);
+      const result = await waitForToolResult(client, index);
+      expect((result.payload as { status: string }).status, toolOutputText(result)).toBe("ok");
+    }
+    await waitForTurnEnd(client, turnId);
+    await boardChangedNext(client, boardId, "updated");
+    await boardChangedNext(second, boardId, "updated");
+
+    const got = await request<BoardPayload>(client, "board.get", { boardId });
+    expect(got.board.items.find((item) => item.id === firstItemId)).toMatchObject({
+      position: { x: 300, y: 200 },
+      groupId,
+    });
+    expect(got.board.edges).toEqual([
+      { id: edgeId, from: firstItemId, to: secondItemId, label: "相關" },
+    ]);
+    expect(got.board.groups).toEqual([{ id: groupId, label: "整理" }]);
+  }, 30_000);
 });

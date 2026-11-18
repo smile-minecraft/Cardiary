@@ -31,6 +31,7 @@ import {
   CardVersionsStore,
   PendingPatchesStore,
   StorageError,
+  type CardFileContent,
   type CardFileEntry,
   type CardFileStore,
   type PendingCardPatch,
@@ -77,12 +78,21 @@ export interface CardLibraryOptions {
   readonly now?: () => Date;
   readonly emit?: (intent: ProtocolEventIntent) => void;
   readonly warn?: (message: string, fields?: JSONObject) => void;
+  /**
+   * 刪卡前的清理；投影到白板的卡片由這裡通知白板模組。
+   *
+   * 在正本刪除之前呼叫：清不掉就不刪卡，避免留下指向已刪卡片的投影。
+   * 省略時（測試直接建構）不做事。
+   */
+  readonly beforeDelete?: (cardId: string) => Promise<void> | void;
 }
 
 interface CreateCardInput {
   readonly kind: CardKind;
   readonly title: string;
   readonly body: string;
+  /** 呼叫端指定的穩定識別碼；檔案已存在時沿用該卡，供重試與冪等建立使用。 */
+  readonly cardId?: string;
   readonly summary?: string;
   readonly tags?: readonly string[];
   readonly persona?: string;
@@ -105,6 +115,7 @@ export class CardLibrary {
   readonly #warn: (message: string, fields?: JSONObject) => void;
   readonly #changeListeners = new Set<(change: CardLibraryChange) => void>();
   readonly #rebuildListeners = new Set<() => void>();
+  readonly #beforeDelete: ((cardId: string) => Promise<void> | void) | undefined;
   /** 變更一次只做一個：協定請求與檔案監看共用同一條序列。 */
   #tail: Promise<void> = Promise.resolve();
 
@@ -116,6 +127,7 @@ export class CardLibrary {
     this.#now = options.now ?? (() => new Date());
     this.#versionsOverride = options.versions;
     this.#patchesOverride = options.patches;
+    this.#beforeDelete = options.beforeDelete;
     this.#warn = options.warn ?? (() => {});
     const sink = options.emit;
     this.#emit = (intent) => {
@@ -417,7 +429,12 @@ export class CardLibrary {
           kind,
         });
       }
-      const cardId = this.#newUniqueId();
+      const requestedId = input.cardId === undefined ? undefined : normalizeCardId(input.cardId);
+      if (requestedId !== undefined) {
+        const existing = this.#files.read(requestedId);
+        if (existing !== undefined) return this.#adoptCard(requestedId, existing);
+      }
+      const cardId = requestedId ?? this.#newUniqueId();
       const now = this.#now().toISOString();
       const frontmatter: CardFrontmatter = {
         id: cardId,
@@ -789,7 +806,7 @@ export class CardLibrary {
   }
 
   async delete(cardId: string): Promise<{ readonly deletedAssets: number }> {
-    return this.#serialize(() => {
+    return this.#serialize(async () => {
       const id = normalizeCardId(cardId);
       const index = this.#index();
       const known = index.get(id);
@@ -798,6 +815,10 @@ export class CardLibrary {
         content === undefined ? null : parseCardText(content.text, { expectedCardId: id });
       if (known === undefined && content === undefined) {
         throw new ProtocolHandlerError("not_found", `找不到卡片 ${id}。`, { cardId: id });
+      }
+      if (this.#beforeDelete !== undefined) {
+        // 在正本刪除前先把外部的依賴清乾淨；失敗就中止刪除，卡片還在。
+        await this.#beforeDelete(id);
       }
       const existed = this.#files.remove(id);
       index.remove(id);
@@ -944,8 +965,11 @@ export class CardLibrary {
   }
 
   /** 一次變更的序列化；失敗不影響後面的工作。 */
-  #serialize<T>(work: () => T): Promise<T> {
-    const run = this.#tail.then(work, work);
+  #serialize<T>(work: () => T | Promise<T>): Promise<T> {
+    const run = this.#tail.then(
+      async () => work(),
+      async () => work(),
+    );
     this.#tail = run.then(
       () => undefined,
       () => undefined,
@@ -1057,6 +1081,36 @@ export class CardLibrary {
       });
     }
     return `assets/${basename(target)}`;
+  }
+
+  /**
+   * 沿用一個已經存在的卡片檔。
+   *
+   * 建立卡片後的後續步驟失敗（例如白板寫入中斷）時，重試會帶著同一個
+   * 識別碼再建一次。檔案是正本，這裡不重寫它，只補索引、狀態與版本
+   * 檢查點；索引原本沒有這張卡時才補一筆 created 事件，避免重複通知。
+   */
+  #adoptCard(cardId: string, content: CardFileContent): Card {
+    const parsed = parseCardText(content.text, { expectedCardId: cardId });
+    if (!parsed.ok) {
+      throw new ProtocolHandlerError("conflict", `卡片檔格式不符：${parsed.reason}`, {
+        reason: "broken_card",
+        cardId,
+      });
+    }
+    const known = this.#index().get(cardId) !== undefined;
+    const { frontmatter, body } = parsed;
+    this.#index().upsert(this.#indexedRecord(content, frontmatter, body));
+    this.#state.ensure(cardId, frontmatter.persona);
+    if (frontmatter.supersedes !== undefined) {
+      this.#state.setSupersededBy(frontmatter.supersedes, cardId);
+    }
+    const revision = computeRevision(frontmatter, body);
+    this.#repairVersion(cardId, body, revision);
+    if (!known) {
+      this.#emit({ kind: "card-changed", cardId, change: "created", revision });
+    }
+    return { cardId, frontmatter, body, revision };
   }
 
   #newUniqueId(): string {

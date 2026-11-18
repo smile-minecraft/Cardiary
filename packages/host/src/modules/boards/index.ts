@@ -69,6 +69,7 @@ async function activate(context: ModuleActivationContext): Promise<void> {
   });
   context.registerToolBundle(bundles.create);
   context.registerToolBundle(bundles.project);
+  context.registerToolBundle(bundles.full);
 
   context.services.host.provide(HOST_SERVICE_NAMES.boards, service);
 }
@@ -79,6 +80,7 @@ function cardGateway(cards: CardService): BoardCardGateway {
     get: (cardId) => cards.get(cardId),
     create: (input) =>
       cards.create({
+        cardId: input.cardId,
         kind: input.kind,
         title: input.title,
         body: input.body,

@@ -49,8 +49,8 @@ function setup(label = "board-pins"): Setup {
   const store = new BoardFileStore({ layout, now: () => clock.now });
   const cards = {
     get: async (cardId: string) => ({ cardId }),
-    create: async (input: { title: string }) => ({
-      cardId: `01CARD${input.title}0000000000`.slice(0, 26).padEnd(26, "0"),
+    create: async (input: { readonly cardId: string; readonly title: string }) => ({
+      cardId: input.cardId,
     }),
   };
   const service = new BoardService(

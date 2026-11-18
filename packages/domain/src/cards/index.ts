@@ -110,6 +110,8 @@ export interface CardService {
   list(query: CardQuery): Promise<CardPage<CardSummary>>;
   search(query: CardQuery): Promise<CardPage<CardSearchHit>>;
   create(input: {
+    /** 呼叫端指定的穩定識別碼；同名卡片已存在時沿用，供重試與冪等建立使用。 */
+    readonly cardId?: CardId;
     readonly kind: CardKind;
     readonly title: string;
     readonly body: string;

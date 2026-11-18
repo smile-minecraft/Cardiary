@@ -70,6 +70,21 @@ describe("投影不是複本", () => {
     expect(listBoardsContainingCard([boardA, boardB], cardId)).toEqual([boardA.id, boardB.id]);
   });
 
+  it("收件區的投影也算這張卡的投影", () => {
+    const cardId = newCardId();
+    const inboxBoard = projectCard({
+      board: emptyBoard(),
+      itemId: newCardId(),
+      cardId,
+      origin: "inbox",
+      position: { x: 0, y: 0 },
+      now: T1,
+    });
+
+    expect(inboxBoard.inbox).toHaveLength(1);
+    expect(listBoardsContainingCard([inboxBoard], cardId)).toEqual([inboxBoard.id]);
+  });
+
   it("同一份白板重複投影同一張卡會被拒絕", () => {
     const board = emptyBoard();
     const cardId = newCardId();

@@ -309,6 +309,37 @@ describe("卡片庫", () => {
     expect(fixture.events.at(-1)).toMatchObject({ change: "deleted", cardId: created.cardId });
   }, 20_000);
 
+  it("指定識別碼重複建立時沿用既有檔案，只在索引缺少時補一次事件", async () => {
+    const fixture = await makeFixture();
+    const { library, files } = fixture;
+    const cardId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const createdEvents = () =>
+      fixture.events.filter((event) => event.kind === "card-changed" && event.cardId === cardId);
+
+    const write = vi.spyOn(CardFileStore.prototype, "write");
+    const first = await library.create({ cardId, kind: "note", title: "重試", body: "內容\n" });
+    expect(first.cardId).toBe(cardId);
+    expect(write).toHaveBeenCalledTimes(1);
+    const original = files.read(cardId);
+    expect(createdEvents()).toHaveLength(1);
+
+    write.mockClear();
+    const again = await library.create({ cardId, kind: "note", title: "重試", body: "內容\n" });
+    expect(again.revision).toBe(first.revision);
+    expect(write).not.toHaveBeenCalled();
+    expect(files.read(cardId)?.text).toBe(original?.text);
+    expect(createdEvents()).toHaveLength(1);
+    expect((await library.list({})).items).toHaveLength(1);
+
+    const index = new CardIndexStore({ db: fixture.storage.cache });
+    index.remove(cardId);
+    expect(index.get(cardId)).toBeUndefined();
+    const adopted = await library.create({ cardId, kind: "note", title: "重試", body: "內容\n" });
+    expect(adopted.cardId).toBe(cardId);
+    expect(index.get(cardId)).toBeDefined();
+    expect(createdEvents()).toHaveLength(2);
+  }, 20_000);
+
   it("版本寫入失敗後讀取正本，自動補上可重放的檢查點", async () => {
     const { library } = await makeFixture();
     const card = await library.create({ kind: "note", title: "修復", body: "原文\n" });
