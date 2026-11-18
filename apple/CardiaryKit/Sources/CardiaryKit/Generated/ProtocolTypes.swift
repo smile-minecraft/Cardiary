@@ -934,6 +934,56 @@ public struct AgentStopResponsePayload: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - AllowAllGrantState
+
+public struct AllowAllGrantState: Codable, Equatable, Sendable {
+    public let tools: [String]
+    public let paths: [String]
+    public let domains: [String]
+    public let expiresAt: String
+
+    public init(
+        tools: [String],
+        paths: [String],
+        domains: [String],
+        expiresAt: String
+    ) {
+        self.tools = tools
+        self.paths = paths
+        self.domains = domains
+        self.expiresAt = expiresAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case tools = "tools"
+        case paths = "paths"
+        case domains = "domains"
+        case expiresAt = "expiresAt"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let tools = try container.decode([String].self, forKey: .tools)
+        let paths = try container.decode([String].self, forKey: .paths)
+        let domains = try container.decode([String].self, forKey: .domains)
+        let expiresAt = try container.decode(String.self, forKey: .expiresAt)
+        self.init(
+            tools: tools,
+            paths: paths,
+            domains: domains,
+            expiresAt: expiresAt
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(tools, forKey: .tools)
+        try container.encode(paths, forKey: .paths)
+        try container.encode(domains, forKey: .domains)
+        try container.encode(expiresAt, forKey: .expiresAt)
+    }
+}
+
 // MARK: - ApprovalDecideRequest
 
 public struct ApprovalDecideRequest: Codable, Equatable, Sendable {
@@ -7616,6 +7666,11 @@ public enum ClientFrame: Codable, Equatable, Sendable {
     case contextCompactRequest(ContextCompactRequest)
     case systemSettingsGetRequest(SystemSettingsGetRequest)
     case systemSettingsSetRequest(SystemSettingsSetRequest)
+    case systemPermissionsGetRequest(SystemPermissionsGetRequest)
+    case systemPermissionsSetCategoryRequest(SystemPermissionsSetCategoryRequest)
+    case systemPermissionsSetDomainsRequest(SystemPermissionsSetDomainsRequest)
+    case systemPermissionsGrantAllowAllRequest(SystemPermissionsGrantAllowAllRequest)
+    case systemPermissionsRevokeAllowAllRequest(SystemPermissionsRevokeAllowAllRequest)
     case systemModulesGetRequest(SystemModulesGetRequest)
     case systemModulesSetEnabledRequest(SystemModulesSetEnabledRequest)
     case systemModelsGetRequest(SystemModelsGetRequest)
@@ -7737,6 +7792,16 @@ public enum ClientFrame: Codable, Equatable, Sendable {
             self = .systemSettingsGetRequest(try SystemSettingsGetRequest(from: decoder))
         case .some("system.settings.set"):
             self = .systemSettingsSetRequest(try SystemSettingsSetRequest(from: decoder))
+        case .some("system.permissions.get"):
+            self = .systemPermissionsGetRequest(try SystemPermissionsGetRequest(from: decoder))
+        case .some("system.permissions.set_category"):
+            self = .systemPermissionsSetCategoryRequest(try SystemPermissionsSetCategoryRequest(from: decoder))
+        case .some("system.permissions.set_domains"):
+            self = .systemPermissionsSetDomainsRequest(try SystemPermissionsSetDomainsRequest(from: decoder))
+        case .some("system.permissions.grant_allow_all"):
+            self = .systemPermissionsGrantAllowAllRequest(try SystemPermissionsGrantAllowAllRequest(from: decoder))
+        case .some("system.permissions.revoke_allow_all"):
+            self = .systemPermissionsRevokeAllowAllRequest(try SystemPermissionsRevokeAllowAllRequest(from: decoder))
         case .some("system.modules.get"):
             self = .systemModulesGetRequest(try SystemModulesGetRequest(from: decoder))
         case .some("system.modules.set_enabled"):
@@ -7883,6 +7948,16 @@ public enum ClientFrame: Codable, Equatable, Sendable {
         case .systemSettingsGetRequest(let value):
             try value.encode(to: encoder)
         case .systemSettingsSetRequest(let value):
+            try value.encode(to: encoder)
+        case .systemPermissionsGetRequest(let value):
+            try value.encode(to: encoder)
+        case .systemPermissionsSetCategoryRequest(let value):
+            try value.encode(to: encoder)
+        case .systemPermissionsSetDomainsRequest(let value):
+            try value.encode(to: encoder)
+        case .systemPermissionsGrantAllowAllRequest(let value):
+            try value.encode(to: encoder)
+        case .systemPermissionsRevokeAllowAllRequest(let value):
             try value.encode(to: encoder)
         case .systemModulesGetRequest(let value):
             try value.encode(to: encoder)
@@ -9277,6 +9352,51 @@ public struct DecidedBy: Codable, Equatable, Sendable {
 public enum DeciderKind: String, Codable, Equatable, Sendable, CaseIterable {
     case client = "client"
     case system = "system"
+}
+
+// MARK: - DelegatedCategory
+
+public enum DelegatedCategory: String, Codable, Equatable, Sendable, CaseIterable {
+    case readOnlyFiles = "read-only-files"
+    case gitReadonly = "git-readonly"
+    case createCard = "create-card"
+    case ownNotification = "own-notification"
+}
+
+// MARK: - DelegatedCategoryGrant
+
+public struct DelegatedCategoryGrant: Codable, Equatable, Sendable {
+    public let category: DelegatedCategory
+    public let paths: [String]
+
+    public init(
+        category: DelegatedCategory,
+        paths: [String]
+    ) {
+        self.category = category
+        self.paths = paths
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case category = "category"
+        case paths = "paths"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let category = try container.decode(DelegatedCategory.self, forKey: .category)
+        let paths = try container.decode([String].self, forKey: .paths)
+        self.init(
+            category: category,
+            paths: paths
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(category, forKey: .category)
+        try container.encode(paths, forKey: .paths)
+    }
 }
 
 // MARK: - DeliveryMode
@@ -13659,6 +13779,70 @@ public enum PendingPatchStatus: String, Codable, Equatable, Sendable, CaseIterab
     case rejected = "rejected"
 }
 
+// MARK: - PermissionModesState
+
+public struct PermissionModesState: Codable, Equatable, Sendable {
+    public let categories: [DelegatedCategoryGrant]
+    public let availableCategories: [DelegatedCategory]
+    public let allowedDomains: [String]
+    public let allowAll: AllowAllGrantState?
+    public let defaultAllowAllMinutes: Int
+    public let maxAllowAllMinutes: Int
+
+    public init(
+        categories: [DelegatedCategoryGrant],
+        availableCategories: [DelegatedCategory],
+        allowedDomains: [String],
+        allowAll: AllowAllGrantState? = nil,
+        defaultAllowAllMinutes: Int,
+        maxAllowAllMinutes: Int
+    ) {
+        self.categories = categories
+        self.availableCategories = availableCategories
+        self.allowedDomains = allowedDomains
+        self.allowAll = allowAll
+        self.defaultAllowAllMinutes = defaultAllowAllMinutes
+        self.maxAllowAllMinutes = maxAllowAllMinutes
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case categories = "categories"
+        case availableCategories = "availableCategories"
+        case allowedDomains = "allowedDomains"
+        case allowAll = "allowAll"
+        case defaultAllowAllMinutes = "defaultAllowAllMinutes"
+        case maxAllowAllMinutes = "maxAllowAllMinutes"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let categories = try container.decode([DelegatedCategoryGrant].self, forKey: .categories)
+        let availableCategories = try container.decode([DelegatedCategory].self, forKey: .availableCategories)
+        let allowedDomains = try container.decode([String].self, forKey: .allowedDomains)
+        let allowAll = try container.decodeIfPresent(AllowAllGrantState.self, forKey: .allowAll)
+        let defaultAllowAllMinutes = try container.decode(Int.self, forKey: .defaultAllowAllMinutes)
+        let maxAllowAllMinutes = try container.decode(Int.self, forKey: .maxAllowAllMinutes)
+        self.init(
+            categories: categories,
+            availableCategories: availableCategories,
+            allowedDomains: allowedDomains,
+            allowAll: allowAll,
+            defaultAllowAllMinutes: defaultAllowAllMinutes,
+            maxAllowAllMinutes: maxAllowAllMinutes
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(categories, forKey: .categories)
+        try container.encode(availableCategories, forKey: .availableCategories)
+        try container.encode(allowedDomains, forKey: .allowedDomains)
+        try container.encodeIfPresent(allowAll, forKey: .allowAll)
+        try container.encode(defaultAllowAllMinutes, forKey: .defaultAllowAllMinutes)
+        try container.encode(maxAllowAllMinutes, forKey: .maxAllowAllMinutes)
+    }
+}
+
 // MARK: - ProtocolInfo
 
 public struct ProtocolInfo: Codable, Equatable, Sendable {
@@ -13906,6 +14090,11 @@ public enum ServerFrame: Codable, Equatable, Sendable {
     case contextCompactResponse(ContextCompactResponse)
     case systemSettingsGetResponse(SystemSettingsGetResponse)
     case systemSettingsSetResponse(SystemSettingsSetResponse)
+    case systemPermissionsGetResponse(SystemPermissionsGetResponse)
+    case systemPermissionsSetCategoryResponse(SystemPermissionsSetCategoryResponse)
+    case systemPermissionsSetDomainsResponse(SystemPermissionsSetDomainsResponse)
+    case systemPermissionsGrantAllowAllResponse(SystemPermissionsGrantAllowAllResponse)
+    case systemPermissionsRevokeAllowAllResponse(SystemPermissionsRevokeAllowAllResponse)
     case systemModulesGetResponse(SystemModulesGetResponse)
     case systemModulesSetEnabledResponse(SystemModulesSetEnabledResponse)
     case systemModelsGetResponse(SystemModelsGetResponse)
@@ -13925,6 +14114,7 @@ public enum ServerFrame: Codable, Equatable, Sendable {
     case sessionUnarchivedEvent(SessionUnarchivedEvent)
     case sessionDeletedEvent(SessionDeletedEvent)
     case systemSettingsChangedEvent(SystemSettingsChangedEvent)
+    case systemPermissionsChangedEvent(SystemPermissionsChangedEvent)
     case systemModulesChangedEvent(SystemModulesChangedEvent)
     case systemModelsChangedEvent(SystemModelsChangedEvent)
     case approvalRequestedEvent(ApprovalRequestedEvent)
@@ -14057,6 +14247,16 @@ public enum ServerFrame: Codable, Equatable, Sendable {
             self = .systemSettingsGetResponse(try SystemSettingsGetResponse(from: decoder))
         case (.some("response"), .some("system.settings.set")):
             self = .systemSettingsSetResponse(try SystemSettingsSetResponse(from: decoder))
+        case (.some("response"), .some("system.permissions.get")):
+            self = .systemPermissionsGetResponse(try SystemPermissionsGetResponse(from: decoder))
+        case (.some("response"), .some("system.permissions.set_category")):
+            self = .systemPermissionsSetCategoryResponse(try SystemPermissionsSetCategoryResponse(from: decoder))
+        case (.some("response"), .some("system.permissions.set_domains")):
+            self = .systemPermissionsSetDomainsResponse(try SystemPermissionsSetDomainsResponse(from: decoder))
+        case (.some("response"), .some("system.permissions.grant_allow_all")):
+            self = .systemPermissionsGrantAllowAllResponse(try SystemPermissionsGrantAllowAllResponse(from: decoder))
+        case (.some("response"), .some("system.permissions.revoke_allow_all")):
+            self = .systemPermissionsRevokeAllowAllResponse(try SystemPermissionsRevokeAllowAllResponse(from: decoder))
         case (.some("response"), .some("system.modules.get")):
             self = .systemModulesGetResponse(try SystemModulesGetResponse(from: decoder))
         case (.some("response"), .some("system.modules.set_enabled")):
@@ -14095,6 +14295,8 @@ public enum ServerFrame: Codable, Equatable, Sendable {
             self = .sessionDeletedEvent(try SessionDeletedEvent(from: decoder))
         case (.some("event"), .some("system.settings.changed")):
             self = .systemSettingsChangedEvent(try SystemSettingsChangedEvent(from: decoder))
+        case (.some("event"), .some("system.permissions.changed")):
+            self = .systemPermissionsChangedEvent(try SystemPermissionsChangedEvent(from: decoder))
         case (.some("event"), .some("system.modules.changed")):
             self = .systemModulesChangedEvent(try SystemModulesChangedEvent(from: decoder))
         case (.some("event"), .some("system.models.changed")):
@@ -14258,6 +14460,16 @@ public enum ServerFrame: Codable, Equatable, Sendable {
             try value.encode(to: encoder)
         case .systemSettingsSetResponse(let value):
             try value.encode(to: encoder)
+        case .systemPermissionsGetResponse(let value):
+            try value.encode(to: encoder)
+        case .systemPermissionsSetCategoryResponse(let value):
+            try value.encode(to: encoder)
+        case .systemPermissionsSetDomainsResponse(let value):
+            try value.encode(to: encoder)
+        case .systemPermissionsGrantAllowAllResponse(let value):
+            try value.encode(to: encoder)
+        case .systemPermissionsRevokeAllowAllResponse(let value):
+            try value.encode(to: encoder)
         case .systemModulesGetResponse(let value):
             try value.encode(to: encoder)
         case .systemModulesSetEnabledResponse(let value):
@@ -14295,6 +14507,8 @@ public enum ServerFrame: Codable, Equatable, Sendable {
         case .sessionDeletedEvent(let value):
             try value.encode(to: encoder)
         case .systemSettingsChangedEvent(let value):
+            try value.encode(to: encoder)
+        case .systemPermissionsChangedEvent(let value):
             try value.encode(to: encoder)
         case .systemModulesChangedEvent(let value):
             try value.encode(to: encoder)
@@ -21467,6 +21681,925 @@ public struct SystemModulesSetEnabledResponsePayload: Codable, Equatable, Sendab
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(module, forKey: .module)
+    }
+}
+
+// MARK: - SystemPermissionsChangedEvent
+
+public struct SystemPermissionsChangedEvent: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let type: String
+    public let stream: String
+    public let seq: Int
+    public let emittedAt: String
+    public let payload: PermissionModesState
+
+    public init(
+        v: Int = 1,
+        kind: String = "event",
+        type: String = "system.permissions.changed",
+        stream: String,
+        seq: Int,
+        emittedAt: String,
+        payload: PermissionModesState
+    ) {
+        self.v = v
+        self.kind = kind
+        self.type = type
+        self.stream = stream
+        self.seq = seq
+        self.emittedAt = emittedAt
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case type = "type"
+        case stream = "stream"
+        case seq = "seq"
+        case emittedAt = "emittedAt"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "SystemPermissionsChangedEvent.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "event" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "SystemPermissionsChangedEvent.kind 必須是 event")
+        }
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "system.permissions.changed" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "SystemPermissionsChangedEvent.type 必須是 system.permissions.changed")
+        }
+        let stream = try container.decode(String.self, forKey: .stream)
+        let seq = try container.decode(Int.self, forKey: .seq)
+        let emittedAt = try container.decode(String.self, forKey: .emittedAt)
+        let payload = try container.decode(PermissionModesState.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            type: type,
+            stream: stream,
+            seq: seq,
+            emittedAt: emittedAt,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(type, forKey: .type)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(seq, forKey: .seq)
+        try container.encode(emittedAt, forKey: .emittedAt)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - SystemPermissionsGetRequest
+
+public struct SystemPermissionsGetRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: SystemPermissionsGetRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "system.permissions.get",
+        payload: SystemPermissionsGetRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "SystemPermissionsGetRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "SystemPermissionsGetRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "system.permissions.get" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "SystemPermissionsGetRequest.type 必須是 system.permissions.get")
+        }
+        let payload = try container.decode(SystemPermissionsGetRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - SystemPermissionsGetRequestPayload
+
+public struct SystemPermissionsGetRequestPayload: Codable, Equatable, Sendable {
+
+    public init() {}
+}
+
+// MARK: - SystemPermissionsGetResponse
+
+public struct SystemPermissionsGetResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: PermissionModesState
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "system.permissions.get",
+        payload: PermissionModesState
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "SystemPermissionsGetResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "SystemPermissionsGetResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "system.permissions.get" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "SystemPermissionsGetResponse.type 必須是 system.permissions.get")
+        }
+        let payload = try container.decode(PermissionModesState.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - SystemPermissionsGrantAllowAllRequest
+
+public struct SystemPermissionsGrantAllowAllRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: SystemPermissionsGrantAllowAllRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "system.permissions.grant_allow_all",
+        payload: SystemPermissionsGrantAllowAllRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "SystemPermissionsGrantAllowAllRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "SystemPermissionsGrantAllowAllRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "system.permissions.grant_allow_all" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "SystemPermissionsGrantAllowAllRequest.type 必須是 system.permissions.grant_allow_all")
+        }
+        let payload = try container.decode(SystemPermissionsGrantAllowAllRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - SystemPermissionsGrantAllowAllRequestPayload
+
+public struct SystemPermissionsGrantAllowAllRequestPayload: Codable, Equatable, Sendable {
+    public let tools: [String]
+    public let paths: [String]
+    public let domains: [String]?
+    public let minutes: Int?
+    public let clientRequestId: String
+
+    public init(
+        tools: [String],
+        paths: [String],
+        domains: [String]? = nil,
+        minutes: Int? = nil,
+        clientRequestId: String
+    ) {
+        self.tools = tools
+        self.paths = paths
+        self.domains = domains
+        self.minutes = minutes
+        self.clientRequestId = clientRequestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case tools = "tools"
+        case paths = "paths"
+        case domains = "domains"
+        case minutes = "minutes"
+        case clientRequestId = "clientRequestId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let tools = try container.decode([String].self, forKey: .tools)
+        let paths = try container.decode([String].self, forKey: .paths)
+        let domains = try container.decodeIfPresent([String].self, forKey: .domains)
+        let minutes = try container.decodeIfPresent(Int.self, forKey: .minutes)
+        let clientRequestId = try container.decode(String.self, forKey: .clientRequestId)
+        self.init(
+            tools: tools,
+            paths: paths,
+            domains: domains,
+            minutes: minutes,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(tools, forKey: .tools)
+        try container.encode(paths, forKey: .paths)
+        try container.encodeIfPresent(domains, forKey: .domains)
+        try container.encodeIfPresent(minutes, forKey: .minutes)
+        try container.encode(clientRequestId, forKey: .clientRequestId)
+    }
+}
+
+// MARK: - SystemPermissionsGrantAllowAllResponse
+
+public struct SystemPermissionsGrantAllowAllResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: PermissionModesState
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "system.permissions.grant_allow_all",
+        payload: PermissionModesState
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "SystemPermissionsGrantAllowAllResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "SystemPermissionsGrantAllowAllResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "system.permissions.grant_allow_all" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "SystemPermissionsGrantAllowAllResponse.type 必須是 system.permissions.grant_allow_all")
+        }
+        let payload = try container.decode(PermissionModesState.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - SystemPermissionsRevokeAllowAllRequest
+
+public struct SystemPermissionsRevokeAllowAllRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: SystemPermissionsRevokeAllowAllRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "system.permissions.revoke_allow_all",
+        payload: SystemPermissionsRevokeAllowAllRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "SystemPermissionsRevokeAllowAllRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "SystemPermissionsRevokeAllowAllRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "system.permissions.revoke_allow_all" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "SystemPermissionsRevokeAllowAllRequest.type 必須是 system.permissions.revoke_allow_all")
+        }
+        let payload = try container.decode(SystemPermissionsRevokeAllowAllRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - SystemPermissionsRevokeAllowAllRequestPayload
+
+public struct SystemPermissionsRevokeAllowAllRequestPayload: Codable, Equatable, Sendable {
+    public let clientRequestId: String
+
+    public init(
+        clientRequestId: String
+    ) {
+        self.clientRequestId = clientRequestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case clientRequestId = "clientRequestId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let clientRequestId = try container.decode(String.self, forKey: .clientRequestId)
+        self.init(
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(clientRequestId, forKey: .clientRequestId)
+    }
+}
+
+// MARK: - SystemPermissionsRevokeAllowAllResponse
+
+public struct SystemPermissionsRevokeAllowAllResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: PermissionModesState
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "system.permissions.revoke_allow_all",
+        payload: PermissionModesState
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "SystemPermissionsRevokeAllowAllResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "SystemPermissionsRevokeAllowAllResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "system.permissions.revoke_allow_all" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "SystemPermissionsRevokeAllowAllResponse.type 必須是 system.permissions.revoke_allow_all")
+        }
+        let payload = try container.decode(PermissionModesState.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - SystemPermissionsSetCategoryRequest
+
+public struct SystemPermissionsSetCategoryRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: SystemPermissionsSetCategoryRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "system.permissions.set_category",
+        payload: SystemPermissionsSetCategoryRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "SystemPermissionsSetCategoryRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "SystemPermissionsSetCategoryRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "system.permissions.set_category" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "SystemPermissionsSetCategoryRequest.type 必須是 system.permissions.set_category")
+        }
+        let payload = try container.decode(SystemPermissionsSetCategoryRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - SystemPermissionsSetCategoryRequestPayload
+
+public struct SystemPermissionsSetCategoryRequestPayload: Codable, Equatable, Sendable {
+    public let category: DelegatedCategory
+    public let enabled: Bool
+    public let paths: [String]
+    public let clientRequestId: String
+
+    public init(
+        category: DelegatedCategory,
+        enabled: Bool,
+        paths: [String],
+        clientRequestId: String
+    ) {
+        self.category = category
+        self.enabled = enabled
+        self.paths = paths
+        self.clientRequestId = clientRequestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case category = "category"
+        case enabled = "enabled"
+        case paths = "paths"
+        case clientRequestId = "clientRequestId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let category = try container.decode(DelegatedCategory.self, forKey: .category)
+        let enabled = try container.decode(Bool.self, forKey: .enabled)
+        let paths = try container.decode([String].self, forKey: .paths)
+        let clientRequestId = try container.decode(String.self, forKey: .clientRequestId)
+        self.init(
+            category: category,
+            enabled: enabled,
+            paths: paths,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(category, forKey: .category)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(paths, forKey: .paths)
+        try container.encode(clientRequestId, forKey: .clientRequestId)
+    }
+}
+
+// MARK: - SystemPermissionsSetCategoryResponse
+
+public struct SystemPermissionsSetCategoryResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: PermissionModesState
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "system.permissions.set_category",
+        payload: PermissionModesState
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "SystemPermissionsSetCategoryResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "SystemPermissionsSetCategoryResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "system.permissions.set_category" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "SystemPermissionsSetCategoryResponse.type 必須是 system.permissions.set_category")
+        }
+        let payload = try container.decode(PermissionModesState.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - SystemPermissionsSetDomainsRequest
+
+public struct SystemPermissionsSetDomainsRequest: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let id: String
+    public let type: String
+    public let payload: SystemPermissionsSetDomainsRequestPayload
+
+    public init(
+        v: Int = 1,
+        kind: String = "request",
+        id: String,
+        type: String = "system.permissions.set_domains",
+        payload: SystemPermissionsSetDomainsRequestPayload
+    ) {
+        self.v = v
+        self.kind = kind
+        self.id = id
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case id = "id"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "SystemPermissionsSetDomainsRequest.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "request" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "SystemPermissionsSetDomainsRequest.kind 必須是 request")
+        }
+        let id = try container.decode(String.self, forKey: .id)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "system.permissions.set_domains" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "SystemPermissionsSetDomainsRequest.type 必須是 system.permissions.set_domains")
+        }
+        let payload = try container.decode(SystemPermissionsSetDomainsRequestPayload.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            id: id,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
+    }
+}
+
+// MARK: - SystemPermissionsSetDomainsRequestPayload
+
+public struct SystemPermissionsSetDomainsRequestPayload: Codable, Equatable, Sendable {
+    public let domains: [String]
+    public let clientRequestId: String
+
+    public init(
+        domains: [String],
+        clientRequestId: String
+    ) {
+        self.domains = domains
+        self.clientRequestId = clientRequestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case domains = "domains"
+        case clientRequestId = "clientRequestId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let domains = try container.decode([String].self, forKey: .domains)
+        let clientRequestId = try container.decode(String.self, forKey: .clientRequestId)
+        self.init(
+            domains: domains,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(domains, forKey: .domains)
+        try container.encode(clientRequestId, forKey: .clientRequestId)
+    }
+}
+
+// MARK: - SystemPermissionsSetDomainsResponse
+
+public struct SystemPermissionsSetDomainsResponse: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let replyTo: String
+    public let type: String
+    public let payload: PermissionModesState
+
+    public init(
+        v: Int = 1,
+        kind: String = "response",
+        replyTo: String,
+        type: String = "system.permissions.set_domains",
+        payload: PermissionModesState
+    ) {
+        self.v = v
+        self.kind = kind
+        self.replyTo = replyTo
+        self.type = type
+        self.payload = payload
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case v = "v"
+        case kind = "kind"
+        case replyTo = "replyTo"
+        case type = "type"
+        case payload = "payload"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let v = try container.decode(Int.self, forKey: .v)
+        guard v == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .v, in: container, debugDescription: "SystemPermissionsSetDomainsResponse.v 必須是 1")
+        }
+        let kind = try container.decode(String.self, forKey: .kind)
+        guard kind == "response" else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "SystemPermissionsSetDomainsResponse.kind 必須是 response")
+        }
+        let replyTo = try container.decode(String.self, forKey: .replyTo)
+        let type = try container.decode(String.self, forKey: .type)
+        guard type == "system.permissions.set_domains" else {
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "SystemPermissionsSetDomainsResponse.type 必須是 system.permissions.set_domains")
+        }
+        let payload = try container.decode(PermissionModesState.self, forKey: .payload)
+        self.init(
+            v: v,
+            kind: kind,
+            replyTo: replyTo,
+            type: type,
+            payload: payload
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(v, forKey: .v)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(replyTo, forKey: .replyTo)
+        try container.encode(type, forKey: .type)
+        try container.encode(payload, forKey: .payload)
     }
 }
 

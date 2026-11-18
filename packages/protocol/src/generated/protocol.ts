@@ -54,6 +54,11 @@ export type ClientFrame =
   | ContextCompactRequest
   | SystemSettingsGetRequest
   | SystemSettingsSetRequest
+  | SystemPermissionsGetRequest
+  | SystemPermissionsSetCategoryRequest
+  | SystemPermissionsSetDomainsRequest
+  | SystemPermissionsGrantAllowAllRequest
+  | SystemPermissionsRevokeAllowAllRequest
   | SystemModulesGetRequest
   | SystemModulesSetEnabledRequest
   | SystemModelsGetRequest
@@ -126,6 +131,11 @@ export type JSONValue =
   | {
       [k: string]: JSONValue;
     };
+/**
+ * System One 可代為放行的封閉類別。
+ */
+export type DelegatedCategory =
+  "read-only-files" | "git-readonly" | "create-card" | "own-notification";
 /**
  * 供應商接入方式。
  */
@@ -205,6 +215,11 @@ export type ServerFrame =
   | ContextCompactResponse
   | SystemSettingsGetResponse
   | SystemSettingsSetResponse
+  | SystemPermissionsGetResponse
+  | SystemPermissionsSetCategoryResponse
+  | SystemPermissionsSetDomainsResponse
+  | SystemPermissionsGrantAllowAllResponse
+  | SystemPermissionsRevokeAllowAllResponse
   | SystemModulesGetResponse
   | SystemModulesSetEnabledResponse
   | SystemModelsGetResponse
@@ -224,6 +239,7 @@ export type ServerFrame =
   | SessionUnarchivedEvent
   | SessionDeletedEvent
   | SystemSettingsChangedEvent
+  | SystemPermissionsChangedEvent
   | SystemModulesChangedEvent
   | SystemModelsChangedEvent
   | ApprovalRequestedEvent
@@ -1648,6 +1664,137 @@ export interface SettingChange {
    */
   key: string;
   value: JSONValue;
+}
+/**
+ * 讀取權限模式。
+ */
+export interface SystemPermissionsGetRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "system.permissions.get";
+  payload: SystemPermissionsGetRequestPayload;
+}
+export interface SystemPermissionsGetRequestPayload {}
+/**
+ * 開關一個 System One 類別。
+ */
+export interface SystemPermissionsSetCategoryRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "system.permissions.set_category";
+  payload: SystemPermissionsSetCategoryRequestPayload;
+}
+export interface SystemPermissionsSetCategoryRequestPayload {
+  category: DelegatedCategory;
+  /**
+   * 開啟或關閉。
+   */
+  enabled: boolean;
+  /**
+   * 路徑範圍；沒有路徑條件的類別必須是空陣列。
+   *
+   * Items: 絕對路徑。
+   */
+  paths: string[];
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId: string;
+}
+/**
+ * 取代可委派網域清單。
+ */
+export interface SystemPermissionsSetDomainsRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "system.permissions.set_domains";
+  payload: SystemPermissionsSetDomainsRequestPayload;
+}
+export interface SystemPermissionsSetDomainsRequestPayload {
+  /**
+   * 完整的可委派網域清單（取代原本的清單）。
+   *
+   * Items: 網域規則。
+   */
+  domains: string[];
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId: string;
+}
+/**
+ * 開啟限時的全部允許。
+ */
+export interface SystemPermissionsGrantAllowAllRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "system.permissions.grant_allow_all";
+  payload: SystemPermissionsGrantAllowAllRequestPayload;
+}
+export interface SystemPermissionsGrantAllowAllRequestPayload {
+  /**
+   * 放行的工具。
+   *
+   * @minItems 1
+   *
+   * Items: 工具名稱。
+   */
+  tools: [string, ...string[]];
+  /**
+   * 放行的路徑範圍。
+   *
+   * Items: 絕對路徑。
+   */
+  paths: string[];
+  /**
+   * 放行的網域範圍。
+   *
+   * Items: 網域規則。
+   */
+  domains?: string[];
+  /**
+   * 期限分鐘數；省略時用預設值，超過上限被拒。
+   */
+  minutes?: number;
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId: string;
+}
+/**
+ * 撤銷全部允許。
+ */
+export interface SystemPermissionsRevokeAllowAllRequest {
+  v: 1;
+  kind: "request";
+  /**
+   * 客戶端產生的請求識別碼；同一條連線內用來重送與去重。
+   */
+  id: string;
+  type: "system.permissions.revoke_allow_all";
+  payload: SystemPermissionsRevokeAllowAllRequestPayload;
+}
+export interface SystemPermissionsRevokeAllowAllRequestPayload {
+  /**
+   * 冪等鍵。
+   */
+  clientRequestId: string;
 }
 /**
  * 讀取模組清單與狀態。
@@ -3986,6 +4133,134 @@ export interface SystemSettingsSetResponsePayload {
   approvalId?: string;
 }
 /**
+ * 變更後的權限模式。
+ */
+export interface SystemPermissionsGetResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "system.permissions.get";
+  payload: PermissionModesState;
+}
+/**
+ * 目前的權限模式；沒有 allowAll 代表全部允許沒有開啟或已到期。
+ */
+export interface PermissionModesState {
+  /**
+   * 已開啟的 System One 類別。
+   */
+  categories: DelegatedCategoryGrant[];
+  /**
+   * 可以開啟的類別。
+   */
+  availableCategories: DelegatedCategory[];
+  /**
+   * 人工維護的可委派網域。
+   *
+   * Items: 網域規則。
+   */
+  allowedDomains: string[];
+  allowAll?: AllowAllGrantState;
+  /**
+   * 全部允許的預設分鐘數。
+   */
+  defaultAllowAllMinutes: number;
+  /**
+   * 全部允許的上限分鐘數。
+   */
+  maxAllowAllMinutes: number;
+}
+export interface DelegatedCategoryGrant {
+  category: DelegatedCategory;
+  /**
+   * 授權的資料夾；只有 read-only-files 與 git-readonly 使用。
+   *
+   * Items: 絕對路徑。
+   */
+  paths: string[];
+}
+export interface AllowAllGrantState {
+  /**
+   * 放行的工具。
+   *
+   * @minItems 1
+   *
+   * Items: 工具名稱。
+   */
+  tools: [string, ...string[]];
+  /**
+   * 放行的路徑範圍。
+   *
+   * Items: 絕對路徑。
+   */
+  paths: string[];
+  /**
+   * 放行的網域範圍。
+   *
+   * Items: 網域規則。
+   */
+  domains: string[];
+  /**
+   * 到期時間，RFC 3339；到期自動失效。
+   */
+  expiresAt: string;
+}
+/**
+ * 變更後的權限模式。
+ */
+export interface SystemPermissionsSetCategoryResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "system.permissions.set_category";
+  payload: PermissionModesState;
+}
+/**
+ * 變更後的權限模式。
+ */
+export interface SystemPermissionsSetDomainsResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "system.permissions.set_domains";
+  payload: PermissionModesState;
+}
+/**
+ * 變更後的權限模式。
+ */
+export interface SystemPermissionsGrantAllowAllResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "system.permissions.grant_allow_all";
+  payload: PermissionModesState;
+}
+/**
+ * 變更後的權限模式。
+ */
+export interface SystemPermissionsRevokeAllowAllResponse {
+  v: 1;
+  kind: "response";
+  /**
+   * 對應的請求 id。
+   */
+  replyTo: string;
+  type: "system.permissions.revoke_allow_all";
+  payload: PermissionModesState;
+}
+/**
  * 模組清單。
  */
 export interface SystemModulesGetResponse {
@@ -4653,6 +4928,27 @@ export interface SystemSettingsChangedEventPayload {
    * 變更時間，RFC 3339。
    */
   changedAt: string;
+}
+/**
+ * 權限模式變更；掛在 system 串流。
+ */
+export interface SystemPermissionsChangedEvent {
+  v: 1;
+  kind: "event";
+  type: "system.permissions.changed";
+  /**
+   * 串流識別碼，system 或 session:<sessionId>。
+   */
+  stream: string;
+  /**
+   * 耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。
+   */
+  seq: number;
+  /**
+   * 主機送出時間，RFC 3339。
+   */
+  emittedAt: string;
+  payload: PermissionModesState;
 }
 /**
  * 模組狀態改變；掛在 system 串流。

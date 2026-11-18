@@ -92,6 +92,14 @@ import {
 } from "@cardiary/domain";
 import { settingLevel } from "../settings/catalog.js";
 import { mapEventIntent, validateEventPayload } from "./events.js";
+import type { AgentPermissions } from "../permissions/agent-permissions.js";
+import {
+  applyPermissionModeRequest,
+  isPermissionModeType,
+  PermissionModeInputError,
+  permissionModeError,
+  permissionModesState,
+} from "./permission-modes.js";
 import { isLoopbackAddress } from "./remote-access.js";
 import { DEFAULT_LIMITS, type GatewayLimits } from "./limits.js";
 import { systemStatus, type HostStatusInput } from "./status.js";
@@ -208,6 +216,8 @@ export interface GatewayOptions {
    * 暫停之後代理不能再靠先前開的全部允許自動放行。
    */
   readonly revokeAllowAll?: () => void;
+  /** 權限模式（System One 類別與全部允許）；只有本機 Mac 客戶端能讀寫。 */
+  readonly agentPermissions?: () => AgentPermissions | undefined;
 }
 
 export class RequestFailure extends Error {
@@ -1051,6 +1061,9 @@ export class Gateway {
           }),
         );
       }
+    }
+    if (isPermissionModeType(request.type)) {
+      return this.#permissionModes(connection, request);
     }
     // 分派順序（modules.md 第 3.2 節）：精確型別 → 核心 switch → 前綴 →
     // module.* → unsupported。精確型別在最前面，模組才能用 `session.archive`
@@ -2720,11 +2733,68 @@ export class Gateway {
     );
   }
 
+  /**
+   * `system.permissions.*`：規格第 11 章，這些模式只由人開啟。遠端裝置連讀取
+   * 也不行（最小權限）；代理沒有客戶端連線，本來就到不了這裡。
+   */
+  async #permissionModes(connection: ClientConnection, request: ParsedRequest): Promise<Unknown> {
+    if (connection.deviceId !== null) {
+      throw new RequestFailure(
+        protocolError("permission_denied", "權限模式只能在 Mac 上由人修改。", {
+          details: { reason: "local_only" },
+        }),
+      );
+    }
+    const permissions = this.#options.agentPermissions?.();
+    if (permissions === undefined) {
+      throw new RequestFailure(protocolError("unsupported", "這個組裝沒有權限模式。"));
+    }
+    if (!isPermissionModeType(request.type)) {
+      throw new RequestFailure(protocolError("unsupported", "未知的權限模式訊息。"));
+    }
+    let result;
+    try {
+      result = applyPermissionModeRequest(
+        permissions,
+        request.type,
+        request.payload,
+        this.#clock.now().getTime(),
+      );
+    } catch (error) {
+      if (error instanceof PermissionModeInputError) {
+        throw new RequestFailure(permissionModeError(error));
+      }
+      throw error;
+    }
+    if (result.changed) {
+      const stored = await this.streamLog.append({
+        stream: "system",
+        kind: "system.permissions.changed",
+        payload: result.state,
+        at: this.#clock.now().toISOString(),
+      });
+      this.#broadcast(stored);
+    }
+    return response(request.id, request.type, result.state);
+  }
+
   async #pauseAll(request: ParsedRequest): Promise<Unknown> {
     const reason = optionalString(request.payload, "reason") ?? "使用者緊急暫停";
     // 先撤銷全部允許，再中止回合：中止期間若有工具呼叫進到權限閘道，
     // 也不會被全部允許放行。
+    const permissions = this.#options.agentPermissions?.();
+    const hadAllowAll = permissions?.allowAllFor(this.#clock.now().getTime()) != null;
     this.#options.revokeAllowAll?.();
+    if (permissions !== undefined && hadAllowAll) {
+      // 讓 Mac 的全部允許橫幅立刻消失。
+      const stored = await this.streamLog.append({
+        stream: "system",
+        kind: "system.permissions.changed",
+        payload: permissionModesState(permissions, this.#clock.now().getTime()),
+        at: this.#clock.now().toISOString(),
+      });
+      this.#broadcast(stored);
+    }
     const paused = await this.#options.engine.pauseAll(reason);
     // 外部代理不在引擎的回合裡：撤回它們等待中的審批並中止行程，
     // 否則緊急暫停之後核准仍會冒出新的代理。

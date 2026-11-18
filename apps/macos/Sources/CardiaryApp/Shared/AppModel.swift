@@ -26,6 +26,8 @@ public final class AppModel: ObservableObject {
     public let agents: AgentModel
     /// 遠端配對與裝置管理；資料走殼的私有控制通道。
     public let remote: RemoteModel
+    /// 代理權限模式（System One 審核與全部允許）；只由人在 Mac 上開啟。
+    public let permissions: PermissionModesModel
     /// 通知流；資料走客戶端協定。
     public let notifications: NotificationModel
     public let settingsModel: SettingsModel
@@ -67,6 +69,7 @@ public final class AppModel: ObservableObject {
         self.approvals = ApprovalModel(language: language)
         self.agents = AgentModel(language: language, keychain: keychain)
         self.remote = RemoteModel(language: language)
+        self.permissions = PermissionModesModel()
         self.notifications = NotificationModel(language: language)
         self.settingsModel = SettingsModel(keychain: keychain, language: language)
         conversation.onMessageSent = { [weak self] in
@@ -135,12 +138,14 @@ public final class AppModel: ObservableObject {
         agents.attach(service: service, approvals: service)
         settingsModel.attach(service: service)
         remote.attachSettings(service: service)
+        permissions.attach(service: service)
         notifications.attach(service: service)
         for model in contentModels {
             model.attach(service: service)
         }
         await reloadAfterAttach()
         await remote.loadAccessSetting()
+        await permissions.load()
         await agents.reload()
         // 首次設定停在「選模型」時，連線一好就把供應商與模型載進來。
         if firstRun.step == .model, firstRun.providers.isEmpty {
@@ -157,6 +162,7 @@ public final class AppModel: ObservableObject {
         conversation.markDisconnected()
         settingsModel.detach()
         remote.detachSettings()
+        permissions.detach()
         firstRun.detach()
         notifications.detach()
         agents.markDisconnected()
@@ -183,6 +189,7 @@ public final class AppModel: ObservableObject {
             notifications.handle(change: event)
         }
         agents.handle(frame: frame)
+        permissions.handle(frame: frame)
         conversations.handle(frame: frame)
         reconcileSelection()
         conversation.apply(frame: frame)

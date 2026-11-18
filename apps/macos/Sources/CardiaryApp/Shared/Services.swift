@@ -285,6 +285,27 @@ public protocol AgentService: Sendable {
     func stopAgent(agentSessionId: String) async throws -> AgentStopResponsePayload
 }
 
+/// 權限模式：System One 審核類別、可委派網域與全部允許。只有本機 Mac 客戶端能呼叫。
+public protocol PermissionModesService: Sendable {
+    func getPermissionModes() async throws -> PermissionModesState
+    func setPermissionCategory(
+        _ category: DelegatedCategory,
+        enabled: Bool,
+        paths: [String],
+        clientRequestId: String
+    ) async throws -> PermissionModesState
+    func setPermissionDomains(_ domains: [String], clientRequestId: String) async throws
+        -> PermissionModesState
+    func grantAllowAll(
+        tools: [String],
+        paths: [String],
+        domains: [String],
+        minutes: Int,
+        clientRequestId: String
+    ) async throws -> PermissionModesState
+    func revokeAllowAll(clientRequestId: String) async throws -> PermissionModesState
+}
+
 /// 配對核准與裝置管理：全部走殼的私有控制通道，不在客戶端協定上。
 public protocol RemoteControlService: Sendable {
     func decidePairing(requestId: String, approve: Bool) async throws
@@ -295,10 +316,10 @@ public protocol RemoteControlService: Sendable {
 public typealias CardiaryService =
     ConversationService & ModelSettingsService & SettingsService & ModulesService & ApprovalService
     & CardService & ContextService & SessionManagementService & MediaImportService & NotificationService
-    & StorageService & McpService & AgentService
+    & StorageService & McpService & AgentService & PermissionModesService
 
 extension CardiaryClient:
     ConversationService, ModelSettingsService, SettingsService, ModulesService, ApprovalService,
     CardService, ContextService, SessionManagementService, MediaImportService, NotificationService,
-    StorageService, McpService, AgentService
+    StorageService, McpService, AgentService, PermissionModesService
 {}

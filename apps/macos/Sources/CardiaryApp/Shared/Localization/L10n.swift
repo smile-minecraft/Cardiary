@@ -170,6 +170,7 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case statusIdle
     case settingsTitle
     case settingsRemoteTab
+    case settingsPermissionsTab
     case settingsModelsTab
     case settingsGeneralTab
     case settingsAddProvider

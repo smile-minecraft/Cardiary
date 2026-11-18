@@ -264,6 +264,50 @@ public actor CardiaryClient {
         return try await connection.setSettings(changes: changes, clientRequestId: clientRequestId)
     }
 
+    public func getPermissionModes() async throws -> PermissionModesState {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.getPermissionModes()
+    }
+
+    public func setPermissionCategory(
+        _ category: DelegatedCategory,
+        enabled: Bool,
+        paths: [String],
+        clientRequestId: String
+    ) async throws -> PermissionModesState {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.setPermissionCategory(
+            category, enabled: enabled, paths: paths, clientRequestId: clientRequestId
+        )
+    }
+
+    public func setPermissionDomains(
+        _ domains: [String],
+        clientRequestId: String
+    ) async throws -> PermissionModesState {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.setPermissionDomains(domains, clientRequestId: clientRequestId)
+    }
+
+    public func grantAllowAll(
+        tools: [String],
+        paths: [String],
+        domains: [String],
+        minutes: Int,
+        clientRequestId: String
+    ) async throws -> PermissionModesState {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.grantAllowAll(
+            tools: tools, paths: paths, domains: domains, minutes: minutes,
+            clientRequestId: clientRequestId
+        )
+    }
+
+    public func revokeAllowAll(clientRequestId: String) async throws -> PermissionModesState {
+        guard let connection else { throw CardiaryClientError.connectionClosed }
+        return try await connection.revokeAllowAll(clientRequestId: clientRequestId)
+    }
+
     public func getModules() async throws -> SystemModulesGetResponsePayload {
         guard let connection else { throw CardiaryClientError.connectionClosed }
         return try await connection.getModules()

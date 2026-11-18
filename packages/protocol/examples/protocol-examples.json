@@ -1234,7 +1234,10 @@
     "kind": "request",
     "id": "req_patches",
     "type": "card.patches.list",
-    "payload": { "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC", "status": "pending" }
+    "payload": {
+      "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC",
+      "status": "pending"
+    }
   },
   "cardPatchesListResponse": {
     "v": 1,
@@ -1247,7 +1250,10 @@
           "patchId": "patch_1",
           "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC",
           "baseRevision": "abc",
-          "patch": { "format": "unified", "text": "@@ -1 +1 @@\n-舊\n+新" },
+          "patch": {
+            "format": "unified",
+            "text": "@@ -1 +1 @@\n-舊\n+新"
+          },
           "status": "pending",
           "createdAt": "2026-11-15T02:00:00.000Z"
         }
@@ -1259,7 +1265,10 @@
     "kind": "request",
     "id": "req_accept",
     "type": "card.patch.accept",
-    "payload": { "patchId": "patch_1", "clientRequestId": "accept_1" }
+    "payload": {
+      "patchId": "patch_1",
+      "clientRequestId": "accept_1"
+    }
   },
   "cardPatchAcceptResponse": {
     "v": 1,
@@ -1271,7 +1280,10 @@
         "patchId": "patch_1",
         "cardId": "card_1",
         "baseRevision": "abc",
-        "patch": { "format": "unified", "text": "@@ -1 +1 @@\n-舊\n+新" },
+        "patch": {
+          "format": "unified",
+          "text": "@@ -1 +1 @@\n-舊\n+新"
+        },
         "status": "accepted",
         "createdAt": "2026-11-15T02:00:00.000Z"
       },
@@ -1286,7 +1298,10 @@
         "freshness": 100,
         "lifecycle": "live",
         "sources": [],
-        "links": { "outgoing": [], "backlinks": [] },
+        "links": {
+          "outgoing": [],
+          "backlinks": []
+        },
         "revision": "def"
       }
     }
@@ -1296,7 +1311,10 @@
     "kind": "request",
     "id": "req_reject",
     "type": "card.patch.reject",
-    "payload": { "patchId": "patch_1", "clientRequestId": "reject_1" }
+    "payload": {
+      "patchId": "patch_1",
+      "clientRequestId": "reject_1"
+    }
   },
   "cardPatchRejectResponse": {
     "v": 1,
@@ -1308,7 +1326,10 @@
         "patchId": "patch_1",
         "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC",
         "baseRevision": "abc",
-        "patch": { "format": "unified", "text": "@@ -1 +1 @@\n-舊\n+新" },
+        "patch": {
+          "format": "unified",
+          "text": "@@ -1 +1 @@\n-舊\n+新"
+        },
         "status": "rejected",
         "createdAt": "2026-11-15T02:00:00.000Z"
       }
@@ -1319,7 +1340,9 @@
     "kind": "request",
     "id": "req_versions",
     "type": "card.versions.list",
-    "payload": { "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC" }
+    "payload": {
+      "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC"
+    }
   },
   "cardVersionsListResponse": {
     "v": 1,
@@ -1345,14 +1368,19 @@
     "kind": "request",
     "id": "req_version",
     "type": "card.version.get",
-    "payload": { "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC", "versionId": "ver_1" }
+    "payload": {
+      "cardId": "01J8Z3K4Q5R6S7T8V9W0X1Y2ZC",
+      "versionId": "ver_1"
+    }
   },
   "cardVersionGetResponse": {
     "v": 1,
     "kind": "response",
     "replyTo": "req_version",
     "type": "card.version.get",
-    "payload": { "body": "舊內容" }
+    "payload": {
+      "body": "舊內容"
+    }
   },
   "cardVersionRestoreRequest": {
     "v": 1,
@@ -1383,7 +1411,10 @@
         "freshness": 100,
         "lifecycle": "live",
         "sources": [],
-        "links": { "outgoing": [], "backlinks": [] },
+        "links": {
+          "outgoing": [],
+          "backlinks": []
+        },
         "revision": "ghi"
       },
       "version": {
@@ -2046,6 +2077,203 @@
       "changedAt": "2026-11-15T02:05:00.000Z"
     }
   },
+  "systemPermissionsGetRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_perm_get",
+    "type": "system.permissions.get",
+    "payload": {}
+  },
+  "systemPermissionsGetResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_perm_get",
+    "type": "system.permissions.get",
+    "payload": {
+      "categories": [
+        {
+          "category": "read-only-files",
+          "paths": ["/Users/me/Projects/notes"]
+        },
+        {
+          "category": "create-card",
+          "paths": []
+        }
+      ],
+      "availableCategories": ["read-only-files", "git-readonly", "create-card", "own-notification"],
+      "allowedDomains": ["docs.example.com"],
+      "defaultAllowAllMinutes": 15,
+      "maxAllowAllMinutes": 60
+    }
+  },
+  "systemPermissionsSetCategoryRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_perm_cat",
+    "type": "system.permissions.set_category",
+    "payload": {
+      "category": "read-only-files",
+      "enabled": true,
+      "paths": ["/Users/me/Projects/notes"],
+      "clientRequestId": "perm_01J8Z3K4Q5R6S7T8V9W0X1Y2Z1"
+    }
+  },
+  "systemPermissionsSetCategoryResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_perm_cat",
+    "type": "system.permissions.set_category",
+    "payload": {
+      "categories": [
+        {
+          "category": "read-only-files",
+          "paths": ["/Users/me/Projects/notes"]
+        },
+        {
+          "category": "create-card",
+          "paths": []
+        }
+      ],
+      "availableCategories": ["read-only-files", "git-readonly", "create-card", "own-notification"],
+      "allowedDomains": ["docs.example.com"],
+      "defaultAllowAllMinutes": 15,
+      "maxAllowAllMinutes": 60
+    }
+  },
+  "systemPermissionsSetDomainsRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_perm_dom",
+    "type": "system.permissions.set_domains",
+    "payload": {
+      "domains": ["docs.example.com"],
+      "clientRequestId": "perm_01J8Z3K4Q5R6S7T8V9W0X1Y2Z2"
+    }
+  },
+  "systemPermissionsSetDomainsResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_perm_dom",
+    "type": "system.permissions.set_domains",
+    "payload": {
+      "categories": [
+        {
+          "category": "read-only-files",
+          "paths": ["/Users/me/Projects/notes"]
+        },
+        {
+          "category": "create-card",
+          "paths": []
+        }
+      ],
+      "availableCategories": ["read-only-files", "git-readonly", "create-card", "own-notification"],
+      "allowedDomains": ["docs.example.com"],
+      "defaultAllowAllMinutes": 15,
+      "maxAllowAllMinutes": 60
+    }
+  },
+  "systemPermissionsGrantAllowAllRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_perm_grant",
+    "type": "system.permissions.grant_allow_all",
+    "payload": {
+      "tools": ["write_file"],
+      "paths": ["/Users/me/Projects/notes"],
+      "domains": [],
+      "minutes": 15,
+      "clientRequestId": "perm_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3"
+    }
+  },
+  "systemPermissionsGrantAllowAllResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_perm_grant",
+    "type": "system.permissions.grant_allow_all",
+    "payload": {
+      "categories": [
+        {
+          "category": "read-only-files",
+          "paths": ["/Users/me/Projects/notes"]
+        },
+        {
+          "category": "create-card",
+          "paths": []
+        }
+      ],
+      "availableCategories": ["read-only-files", "git-readonly", "create-card", "own-notification"],
+      "allowedDomains": ["docs.example.com"],
+      "allowAll": {
+        "tools": ["write_file"],
+        "paths": ["/Users/me/Projects/notes"],
+        "domains": [],
+        "expiresAt": "2026-11-15T02:20:00.000Z"
+      },
+      "defaultAllowAllMinutes": 15,
+      "maxAllowAllMinutes": 60
+    }
+  },
+  "systemPermissionsRevokeAllowAllRequest": {
+    "v": 1,
+    "kind": "request",
+    "id": "req_perm_revoke",
+    "type": "system.permissions.revoke_allow_all",
+    "payload": {
+      "clientRequestId": "perm_01J8Z3K4Q5R6S7T8V9W0X1Y2Z4"
+    }
+  },
+  "systemPermissionsRevokeAllowAllResponse": {
+    "v": 1,
+    "kind": "response",
+    "replyTo": "req_perm_revoke",
+    "type": "system.permissions.revoke_allow_all",
+    "payload": {
+      "categories": [
+        {
+          "category": "read-only-files",
+          "paths": ["/Users/me/Projects/notes"]
+        },
+        {
+          "category": "create-card",
+          "paths": []
+        }
+      ],
+      "availableCategories": ["read-only-files", "git-readonly", "create-card", "own-notification"],
+      "allowedDomains": ["docs.example.com"],
+      "defaultAllowAllMinutes": 15,
+      "maxAllowAllMinutes": 60
+    }
+  },
+  "systemPermissionsChangedEvent": {
+    "v": 1,
+    "kind": "event",
+    "type": "system.permissions.changed",
+    "stream": "system",
+    "seq": 49,
+    "emittedAt": "2026-11-15T02:21:00.000Z",
+    "payload": {
+      "categories": [
+        {
+          "category": "read-only-files",
+          "paths": ["/Users/me/Projects/notes"]
+        },
+        {
+          "category": "create-card",
+          "paths": []
+        }
+      ],
+      "availableCategories": ["read-only-files", "git-readonly", "create-card", "own-notification"],
+      "allowedDomains": ["docs.example.com"],
+      "allowAll": {
+        "tools": ["write_file"],
+        "paths": ["/Users/me/Projects/notes"],
+        "domains": [],
+        "expiresAt": "2026-11-15T02:20:00.000Z"
+      },
+      "defaultAllowAllMinutes": 15,
+      "maxAllowAllMinutes": 60
+    }
+  },
   "systemModulesGetRequest": {
     "v": 1,
     "kind": "request",
@@ -2568,7 +2796,10 @@
     "kind": "request",
     "id": "req_pairing_begin",
     "type": "pairing.begin",
-    "payload": { "deviceName": "我的 iPhone", "kind": "web" }
+    "payload": {
+      "deviceName": "我的 iPhone",
+      "kind": "web"
+    }
   },
   "pairingBeginResponse": {
     "v": 1,
@@ -2627,14 +2858,19 @@
     "kind": "request",
     "id": "req_agent_stop",
     "type": "agent.stop",
-    "payload": { "agentSessionId": "agnt_01JFA1Q2W3E4R5T6Y7U8I9O0P" }
+    "payload": {
+      "agentSessionId": "agnt_01JFA1Q2W3E4R5T6Y7U8I9O0P"
+    }
   },
   "agentStopResponse": {
     "v": 1,
     "kind": "response",
     "replyTo": "req_agent_stop",
     "type": "agent.stop",
-    "payload": { "agentSessionId": "agnt_01JFA1Q2W3E4R5T6Y7U8I9O0P", "stopped": true }
+    "payload": {
+      "agentSessionId": "agnt_01JFA1Q2W3E4R5T6Y7U8I9O0P",
+      "stopped": true
+    }
   },
   "agentListRequest": {
     "v": 1,
@@ -2742,21 +2978,29 @@
     "kind": "request",
     "id": "req_mcp_server_remove",
     "type": "mcp.server.remove",
-    "payload": { "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K" }
+    "payload": {
+      "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K"
+    }
   },
   "mcpServerRemoveResponse": {
     "v": 1,
     "kind": "response",
     "replyTo": "req_mcp_server_remove",
     "type": "mcp.server.remove",
-    "payload": { "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K", "removed": true }
+    "payload": {
+      "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K",
+      "removed": true
+    }
   },
   "mcpServerSetEnabledRequest": {
     "v": 1,
     "kind": "request",
     "id": "req_mcp_server_set_enabled",
     "type": "mcp.server.set_enabled",
-    "payload": { "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K", "enabled": false }
+    "payload": {
+      "serverId": "mcps_01JFB2A3B4C5D6E7F8G9H0J1K",
+      "enabled": false
+    }
   },
   "mcpServerSetEnabledResponse": {
     "v": 1,
@@ -2977,13 +3221,41 @@
     "type": "storage.usage",
     "payload": {
       "usage": [
-        { "category": "cards", "bytes": 4823456, "cleanableBytes": 0 },
-        { "category": "assets", "bytes": 128493056, "cleanableBytes": 0 },
-        { "category": "cache", "bytes": 24576100, "cleanableBytes": 24576100 },
-        { "category": "state", "bytes": 1245678, "cleanableBytes": 0 },
-        { "category": "logs", "bytes": 834560, "cleanableBytes": 834560 },
-        { "category": "tmp", "bytes": 40960, "cleanableBytes": 40960 },
-        { "category": "shellState", "bytes": 2097152, "cleanableBytes": 0 }
+        {
+          "category": "cards",
+          "bytes": 4823456,
+          "cleanableBytes": 0
+        },
+        {
+          "category": "assets",
+          "bytes": 128493056,
+          "cleanableBytes": 0
+        },
+        {
+          "category": "cache",
+          "bytes": 24576100,
+          "cleanableBytes": 24576100
+        },
+        {
+          "category": "state",
+          "bytes": 1245678,
+          "cleanableBytes": 0
+        },
+        {
+          "category": "logs",
+          "bytes": 834560,
+          "cleanableBytes": 834560
+        },
+        {
+          "category": "tmp",
+          "bytes": 40960,
+          "cleanableBytes": 40960
+        },
+        {
+          "category": "shellState",
+          "bytes": 2097152,
+          "cleanableBytes": 0
+        }
       ]
     }
   },
@@ -2992,7 +3264,9 @@
     "kind": "request",
     "id": "req_storage_cleanup_preview",
     "type": "storage.cleanup.preview",
-    "payload": { "categories": ["cache", "logs"] }
+    "payload": {
+      "categories": ["cache", "logs"]
+    }
   },
   "storageCleanupPreviewResponse": {
     "v": 1,
@@ -3001,8 +3275,16 @@
     "type": "storage.cleanup.preview",
     "payload": {
       "targets": [
-        { "category": "cache", "items": 128, "bytes": 24576100 },
-        { "category": "logs", "items": 14, "bytes": 834560 }
+        {
+          "category": "cache",
+          "items": 128,
+          "bytes": 24576100
+        },
+        {
+          "category": "logs",
+          "items": 14,
+          "bytes": 834560
+        }
       ],
       "totalBytes": 25410660
     }
@@ -3012,7 +3294,9 @@
     "kind": "request",
     "id": "req_storage_cleanup_apply",
     "type": "storage.cleanup.apply",
-    "payload": { "categories": ["cache", "logs"] }
+    "payload": {
+      "categories": ["cache", "logs"]
+    }
   },
   "storageCleanupApplyResponse": {
     "v": 1,
@@ -3021,8 +3305,16 @@
     "type": "storage.cleanup.apply",
     "payload": {
       "targets": [
-        { "category": "cache", "items": 128, "bytes": 24576100 },
-        { "category": "logs", "items": 14, "bytes": 834560 }
+        {
+          "category": "cache",
+          "items": 128,
+          "bytes": 24576100
+        },
+        {
+          "category": "logs",
+          "items": 14,
+          "bytes": 834560
+        }
       ],
       "totalBytes": 25410660,
       "recordId": "rec_01JFD7G8H9J0K1L2M3N4P5Q6R7"

@@ -60,6 +60,8 @@ actor FakeCardiaryService:
     private(set) var approvalDecisions: [(approvalId: String, optionId: String, note: String?)] = []
     private(set) var pauseAllCalls = 0
     private(set) var settingChanges: [[SettingChange]] = []
+    var permissionModes = FakeCardiaryService.modes()
+    private(set) var permissionCalls: [String] = []
     private(set) var moduleChanges: [(moduleId: String, enabled: Bool)] = []
     private(set) var mcpAdds: [(name: String, transport: McpTransport, command: String?, args: [String]?, url: String?, allowedHosts: [String], clientRequestId: String?, persistentData: Bool?)] = []
     private(set) var mcpRemoves: [String] = []
@@ -1233,6 +1235,76 @@ enum Fixtures {
             models: models.map {
                 ModelInfo(modelId: $0, displayName: $0, contextWindow: 128_000, input: [.text])
             }
+        )
+    }
+}
+
+// MARK: - PermissionModesService
+
+/// 權限模式的記憶體替身：記下呼叫，回傳更新後的完整狀態，行為比照主機。
+extension FakeCardiaryService: PermissionModesService {
+    func getPermissionModes() async throws -> PermissionModesState {
+        permissionModes
+    }
+
+    func setPermissionCategory(
+        _ category: DelegatedCategory,
+        enabled: Bool,
+        paths: [String],
+        clientRequestId: String
+    ) async throws -> PermissionModesState {
+        permissionCalls.append("set_category:\(category.rawValue):\(enabled):\(paths.joined(separator: ","))")
+        var categories = permissionModes.categories.filter { $0.category != category }
+        if enabled { categories.append(DelegatedCategoryGrant(category: category, paths: paths)) }
+        permissionModes = Self.modes(categories: categories, domains: permissionModes.allowedDomains, allowAll: permissionModes.allowAll)
+        return permissionModes
+    }
+
+    func setPermissionDomains(_ domains: [String], clientRequestId: String) async throws -> PermissionModesState {
+        permissionCalls.append("set_domains:\(domains.joined(separator: ","))")
+        permissionModes = Self.modes(categories: permissionModes.categories, domains: domains, allowAll: permissionModes.allowAll)
+        return permissionModes
+    }
+
+    func grantAllowAll(
+        tools: [String],
+        paths: [String],
+        domains: [String],
+        minutes: Int,
+        clientRequestId: String
+    ) async throws -> PermissionModesState {
+        permissionCalls.append("grant:\(tools.joined(separator: ",")):\(paths.joined(separator: ",")):\(minutes)")
+        let expiry = ISO8601DateFormatter().string(from: Date().addingTimeInterval(TimeInterval(minutes * 60)))
+        permissionModes = Self.modes(
+            categories: permissionModes.categories,
+            domains: permissionModes.allowedDomains,
+            allowAll: AllowAllGrantState(tools: tools, paths: paths, domains: domains, expiresAt: expiry)
+        )
+        return permissionModes
+    }
+
+    func revokeAllowAll(clientRequestId: String) async throws -> PermissionModesState {
+        permissionCalls.append("revoke")
+        permissionModes = Self.modes(categories: permissionModes.categories, domains: permissionModes.allowedDomains, allowAll: nil)
+        return permissionModes
+    }
+
+    func setPermissionModesForTest(_ modes: PermissionModesState) {
+        permissionModes = modes
+    }
+
+    static func modes(
+        categories: [DelegatedCategoryGrant] = [],
+        domains: [String] = [],
+        allowAll: AllowAllGrantState? = nil
+    ) -> PermissionModesState {
+        PermissionModesState(
+            categories: categories,
+            availableCategories: DelegatedCategory.allCases,
+            allowedDomains: domains,
+            allowAll: allowAll,
+            defaultAllowAllMinutes: 15,
+            maxAllowAllMinutes: 60
         )
     }
 }

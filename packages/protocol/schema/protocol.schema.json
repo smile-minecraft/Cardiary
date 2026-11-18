@@ -3260,6 +3260,225 @@
         }
       }
     },
+    "DelegatedCategory": {
+      "title": "DelegatedCategory",
+      "type": "string",
+      "enum": ["read-only-files", "git-readonly", "create-card", "own-notification"],
+      "description": "System One 可代為放行的封閉類別。"
+    },
+    "DelegatedCategoryGrant": {
+      "title": "DelegatedCategoryGrant",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "paths"],
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/DelegatedCategory"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "絕對路徑。"
+          },
+          "description": "授權的資料夾；只有 read-only-files 與 git-readonly 使用。"
+        }
+      }
+    },
+    "AllowAllGrantState": {
+      "title": "AllowAllGrantState",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tools", "paths", "domains", "expiresAt"],
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "工具名稱。"
+          },
+          "description": "放行的工具。",
+          "minItems": 1
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "絕對路徑。"
+          },
+          "description": "放行的路徑範圍。"
+        },
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "網域規則。"
+          },
+          "description": "放行的網域範圍。"
+        },
+        "expiresAt": {
+          "type": "string",
+          "description": "到期時間，RFC 3339；到期自動失效。",
+          "format": "date-time"
+        }
+      }
+    },
+    "PermissionModesState": {
+      "title": "PermissionModesState",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "categories",
+        "availableCategories",
+        "allowedDomains",
+        "defaultAllowAllMinutes",
+        "maxAllowAllMinutes"
+      ],
+      "properties": {
+        "categories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DelegatedCategoryGrant"
+          },
+          "description": "已開啟的 System One 類別。"
+        },
+        "availableCategories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DelegatedCategory"
+          },
+          "description": "可以開啟的類別。"
+        },
+        "allowedDomains": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "網域規則。"
+          },
+          "description": "人工維護的可委派網域。"
+        },
+        "allowAll": {
+          "$ref": "#/$defs/AllowAllGrantState"
+        },
+        "defaultAllowAllMinutes": {
+          "type": "integer",
+          "description": "全部允許的預設分鐘數。"
+        },
+        "maxAllowAllMinutes": {
+          "type": "integer",
+          "description": "全部允許的上限分鐘數。"
+        }
+      },
+      "description": "目前的權限模式；沒有 allowAll 代表全部允許沒有開啟或已到期。"
+    },
+    "SystemPermissionsGetRequestPayload": {
+      "title": "SystemPermissionsGetRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {}
+    },
+    "SystemPermissionsSetCategoryRequestPayload": {
+      "title": "SystemPermissionsSetCategoryRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "enabled", "paths", "clientRequestId"],
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/DelegatedCategory"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "開啟或關閉。"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "絕對路徑。"
+          },
+          "description": "路徑範圍；沒有路徑條件的類別必須是空陣列。"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵。"
+        }
+      }
+    },
+    "SystemPermissionsSetDomainsRequestPayload": {
+      "title": "SystemPermissionsSetDomainsRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domains", "clientRequestId"],
+      "properties": {
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "網域規則。"
+          },
+          "description": "完整的可委派網域清單（取代原本的清單）。"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵。"
+        }
+      }
+    },
+    "SystemPermissionsGrantAllowAllRequestPayload": {
+      "title": "SystemPermissionsGrantAllowAllRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tools", "paths", "clientRequestId"],
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "工具名稱。"
+          },
+          "description": "放行的工具。",
+          "minItems": 1
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "絕對路徑。"
+          },
+          "description": "放行的路徑範圍。"
+        },
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "網域規則。"
+          },
+          "description": "放行的網域範圍。"
+        },
+        "minutes": {
+          "type": "integer",
+          "description": "期限分鐘數；省略時用預設值，超過上限被拒。",
+          "minimum": 1
+        },
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵。"
+        }
+      }
+    },
+    "SystemPermissionsRevokeAllowAllRequestPayload": {
+      "title": "SystemPermissionsRevokeAllowAllRequestPayload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clientRequestId"],
+      "properties": {
+        "clientRequestId": {
+          "type": "string",
+          "description": "冪等鍵。"
+        }
+      }
+    },
     "SettingKind": {
       "title": "SettingKind",
       "type": "string",
@@ -7086,6 +7305,291 @@
       },
       "description": "設定變更；掛在 system 串流。"
     },
+    "SystemPermissionsGetRequest": {
+      "title": "SystemPermissionsGetRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.permissions.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemPermissionsGetRequestPayload"
+        }
+      },
+      "description": "讀取權限模式。"
+    },
+    "SystemPermissionsGetResponse": {
+      "title": "SystemPermissionsGetResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.permissions.get"
+        },
+        "payload": {
+          "$ref": "#/$defs/PermissionModesState"
+        }
+      },
+      "description": "變更後的權限模式。"
+    },
+    "SystemPermissionsSetCategoryRequest": {
+      "title": "SystemPermissionsSetCategoryRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.permissions.set_category"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemPermissionsSetCategoryRequestPayload"
+        }
+      },
+      "description": "開關一個 System One 類別。"
+    },
+    "SystemPermissionsSetCategoryResponse": {
+      "title": "SystemPermissionsSetCategoryResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.permissions.set_category"
+        },
+        "payload": {
+          "$ref": "#/$defs/PermissionModesState"
+        }
+      },
+      "description": "變更後的權限模式。"
+    },
+    "SystemPermissionsSetDomainsRequest": {
+      "title": "SystemPermissionsSetDomainsRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.permissions.set_domains"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemPermissionsSetDomainsRequestPayload"
+        }
+      },
+      "description": "取代可委派網域清單。"
+    },
+    "SystemPermissionsSetDomainsResponse": {
+      "title": "SystemPermissionsSetDomainsResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.permissions.set_domains"
+        },
+        "payload": {
+          "$ref": "#/$defs/PermissionModesState"
+        }
+      },
+      "description": "變更後的權限模式。"
+    },
+    "SystemPermissionsGrantAllowAllRequest": {
+      "title": "SystemPermissionsGrantAllowAllRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.permissions.grant_allow_all"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemPermissionsGrantAllowAllRequestPayload"
+        }
+      },
+      "description": "開啟限時的全部允許。"
+    },
+    "SystemPermissionsGrantAllowAllResponse": {
+      "title": "SystemPermissionsGrantAllowAllResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.permissions.grant_allow_all"
+        },
+        "payload": {
+          "$ref": "#/$defs/PermissionModesState"
+        }
+      },
+      "description": "變更後的權限模式。"
+    },
+    "SystemPermissionsRevokeAllowAllRequest": {
+      "title": "SystemPermissionsRevokeAllowAllRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "id", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "description": "客戶端產生的請求識別碼；同一條連線內用來重送與去重。"
+        },
+        "type": {
+          "const": "system.permissions.revoke_allow_all"
+        },
+        "payload": {
+          "$ref": "#/$defs/SystemPermissionsRevokeAllowAllRequestPayload"
+        }
+      },
+      "description": "撤銷全部允許。"
+    },
+    "SystemPermissionsRevokeAllowAllResponse": {
+      "title": "SystemPermissionsRevokeAllowAllResponse",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "replyTo", "type", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "對應的請求 id。"
+        },
+        "type": {
+          "const": "system.permissions.revoke_allow_all"
+        },
+        "payload": {
+          "$ref": "#/$defs/PermissionModesState"
+        }
+      },
+      "description": "變更後的權限模式。"
+    },
+    "SystemPermissionsChangedEvent": {
+      "title": "SystemPermissionsChangedEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "kind", "type", "stream", "seq", "emittedAt", "payload"],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "type": {
+          "const": "system.permissions.changed"
+        },
+        "stream": {
+          "type": "string",
+          "description": "串流識別碼，system 或 session:<sessionId>。"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "耐久事件是這個串流在同一個 epoch 內的單調遞增序號，從 1 開始；非耐久事件填目前的耐久邊界。",
+          "minimum": 1
+        },
+        "emittedAt": {
+          "type": "string",
+          "description": "主機送出時間，RFC 3339。",
+          "format": "date-time"
+        },
+        "payload": {
+          "$ref": "#/$defs/PermissionModesState"
+        }
+      },
+      "description": "權限模式變更；掛在 system 串流。"
+    },
     "SystemModulesGetRequest": {
       "title": "SystemModulesGetRequest",
       "type": "object",
@@ -10112,6 +10616,21 @@
           "$ref": "#/$defs/SystemSettingsSetRequest"
         },
         {
+          "$ref": "#/$defs/SystemPermissionsGetRequest"
+        },
+        {
+          "$ref": "#/$defs/SystemPermissionsSetCategoryRequest"
+        },
+        {
+          "$ref": "#/$defs/SystemPermissionsSetDomainsRequest"
+        },
+        {
+          "$ref": "#/$defs/SystemPermissionsGrantAllowAllRequest"
+        },
+        {
+          "$ref": "#/$defs/SystemPermissionsRevokeAllowAllRequest"
+        },
+        {
           "$ref": "#/$defs/SystemModulesGetRequest"
         },
         {
@@ -10331,6 +10850,21 @@
           "$ref": "#/$defs/SystemSettingsSetResponse"
         },
         {
+          "$ref": "#/$defs/SystemPermissionsGetResponse"
+        },
+        {
+          "$ref": "#/$defs/SystemPermissionsSetCategoryResponse"
+        },
+        {
+          "$ref": "#/$defs/SystemPermissionsSetDomainsResponse"
+        },
+        {
+          "$ref": "#/$defs/SystemPermissionsGrantAllowAllResponse"
+        },
+        {
+          "$ref": "#/$defs/SystemPermissionsRevokeAllowAllResponse"
+        },
+        {
           "$ref": "#/$defs/SystemModulesGetResponse"
         },
         {
@@ -10386,6 +10920,9 @@
         },
         {
           "$ref": "#/$defs/SystemSettingsChangedEvent"
+        },
+        {
+          "$ref": "#/$defs/SystemPermissionsChangedEvent"
         },
         {
           "$ref": "#/$defs/SystemModulesChangedEvent"
