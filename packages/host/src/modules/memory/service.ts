@@ -550,6 +550,9 @@ export class DistillationService {
     this.#markArchiveDone(run, candidate.cardId);
 
     if (verdict.action === "supersede") {
+      // 蒸餾寫卡不走卡片建立路徑，被取代的一方標好 `superseded_by`，
+      // 後續批次的跨批去重才看得到這張卡已被取代。
+      this.#options.lifecycle.markSuperseded(verdict.supersedes, outputCardId);
       stats.superseded += 1;
       items.push({
         id: `itm_${run.runId}_${index}`,
