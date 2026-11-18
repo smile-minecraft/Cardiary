@@ -77,6 +77,13 @@ export interface CardLibraryOptions {
   readonly now?: () => Date;
   readonly emit?: (intent: ProtocolEventIntent) => void;
   readonly warn?: (message: string, fields?: JSONObject) => void;
+  /**
+   * 刪卡前的清理；投影到白板的卡片由這裡通知白板模組。
+   *
+   * 在正本刪除之前呼叫：清不掉就不刪卡，避免留下指向已刪卡片的投影。
+   * 省略時（測試直接建構）不做事。
+   */
+  readonly beforeDelete?: (cardId: string) => Promise<void> | void;
 }
 
 interface CreateCardInput {
@@ -105,6 +112,7 @@ export class CardLibrary {
   readonly #warn: (message: string, fields?: JSONObject) => void;
   readonly #changeListeners = new Set<(change: CardLibraryChange) => void>();
   readonly #rebuildListeners = new Set<() => void>();
+  readonly #beforeDelete: ((cardId: string) => Promise<void> | void) | undefined;
   /** 變更一次只做一個：協定請求與檔案監看共用同一條序列。 */
   #tail: Promise<void> = Promise.resolve();
 
@@ -116,6 +124,7 @@ export class CardLibrary {
     this.#now = options.now ?? (() => new Date());
     this.#versionsOverride = options.versions;
     this.#patchesOverride = options.patches;
+    this.#beforeDelete = options.beforeDelete;
     this.#warn = options.warn ?? (() => {});
     const sink = options.emit;
     this.#emit = (intent) => {
@@ -789,7 +798,7 @@ export class CardLibrary {
   }
 
   async delete(cardId: string): Promise<{ readonly deletedAssets: number }> {
-    return this.#serialize(() => {
+    return this.#serialize(async () => {
       const id = normalizeCardId(cardId);
       const index = this.#index();
       const known = index.get(id);
@@ -798,6 +807,10 @@ export class CardLibrary {
         content === undefined ? null : parseCardText(content.text, { expectedCardId: id });
       if (known === undefined && content === undefined) {
         throw new ProtocolHandlerError("not_found", `找不到卡片 ${id}。`, { cardId: id });
+      }
+      if (this.#beforeDelete !== undefined) {
+        // 在正本刪除前先把外部的依賴清乾淨；失敗就中止刪除，卡片還在。
+        await this.#beforeDelete(id);
       }
       const existed = this.#files.remove(id);
       index.remove(id);
@@ -944,8 +957,11 @@ export class CardLibrary {
   }
 
   /** 一次變更的序列化；失敗不影響後面的工作。 */
-  #serialize<T>(work: () => T): Promise<T> {
-    const run = this.#tail.then(work, work);
+  #serialize<T>(work: () => T | Promise<T>): Promise<T> {
+    const run = this.#tail.then(
+      async () => work(),
+      async () => work(),
+    );
     this.#tail = run.then(
       () => undefined,
       () => undefined,

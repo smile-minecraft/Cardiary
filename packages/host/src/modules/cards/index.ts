@@ -10,6 +10,7 @@ import {
 } from "@cardiary/storage";
 
 import { HOST_SERVICE_NAMES, type CardEnvironment } from "../contract.js";
+import type { BoardService } from "../boards/service.js";
 import { CardLibrary } from "./library.js";
 import { manifest } from "./manifest.js";
 import { registerCardsProtocol } from "./protocol.js";
@@ -71,6 +72,12 @@ async function activate(context: ModuleActivationContext): Promise<void> {
     now,
     emit: (intent) => context.services.protocol.emit(intent),
     warn,
+    // 刪卡時連帶移除白板投影：投影在別的模組，所以刪除流程主動呼叫過去。
+    // 白板模組沒啟用或還沒接上時安靜跳過；投影清不掉就不要刪卡，留給呼叫端重試。
+    beforeDelete: async (cardId) => {
+      const boards = context.services.host.get<BoardService>(HOST_SERVICE_NAMES.boards);
+      await boards?.removeCardProjections(cardId);
+    },
   });
 
   await library.initialize();
