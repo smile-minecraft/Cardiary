@@ -79,6 +79,9 @@ public final class McpSettingsModel: ObservableObject {
     }
 
     /// 新增伺服器。回傳值代表請求是否送出；伺服器本身要等審批通過才會出現。
+    ///
+    /// - Parameter persistentData: 是否授權標準輸入的伺服器寫入自己的持久資料目錄。
+    ///   預設關閉；HTTP 伺服器沒有這個目錄，一律不送授權欄位。
     @discardableResult
     public func add(
         name: String,
@@ -86,7 +89,8 @@ public final class McpSettingsModel: ObservableObject {
         command: String? = nil,
         arguments: String = "",
         url: String? = nil,
-        allowedHosts: String = ""
+        allowedHosts: String = "",
+        persistentData: Bool = false
     ) async -> Bool {
         guard let service else {
             errorMessage = McpL10n.text(.mcpServiceUnavailable, language: language)
@@ -119,7 +123,8 @@ public final class McpSettingsModel: ObservableObject {
                 args: transport == .stdio ? Self.parseArguments(arguments) : nil,
                 url: transport == .http ? trimmedURL : nil,
                 allowedHosts: hosts,
-                clientRequestId: ClientRequestID.next("mcp")
+                clientRequestId: ClientRequestID.next("mcp"),
+                persistentData: transport == .stdio ? persistentData : nil
             )
             pendingApprovalId = payload.approvalId
             pendingServerName = trimmedName
@@ -248,6 +253,26 @@ public final class McpSettingsModel: ObservableObject {
         case .disabled: return .mcpStateDisabled
         case .failed: return .mcpStateFailed
         }
+    }
+
+    /// 主機回報的持久資料授權與用量。舊版主機沒帶這個欄位時回 `nil`，畫面保持未知；
+    /// 不能自己猜成「未授權」。
+    public static func persistentDataSummary(
+        _ info: McpPersistentDataInfo?,
+        language: AppLanguage? = nil
+    ) -> String? {
+        guard let info else { return nil }
+        guard info.allowed else {
+            return McpL10n.text(.mcpPersistentDataDenied, language: language)
+        }
+        return McpL10n.format(
+            .mcpPersistentDataGranted,
+            [
+                "bytes": StorageSettingsModel.formattedBytes(info.bytes),
+                "files": "\(info.files)",
+            ],
+            language: language
+        )
     }
 
     /// 參數欄位：空白分隔，成對的單引號或雙引號包住的內容算一個參數。

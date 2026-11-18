@@ -53,6 +53,7 @@ final class McpClientTests: XCTestCase {
         XCTAssertEqual(payload["allowedHosts"] as? [String], ["api.example.com"])
         XCTAssertEqual(payload["clientRequestId"] as? String, "req_mcp_add")
         XCTAssertNil(payload["command"], "HTTP 伺服器不帶 command")
+        XCTAssertNil(payload["persistentData"], "沒有指定授權時不送欄位；主機缺省視為不授權")
 
         await transport.push(try responseFrame(
             replyTo: sent,
@@ -61,6 +62,65 @@ final class McpClientTests: XCTestCase {
         ))
         let result = try await task.value
         XCTAssertEqual(result.approvalId, "appr_1")
+    }
+
+    func testAddMcpServerSendsExplicitPersistentDataChoice() async throws {
+        for granted in [true, false] {
+            let transport = FakeServerTransport()
+            let connection = CardiaryConnection(transport: transport, clientToken: "client-token")
+            defer { Task { await connection.close() } }
+
+            let task = Task {
+                try await connection.addMcpServer(
+                    name: "Filesystem",
+                    transport: .stdio,
+                    command: "npx",
+                    allowedHosts: [],
+                    persistentData: granted
+                )
+            }
+            let sent = JSONFixture.decode(try await transport.nextSent())
+            let payload = try XCTUnwrap(sent["payload"] as? [String: Any])
+            XCTAssertEqual(
+                payload["persistentData"] as? Bool,
+                granted,
+                "使用者的明確選擇要原樣送出，true 與 false 都不能省略"
+            )
+            await transport.push(try responseFrame(
+                replyTo: sent,
+                type: "mcp.server.add",
+                payload: ["approvalId": "appr_1"]
+            ))
+            _ = try await task.value
+        }
+    }
+
+    func testListMcpServersDecodesPersistentDataUsage() async throws {
+        let transport = FakeServerTransport()
+        let connection = CardiaryConnection(transport: transport, clientToken: "client-token")
+        defer { Task { await connection.close() } }
+
+        let task = Task { try await connection.listMcpServers() }
+        let sent = JSONFixture.decode(try await transport.nextSent())
+        await transport.push(try responseFrame(
+            replyTo: sent,
+            type: "mcp.servers.list",
+            payload: ["servers": [
+                serverJSON(
+                    serverId: "srv_1",
+                    name: "Filesystem",
+                    persistentData: ["allowed": true, "bytes": 2048, "files": 3]
+                ),
+                serverJSON(serverId: "srv_2", name: "Old host"),
+            ]]
+        ))
+
+        let payload = try await task.value
+        let granted = try XCTUnwrap(payload.servers.first?.persistentData)
+        XCTAssertTrue(granted.allowed)
+        XCTAssertEqual(granted.bytes, 2048)
+        XCTAssertEqual(granted.files, 3)
+        XCTAssertNil(payload.servers.last?.persistentData, "舊版主機沒帶欄位時要保持未知")
     }
 
     func testRemoveMcpServerSendsServerId() async throws {
@@ -249,7 +309,8 @@ final class McpClientTests: XCTestCase {
         transport: String = "stdio",
         url: String? = nil,
         allowedHosts: [String] = [],
-        enabled: Bool = true
+        enabled: Bool = true,
+        persistentData: [String: Any]? = nil
     ) -> [String: Any] {
         var json: [String: Any] = [
             "serverId": serverId,
@@ -265,6 +326,9 @@ final class McpClientTests: XCTestCase {
         }
         if let url {
             json["url"] = url
+        }
+        if let persistentData {
+            json["persistentData"] = persistentData
         }
         return json
     }

@@ -697,6 +697,91 @@
           }
         }
       }
+    },
+    "mcpPersistentDataTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persistent data"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "持久資料目錄"
+          }
+        }
+      }
+    },
+    "mcpPersistentDataToggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow writing to its own persistent data directory"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允許寫入自己的持久資料目錄"
+          }
+        }
+      }
+    },
+    "mcpPersistentDataHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not granted by default. This choice is sent with the approval; the server can keep files across runs only after it is approved."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "預設不授權。這個選擇會一起送進審批；核准後伺服器才能跨執行保留檔案。"
+          }
+        }
+      }
+    },
+    "mcpPersistentDataGranted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Write access granted; {bytes} used in {files} files"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已授權寫入；用量 {bytes}，{files} 個檔案"
+          }
+        }
+      }
+    },
+    "mcpPersistentDataDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Write access not granted"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未授權寫入"
+          }
+        }
+      }
     }
   }
 }

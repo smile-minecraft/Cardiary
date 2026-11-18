@@ -67,7 +67,8 @@ public protocol McpService: Sendable {
         args: [String]?,
         url: String?,
         allowedHosts: [String],
-        clientRequestId: String?
+        clientRequestId: String?,
+        persistentData: Bool?
     ) async throws -> McpServerAddResponsePayload
     func removeMcpServer(serverId: String) async throws -> McpServerRemoveResponsePayload
     func setMcpServerEnabled(

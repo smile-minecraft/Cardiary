@@ -439,6 +439,9 @@ public actor CardiaryConnection {
 
     /// 新增伺服器。這一步只送審批：回應帶 `approvalId`，批准後才以
     /// `mcp.servers_changed` 事件通知實際結果。
+    ///
+    /// `persistentData` 是使用者是否授權它寫入自己的持久資料目錄；只有標準輸入的
+    /// 伺服器有這個選項。傳 `nil` 表示不指定，主機一律視為不授權。
     public func addMcpServer(
         name: String,
         transport: McpTransport,
@@ -447,6 +450,7 @@ public actor CardiaryConnection {
         url: String? = nil,
         allowedHosts: [String] = [],
         clientRequestId: String? = nil,
+        persistentData: Bool? = nil,
         options: RequestOptions = .default
     ) async throws -> McpServerAddResponsePayload {
         let request = McpServerAddRequest(
@@ -458,7 +462,8 @@ public actor CardiaryConnection {
                 args: args,
                 url: url,
                 allowedHosts: allowedHosts,
-                clientRequestId: clientRequestId
+                clientRequestId: clientRequestId,
+                persistentData: persistentData
             )
         )
         let frame = try await perform(id: request.id, encode: request, options: options)

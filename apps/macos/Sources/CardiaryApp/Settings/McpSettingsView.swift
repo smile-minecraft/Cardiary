@@ -25,6 +25,7 @@ struct McpSettingsView: View {
     @State private var arguments = ""
     @State private var url = ""
     @State private var allowedHosts = ""
+    @State private var persistentData = false
     @State private var hostDrafts: [String: String] = [:]
     @State private var serverToRemove: McpServerInfo?
 
@@ -128,14 +129,23 @@ struct McpSettingsView: View {
                     .foregroundStyle(Palette.inkSecondary)
                     .textSelection(.enabled)
             }
-            if server.transport == .stdio, let command = server.command, !command.isEmpty {
-                Text(stdioDescription(command: command, arguments: server.args ?? []))
-                    .font(.cardiary(.caption))
-                    .foregroundStyle(Palette.inkSecondary)
-                    .textSelection(.enabled)
-                Text(McpL10n.text(.mcpStdioSecretNote))
-                    .font(.cardiary(.caption2))
-                    .foregroundStyle(Palette.inkSecondary)
+            if server.transport == .stdio {
+                if let command = server.command, !command.isEmpty {
+                    Text(stdioDescription(command: command, arguments: server.args ?? []))
+                        .font(.cardiary(.caption))
+                        .foregroundStyle(Palette.inkSecondary)
+                        .textSelection(.enabled)
+                    Text(McpL10n.text(.mcpStdioSecretNote))
+                        .font(.cardiary(.caption2))
+                        .foregroundStyle(Palette.inkSecondary)
+                }
+                if let summary = McpSettingsModel.persistentDataSummary(server.persistentData) {
+                    Text(McpL10n.text(.mcpPersistentDataTitle))
+                        .font(.cardiary(.caption, weight: .semibold))
+                    Text(summary)
+                        .font(.cardiary(.caption))
+                        .foregroundStyle(Palette.inkSecondary)
+                }
             }
             if let failure = server.failure, !failure.isEmpty {
                 Text(McpL10n.format(.mcpFailure, value: failure))
@@ -208,6 +218,14 @@ struct McpSettingsView: View {
                 Text(McpL10n.text(.mcpStdioSecretNote))
                     .font(.cardiary(.caption2))
                     .foregroundStyle(Palette.inkSecondary)
+                Toggle(isOn: $persistentData) {
+                    Text(McpL10n.text(.mcpPersistentDataToggle))
+                        .font(.cardiary(.callout))
+                }
+                .toggleStyle(ThemeSwitchStyle())
+                Text(McpL10n.text(.mcpPersistentDataHint))
+                    .font(.cardiary(.caption2))
+                    .foregroundStyle(Palette.inkSecondary)
             case .http:
                 TextField(McpL10n.text(.mcpURL), text: $url)
                 TextField(McpL10n.text(.mcpAllowedHosts), text: $allowedHosts)
@@ -226,7 +244,8 @@ struct McpSettingsView: View {
                         command: transport == .stdio ? command : nil,
                         arguments: transport == .stdio ? arguments : "",
                         url: transport == .http ? url : nil,
-                        allowedHosts: transport == .http ? allowedHosts : ""
+                        allowedHosts: transport == .http ? allowedHosts : "",
+                        persistentData: persistentData
                     )
                     if added {
                         clearForm()
@@ -256,6 +275,7 @@ struct McpSettingsView: View {
         arguments = ""
         url = ""
         allowedHosts = ""
+        persistentData = false
     }
 
     private func hostDraft(_ server: McpServerInfo) -> Binding<String> {
