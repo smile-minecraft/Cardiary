@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { JSONObject } from "@cardiary/protocol";
 
+import { REMOTE_ACCESS_SETTING_KEY } from "../../src/gateway/remote-access.js";
+import { HOST_SERVICE_NAMES, type CardEnvironment } from "../../src/modules/contract.js";
 import { registerRemoteControlRoutes } from "../../src/remote/control.js";
 import type { ControlChannel } from "../../src/control/channel.js";
 import type { RemoteStack } from "../../src/remote/stack.js";
@@ -18,6 +20,13 @@ afterEach(async () => {
 
 async function boot(options?: Parameters<typeof startTestHost>[0]): Promise<TestHost> {
   const host = await startTestHost(options);
+  // 這些測試驗證配對與裝置 Token 本身；遠端開關由 access.test.ts 單獨驗證。
+  host.host.hostServices.require<CardEnvironment>(HOST_SERVICE_NAMES.cardStorage).settings.set({
+    key: REMOTE_ACCESS_SETTING_KEY,
+    value: "true",
+    level: "human-only",
+    updatedBy: "test",
+  });
   hosts.push(host);
   return host;
 }
