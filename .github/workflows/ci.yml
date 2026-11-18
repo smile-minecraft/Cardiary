@@ -77,7 +77,16 @@ jobs:
           packages/host/test/modules/mcp/stdio-concurrency.test.ts
           packages/host/test/modules/external-agents/lifecycle.test.ts
           packages/host/test/modules/external-agents/permission-reply.test.ts
-      # 契約測試只有這一個測試有 darwin 分支；用名稱篩選，不跑整包契約測試。
+          packages/host/test/modules/external-agents/service.test.ts
+          packages/host/test/modules/mcp/client.test.ts
+      # 整包只在 darwin 跑的契約測試（外部代理需要 sandbox-exec；第 13 章組合驗收用真的
+      # stdio MCP 與 sandbox-exec）。在 ubuntu 會整包 skip，所以要在這裡跑。
+      - name: macOS 專屬契約測試
+        run: >-
+          pnpm vitest run
+          packages/contract-tests/external-agents/external-agents.test.ts
+          packages/contract-tests/storage/chapter-13-composed.test.ts
+      # contract.test.ts 只有這一個案例有 darwin 分支，其餘由 ubuntu 跑；用名稱篩選，不重跑整檔。
       - name: 控制面的 darwin 檢查
         run: pnpm vitest run packages/contract-tests/test/contract.test.ts -t "控制面不開 TCP listener"
       - name: CardiaryKit 測試
