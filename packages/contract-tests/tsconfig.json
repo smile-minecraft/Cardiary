@@ -2,16 +2,21 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"],
-    "rootDir": ".",
-    "outDir": "dist",
-    "esModuleInterop": true,
-    "declaration": true,
-    "emitDeclarationOnly": true
-  },
-  "include": ["test", "media", "external-agents"],
-  "references": [
-    {
-      "path": "../protocol"
+    "composite": false,
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "paths": {
+      "@cardiary/domain": ["../domain/src/index.ts"],
+      "@cardiary/engine-adapter": ["../engine-adapter/src/index.ts"],
+      "@cardiary/engine-fake": ["../engine-fake/src/index.ts"],
+      "@cardiary/module-api": ["../module-api/src/index.ts"],
+      "@cardiary/protocol": ["../protocol/src/index.ts"],
+      "@cardiary/storage": ["../storage/src/index.ts"],
+      "@cardiary/storage/testing": ["../storage/src/testing.ts"]
     }
-  ]
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["dist", "node_modules"]
 }

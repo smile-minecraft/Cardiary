@@ -180,8 +180,14 @@ async function databaseBytes(path: string): Promise<number | null> {
     fileSize(`${path}-wal`),
     fileSize(`${path}-shm`),
   ]);
-  if (sizes.every((size) => size === null)) return null;
-  return sizes.reduce((total, size) => total + (size ?? 0), 0);
+  let total = 0;
+  let found = false;
+  for (const size of sizes) {
+    if (size === null) continue;
+    found = true;
+    total += size;
+  }
+  return found ? total : null;
 }
 
 function cardFile(harness: LifecycleHarness, cardId: string): string {
