@@ -26,6 +26,8 @@ struct BoardsView: View {
     @State private var isNewCardPresented = false
     @State private var newCardTitle = ""
     @State private var newCardBody = ""
+    @State private var isNewGroupPresented = false
+    @State private var newGroupLabel = ""
     @State private var isDeletePresented = false
 
     var body: some View {
@@ -47,6 +49,7 @@ struct BoardsView: View {
         .task { await model.reload() }
         .sheet(isPresented: $isNewBoardPresented) { newBoardSheet }
         .sheet(isPresented: $isNewCardPresented) { newCardSheet }
+        .sheet(isPresented: $isNewGroupPresented) { newGroupSheet }
         .alert(BoardL10n.text(.boardsDeleteConfirmTitle), isPresented: $isDeletePresented) {
             Button(BoardL10n.text(.boardsDelete), role: .destructive) {
                 Task { await model.deleteCurrentBoard() }
@@ -74,6 +77,7 @@ struct BoardsView: View {
                     SuitLoader()
                 }
                 boardMenu
+                structureMenu
                 Button {
                     newBoardTitle = ""
                     isNewBoardPresented = true
@@ -120,6 +124,66 @@ struct BoardsView: View {
         .fixedSize()
     }
 
+    /// 連線與分組的入口：建立、指派、選取整組與刪除都在這裡。
+    private var structureMenu: some View {
+        Menu {
+            Button(BoardL10n.text(.boardsCreateEdge)) {
+                Task { await model.createEdgeBetweenSelection() }
+            }
+            .disabled(model.selectionCount != 2)
+            Button(BoardL10n.text(.boardsCreateGroup)) {
+                presentNewGroup()
+            }
+            .disabled(model.selectionCount < 2)
+            if model.selectionGroupId != nil {
+                Button(BoardL10n.text(.boardsRemoveFromGroup)) {
+                    Task { await model.removeSelectionFromGroup() }
+                }
+            }
+            if let edges = model.board?.edges, !edges.isEmpty {
+                Divider()
+                Section(BoardL10n.text(.boardsLink)) {
+                    ForEach(edges, id: \.id) { edge in
+                        Button(
+                            BoardL10n.format(.boardsDeleteEdgeTo, [
+                                "from": model.itemTitle(forItemId: edge.from),
+                                "to": model.itemTitle(forItemId: edge.to),
+                            ]),
+                            role: .destructive
+                        ) {
+                            Task { await model.deleteEdge(edge.id) }
+                        }
+                    }
+                }
+            }
+            if let groups = model.board?.groups, !groups.isEmpty {
+                Divider()
+                Section(BoardL10n.text(.boardsGroupSection)) {
+                    ForEach(groups, id: \.id) { group in
+                        Menu(group.label) {
+                            Button(BoardL10n.text(.boardsSelectGroup)) {
+                                model.selectItems(inGroup: group.id)
+                            }
+                            Button(BoardL10n.text(.boardsAssignToGroup)) {
+                                Task { await model.assignItems(Array(model.canvas.selectedIds), toGroup: group.id) }
+                            }
+                            .disabled(model.selectionCount == 0)
+                            Divider()
+                            Button(BoardL10n.text(.boardsDeleteGroup), role: .destructive) {
+                                Task { await model.deleteGroup(group.id) }
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label(BoardL10n.text(.boardsStructure), systemImage: "rectangle.3.group")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(model.board == nil)
+    }
+
     private var selectionBar: some View {
         HStack(spacing: DesignTokens.spacingS) {
             Text(
@@ -145,11 +209,38 @@ struct BoardsView: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
 
+                if model.selectionCount == 2 {
+                    Button {
+                        Task { await model.createEdgeBetweenSelection() }
+                    } label: {
+                        Label(BoardL10n.text(.boardsCreateEdge), systemImage: "link")
+                    }
+                    .buttonStyle(ThemeButtonStyle(kind: .soft))
+                }
+
+                if model.selectionCount >= 2 {
+                    Button {
+                        presentNewGroup()
+                    } label: {
+                        Label(BoardL10n.text(.boardsCreateGroup), systemImage: "rectangle.3.group")
+                    }
+                    .buttonStyle(ThemeButtonStyle(kind: .soft))
+                }
+
+                if model.selectionGroupId != nil {
+                    Button {
+                        Task { await model.removeSelectionFromGroup() }
+                    } label: {
+                        Label(BoardL10n.text(.boardsRemoveFromGroup), systemImage: "rectangle.badge.minus")
+                    }
+                    .buttonStyle(ThemeButtonStyle(kind: .soft))
+                }
+
                 Button {
-                    model.togglePinSelected()
+                    Task { await model.togglePinSelected() }
                 } label: {
                     Label(
-                        model.canvas.selectedItems.first?.pinned == true
+                        model.canvas.selectedItems.allSatisfy(\.pinned)
                             ? BoardL10n.text(.boardsUnpin)
                             : BoardL10n.text(.boardsPin),
                         systemImage: "pin"
@@ -166,12 +257,7 @@ struct BoardsView: View {
                 }
                 .buttonStyle(ThemeButtonStyle(kind: .soft))
 
-                Button {
-                    Task { await model.sendSelectionToConversation() }
-                } label: {
-                    Label(BoardL10n.text(.boardsSendToConversation), systemImage: "bubble.left.and.text.bubble.right")
-                }
-                .buttonStyle(ThemeButtonStyle(kind: .soft))
+                sendMenu
             }
             Button {
                 model.undo()
@@ -190,6 +276,42 @@ struct BoardsView: View {
             .disabled(!model.canvas.canRedo)
             .help(BoardL10n.text(.boardsRedo))
         }
+    }
+
+    /// 送進對話：目前對話、清單上的其他對話，或先建立一場新對話。
+    private var sendMenu: some View {
+        let targets = model.conversationTargets()
+        let currentId = model.currentConversationId
+        return Menu {
+            if let currentId {
+                Button(
+                    model.currentConversationTitle.map {
+                        BoardL10n.format(.boardsSendToCurrentConversation, ["title": $0])
+                    } ?? BoardL10n.text(.boardsSendToConversation)
+                ) {
+                    Task { await model.sendSelection(to: currentId) }
+                }
+                Divider()
+            }
+            ForEach(targets.filter { $0.id != currentId }) { target in
+                Button(target.title) {
+                    Task { await model.sendSelection(to: target.id) }
+                }
+            }
+            Divider()
+            Button(BoardL10n.text(.boardsSendToNewConversation)) {
+                Task { await model.sendSelectionToNewConversation() }
+            }
+        } label: {
+            Label(BoardL10n.text(.boardsSendToConversation), systemImage: "bubble.left.and.text.bubble.right")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private func presentNewGroup() {
+        newGroupLabel = ""
+        isNewGroupPresented = true
     }
 
     private func alignmentButton(_ alignment: BoardCanvas.Alignment, _ key: BoardString) -> some View {
@@ -547,6 +669,34 @@ struct BoardsView: View {
         }
         .padding(DesignTokens.spacingL)
         .frame(width: 420)
+    }
+
+    private var newGroupSheet: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
+            Text(BoardL10n.text(.boardsCreateGroup))
+                .font(.cardiary(.title3))
+            TextField(BoardL10n.text(.boardsGroupNameTitle), text: $newGroupLabel)
+                .textFieldStyle(ThemeFieldStyle())
+            Text(BoardL10n.count(.boardsSelection, count: model.selectionCount))
+                .font(.cardiary(.caption))
+                .foregroundStyle(Palette.inkSecondary)
+            HStack {
+                Spacer()
+                Button(BoardL10n.text(.boardsCancel)) { isNewGroupPresented = false }
+                Button(BoardL10n.text(.boardsCreate)) {
+                    let label = newGroupLabel
+                    isNewGroupPresented = false
+                    Task { await model.createGroup(label: label) }
+                }
+                .buttonStyle(ThemeButtonStyle(kind: .soft))
+                .disabled(
+                    newGroupLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || model.selectionCount < 2
+                )
+            }
+        }
+        .padding(DesignTokens.spacingL)
+        .frame(width: 360)
     }
 
     private func banner(_ text: String, tone: BannerTone) -> some View {

@@ -13,6 +13,16 @@ public enum BoardsUIModule {
             }
             return nil
         }
+        model.conversationTargets = { [weak app] in
+            guard let app else { return [] }
+            return app.conversations.sessions.map {
+                BoardModel.ConversationTarget(id: $0.id, title: $0.title)
+            }
+        }
+        model.createConversation = { [weak app] in
+            guard let app else { return nil }
+            return await app.createConversation()
+        }
         app.installBoardsUI(model)
     }
 }

@@ -331,6 +331,19 @@ public struct BoardCanvas: Equatable, Sendable {
         return true
     }
 
+    /// 把一組投影設成同一個釘選狀態；沒選到的投影不動。
+    /// 有實際變更才記錄復原點，回傳是否變更。
+    @discardableResult
+    public mutating func setPinned(_ ids: Set<String>, pinned: Bool) -> Bool {
+        let changed = items.contains { ids.contains($0.id) && $0.pinned != pinned }
+        guard changed else { return false }
+        recordUndo()
+        for index in items.indices where ids.contains(items[index].id) {
+            items[index].pinned = pinned
+        }
+        return true
+    }
+
     public func item(_ id: String) -> BoardCanvasItem? {
         items.first { $0.id == id }
     }
