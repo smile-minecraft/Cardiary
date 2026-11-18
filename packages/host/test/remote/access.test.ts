@@ -122,7 +122,7 @@ describe("遠端存取開關", () => {
     const reply = await client.waitForReply(id);
     expect(reply.code).toBe("permission_denied");
     expect((reply.details as { reason: string }).reason).toBe("remote_access_disabled");
-    await waitUntil(() => client.closed, 3000);
+    await waitUntil(() => client.closeCode !== null, 3000);
     expect(client.closeCode).toBe(1008);
     await client.close();
   });
@@ -163,7 +163,7 @@ describe("遠端存取關閉時切斷裝置", () => {
     const off = await local.waitForReply(offId);
     expect(off.kind).toBe("response");
 
-    await waitUntil(() => device.closed, 3000);
+    await waitUntil(() => device.closeCode !== null, 3000);
     expect(device.closeCode).toBe(1008);
     expect(device.closeReason).toBe("remote_access_disabled");
 
@@ -187,7 +187,7 @@ describe("遠端存取關閉時切斷裝置", () => {
     await host.host.gateway.emitSystemStatus();
     await local.waitForEvent("system.status");
 
-    await waitUntil(() => device.closed, 3000);
+    await waitUntil(() => device.closeCode !== null, 3000);
     expect(device.closeCode).toBe(1008);
     expect(device.closeReason).toBe("remote_access_disabled");
     expect(
