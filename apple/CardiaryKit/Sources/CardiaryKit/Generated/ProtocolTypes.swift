@@ -1557,6 +1557,7 @@ public struct ApprovalRequest: Codable, Equatable, Sendable {
     public let options: [ApprovalOption]
     public let requestedAt: String
     public let expiresAt: String?
+    public let sourceScheduleName: String?
 
     public init(
         approvalId: String,
@@ -1568,7 +1569,8 @@ public struct ApprovalRequest: Codable, Equatable, Sendable {
         scope: ApprovalScope,
         options: [ApprovalOption],
         requestedAt: String,
-        expiresAt: String? = nil
+        expiresAt: String? = nil,
+        sourceScheduleName: String? = nil
     ) {
         self.approvalId = approvalId
         self.sessionId = sessionId
@@ -1580,6 +1582,7 @@ public struct ApprovalRequest: Codable, Equatable, Sendable {
         self.options = options
         self.requestedAt = requestedAt
         self.expiresAt = expiresAt
+        self.sourceScheduleName = sourceScheduleName
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1593,6 +1596,7 @@ public struct ApprovalRequest: Codable, Equatable, Sendable {
         case options = "options"
         case requestedAt = "requestedAt"
         case expiresAt = "expiresAt"
+        case sourceScheduleName = "sourceScheduleName"
     }
 
     public init(from decoder: Decoder) throws {
@@ -1607,6 +1611,7 @@ public struct ApprovalRequest: Codable, Equatable, Sendable {
         let options = try container.decode([ApprovalOption].self, forKey: .options)
         let requestedAt = try container.decode(String.self, forKey: .requestedAt)
         let expiresAt = try container.decodeIfPresent(String.self, forKey: .expiresAt)
+        let sourceScheduleName = try container.decodeIfPresent(String.self, forKey: .sourceScheduleName)
         self.init(
             approvalId: approvalId,
             sessionId: sessionId,
@@ -1617,7 +1622,8 @@ public struct ApprovalRequest: Codable, Equatable, Sendable {
             scope: scope,
             options: options,
             requestedAt: requestedAt,
-            expiresAt: expiresAt
+            expiresAt: expiresAt,
+            sourceScheduleName: sourceScheduleName
         )
     }
 
@@ -1633,6 +1639,7 @@ public struct ApprovalRequest: Codable, Equatable, Sendable {
         try container.encode(options, forKey: .options)
         try container.encode(requestedAt, forKey: .requestedAt)
         try container.encodeIfPresent(expiresAt, forKey: .expiresAt)
+        try container.encodeIfPresent(sourceScheduleName, forKey: .sourceScheduleName)
     }
 }
 

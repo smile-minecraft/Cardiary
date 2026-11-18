@@ -112,6 +112,18 @@ struct ConversationView: View {
             .onChange(of: conversation.streamingText) { _, _ in
                 proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
             }
+            .dropDestination(for: NotificationDrag.self) { items, _ in
+                guard !items.isEmpty, let sessionId = conversation.sessionId else { return false }
+                let title = conversation.title.isEmpty ? nil : conversation.title
+                Task {
+                    await model.notifications.addToConversation(
+                        drags: items,
+                        sessionId: sessionId,
+                        conversationTitle: title
+                    )
+                }
+                return true
+            }
         }
     }
 

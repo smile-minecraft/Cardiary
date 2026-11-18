@@ -3,7 +3,7 @@ import Combine
 import Foundation
 
 /// 一則通知在流裡的樣子。
-public struct NotificationPresentation: Identifiable, Equatable, Sendable {
+public struct NotificationPresentation: Identifiable, Codable, Equatable, Sendable {
     public let notificationId: String
     public let kind: NotificationKind
     public let title: String
@@ -66,12 +66,17 @@ public struct NotificationPresentation: Identifiable, Equatable, Sendable {
     }
 }
 
-/// 通知流：清單、未讀計數、標已讀與轉卡。
+/// 通知流：清單、未讀計數、標已讀、轉卡與加入對話。
 ///
 /// `notification.changed` 事件即時更新清單；所有寫操作走 `NotificationService`，
-/// 介面不碰協定 frame。卡片去重由主机負責，介面另外擋住重複提交。
+/// 介面不碰協定 frame。卡片去重由主機負責，介面另外擋住重複提交。
+///
+/// 「加入對話」會先轉成卡片（已有卡片就重用），再用 `context.add_card_to_context`
+/// 加到選中的對話。
 @MainActor
 public final class NotificationModel: ObservableObject {
+    public let scheduler = SchedulerModel()
+
     @Published public private(set) var notifications: [NotificationPresentation] = []
     @Published public private(set) var totalUnread = 0
     @Published public private(set) var isKnown = false
@@ -79,8 +84,14 @@ public final class NotificationModel: ObservableObject {
     @Published public private(set) var actingIds: Set<String> = []
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var noticeMessage: String?
+    @Published public private(set) var conversations: [SessionSummary] = []
+    @Published public private(set) var isLoadingConversations = false
 
     private var service: (any NotificationService)?
+    private var contextService: (any ContextService)?
+    private var conversationService: (any ConversationService)?
+    private var systemCenter: (any NotificationSystemCenter)?
+    private var systemCenterSettings: (any NotificationSystemCenterSettings)?
     private let language: AppLanguage
 
     public init(language: AppLanguage = AppL10n.language) {
@@ -89,11 +100,47 @@ public final class NotificationModel: ObservableObject {
 
     public func attach(service: any NotificationService) {
         self.service = service
+        contextService = service as? any ContextService
+        conversationService = service as? any ConversationService
+        // 有設定服務時才接 `UNUserNotificationCenter`，避免測試的假服務誤觸系統通知。
+        let isRunningUnderXCTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        if let settings = service as? any SettingsService {
+            systemCenterSettings = SettingsNotificationSystemCenter(service: settings)
+            #if canImport(UserNotifications)
+            if !isRunningUnderXCTest {
+                systemCenter = UserNotificationSystemCenter()
+            }
+            #endif
+        } else {
+            systemCenterSettings = nil
+            systemCenter = nil
+        }
+        if let sender = service as? any ModuleRequestSending {
+            scheduler.attach(service: ModuleSchedulerAdminService(sender: sender))
+        } else {
+            scheduler.detach()
+        }
+    }
+
+    /// 注入假的系統通知中心，給測試用。
+    public func attachSystemCenter(_ center: (any NotificationSystemCenter)?) {
+        systemCenter = center
+    }
+
+    /// 注入假的設定來源，給測試用。
+    public func attachSystemCenterSettings(_ settings: (any NotificationSystemCenterSettings)?) {
+        systemCenterSettings = settings
     }
 
     public func detach() {
         service = nil
+        contextService = nil
+        conversationService = nil
+        systemCenter = nil
+        systemCenterSettings = nil
+        scheduler.detach()
         notifications = []
+        conversations = []
         totalUnread = 0
         isKnown = false
         actingIds = []
@@ -107,7 +154,7 @@ public final class NotificationModel: ObservableObject {
             isKnown = false
             return
         }
-        // 轉卡後主机可能還沒把 cardId 帶進事件；保留本機已知的 cardId。
+        // 轉卡後主機可能還沒把 cardId 帶進事件；保留本機已知的 cardId。
         let knownCards = Dictionary(
             uniqueKeysWithValues: self.notifications.compactMap { item in
                 item.cardId.map { (item.notificationId, $0) }
@@ -127,6 +174,7 @@ public final class NotificationModel: ObservableObject {
     public func handle(change event: NotificationChangedEvent) {
         let record = event.payload.notification
         let presentation = NotificationPresentation(record: record)
+        let isNew = notifications.allSatisfy { $0.notificationId != record.notificationId }
         if let index = notifications.firstIndex(where: { $0.notificationId == record.notificationId }) {
             notifications[index] = notifications[index].updating(record: record)
         } else {
@@ -135,6 +183,10 @@ public final class NotificationModel: ObservableObject {
         // 未讀計數一律由目前清單重算，重複事件才不會累加。
         recountUnread()
         isKnown = true
+        if isNew, record.readAt == nil {
+            let item = notifications.first { $0.notificationId == record.notificationId } ?? presentation
+            Task { await presentSystemNotification(for: item) }
+        }
     }
 
     public func reload() async {
@@ -191,17 +243,25 @@ public final class NotificationModel: ObservableObject {
         }
     }
 
-    /// 轉卡：主机去重，介面也擋住同一則的重複提交，成功後記下 cardId。
+    /// 轉卡：主機去重，介面也擋住同一則的重複提交，成功後記下 cardId。
     @discardableResult
     public func createCard(for item: NotificationPresentation) async -> Bool {
-        guard !actingIds.contains(item.notificationId) else { return false }
         if item.cardId != nil {
             noticeMessage = NotificationL10n.text(.notificationCardReused, language: language)
             return false
         }
+        return await ensureCard(for: item) != nil
+    }
+
+    /// 取得通知對應的卡片；沒有卡片就請主機轉一張，成功後更新載入中的清單。
+    ///
+    /// 拖曳帶來的通知可能不在 `notifications` 裡，所以回傳值不能從清單重新讀取。
+    private func ensureCard(for item: NotificationPresentation) async -> String? {
+        if let cardId = item.cardId { return cardId }
+        guard !actingIds.contains(item.notificationId) else { return nil }
         guard let service else {
             errorMessage = NotificationL10n.text(.notificationServiceUnavailable, language: language)
-            return false
+            return nil
         }
         actingIds.insert(item.notificationId)
         defer { actingIds.remove(item.notificationId) }
@@ -214,6 +274,58 @@ public final class NotificationModel: ObservableObject {
                 ? NotificationL10n.text(.notificationCardReused, language: language)
                 : NotificationL10n.text(.notificationCardCreated, language: language)
             errorMessage = nil
+            return response.card.cardId
+        } catch {
+            errorMessage = NotificationL10n.format(
+                .notificationActionFailed, value: Self.errorText(error), language: language
+            )
+            return nil
+        }
+    }
+
+    /// 載入可加入通知卡片的對話（最近 20 筆）。
+    public func loadConversations() async {
+        guard let conversationService else {
+            errorMessage = NotificationL10n.text(.notificationServiceUnavailable, language: language)
+            return
+        }
+        guard !isLoadingConversations else { return }
+        isLoadingConversations = true
+        defer { isLoadingConversations = false }
+        do {
+            let payload = try await conversationService.listSessions(cursor: nil, limit: 20)
+            conversations = payload.sessions
+            errorMessage = nil
+        } catch {
+            errorMessage = NotificationL10n.format(
+                .notificationActionFailed, value: Self.errorText(error), language: language
+            )
+        }
+    }
+
+    /// 把通知轉成卡片（已有卡片就重用），加到指定的對話。
+    @discardableResult
+    public func addToConversation(
+        _ item: NotificationPresentation,
+        sessionId: String,
+        conversationTitle: String? = nil
+    ) async -> Bool {
+        guard !actingIds.contains(item.notificationId) else { return false }
+        guard let contextService else {
+            errorMessage = NotificationL10n.text(.notificationServiceUnavailable, language: language)
+            return false
+        }
+        guard let cardId = await ensureCard(for: item) else { return false }
+        actingIds.insert(item.notificationId)
+        defer { actingIds.remove(item.notificationId) }
+        do {
+            _ = try await contextService.addCardToContext(sessionId: sessionId, cardId: cardId)
+            noticeMessage = NotificationL10n.format(
+                .notificationAddedToConversation,
+                value: conversationTitle ?? sessionId,
+                language: language
+            )
+            errorMessage = nil
             return true
         } catch {
             errorMessage = NotificationL10n.format(
@@ -221,6 +333,92 @@ public final class NotificationModel: ObservableObject {
             )
             return false
         }
+    }
+
+    /// 拖曳進對話：先從載入中的清單找通知，找不到就用拖曳帶來的內容；
+    /// 兩者都沒有時重新整理通知流再找一次，避免因為分頁或尚未載入而靜默失敗。
+    @discardableResult
+    public func addToConversation(
+        drags: [NotificationDrag],
+        sessionId: String,
+        conversationTitle: String? = nil
+    ) async -> Int {
+        let unique = Self.deduplicated(drags)
+        guard !unique.isEmpty else { return 0 }
+        errorMessage = nil
+
+        var items: [NotificationPresentation] = []
+        var missing: [String] = []
+        for drag in unique {
+            if let item = notifications.first(where: { $0.notificationId == drag.notificationId }) {
+                items.append(item)
+            } else if let item = drag.notification {
+                items.append(item)
+            } else {
+                missing.append(drag.notificationId)
+            }
+        }
+        if !missing.isEmpty, service != nil {
+            await reload()
+            for id in missing {
+                if let item = notifications.first(where: { $0.notificationId == id }) {
+                    items.append(item)
+                }
+            }
+            missing = missing.filter { id in !items.contains { $0.notificationId == id } }
+        }
+
+        var added = 0
+        var failures: [String] = []
+        for item in items {
+            if await addToConversation(item, sessionId: sessionId, conversationTitle: conversationTitle) {
+                added += 1
+            } else {
+                failures.append(
+                    errorMessage ?? NotificationL10n.text(.notificationNotFound, language: language)
+                )
+            }
+        }
+        if !missing.isEmpty {
+            failures.append(NotificationL10n.text(.notificationNotFound, language: language))
+        }
+
+        if added == unique.count {
+            errorMessage = nil
+        } else if added > 0 {
+            errorMessage = NotificationL10n.count(.notificationPartiallyAdded, count: added, language: language)
+        } else {
+            errorMessage = failures.first
+        }
+        return added
+    }
+
+    /// 只帶通知識別碼的版本；內容留給通知流查詢。
+    @discardableResult
+    public func addToConversation(
+        notificationIds: [String],
+        sessionId: String,
+        conversationTitle: String? = nil
+    ) async -> Int {
+        await addToConversation(
+            drags: notificationIds.map { NotificationDrag(notificationId: $0) },
+            sessionId: sessionId,
+            conversationTitle: conversationTitle
+        )
+    }
+
+    private static func deduplicated(_ drags: [NotificationDrag]) -> [NotificationDrag] {
+        var seen = Set<String>()
+        return drags.filter { seen.insert($0.notificationId).inserted }
+    }
+
+    /// 有權限且設定允許時，送一則系統通知；失敗不擋住通知流程。
+    public func presentSystemNotification(for item: NotificationPresentation) async {
+        guard let systemCenter else { return }
+        let enabled = (try? await systemCenterSettings?.isEnabled()) ?? true
+        guard enabled else { return }
+        guard await systemCenter.requestAuthorization() else { return }
+        try? await systemCenter.show(id: item.notificationId, title: item.title, body: item.body)
     }
 
     public func dismissMessages() {

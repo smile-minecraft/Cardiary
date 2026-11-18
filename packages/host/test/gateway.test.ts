@@ -409,6 +409,54 @@ describe("協定閘道", () => {
     await client.close();
   });
 
+  it("排程背景對話的審批請求標明來源排程，一般會話不帶", async () => {
+    const host = await boot({
+      scripts: [
+        [
+          { kind: "tool", toolName: "demo.echo", input: { text: "排程輸出" } },
+          { kind: "text", text: "完成" },
+        ],
+        [
+          { kind: "tool", toolName: "demo.echo", input: { text: "一般輸出" } },
+          { kind: "text", text: "完成" },
+        ],
+      ],
+    });
+    const client = await helloClient(host);
+    const settings = await host.host.engine.getModelSettings();
+    const scheduled = await host.host.engine.createConversation({
+      title: "排程：每日摘要",
+      purpose: "background-task",
+      model: settings.roles.main,
+      systemContext: "你是排程助理。",
+      toolBundles: [{ bundleId: "demo", generation: 1 }],
+      permissionMode: "hard-rules",
+    });
+    await subscribeSession(client, scheduled.id);
+    client.request("session.send_message", {
+      sessionId: scheduled.id,
+      text: "用工具",
+      delivery: "queue",
+    });
+    const scheduleRequested = await client.waitForEvent("approval.requested");
+    const schedulePayload = scheduleRequested.payload as { sourceScheduleName?: string };
+    expect(schedulePayload.sourceScheduleName).toBe("每日摘要");
+    await client.close();
+
+    const plain = await helloClient(host);
+    const plainId = await createSession(plain);
+    await subscribeSession(plain, plainId);
+    plain.request("session.send_message", {
+      sessionId: plainId,
+      text: "用工具",
+      delivery: "queue",
+    });
+    const plainRequested = await plain.waitForEvent("approval.requested");
+    const plainPayload = plainRequested.payload as { sourceScheduleName?: string };
+    expect(plainPayload.sourceScheduleName).toBeUndefined();
+    await plain.close();
+  });
+
   it("緊急全部暫停中止回合並回報受影響的會話", async () => {
     const host = await boot({
       scripts: [[{ kind: "text", text: "很久", chunkSize: 1, delayMs: 20 }]],
