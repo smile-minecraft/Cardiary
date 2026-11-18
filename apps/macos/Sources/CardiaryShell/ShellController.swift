@@ -398,7 +398,9 @@ final class ShellController: NSObject {
                 scriptURL: script,
                 folderPath: path,
                 // 空的資料夾由服務初始化；已有 state/folder.json 時這個旗標不影響。
-                initializeFolder: true
+                initializeFolder: true,
+                servicePort: AppPaths.preferredServicePort,
+                webRoot: AppPaths.webRoot()
             )
             let configuration = ServiceSupervisorConfiguration(launchPlan: plan)
             let broker = brokerService

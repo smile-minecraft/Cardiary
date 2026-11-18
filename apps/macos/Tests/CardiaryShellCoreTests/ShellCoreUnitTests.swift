@@ -328,6 +328,23 @@ final class ServiceLaunchPlanTests: XCTestCase {
         XCTAssertFalse(allValues.lowercased().contains("secret"))
     }
 
+    func testLaunchPlanPassesPreferredPortAndWebRoot() {
+        let webRoot = URL(fileURLWithPath: "/Applications/Cardiary.app/Contents/Resources/web")
+        let plan = ServiceLaunchPlan.make(
+            nodeURL: URL(fileURLWithPath: "/Applications/Cardiary.app/Contents/Helpers/Node/node"),
+            scriptURL: URL(fileURLWithPath: "/Applications/Cardiary.app/Contents/Resources/Service/dist/main.js"),
+            folderPath: "/tmp/Cardiary",
+            initializeFolder: true,
+            servicePort: 63_715,
+            webRoot: webRoot
+        )
+        XCTAssertEqual(
+            Array(plan.arguments.suffix(2)),
+            ["--port", "63715"]
+        )
+        XCTAssertEqual(plan.environment["CARDIARY_WEB_ROOT"], webRoot.path)
+    }
+
     func testServiceExitDescription() {
         XCTAssertEqual(ServiceExit(status: 9, wasSignaled: false).description, "exit 9")
         XCTAssertEqual(ServiceExit(status: SIGBUS, wasSignaled: true).description, "signal 10")

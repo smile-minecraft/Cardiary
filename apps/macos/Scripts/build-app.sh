@@ -26,6 +26,13 @@ EXECUTABLE_NAME="CardiaryShell"
 DIST_DIR="$APP_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$BUNDLE_NAME.app"
 MINIMUM_NODE="22.19.0"
+WEB_DIST="$APP_DIR/../web/dist"
+
+if [[ ! -f "$WEB_DIST/index.html" ]]; then
+  echo "找不到網頁客戶端：$WEB_DIST/index.html" >&2
+  echo "先執行 pnpm --filter web build，再重新建置 App。" >&2
+  exit 1
+fi
 
 if [[ -z "${CARDIARY_NODE:-}" ]]; then
   CARDIARY_NODE="$("$APP_DIR/Scripts/fetch-node.sh")"
@@ -71,9 +78,11 @@ echo "組裝 App bundle…"
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" \
   "$APP_BUNDLE/Contents/Helpers/Node" \
-  "$APP_BUNDLE/Contents/Resources/Service"
+  "$APP_BUNDLE/Contents/Resources/Service" \
+  "$APP_BUNDLE/Contents/Resources/web"
 cp "$BIN_DIR/$EXECUTABLE_NAME" "$APP_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
 cp "$NODE_SOURCE" "$APP_BUNDLE/Contents/Helpers/Node/node"
+cp -R "$WEB_DIST/." "$APP_BUNDLE/Contents/Resources/web/"
 cp "$APP_DIR/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 printf 'APPL????' >"$APP_BUNDLE/Contents/PkgInfo"
 
@@ -121,6 +130,7 @@ cat <<SUMMARY
 完成：$APP_BUNDLE
   殼執行檔      Contents/MacOS/$EXECUTABLE_NAME
   內嵌 Node     Contents/Helpers/Node/node（${NODE_VERSION}，需求 >= ${MINIMUM_NODE}）
+  網頁客戶端    Contents/Resources/web（來源：${WEB_DIST}）
   服務腳本      $SERVICE_SCRIPT
   沙盒          關閉
   簽章身分      $IDENTITY
