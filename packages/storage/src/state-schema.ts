@@ -719,6 +719,26 @@ export const M7_MIGRATIONS: readonly Migration[] = [
   { version: 8, name: "mcp-server-approvals", sql: M8_SCHEMA },
 ];
 
+/**
+ * v9「MCP 伺服器持久資料授權」：核准時可以額外授權該伺服器寫入
+ * `modules/mcp/<serverId>/`。
+ *
+ * 授權是人在核准當下做的決定，不屬於設定正本內容，所以存在核准表而不是
+ * 正本裡；手改 `state/mcp-servers.json` 仍會讓設定雜湊不符，整筆核准
+ * （連同這個授權）一起失效。舊資料庫升級後預設為不授權。
+ */
+const M9_SCHEMA = `
+ALTER TABLE mcp_server_approvals ADD COLUMN persistent_write INTEGER NOT NULL DEFAULT 0;
+`;
+
+/**
+ * v9 的遷移清單：在 v8 之後加持久資料授權欄位。
+ */
+export const M8_MIGRATIONS: readonly Migration[] = [
+  ...M7_MIGRATIONS,
+  { version: 9, name: "mcp-server-persistent-write", sql: M9_SCHEMA },
+];
+
 const SCHEMA_MIGRATIONS_DDL = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version     INTEGER PRIMARY KEY,
@@ -763,7 +783,7 @@ interface AppliedMigrationRow {
  * - 每個版本在單一交易內完成 SQL、`user_version` 與 `schema_migrations`。
  */
 export function migrate(db: Database, options: MigrateOptions): MigrationOutcome {
-  const migrations = options.migrations ?? M7_MIGRATIONS;
+  const migrations = options.migrations ?? M8_MIGRATIONS;
   const now = options.now ?? (() => new Date());
   db.exec(SCHEMA_MIGRATIONS_DDL);
 
