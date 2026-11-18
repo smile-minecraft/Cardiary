@@ -82,9 +82,9 @@ struct SidebarView: View {
                                     systemImage: symbol(for: session.status),
                                     tone: tone(for: session.status),
                                     isSelected: model.selection == .conversation(session.id),
-                                    isDropTarget: isDropTarget
+                                    isDropTarget: isDropTarget,
+                                    onActivate: { select(.conversation(session.id)) }
                                 )
-                                .onTapGesture { select(.conversation(session.id)) }
                                 .contextMenu {
                                     if session.status != .archived {
                                         Button {
@@ -125,9 +125,10 @@ struct SidebarView: View {
                             title: AppL10n.text(slot.titleKey),
                             systemImage: slot.systemImage,
                             tone: Self.tone(forSlot: slot.id),
-                            isSelected: model.selection == .slot(slot.id)
+                            isSelected: model.selection == .slot(slot.id),
+                            isSymbolDecorative: true,
+                            onActivate: { select(.slot(slot.id)) }
                         )
-                        .onTapGesture { select(.slot(slot.id)) }
                     }
                 }
                 .focusable()
@@ -160,9 +161,23 @@ struct SidebarView: View {
 
     /// 側欄本身承接方向鍵：上下移動選取，和滑鼠點選走同一條路。
     private func moveSelection(_ direction: MoveCommandDirection) {
-        let items = selectableItems
-        guard !items.isEmpty else { return }
-        let current = items.firstIndex(of: model.selection)
+        guard let target = Self.moveTarget(
+            in: selectableItems,
+            from: model.selection,
+            direction: direction
+        ) else { return }
+        select(target)
+    }
+
+    /// 方向鍵要移到的列：上下各移一列，到頭不繞回；目前沒有選中可選的列時選第一列。
+    /// 不需要移動（已在邊界、清單是空的、左右鍵）時回 nil。
+    static func moveTarget(
+        in items: [AppSelection],
+        from selection: AppSelection,
+        direction: MoveCommandDirection
+    ) -> AppSelection? {
+        guard !items.isEmpty else { return nil }
+        let current = items.firstIndex(of: selection)
         let index: Int
         switch direction {
         case .up:
@@ -170,11 +185,10 @@ struct SidebarView: View {
         case .down:
             index = current.map { min(items.count - 1, $0 + 1) } ?? 0
         default:
-            return
+            return nil
         }
         let target = items[index]
-        guard target != model.selection else { return }
-        select(target)
+        return target == selection ? nil : target
     }
 
     private var otherSlots: [SidebarSlot] {
@@ -236,12 +250,20 @@ private struct SidebarSectionLabel: View {
 }
 
 /// 左側欄的一列。
+///
+/// 滑鼠點選與輔助技術的「按下」（VoiceOver 的 VO-空白鍵、AXPress）都呼叫 `onActivate`。
+/// 只加 `.isButton` 不夠：SwiftUI 不會把 AXPress 接到 `onTapGesture`，
+/// 而且圖示和文字會各自成為一個沒有動作的按鈕。
 private struct SidebarRowLabel: View {
     let title: String
     let systemImage: String
     let tone: Tone
     let isSelected: Bool
     var isDropTarget = false
+    /// 圖示只是裝飾時設 true，輔助技術只唸標題。工具列是這樣；
+    /// 對話列的圖示代表狀態，保留系統讀出的圖示說明。
+    var isSymbolDecorative = false
+    let onActivate: () -> Void
 
     @State private var isHovered = false
 
@@ -267,11 +289,22 @@ private struct SidebarRowLabel: View {
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous))
+        .onTapGesture(perform: onActivate)
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .animation(.easeOut(duration: 0.12), value: isDropTarget)
+        // 一列一個元素。`.combine` 會丟掉 SF Symbol 的說明，所以標籤自己組。
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityTitle)
+        .accessibilityAction { onActivate() }
         .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// 對話列的標籤是「狀態圖示的系統說明, 標題」，和修正前讀得到的資訊相同，
+    /// 不另外加字串；工具列只唸標題。
+    private var accessibilityTitle: Text {
+        isSymbolDecorative ? Text(title) : Text("\(Image(systemName: systemImage)), \(title)")
     }
 
     private var background: Color {
