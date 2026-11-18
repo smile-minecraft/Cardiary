@@ -266,7 +266,7 @@ describe("模組停用狀態跨重啟", () => {
   }, 60_000);
 
   it("停用 memory 後重啟：核心記憶仍在，重新啟用後回到上下文第 3 層", async () => {
-    let harness = await startHarness();
+    let harness = await startHarness({ scripts: [[{ kind: "text", text: "收到。" }]] });
     try {
       const sessionId = await createSession(harness.client);
       const title = `核心記憶保留探針 ${Date.now()}`;

@@ -36,7 +36,13 @@ function statusEvents(harness: Harness): number {
 
 describe("沒有共同協定探針的模組", () => {
   it("emotion：停用後不再寫入情緒檔，重新啟用後恢復", async () => {
-    const harness = await startHarness();
+    const harness = await startHarness({
+      scripts: [
+        [{ kind: "text", text: "收到。" }],
+        [{ kind: "text", text: "收到。" }],
+        [{ kind: "text", text: "收到。" }],
+      ],
+    });
     try {
       const { client } = harness;
       const sessionId = await createSession(client);
@@ -68,10 +74,12 @@ describe("沒有共同協定探針的模組", () => {
   }, 60_000);
 
   it("local-tools：停用後工具呼叫回 tool_unavailable，重新啟用後恢復", async () => {
-    const readProbe = [{ kind: "tool", toolName: "read_file", input: { path: "probe.txt" } }];
-    const harness = await startHarness({
-      scripts: [[...readProbe], [...readProbe], [...readProbe]],
-    });
+    // Pi 在工具回傳後會在同一回合再呼叫模型。每回合都用文字結束，避免吃掉下一回合的工具探針。
+    const readProbe = [
+      { kind: "tool", toolName: "read_file", input: { path: "probe.txt" } },
+      { kind: "text", text: "探針結束。" },
+    ] as const;
+    const harness = await startHarness({ scripts: [readProbe, readProbe, readProbe] });
     try {
       const { client } = harness;
       await writeFile(join(harness.folder.path, "probe.txt"), "本地工具探針\n", "utf8");
@@ -115,7 +123,7 @@ describe("沒有共同協定探針的模組", () => {
   }, 60_000);
 
   it("retrieval：停用後 dealing 連帶停用、卡片搜尋降級仍可用；重新啟用後一起恢復", async () => {
-    const harness = await startHarness();
+    const harness = await startHarness({ scripts: [[{ kind: "text", text: "收到。" }]] });
     try {
       const { client } = harness;
       await request(client, "system.subscribe", {});

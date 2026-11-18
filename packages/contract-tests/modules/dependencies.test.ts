@@ -45,7 +45,7 @@ describe("模組相依的連帶停用與恢復", () => {
   let sessionId: string;
 
   beforeAll(async () => {
-    harness = await startHarness();
+    harness = await startHarness({ scripts: [[{ kind: "text", text: "收到。" }]] });
     sessionId = await createSession(harness.client);
   }, 30_000);
 
