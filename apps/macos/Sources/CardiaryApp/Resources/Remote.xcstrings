@@ -18,6 +18,210 @@
         }
       }
     },
+    "remoteAccessBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When on, pairing requests and paired devices can reach this Mac over an encrypted channel. When off, only local connections are accepted."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟後，經加密通道的配對請求與已配對裝置才能連到這台電腦；關閉時只接受本機連線。"
+          }
+        }
+      }
+    },
+    "remoteAccessDisabledHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remote access is off. New pairings and remote connections are refused; paired devices stay listed below."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "遠端存取已關閉，新的配對與遠端連線都會被拒絕。已配對裝置仍會列在下面。"
+          }
+        }
+      }
+    },
+    "remoteAccessLoadFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not read the remote access setting: {value}"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "讀取遠端存取設定失敗：{value}"
+          }
+        }
+      }
+    },
+    "remoteAccessSaveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not save the remote access setting: {value}"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "儲存遠端存取設定失敗：{value}"
+          }
+        }
+      }
+    },
+    "remoteAccessSaved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remote access setting updated."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已更新遠端存取設定。"
+          }
+        }
+      }
+    },
+    "remoteAccessTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remote access"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "遠端存取"
+          }
+        }
+      }
+    },
+    "remoteAccessToggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow remote devices"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允許遠端裝置連線"
+          }
+        }
+      }
+    },
+    "remoteAddressCopy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy address"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複製位址"
+          }
+        }
+      }
+    },
+    "remoteAddressCopied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Address copied."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已複製位址。"
+          }
+        }
+      }
+    },
+    "remoteAddressHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open this address on a paired device. From another network, replace 127.0.0.1 with this Mac's Tailscale address."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在已配對的裝置上開啟這個位址。從其他網路連線時，把 127.0.0.1 換成這台電腦的 Tailscale 位址。"
+          }
+        }
+      }
+    },
+    "remoteAddressTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Service address"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服務位址"
+          }
+        }
+      }
+    },
+    "remoteAddressUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The address appears once the service starts."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服務啟動後會顯示位址。"
+          }
+        }
+      }
+    },
     "remoteDevicesEmpty": {
       "extractionState": "manual",
       "localizations": {

@@ -134,11 +134,13 @@ public final class AppModel: ObservableObject {
         approvals.attach(service: service)
         agents.attach(service: service, approvals: service)
         settingsModel.attach(service: service)
+        remote.attachSettings(service: service)
         notifications.attach(service: service)
         for model in contentModels {
             model.attach(service: service)
         }
         await reloadAfterAttach()
+        await remote.loadAccessSetting()
         await agents.reload()
         // 首次設定停在「選模型」時，連線一好就把供應商與模型載進來。
         if firstRun.step == .model, firstRun.providers.isEmpty {
@@ -154,6 +156,7 @@ public final class AppModel: ObservableObject {
         }
         conversation.markDisconnected()
         settingsModel.detach()
+        remote.detachSettings()
         firstRun.detach()
         notifications.detach()
         agents.markDisconnected()

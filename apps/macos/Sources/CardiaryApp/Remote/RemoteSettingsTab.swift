@@ -22,6 +22,8 @@ private struct RemoteSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignTokens.spacingL) {
+                AccessSettingsView(model: remote)
+                Divider()
                 PairingApprovalView(model: remote)
                 Divider()
                 DevicesView(model: remote)

@@ -435,6 +435,8 @@ final class ShellController: NSObject {
 
     private func applyServiceSnapshot(_ snapshot: ServiceStatusSnapshot) {
         serviceSnapshot = snapshot
+        // 設定頁顯示的遠端位址跟著服務實際監聽的埠。
+        appModel?.remote.update(servicePort: snapshot.phase == .running ? snapshot.clientPort : nil)
 
         if let folderId = snapshot.folderId, authorization?.folderId != folderId {
             authorization?.folderId = folderId

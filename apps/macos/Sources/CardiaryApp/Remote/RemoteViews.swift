@@ -1,5 +1,83 @@
+import AppKit
 import CardiaryShellCore
 import SwiftUI
+
+/// 遠端存取開關與服務位址：開關寫入主機的 human-only 設定。
+struct AccessSettingsView: View {
+    @ObservedObject var model: RemoteModel
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
+            Text(RemoteL10n.text(.remoteAccessTitle))
+                .font(.cardiary(.title3, weight: .semibold))
+            Toggle(
+                isOn: Binding(
+                    get: { model.accessEnabled },
+                    set: { enabled in Task { await model.setAccessEnabled(enabled) } }
+                )
+            ) {
+                Text(RemoteL10n.text(.remoteAccessToggle))
+            }
+            .toggleStyle(.switch)
+            .disabled(model.savingAccess)
+            Text(RemoteL10n.text(.remoteAccessBody))
+                .font(.cardiary(.caption))
+                .foregroundStyle(Palette.inkSecondary)
+            if model.isPairingPaused {
+                Text(RemoteL10n.text(.remoteAccessDisabledHint))
+                    .font(.cardiary(.caption))
+                    .foregroundStyle(Palette.inkSecondary)
+            }
+            if let message = model.accessError {
+                Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.red)
+            }
+            if let message = model.accessNotice {
+                Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.sageInk)
+            }
+
+            VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
+                Text(RemoteL10n.text(.remoteAddressTitle))
+                    .font(.cardiary(.callout, weight: .semibold))
+                if let address = model.remoteAddress {
+                    HStack {
+                        Text(address)
+                            .font(.cardiary(.callout, weight: .regular, monospacedDigits: true))
+                            .textSelection(.enabled)
+                        Spacer()
+                        Button {
+                            copy(address)
+                        } label: {
+                            Label(RemoteL10n.text(.remoteAddressCopy), systemImage: "doc.on.doc")
+                        }
+                        .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
+                    }
+                    Text(RemoteL10n.text(.remoteAddressHint))
+                        .font(.cardiary(.caption))
+                        .foregroundStyle(Palette.inkSecondary)
+                } else {
+                    Text(RemoteL10n.text(.remoteAddressUnavailable))
+                        .font(.cardiary(.caption))
+                        .foregroundStyle(Palette.inkSecondary)
+                }
+                if copied {
+                    Text(RemoteL10n.text(.remoteAddressCopied))
+                        .font(.cardiary(.caption))
+                        .foregroundStyle(Palette.sageInk)
+                }
+            }
+            .padding(DesignTokens.spacingM)
+            .background(Palette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius))
+        }
+        .padding(DesignTokens.spacingM)
+    }
+
+    private func copy(_ address: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(address, forType: .string)
+        copied = true
+    }
+}
 
 /// 配對核准視窗：顯示裝置名稱、種類、短碼與期限，讓人決定核准或拒絕。
 ///

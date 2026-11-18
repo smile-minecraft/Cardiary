@@ -19,8 +19,10 @@ public final class GeneralSettingsModel: ObservableObject {
     private var service: (any CardiaryService)?
     private let language: AppLanguage
 
-    /// 由模型分頁擁有的設定鍵；一般設定不顯示、也不送出。
-    static let modelOwnedKeys: Set<String> = ["models.providers", "models.roles"]
+    /// 由模型分頁與遠端分頁擁有的設定鍵；一般設定不顯示、也不送出。
+    static let modelOwnedKeys: Set<String> = [
+        "models.providers", "models.roles", "remote.accessEnabled",
+    ]
 
     /// - Parameter language: 這個模型產生訊息時用的介面語言。預設跟著 App 目前的語言，
     ///   測試可以指定，讓結果不受系統語言影響。
