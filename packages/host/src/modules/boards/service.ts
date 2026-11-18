@@ -31,7 +31,13 @@ export interface BoardChangedEvent {
   readonly cardIds?: readonly string[];
 }
 
-/** 建卡與投影時，服務只需要卡片服務的這兩個方法。 */
+/**
+ * 建卡與投影時，服務只需要卡片服務的這兩個方法。
+ *
+ * `get` 只讀卡片檔，不排卡片寫入佇列，可以在白板鎖內呼叫；`create` 會拿
+ * 卡片寫入鎖，只能在白板鎖外呼叫。兩把鎖的取得順序固定是卡片 → 白板，
+ * 反過來就會和刪卡流程互等。
+ */
 export interface BoardCardGateway {
   get(cardId: string): Promise<unknown | null>;
   create(input: {
@@ -183,6 +189,10 @@ interface AgentChange {
  * 寫入，否則兩個視窗同時投影會把對方覆蓋掉。讀取不排隊，最多看到前一筆
  * 寫入完成的狀態。
  *
+ * 這條佇列只包住白板檔的讀寫與投影；需要卡片寫入鎖的操作（例如建卡）一律
+ * 在佇列外完成。刪卡流程是反過來先拿卡片寫入鎖、再呼叫
+ * `removeCardProjections` 拿白板佇列，所以鎖的取得順序固定是卡片 → 白板。
+ *
  * 代理變更的復原紀錄只放在記憶體：主機重啟後清空，客戶端就顯示沒有可
  * 復原的變更。把快照寫進檔案會讓它和正本、釘選狀態跨越重啟後互相矛盾，
  * 保守的做法是不假裝還原得回來。
@@ -316,28 +326,37 @@ export class BoardService {
   /**
    * 用圈選的卡片建立新卡並投影到白板。
    *
+   * 建卡在白板鎖外進行：卡片庫的 `create` 會拿卡片寫入鎖，若在白板鎖內
+   * 等它，另一邊的刪卡（卡片寫入鎖 → 移除白板投影 → 白板鎖）就會和這裡
+   * 互等。白板鎖內只做投影寫入，不再等任何會拿卡片寫入鎖的操作。
+   *
    * 建卡成功、投影失敗時卡片會留在卡片庫。重試帶的是同一個穩定識別碼，
    * 卡片庫會沿用同一張卡，所以不會多出重複的卡片。
    */
-  createCard(input: CreateCardOnBoardInput): Promise<CreatedCardProjection> {
+  async createCard(input: CreateCardOnBoardInput): Promise<CreatedCardProjection> {
+    const initial = this.get(input.boardId);
+    const projectedAlready = findItem(initial, input.itemId);
+    if (projectedAlready !== undefined) {
+      return { board: initial, cardId: projectedAlready.cardId, item: projectedAlready };
+    }
+    const cards = this.#requireCards();
+    const card = await cards.create({
+      cardId: cardIdForBoardItem(input.boardId, input.itemId),
+      kind: "note",
+      title: input.title,
+      body: input.body,
+      ...(input.derivedFrom === undefined ? {} : { sources: input.derivedFrom }),
+    });
     return this.#exclusive(async () => {
       const pinnedBefore = this.#pinnedCardIds();
+      // 建卡是慢操作，回來後重新讀一次，避免把等待期間的寫入蓋掉；
+      // 同一個 itemId 也可能已被另一個請求完成投影。
       const board = this.get(input.boardId);
       const existing = findItem(board, input.itemId);
       if (existing !== undefined) {
         return { board, cardId: existing.cardId, item: existing };
       }
-      const cards = this.#requireCards();
-      const card = await cards.create({
-        cardId: cardIdForBoardItem(input.boardId, input.itemId),
-        kind: "note",
-        title: input.title,
-        body: input.body,
-        ...(input.derivedFrom === undefined ? {} : { sources: input.derivedFrom }),
-      });
-      // 建卡是慢操作，回來後重新讀一次，避免把等待期間的寫入蓋掉。
-      const current = this.get(input.boardId);
-      const projected = this.#projectOnto(current, {
+      const projected = this.#projectOnto(board, {
         boardId: input.boardId,
         itemId: input.itemId,
         cardId: card.cardId,
@@ -346,7 +365,7 @@ export class BoardService {
         projectedBy: input.projectedBy,
       });
       const written = await this.#commit({
-        before: current,
+        before: board,
         next: projected,
         pinnedBefore,
         cardIds: [card.cardId],
