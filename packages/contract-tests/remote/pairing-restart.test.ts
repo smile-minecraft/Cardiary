@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   connect,
+  connectAndHello,
   engineUnderTest,
   spawnService,
   waitUntil,
@@ -35,7 +36,26 @@ async function boot(folder?: TestFolder): Promise<SpawnedService> {
     ...(folder === undefined ? {} : { folder }),
   });
   running.push(service);
+  await enableRemoteAccess(service);
   return service;
+}
+
+/** 遠端存取預設關閉；比照設定頁，由本機客戶端寫入人類專屬設定後才接受配對。 */
+async function enableRemoteAccess(service: SpawnedService): Promise<void> {
+  const client = await connectAndHello(service);
+  try {
+    const id = client.request("system.settings.set", {
+      changes: [{ key: "remote.accessEnabled", value: true }],
+      clientRequestId: `remote-access-${Math.random().toString(36).slice(2)}`,
+    });
+    const reply = await client.waitForReply(id, 20_000);
+    expect(reply.kind).toBe("response");
+    expect((reply.payload as { applied?: Array<{ key: string; value: unknown }> }).applied).toEqual(
+      [expect.objectContaining({ key: "remote.accessEnabled", value: true })],
+    );
+  } finally {
+    await client.close();
+  }
 }
 
 async function pair(service: SpawnedService): Promise<{ deviceId: string; deviceToken: string }> {
