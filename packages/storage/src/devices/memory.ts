@@ -2,9 +2,10 @@
  * 記憶體實作的裝置 Token 儲存。
  *
  * 用途：
- * - v3 遷移還沒有進 main 時，主機用它跑起配對流程與測試。
- * - 正式實作接上 `device_tokens` 表之前，重啟會讓所有已配對裝置失效，
- *   這是已知限制，寫在 PR 裡。
+ * - 沒有狀態資料庫的組裝（例如 `assembly: "fake"` 的測試）。
+ * - `storage` 由呼叫端注入、沒有持久資料庫時，閘道的預設值。
+ *
+ * 正式組裝使用 `SqliteDeviceTokenStore`；重啟後裝置仍然有效。
  */
 
 import { revokeDeviceToken } from "@cardiary/domain";
