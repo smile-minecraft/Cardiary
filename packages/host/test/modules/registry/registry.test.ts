@@ -5,6 +5,7 @@ import type {
   ModuleActivationContext,
   ModuleManifest,
   ModuleServices,
+  ScheduleDeclaration,
   ToolBundle,
   ToolBundleId,
   ToolBundleState,
@@ -14,6 +15,7 @@ import type {
 
 import { ProtocolHandlerError } from "../../../src/modules/contract.js";
 import {
+  CONTRIBUTIONS_SERVICE_NAME,
   HostServiceConflict,
   HostModuleRegistry,
   HostServiceMissing,
@@ -23,6 +25,7 @@ import {
   ProtocolRegistrationError,
   ProtocolRouter,
   ScopedHostServices,
+  type ModuleContributions,
 } from "../../../src/modules/registry.js";
 
 /** 記錄註冊與退役次數的假工具註冊表。 */
@@ -84,17 +87,34 @@ interface RegistryHarness {
   readonly registry: HostModuleRegistry;
   readonly tools: RecordingTools;
   readonly events: { readonly emitted: unknown[] };
+  readonly warns: Array<{ readonly message: string; readonly fields: unknown }>;
 }
 
 function makeRegistry(): RegistryHarness {
   const tools = new RecordingTools();
   const emitted: unknown[] = [];
+  const warns: Array<{ readonly message: string; readonly fields: unknown }> = [];
   const registry = new HostModuleRegistry({
     tools,
     services: baseServices,
     events: { emit: (intent) => emitted.push(intent) },
+    warn: (message, fields) => warns.push({ message, fields }),
   });
-  return { registry, tools, events: { emitted } };
+  return { registry, tools, events: { emitted }, warns };
+}
+
+/** 測試用的排程宣告；觸發方式不影響這裡要驗的通知。 */
+function scheduleOf(scheduleId: string): ScheduleDeclaration {
+  return {
+    scheduleId,
+    title: scheduleId,
+    trigger: { kind: "interval", everyMs: 5 * 60_000 },
+    defaultEnabled: true,
+    requiresApproval: false,
+    async run() {
+      return;
+    },
+  };
 }
 
 describe("模組服務註冊表", () => {
@@ -484,5 +504,89 @@ describe("模組生命週期", () => {
     await registry.deactivate("base", { reason: "user", cascade: true });
     expect(registry.record("base")?.state).toBe("inactive");
     expect(registry.record("uses-base")?.state).toBe("inactive");
+  });
+});
+
+describe("排程變更通知", () => {
+  it("模組註冊與停用排程時通知訂閱者，取消訂閱後不再通知", async () => {
+    const { registry } = makeRegistry();
+    const contributions = registry.hostServices.require<ModuleContributions>(
+      CONTRIBUTIONS_SERVICE_NAME,
+    );
+    const seen: string[][] = [];
+    const unsubscribe = contributions.onSchedulesChanged(() => {
+      seen.push(contributions.schedules().map((schedule) => schedule.scheduleId));
+    });
+    await registry.load({
+      manifest: manifestOf("memory"),
+      activate(context) {
+        context.registerSchedule(scheduleOf("memory.distillation.daily"));
+      },
+    });
+    // 載入只檢查描述檔，還沒有宣告。
+    expect(seen).toEqual([]);
+
+    await registry.activate("memory");
+    expect(seen).toEqual([["memory.distillation.daily"]]);
+    expect(contributions.schedules()).toHaveLength(1);
+
+    unsubscribe();
+    await registry.deactivate("memory", { reason: "user" });
+    expect(seen).toEqual([["memory.distillation.daily"]]);
+    expect(contributions.schedules()).toEqual([]);
+  });
+
+  it("啟用失敗時移除已註冊的宣告並通知，監聽者丟錯不影響生命週期", async () => {
+    const { registry, warns } = makeRegistry();
+    const contributions = registry.hostServices.require<ModuleContributions>(
+      CONTRIBUTIONS_SERVICE_NAME,
+    );
+    const seen: number[] = [];
+    contributions.onSchedulesChanged(() => {
+      seen.push(contributions.schedules().length);
+      throw new Error("監聽壞了");
+    });
+    const module: HostModule = {
+      manifest: manifestOf("memory"),
+      activate(context) {
+        context.registerSchedule(scheduleOf("memory.distillation.daily"));
+        throw new Error("模組壞了");
+      },
+    };
+    await registry.load(module);
+    const failed = await registry.activate("memory");
+    expect(failed.state).toBe("failed");
+    // 註冊時通知一次（1 筆），啟用失敗清掉 handle 再通知一次（0 筆）。
+    expect(seen).toEqual([1, 0]);
+    expect(contributions.schedules()).toEqual([]);
+    expect(warns.map((entry) => entry.message)).toEqual([
+      "排程變更通知失敗",
+      "排程變更通知失敗",
+      "模組啟用失敗",
+    ]);
+  });
+
+  it("關閉主機時停用模組不通知；宣告消失只在使用者停用模組時才算", async () => {
+    const { registry } = makeRegistry();
+    const contributions = registry.hostServices.require<ModuleContributions>(
+      CONTRIBUTIONS_SERVICE_NAME,
+    );
+    const seen: number[] = [];
+    contributions.onSchedulesChanged(() => {
+      seen.push(contributions.schedules().length);
+    });
+    await registry.load({
+      manifest: manifestOf("memory"),
+      activate(context) {
+        context.registerSchedule(scheduleOf("memory.distillation.daily"));
+      },
+    });
+    await registry.activate("memory");
+    expect(seen).toEqual([1]);
+
+    // 關機不是宣告被移除：排程列要留著，下次啟動才能補跑錯過的時段。
+    await registry.deactivateAll("shutdown");
+    expect(seen).toEqual([1]);
+    expect(contributions.schedules()).toEqual([]);
   });
 });
