@@ -253,7 +253,7 @@ describe("裝置 Token 認證與撤銷", () => {
     // 撤銷；既有連線應立刻被關閉。
     const revoked = await control.revoke(deviceId);
     expect(revoked).toMatchObject({ revoked: true, closedConnections: 1 });
-    await waitUntil(() => client.closed, 3000);
+    await waitUntil(() => client.closeCode !== null, 3000);
     expect(client.closeCode).toBe(1008);
 
     const again = await TestClient.connect(host.url);

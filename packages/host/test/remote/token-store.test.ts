@@ -203,7 +203,7 @@ describe("遠端裝置 Token 持久化", () => {
 
     const revoked = await fakeControl(first.host).revoke(paired.deviceId);
     expect(revoked).toMatchObject({ revoked: true, closedConnections: 1 });
-    await waitUntil(() => client.closed, 3000);
+    await waitUntil(() => client.closeCode !== null, 3000);
     expect(client.closeCode).toBe(1008);
     await first.stop();
 

@@ -869,7 +869,7 @@ describe("審查修正的回歸測試", () => {
     client.request("session.send_message", { sessionId, text: "觸發", delivery: "queue" });
     await waitUntil(() => failures.length > 0, 4000);
     expect(failures[0]?.startsWith("storage_io:")).toBe(true);
-    await waitUntil(() => client.closed, 4000);
+    await waitUntil(() => client.closeCode !== null, 4000);
     expect(client.closeCode).toBe(1011);
     expect(client.closeReason).toBe("storage_failure");
     expect(host.host.service.health().state).toBe("storage-failed");
@@ -887,7 +887,7 @@ describe("審查修正的回歸測試", () => {
     client.request("module.demo.emit", { data: { action: "emit", value: 1 } });
     await waitUntil(() => failures.length > 0, 4000);
     expect(failures[0]?.startsWith("storage_io:")).toBe(true);
-    await waitUntil(() => client.closed, 4000);
+    await waitUntil(() => client.closeCode !== null, 4000);
     expect(client.closeCode).toBe(1011);
     expect(client.closeReason).toBe("storage_failure");
   });
