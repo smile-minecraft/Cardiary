@@ -167,7 +167,8 @@ export class DistillationService {
     injected: InjectedModels,
   ): Promise<DistillationRunRecord> {
     const stats: DistillationStats = { ...EMPTY_STATS };
-    const items: DistillationSummaryItem[] = [];
+    // 續跑：中斷前完成的變更只留在單元紀錄，先重建回摘要，逐項復原才有對象。
+    const items: DistillationSummaryItem[] = this.#completedItems(run, stats);
     const adapters = injected.distiller ?? createModelAdapters(this.#options.models).distiller;
     const judge = injected.judge ?? createModelAdapters(this.#options.models).judge;
     const titler =
@@ -179,10 +180,9 @@ export class DistillationService {
       await this.#processCard(run, candidate, stats, items, adapters, judge, titler);
     }
 
-    // 步驟 5：冷封存所有成功處理的歸零卡。
-    const coldIds = candidates
-      .filter((card) => this.#processed(run, card.cardId))
-      .map((card) => card.cardId);
+    // 步驟 5：冷封存所有已封存的歸零卡；以 archive 標記為準，涵蓋中斷前
+    // 已完成、但還沒走到冷封存的卡。
+    const coldIds = this.#archivedCardIds(run);
     const coldChanged = this.#options.lifecycle.cold(coldIds);
     stats.cold = coldChanged;
     // 新寫的記憶卡要進索引，之後才搜得到、復原時才删得掉。
@@ -400,13 +400,6 @@ export class DistillationService {
     const cross = await this.#crossBatchMatch(run, hash);
     if (cross?.outputCardId !== null && cross?.outputCardId !== undefined) {
       stats.merged += 1;
-      items.push({
-        id: `itm_${run.runId}_${index}`,
-        action: "merged",
-        mergedInto: cross.outputCardId,
-        sources: [candidate.cardId],
-        recovery: "none",
-      });
       this.#options.runs.upsertItem({
         runId: run.runId,
         itemKey,
@@ -419,6 +412,15 @@ export class DistillationService {
         status: "done",
         detailJson: stableJson({ action: "merged", mergedInto: cross.outputCardId }),
       });
+      // 合併已定案：來源卡不再參與往後的提煉，跟新建卡的路徑一致。
+      this.#markArchiveDone(run, candidate.cardId);
+      items.push({
+        id: summaryItemId(run.runId, itemKey),
+        action: "merged",
+        mergedInto: cross.outputCardId,
+        sources: [candidate.cardId],
+        recovery: "none",
+      });
       return;
     }
 
@@ -428,13 +430,6 @@ export class DistillationService {
 
     if (verdict.action === "merge") {
       stats.merged += 1;
-      items.push({
-        id: `itm_${run.runId}_${index}`,
-        action: "merged",
-        mergedInto: verdict.mergedInto,
-        sources: [candidate.cardId],
-        recovery: "none",
-      });
       this.#options.runs.upsertItem({
         runId: run.runId,
         itemKey,
@@ -445,6 +440,15 @@ export class DistillationService {
         phase: "merge",
         status: "done",
         detailJson: stableJson({ action: "merge", mergedInto: verdict.mergedInto }),
+      });
+      // 合併已定案：來源卡不再參與往後的提煉，跟新建卡的路徑一致。
+      this.#markArchiveDone(run, candidate.cardId);
+      items.push({
+        id: summaryItemId(run.runId, itemKey),
+        action: "merged",
+        mergedInto: verdict.mergedInto,
+        sources: [candidate.cardId],
+        recovery: "none",
       });
       return;
     }
@@ -555,7 +559,7 @@ export class DistillationService {
       this.#options.lifecycle.markSuperseded(verdict.supersedes, outputCardId);
       stats.superseded += 1;
       items.push({
-        id: `itm_${run.runId}_${index}`,
+        id: summaryItemId(run.runId, itemKey),
         action: "superseded",
         cardId: outputCardId,
         supersedes: verdict.supersedes,
@@ -565,7 +569,7 @@ export class DistillationService {
     } else {
       stats.created += 1;
       items.push({
-        id: `itm_${run.runId}_${index}`,
+        id: summaryItemId(run.runId, itemKey),
         action: "created",
         cardId: outputCardId,
         sources: [candidate.cardId],
@@ -609,10 +613,96 @@ export class DistillationService {
     }));
   }
 
-  /** 該候選是否已有成功處理的 archive 標記。 */
-  #processed(run: DistillationRunRecord, cardId: string): boolean {
-    const item = this.#options.runs.findBatchItem(run.persona, run.runId, archiveKey(cardId));
-    return item?.status === "done";
+  /**
+   * 續跑時重建中斷前已完成的摘要項目。
+   *
+   * 摘要原本只存在通知裡，而通知要整輪結束才建立；中斷前完成的 created／
+   * superseded／merged／core-added 因此只留在單元紀錄。這裡把它們放回本次
+   * 摘要，逐項復原才有對象。已復原的單元不列；冷封存統一由 archive 標記在
+   * 結尾產生，避免同一張卡重複出現。
+   */
+  #completedItems(run: DistillationRunRecord, stats: DistillationStats): DistillationSummaryItem[] {
+    const items: DistillationSummaryItem[] = [];
+    const core = new Set(this.#options.core.list(run.persona).map((entry) => entry.cardId));
+    for (const record of this.#options.runs.listItems(run.runId)) {
+      if (record.status !== "done" || record.undone) continue;
+      if (record.phase === "merge") {
+        const item = this.#restoredMergeItem(run, record);
+        if (item === null) continue;
+        if (item.action === "created") stats.created += 1;
+        if (item.action === "superseded") stats.superseded += 1;
+        if (item.action === "merged") stats.merged += 1;
+        items.push(item);
+        continue;
+      }
+      if (record.phase !== "core" || record.outputCardId === null) continue;
+      // 核心組提議可能還沒成功（預算不足或當日已變動），以現況成員為準。
+      if (!core.has(record.outputCardId)) continue;
+      stats.coreAdded += 1;
+      items.push({
+        id: `core_${run.runId}_${record.outputCardId}`,
+        action: "core-added",
+        cardId: record.outputCardId,
+        recovery: "core-remove",
+      });
+    }
+    return items;
+  }
+
+  /** 把一筆完成的 merge 單元還原成摘要項目；detail 不完整就跳過。 */
+  #restoredMergeItem(
+    run: DistillationRunRecord,
+    record: StoredItemRecord,
+  ): DistillationSummaryItem | null {
+    if (record.outputCardId === null) return null;
+    const detail = safeParse(record.detailJson ?? "{}");
+    if (detail === null || typeof detail !== "object") return null;
+    const action = (detail as { readonly action?: unknown }).action;
+    const id = summaryItemId(run.runId, record.itemKey);
+    if (action === "create") {
+      return {
+        id,
+        action: "created",
+        cardId: record.outputCardId,
+        sources: [record.sourceCardId],
+        recovery: "delete-card",
+      };
+    }
+    if (action === "supersede") {
+      const supersedes = (detail as { readonly supersedes?: unknown }).supersedes;
+      if (typeof supersedes !== "string" || supersedes.length === 0) return null;
+      return {
+        id,
+        action: "superseded",
+        cardId: record.outputCardId,
+        supersedes,
+        sources: [record.sourceCardId],
+        recovery: "delete-card",
+      };
+    }
+    if (action === "merged" || action === "merge") {
+      const mergedInto = (detail as { readonly mergedInto?: unknown }).mergedInto;
+      if (typeof mergedInto !== "string" || mergedInto.length === 0) return null;
+      return {
+        id,
+        action: "merged",
+        mergedInto,
+        sources: [record.sourceCardId],
+        recovery: "none",
+      };
+    }
+    return null;
+  }
+
+  /** 這次 run 已封存的卡；含中斷前完成、還沒走到冷封存的。 */
+  #archivedCardIds(run: DistillationRunRecord): string[] {
+    const ids = new Set<string>();
+    for (const record of this.#options.runs.listItems(run.runId)) {
+      if (record.phase === "archive" && record.status === "done" && !record.undone) {
+        ids.add(record.sourceCardId);
+      }
+    }
+    return [...ids];
   }
 
   #markArchiveDone(run: DistillationRunRecord, cardId: string): void {
@@ -698,7 +788,12 @@ export class DistillationService {
     return 0;
   }
 
-  /** 步驟 7：產生一則摘要通知；重複呼叫同一 run 以 runId 去重（notification 內容冪等）。 */
+  /**
+   * 步驟 7：產生一則摘要通知。
+   *
+   * 續跑時摘要由同一份 run 紀錄重建，內容與中斷前一致；通知本身沒有去重，
+   * 同一 run 若在建立通知後才中斷，重跑會再建一則。
+   */
   async #notify(
     run: DistillationRunRecord,
     stats: DistillationStats,
@@ -735,6 +830,17 @@ export class DistillationService {
 
 function archiveKey(cardId: string): string {
   return `${cardId}:archive`;
+}
+
+/**
+ * 摘要項目的 id：同一 run 內帶上來源卡與項目序號，不同卡的同一個序號不會撞。
+ * 續跑重建時從 itemKey（`<cardId>:merge:<index>`）還原出同一個 id。
+ */
+function summaryItemId(runId: string, itemKey: string): string {
+  const marker = ":merge:";
+  const at = itemKey.lastIndexOf(marker);
+  if (at < 0) return `itm_${runId}_${itemKey}`;
+  return `itm_${runId}_${itemKey.slice(0, at)}_${itemKey.slice(at + marker.length)}`;
 }
 
 /** 儲存層的單元列映射成領域層的續跑紀錄（`detailJson` 留給呼叫端自己讀）。 */
