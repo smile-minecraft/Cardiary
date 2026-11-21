@@ -149,6 +149,8 @@ export class DealingService {
         await this.#cards.noteConversationLoad({
           conversationId: input.sessionId,
           cardId: card.cardId,
+          kind: "deal",
+          linkToConversation: false,
         });
       } catch (error) {
         this.#warn("記下發牌卡的載入紀錄失敗", {
