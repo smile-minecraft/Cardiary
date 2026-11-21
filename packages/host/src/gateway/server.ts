@@ -2754,12 +2754,7 @@ export class Gateway {
     }
     let result;
     try {
-      result = applyPermissionModeRequest(
-        permissions,
-        request.type,
-        request.payload,
-        this.#clock.now().getTime(),
-      );
+      result = applyPermissionModeRequest(permissions, request.type, request.payload);
     } catch (error) {
       if (error instanceof PermissionModeInputError) {
         throw new RequestFailure(permissionModeError(error));
@@ -2783,14 +2778,14 @@ export class Gateway {
     // 先撤銷全部允許，再中止回合：中止期間若有工具呼叫進到權限閘道，
     // 也不會被全部允許放行。
     const permissions = this.#options.agentPermissions?.();
-    const hadAllowAll = permissions?.allowAllFor(this.#clock.now().getTime()) != null;
+    const hadAllowAll = permissions?.allowAll() != null;
     this.#options.revokeAllowAll?.();
     if (permissions !== undefined && hadAllowAll) {
-      // 讓 Mac 的全部允許橫幅立刻消失。
+      // 讓 Mac 設定頁的全部允許狀態立刻更新。
       const stored = await this.streamLog.append({
         stream: "system",
         kind: "system.permissions.changed",
-        payload: permissionModesState(permissions, this.#clock.now().getTime()),
+        payload: permissionModesState(permissions),
         at: this.#clock.now().toISOString(),
       });
       this.#broadcast(stored);

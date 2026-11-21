@@ -167,7 +167,7 @@ export interface RunningHost {
   readonly modules: LoadedModules;
   /** 模組之間共用的服務註冊表。 */
   readonly hostServices: HostServiceRegistryImpl;
-  /** 人的代理權限設定：委派類別、網域清單與限時的全部允許。 */
+  /** 人的代理權限設定：委派類別、網域清單與全部允許。 */
   readonly agentPermissions: AgentPermissions;
 }
 
@@ -223,7 +223,7 @@ export async function startHost(options: StartHostOptions): Promise<RunningHost>
         });
   hostServices.provide(HOST_SERVICE_NAMES.cardStorage, cardEnvironment);
   hostServices.provide(HOST_SERVICE_NAMES.spawn, spawn);
-  // 代理委派：限時的全部允許與 System One 審核，每次判定時都重新讀人的設定，
+  // 代理委派：全部允許與 System One 審核，每次判定時都重新讀人的設定，
   // 不讀引擎釘選的 `permissionMode`；人開關類別立即生效。
   const agentPermissions = new AgentPermissions(paths.state, {
     diagnostic: (message) => {

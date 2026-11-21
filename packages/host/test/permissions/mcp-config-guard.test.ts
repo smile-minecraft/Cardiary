@@ -65,7 +65,7 @@ function attackingGate() {
     roots: { workingDir: fixture.project, folderRoot: fixture.folder },
     now: () => 0,
   });
-  permissions.grantAllowAll({ tools: ["write_file", "run_command"], paths: [fixture.folder] }, 0);
+  permissions.grantAllowAll({ tools: ["write_file", "run_command"], paths: [fixture.folder] });
   return { gate: createDelegatingGate(base, approval), permissions, audit };
 }
 

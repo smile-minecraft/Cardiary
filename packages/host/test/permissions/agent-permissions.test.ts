@@ -31,9 +31,9 @@ function setup() {
 describe("委派設定", () => {
   it("預設全部關閉，設定儲存後可重新讀取", () => {
     const { store, state } = setup();
-    expect(store.status("conversation", 0).categories).toEqual([]);
+    expect(store.status("conversation").categories).toEqual([]);
     store.setCategory("read-only-files", true, ["/allowed"]);
-    expect(new AgentPermissions(state).status("conversation", 0).categories).toEqual([
+    expect(new AgentPermissions(state).status("conversation").categories).toEqual([
       { category: "read-only-files", paths: ["/allowed"] },
     ]);
   });
@@ -42,7 +42,7 @@ describe("委派設定", () => {
     const { state, diagnostics } = setup();
     writeFileSync(join(state, "agent-permissions.json"), "{broken");
     const store = new AgentPermissions(state, { diagnostic: (text) => diagnostics.push(text) });
-    expect(store.status("conversation", 0).categories).toEqual([]);
+    expect(store.status("conversation").categories).toEqual([]);
     expect(diagnostics.length).toBe(1);
     store.setCategory("read-only-files", true, ["/allowed"]);
     expect(() =>
@@ -50,22 +50,74 @@ describe("委派設定", () => {
     ).not.toThrow();
   });
 
-  it("全部允許預設 15 分鐘，到期失效，上限 60 分鐘", () => {
+  it("全部允許沒有期限，重新載入後仍在，撤銷後才消失", () => {
+    const { store, state } = setup();
+    store.grantAllowAll({ tools: ["read_file"], paths: ["/allowed"] });
+    expect(store.status("conversation").allowAll).toEqual({
+      tools: ["read_file"],
+      paths: ["/allowed"],
+      domains: [],
+    });
+    const restarted = new AgentPermissions(state);
+    expect(restarted.allowAll()?.paths).toEqual(["/allowed"]);
+    restarted.revokeAllowAll();
+    expect(new AgentPermissions(state).allowAll()).toBeNull();
+  });
+
+  it("舊版帶 expiresAt 的限時授權在載入時撤銷，其他設定保留", () => {
+    const { state, diagnostics } = setup();
+    writeFileSync(
+      join(state, "agent-permissions.json"),
+      JSON.stringify({
+        version: 1,
+        categories: [{ category: "create-card", paths: [] }],
+        allowedDomains: ["example.com"],
+        allowAll: { tools: ["write_file"], paths: ["/allowed"], domains: [], expiresAt: 1 },
+        counts: {},
+      }),
+    );
+    const store = new AgentPermissions(state, { diagnostic: (text) => diagnostics.push(text) });
+    expect(store.allowAll()).toBeNull();
+    expect(store.status("conversation").categories).toEqual([
+      { category: "create-card", paths: [] },
+    ]);
+    expect(store.allowedDomains()).toEqual(["example.com"]);
+    expect(diagnostics.length).toBe(1);
+    // 撤銷寫回正本：再次載入不會又跑一次，也不會讓限時授權變成無期限。
+    const reloaded = JSON.parse(readFileSync(join(state, "agent-permissions.json"), "utf8"));
+    expect(reloaded.allowAll).toBeNull();
+  });
+
+  it("全部允許含不認得的欄位視為損毀，退回全部關閉", () => {
+    const { state, diagnostics } = setup();
+    writeFileSync(
+      join(state, "agent-permissions.json"),
+      JSON.stringify({
+        version: 1,
+        categories: [{ category: "create-card", paths: [] }],
+        allowedDomains: [],
+        allowAll: { tools: ["write_file"], paths: ["/allowed"], domains: [], scope: "all" },
+        counts: {},
+      }),
+    );
+    const store = new AgentPermissions(state, { diagnostic: (text) => diagnostics.push(text) });
+    expect(store.allowAll()).toBeNull();
+    expect(store.status("conversation").categories).toEqual([]);
+    expect(diagnostics.length).toBe(1);
+  });
+
+  it("工具不可為空", () => {
     const { store } = setup();
-    store.grantAllowAll({ tools: ["read_file"], paths: ["/allowed"] }, 0);
-    expect(store.status("conversation", 899_999).allowAll?.expiresAt).toBe(900_000);
-    expect(store.status("conversation", 900_000).allowAll).toBeNull();
-    expect(() =>
-      store.grantAllowAll({ tools: ["read_file"], paths: ["/allowed"] }, 0, 61),
-    ).toThrow();
+    expect(() => store.grantAllowAll({ tools: [], paths: ["/allowed"] })).toThrow();
+    expect(store.allowAll()).toBeNull();
   });
 
   it("每場對話的次數分別保存，達 20 次後不能再預留", () => {
     const { store, state } = setup();
     for (let i = 0; i < 20; i += 1) expect(store.reserve("a")).toBe(true);
     expect(store.reserve("a")).toBe(false);
-    expect(new AgentPermissions(state).status("a", 0).remaining).toBe(0);
-    expect(store.status("b", 0).remaining).toBe(20);
+    expect(new AgentPermissions(state).status("a").remaining).toBe(0);
+    expect(store.status("b").remaining).toBe(20);
   });
 });
 
@@ -80,12 +132,8 @@ describe("授權路徑存成真實路徑", () => {
       const state = join(base, "state");
       mkdirSync(state);
       const permissions = new AgentPermissions(state);
-      permissions.grantAllowAll(
-        { tools: ["write_file"], paths: [link, join(link, "later")] },
-        0,
-        15,
-      );
-      expect(permissions.allowAllFor(0)?.paths).toEqual([real, join(real, "later")]);
+      permissions.grantAllowAll({ tools: ["write_file"], paths: [link, join(link, "later")] });
+      expect(permissions.allowAll()?.paths).toEqual([real, join(real, "later")]);
       permissions.setCategory("read-only-files", true, [link]);
       expect(permissions.allowsCategory("read-only-files", join(real, "notes.md"))).toBe(true);
     } finally {

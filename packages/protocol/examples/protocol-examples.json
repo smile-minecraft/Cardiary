@@ -2101,9 +2101,7 @@
         }
       ],
       "availableCategories": ["read-only-files", "git-readonly", "create-card", "own-notification"],
-      "allowedDomains": ["docs.example.com"],
-      "defaultAllowAllMinutes": 15,
-      "maxAllowAllMinutes": 60
+      "allowedDomains": ["docs.example.com"]
     }
   },
   "systemPermissionsSetCategoryRequest": {
@@ -2135,9 +2133,7 @@
         }
       ],
       "availableCategories": ["read-only-files", "git-readonly", "create-card", "own-notification"],
-      "allowedDomains": ["docs.example.com"],
-      "defaultAllowAllMinutes": 15,
-      "maxAllowAllMinutes": 60
+      "allowedDomains": ["docs.example.com"]
     }
   },
   "systemPermissionsSetDomainsRequest": {
@@ -2167,9 +2163,7 @@
         }
       ],
       "availableCategories": ["read-only-files", "git-readonly", "create-card", "own-notification"],
-      "allowedDomains": ["docs.example.com"],
-      "defaultAllowAllMinutes": 15,
-      "maxAllowAllMinutes": 60
+      "allowedDomains": ["docs.example.com"]
     }
   },
   "systemPermissionsGrantAllowAllRequest": {
@@ -2181,7 +2175,6 @@
       "tools": ["write_file"],
       "paths": ["/Users/me/Projects/notes"],
       "domains": [],
-      "minutes": 15,
       "clientRequestId": "perm_01J8Z3K4Q5R6S7T8V9W0X1Y2Z3"
     }
   },
@@ -2206,11 +2199,8 @@
       "allowAll": {
         "tools": ["write_file"],
         "paths": ["/Users/me/Projects/notes"],
-        "domains": [],
-        "expiresAt": "2026-11-15T02:20:00.000Z"
-      },
-      "defaultAllowAllMinutes": 15,
-      "maxAllowAllMinutes": 60
+        "domains": []
+      }
     }
   },
   "systemPermissionsRevokeAllowAllRequest": {
@@ -2239,9 +2229,7 @@
         }
       ],
       "availableCategories": ["read-only-files", "git-readonly", "create-card", "own-notification"],
-      "allowedDomains": ["docs.example.com"],
-      "defaultAllowAllMinutes": 15,
-      "maxAllowAllMinutes": 60
+      "allowedDomains": ["docs.example.com"]
     }
   },
   "systemPermissionsChangedEvent": {
@@ -2267,11 +2255,8 @@
       "allowAll": {
         "tools": ["write_file"],
         "paths": ["/Users/me/Projects/notes"],
-        "domains": [],
-        "expiresAt": "2026-11-15T02:20:00.000Z"
-      },
-      "defaultAllowAllMinutes": 15,
-      "maxAllowAllMinutes": 60
+        "domains": []
+      }
     }
   },
   "systemModulesGetRequest": {

@@ -881,12 +881,24 @@ export class CardLibrary {
   async noteConversationLoad(input: {
     readonly conversationId: string;
     readonly cardId: string;
+    readonly kind?: "search" | "deal";
+    readonly linkToConversation?: boolean;
   }): Promise<void> {
     const id = normalizeCardId(input.cardId);
-    if (this.#index().get(id) === undefined) {
+    const known = this.#index().get(id);
+    if (known === undefined) {
       throw new ProtocolHandlerError("not_found", `找不到卡片 ${id}。`, { cardId: id });
     }
-    this.#state.recordLoad(input.conversationId, id, "search", true);
+    const kind = input.kind ?? "search";
+    const linkToConversation = input.linkToConversation ?? true;
+    if (linkToConversation) {
+      this.#state.recordLoad(input.conversationId, id, kind, true);
+      return;
+    }
+    // 開局發牌只在第 4 層載入既有記憶，不寫入 conversation_cards 以免刪除新對話時誤刪既有卡；
+    // 同時以 conversation_id = NULL 寫入 card_loads 並保鮮回滿，避免被誤判成孤兒卡而歸零。
+    this.#state.recordLoad(null, id, kind, true);
+    this.#state.refresh(id, known.persona);
   }
 
   /** 索引列的摘要；協定與工具共用。 */

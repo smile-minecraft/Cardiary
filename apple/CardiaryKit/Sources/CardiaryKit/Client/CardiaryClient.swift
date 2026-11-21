@@ -293,12 +293,11 @@ public actor CardiaryClient {
         tools: [String],
         paths: [String],
         domains: [String],
-        minutes: Int,
         clientRequestId: String
     ) async throws -> PermissionModesState {
         guard let connection else { throw CardiaryClientError.connectionClosed }
         return try await connection.grantAllowAll(
-            tools: tools, paths: paths, domains: domains, minutes: minutes,
+            tools: tools, paths: paths, domains: domains,
             clientRequestId: clientRequestId
         )
     }

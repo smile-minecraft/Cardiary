@@ -64,8 +64,8 @@ private struct AllowAllSection: View {
                 .foregroundStyle(Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if model.allowAllExpiry() != nil {
-                AllowAllBanner(model: model, showsScope: true)
+            if let grant = model.activeAllowAll {
+                AllowAllActiveCard(model: model, grant: grant)
             } else {
                 HStack(spacing: DesignTokens.spacingM) {
                     ForEach(PermissionModesModel.allowAllTools, id: \.self) { tool in
@@ -86,17 +86,6 @@ private struct AllowAllSection: View {
                     onAdd: { path in model.allowAllFolders.append(path) },
                     onRemove: { path in model.allowAllFolders.removeAll { $0 == path } }
                 )
-                Stepper(
-                    value: $model.allowAllMinutes,
-                    in: 1...(model.state?.maxAllowAllMinutes ?? 60),
-                    step: 5
-                ) {
-                    Text(PermissionL10n.format(.permAllowAllMinutes, value: "\(model.allowAllMinutes)"))
-                        .font(.cardiary(.callout, weight: .regular, monospacedDigits: true))
-                }
-                .fixedSize()
-                // 步進器在 AX 上是獨立元素，名稱要自己帶上，不然只唸出數字。
-                .accessibilityLabel(Text(PermissionL10n.format(.permAllowAllMinutes, value: "\(model.allowAllMinutes)")))
                 Button(PermissionL10n.text(.permAllowAllStart)) {
                     Task { await model.startAllowAll() }
                 }
@@ -224,59 +213,41 @@ private struct FolderList: View {
     }
 }
 
-/// 全部允許期間的橫幅：主視窗頂端與設定頁都用它，每秒更新倒數，可以一鍵結束。
-struct AllowAllBanner: View {
+/// 全部允許已開啟時的狀態卡：僅在設定頁顯示目前狀態、作用範圍與一鍵結束按鈕。
+private struct AllowAllActiveCard: View {
     @ObservedObject var model: PermissionModesModel
-    var showsScope = false
-    /// 放在主視窗頂端時，自己加上外距；沒開全部允許時不佔任何空間。
-    var insetInWindow = false
+    let grant: AllowAllGrantState
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            if let expiry = model.allowAllExpiry(now: context.date) {
-                VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
-                    HStack(spacing: DesignTokens.spacingS) {
-                        Image(systemName: "exclamationmark.shield.fill")
-                            .foregroundStyle(Palette.redInk)
-                        Text(PermissionL10n.format(
-                            .permAllowAllActive,
-                            value: Self.remaining(until: expiry, now: context.date)
-                        ))
-                        .font(.cardiary(.callout, weight: .semibold, monospacedDigits: true))
-                        Spacer()
-                        Button(PermissionL10n.text(.permAllowAllEnd)) {
-                            Task { await model.endAllowAll() }
-                        }
-                        .buttonStyle(ThemeButtonStyle(kind: .danger))
-                        .controlSize(.small)
-                        .disabled(model.isWorking)
-                    }
-                    if showsScope, let grant = model.state?.allowAll {
-                        Text(PermissionL10n.format(
-                            .permAllowAllScope,
-                            value: (grant.tools + grant.paths + grant.domains)
-                                .joined(separator: AppL10n.language == .zhHant ? "、" : ", ")
-                        ))
-                        .font(.cardiary(.caption))
-                        .foregroundStyle(Palette.inkSecondary)
-                        .lineLimit(2)
-                    }
+        VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
+            HStack(spacing: DesignTokens.spacingS) {
+                Image(systemName: "checkmark.shield.fill")
+                    .foregroundStyle(Palette.redInk)
+                Text(PermissionL10n.text(.permAllowAllActive))
+                    .font(.cardiary(.callout, weight: .semibold))
+                Spacer()
+                Button(PermissionL10n.text(.permAllowAllEnd)) {
+                    Task { await model.endAllowAll() }
                 }
-                .padding(.horizontal, DesignTokens.spacingM)
-                .padding(.vertical, DesignTokens.spacingS)
-                .background(
-                    Palette.redSoft,
-                    in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous)
-                )
-                .accessibilityElement(children: .combine)
-                .padding(.horizontal, insetInWindow ? DesignTokens.spacingM : 0)
-                .padding(.top, insetInWindow ? DesignTokens.spacingS : 0)
+                .buttonStyle(ThemeButtonStyle(kind: .danger))
+                .controlSize(.small)
+                .disabled(model.isWorking)
             }
+            Text(PermissionL10n.format(
+                .permAllowAllScope,
+                value: (grant.tools + grant.paths + grant.domains)
+                    .joined(separator: AppL10n.language == .zhHant ? "、" : ", ")
+            ))
+            .font(.cardiary(.caption))
+            .foregroundStyle(Palette.inkSecondary)
+            .lineLimit(2)
         }
-    }
-
-    static func remaining(until expiry: Date, now: Date) -> String {
-        let seconds = max(0, Int(expiry.timeIntervalSince(now).rounded(.up)))
-        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+        .padding(.horizontal, DesignTokens.spacingM)
+        .padding(.vertical, DesignTokens.spacingS)
+        .background(
+            Palette.redSoft,
+            in: RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous)
+        )
+        .accessibilityElement(children: .combine)
     }
 }

@@ -246,6 +246,84 @@ describe("第 13 章驗收：M2 資料夾（向量索引、排程與通知）", 
   );
 
   it(
+    "開局發牌載入既有卡後刪除新對話，不連帶刪除該既有卡",
+    async () => {
+      const { folder } = await isolatedFolder();
+      const booted = await boot(folder, true);
+      await allowVectors(booted.client);
+
+      const existingId = await createCard(
+        booted.client,
+        "既有長期記憶",
+        "這張卡片記錄使用者習慣早起喝黑咖啡，應保留不隨新對話刪除。",
+      );
+      await eventually(() => vectorRows(folder.path, existingId) > 0);
+
+      const created = await request<{ session: { id: string } }>(booted.client, "session.create", {
+        title: "發牌後刪除的新對話",
+        clientRequestId: requestId("session-deal"),
+      });
+      const sessionId = created.session.id;
+      await request(booted.client, "session.subscribe", { sessionId });
+      await request(booted.client, "session.send_message", {
+        sessionId,
+        text: "早起喝黑咖啡的習慣",
+        delivery: "queue",
+      });
+      await booted.client.waitForEvent("stream.message_completed", 30_000);
+
+      const contextPayload = await request<{
+        context: { entries: Array<{ layer: string; cardId?: string }> };
+      }>(booted.client, "context.get", { sessionId });
+      const openingIds = contextPayload.context.entries
+        .filter((entry) => entry.layer === "opening-memory" && entry.cardId !== undefined)
+        .map((entry) => entry.cardId);
+      expect(openingIds).toContain(existingId);
+
+      // 驗證僅開局發牌時，預覽的專屬卡片數為 0。
+      const previewBeforeRef = await request<{ exclusiveCards: number }>(
+        booted.client,
+        "session.deletion_preview",
+        { sessionId },
+      );
+      expect(previewBeforeRef.exclusiveCards).toBe(0);
+
+      // 再建立一張確實在此對話被讀取的專屬卡，確認刪除仍會帶走真正屬於這場對話的卡，但不碰開局卡。
+      const exclusiveId = await createCard(
+        booted.client,
+        "這場對話的專屬筆記",
+        "只在這場對話裡建立與讀取。",
+      );
+      await request(booted.client, "card.get", { cardId: exclusiveId, sessionId });
+      await eventually(() => vectorRows(folder.path, exclusiveId) > 0);
+
+      const preview = await request<{ exclusiveCards: number }>(
+        booted.client,
+        "session.deletion_preview",
+        { sessionId },
+      );
+      expect(preview.exclusiveCards).toBe(1);
+
+      const deleted = await request<{ deletedCards: number }>(booted.client, "session.delete", {
+        sessionId,
+        clientRequestId: requestId("delete-deal"),
+      });
+      expect(deleted.deletedCards).toBe(1);
+      await eventually(() => vectorRows(folder.path, exclusiveId) === 0);
+
+      const kept = await request<{
+        card: { cardId: string; title: string; freshness: number };
+      }>(booted.client, "card.get", { cardId: existingId });
+      expect(kept.card.cardId).toBe(existingId);
+      expect(kept.card.title).toBe("既有長期記憶");
+      expect(kept.card.freshness).toBe(100);
+      expect(vectorRows(folder.path, existingId)).toBeGreaterThan(0);
+      await shutdown(booted);
+    },
+    TEST_TIMEOUT,
+  );
+
+  it(
     "排程跑完產生通知；刪掉整個 cache/ 後重啟，卡片、排程與通知都在，向量索引重建；tmp/ 為空、資料夾外零新檔",
     async () => {
       const { root, folder } = await isolatedFolder();

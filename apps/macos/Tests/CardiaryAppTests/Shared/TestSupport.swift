@@ -1270,15 +1270,13 @@ extension FakeCardiaryService: PermissionModesService {
         tools: [String],
         paths: [String],
         domains: [String],
-        minutes: Int,
         clientRequestId: String
     ) async throws -> PermissionModesState {
-        permissionCalls.append("grant:\(tools.joined(separator: ",")):\(paths.joined(separator: ",")):\(minutes)")
-        let expiry = ISO8601DateFormatter().string(from: Date().addingTimeInterval(TimeInterval(minutes * 60)))
+        permissionCalls.append("grant:\(tools.joined(separator: ",")):\(paths.joined(separator: ","))")
         permissionModes = Self.modes(
             categories: permissionModes.categories,
             domains: permissionModes.allowedDomains,
-            allowAll: AllowAllGrantState(tools: tools, paths: paths, domains: domains, expiresAt: expiry)
+            allowAll: AllowAllGrantState(tools: tools, paths: paths, domains: domains)
         )
         return permissionModes
     }
@@ -1302,9 +1300,7 @@ extension FakeCardiaryService: PermissionModesService {
             categories: categories,
             availableCategories: DelegatedCategory.allCases,
             allowedDomains: domains,
-            allowAll: allowAll,
-            defaultAllowAllMinutes: 15,
-            maxAllowAllMinutes: 60
+            allowAll: allowAll
         )
     }
 }

@@ -837,6 +837,44 @@ describe("卡片庫", () => {
     expect(Number(loads?.n)).toBe(1);
   }, 20_000);
 
+  it("開局發牌載入既有卡（linkToConversation=false）不綁對話專屬引用，會回滿 100 且不變孤兒", async () => {
+    const fixture = await makeFixture();
+    const { library, storage } = fixture;
+    const card = await library.create({
+      kind: "memory",
+      title: "既有記憶",
+      body: "原本已存在\n",
+      allowSystemKinds: true,
+    });
+
+    storage.state.run(
+      "UPDATE card_state SET freshness = 20, freshness_at = ? WHERE card_id = ?",
+      new Date(Date.now() - 30 * 86_400_000).toISOString(),
+      card.cardId,
+    );
+    expect(library.freshnessOf(card.cardId)).toBeLessThan(20);
+
+    await library.noteConversationLoad({
+      conversationId: "01CONVERSATION000000000000BB",
+      cardId: card.cardId,
+      kind: "deal",
+      linkToConversation: false,
+    });
+
+    expect(library.freshnessOf(card.cardId)).toBe(100);
+    const refs = storage.state.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM conversation_cards WHERE conversation_id = ? AND card_id = ?",
+      "01CONVERSATION000000000000BB",
+      card.cardId,
+    );
+    expect(Number(refs?.n)).toBe(0);
+    const dealLoad = storage.state.get<{ kind: string; conversation_id: string | null }>(
+      "SELECT kind, conversation_id FROM card_loads WHERE card_id = ? AND counts_as_load = 1",
+      card.cardId,
+    );
+    expect(dealLoad).toEqual({ kind: "deal", conversation_id: null });
+  }, 20_000);
+
   it("不重啟、把時間推進，新鮮度會隨讀取時間下降；卡片檔位元組不變", async () => {
     const clock = { now: new Date("2026-01-01T00:00:00.000Z") };
     const fixture = await makeFixture(clock);

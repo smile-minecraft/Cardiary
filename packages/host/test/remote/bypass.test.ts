@@ -152,7 +152,7 @@ describe("遠端存取的繞過嘗試", () => {
   );
   it.each([
     ["system.permissions.get", {}],
-    ["system.permissions.grant_allow_all", { tools: ["write_file"], paths: ["/tmp"], minutes: 60 }],
+    ["system.permissions.grant_allow_all", { tools: ["write_file"], paths: ["/tmp"] }],
     ["system.permissions.set_category", { category: "create-card", enabled: true, paths: [] }],
     ["system.permissions.set_domains", { domains: ["example.com"] }],
     ["system.permissions.revoke_allow_all", {}],
@@ -167,8 +167,7 @@ describe("遠端存取的繞過嘗試", () => {
     expect(reply.code).toBe("permission_denied");
     expect((reply.details as { reason: string }).reason).toBe("local_only");
     await client.close();
-    const now = Date.now();
-    expect(host.host.agentPermissions.allowAllFor(now)).toBeNull();
-    expect(host.host.agentPermissions.status("", now).categories).toEqual([]);
+    expect(host.host.agentPermissions.allowAll()).toBeNull();
+    expect(host.host.agentPermissions.status("").categories).toEqual([]);
   });
 });

@@ -3289,7 +3289,7 @@
       "title": "AllowAllGrantState",
       "type": "object",
       "additionalProperties": false,
-      "required": ["tools", "paths", "domains", "expiresAt"],
+      "required": ["tools", "paths", "domains"],
       "properties": {
         "tools": {
           "type": "array",
@@ -3315,25 +3315,15 @@
             "description": "網域規則。"
           },
           "description": "放行的網域範圍。"
-        },
-        "expiresAt": {
-          "type": "string",
-          "description": "到期時間，RFC 3339；到期自動失效。",
-          "format": "date-time"
         }
-      }
+      },
+      "description": "全部允許的範圍；沒有期限，重啟後保留，直到人撤銷或緊急全部暫停。"
     },
     "PermissionModesState": {
       "title": "PermissionModesState",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "categories",
-        "availableCategories",
-        "allowedDomains",
-        "defaultAllowAllMinutes",
-        "maxAllowAllMinutes"
-      ],
+      "required": ["categories", "availableCategories", "allowedDomains"],
       "properties": {
         "categories": {
           "type": "array",
@@ -3359,17 +3349,9 @@
         },
         "allowAll": {
           "$ref": "#/$defs/AllowAllGrantState"
-        },
-        "defaultAllowAllMinutes": {
-          "type": "integer",
-          "description": "全部允許的預設分鐘數。"
-        },
-        "maxAllowAllMinutes": {
-          "type": "integer",
-          "description": "全部允許的上限分鐘數。"
         }
       },
-      "description": "目前的權限模式；沒有 allowAll 代表全部允許沒有開啟或已到期。"
+      "description": "目前的權限模式；沒有 allowAll 代表全部允許沒有開啟或已撤銷。"
     },
     "SystemPermissionsGetRequestPayload": {
       "title": "SystemPermissionsGetRequestPayload",
@@ -3455,11 +3437,6 @@
             "description": "網域規則。"
           },
           "description": "放行的網域範圍。"
-        },
-        "minutes": {
-          "type": "integer",
-          "description": "期限分鐘數；省略時用預設值，超過上限被拒。",
-          "minimum": 1
         },
         "clientRequestId": {
           "type": "string",
@@ -7478,7 +7455,7 @@
           "$ref": "#/$defs/SystemPermissionsGrantAllowAllRequestPayload"
         }
       },
-      "description": "開啟限時的全部允許。"
+      "description": "開啟全部允許（無期限，重啟保留，直到撤銷或緊急全部暫停）。"
     },
     "SystemPermissionsGrantAllowAllResponse": {
       "title": "SystemPermissionsGrantAllowAllResponse",

@@ -225,19 +225,21 @@ describe("System One 的機率判定", () => {
 });
 
 describe("全部允許模式", () => {
-  it("到期自動失效", async () => {
+  it("沒有期限：時間過了很久仍放行，撤銷後才回到詢問", async () => {
     const fixture = setup();
-    fixture.permissions.grantAllowAll({ tools: ["read_file"], paths: [fixture.project] }, 0);
+    fixture.permissions.grantAllowAll({ tools: ["read_file"], paths: [fixture.project] });
     const read = () => fixture.gate.evaluate(fixture.request("read_file", { path: "notes.md" }));
     fixture.setNow(899_999);
     expect(await read()).toEqual({ kind: "allow" });
-    fixture.setNow(900_000);
+    fixture.setNow(365 * 24 * 60 * 60_000);
+    expect(await read()).toEqual({ kind: "allow" });
+    fixture.permissions.revokeAllowAll();
     expect((await read()).kind).toBe("ask-human");
   });
 
   it("工具或路徑在範圍外不生效", async () => {
     const fixture = setup();
-    fixture.permissions.grantAllowAll({ tools: ["read_file"], paths: [fixture.project] }, 0);
+    fixture.permissions.grantAllowAll({ tools: ["read_file"], paths: [fixture.project] });
     expect(
       (
         await fixture.gate.evaluate(
@@ -252,13 +254,10 @@ describe("全部允許模式", () => {
 
   it("全部允許也不涵蓋禁止項：非唯讀 shell、設定、MCP、外部代理", async () => {
     const fixture = setup();
-    fixture.permissions.grantAllowAll(
-      {
-        tools: ["run_command", "settings_change", "mcp_call", "external_agent"],
-        paths: [fixture.project],
-      },
-      0,
-    );
+    fixture.permissions.grantAllowAll({
+      tools: ["run_command", "settings_change", "mcp_call", "external_agent"],
+      paths: [fixture.project],
+    });
     const cases: ReadonlyArray<[string, unknown]> = [
       ["run_command", { command: "rm -rf cards", cwd: fixture.project }],
       ["settings_change", { key: "allowlist", level: "approval" }],
@@ -274,7 +273,7 @@ describe("全部允許模式", () => {
 
   it("全部允許也不涵蓋僅限人類的狀態檔：MCP 設定、狀態庫、資料夾設定", async () => {
     const fixture = setup();
-    fixture.permissions.grantAllowAll({ tools: ["write_file"], paths: [fixture.project] }, 0);
+    fixture.permissions.grantAllowAll({ tools: ["write_file"], paths: [fixture.project] });
     // 同一份授權對一般檔案有效，證明放行不是因為授權根本沒生效。
     expect(
       (
@@ -297,7 +296,7 @@ describe("全部允許模式", () => {
 
   it("只保護大小寫變體卷上指向同一檔案的 MCP 設定路徑", async () => {
     const fixture = setup();
-    fixture.permissions.grantAllowAll({ tools: ["write_file"], paths: [fixture.project] }, 0);
+    fixture.permissions.grantAllowAll({ tools: ["write_file"], paths: [fixture.project] });
     const sensitivity = detectCaseSensitivity(fixture.project);
     const expected = sensitivity === "case-sensitive" ? "allow" : "ask-human";
 
@@ -353,7 +352,7 @@ describe("稽核與損毀復原", () => {
     const recovered = new AgentPermissions(fixture.state, {
       diagnostic: (text) => fixture.diagnostics.push(text),
     });
-    expect(recovered.status("c1", 0).categories).toEqual([]);
+    expect(recovered.status("c1").categories).toEqual([]);
     expect(fixture.diagnostics.length).toBeGreaterThan(0);
     const approval = new DelegatedApproval({
       permissions: recovered,

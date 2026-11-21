@@ -63,7 +63,6 @@ async function grantAllowAll(
   await reply(client, "system.permissions.grant_allow_all", {
     tools,
     paths,
-    minutes: 30,
     clientRequestId: `grant-${Math.random()}`,
   });
 }

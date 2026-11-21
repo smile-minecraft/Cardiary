@@ -4,7 +4,7 @@
  * 順序固定：
  *
  * 1. 硬規則的 `deny` 在別的地方就回掉了，不會進這裡；`allow` 也不需要委派。
- * 2. 限時的全部允許先確認：工具命中、路徑或網域命中、沒有過期，才放行。
+ * 2. 全部允許先確認：工具命中、路徑或網域命中，才放行（沒有期限，人撤銷或緊急暫停才結束）。
  * 3. 其餘動作走 System One：先看是不是可委派類別、人有沒有開、路徑在不在
  *    授權範圍、這場對話的 20 次用完沒有，最後才問模型。
  *
@@ -163,8 +163,8 @@ export class DelegatedApproval {
       return verdict;
     }
 
-    const { permissions, audit, roots, now } = this.#options;
-    const grant = permissions.allowAllFor(now());
+    const { permissions, audit, roots } = this.#options;
+    const grant = permissions.allowAll();
     if (grant !== null && allowAllCovers(grant, action, request, permissions, this.#options)) {
       audit.append({
         conversationId: request.conversationId,

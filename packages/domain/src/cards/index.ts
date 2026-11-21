@@ -134,10 +134,12 @@ export interface CardService {
     readonly patch: CardPatch;
   }): Promise<Card>;
   delete(cardId: CardId): Promise<{ readonly deletedAssets: number }>;
-  /** 讀取卡片時記下對話引用；`countsAsLoad` 由呼叫端決定。 */
+  /** 讀取卡片時記下對話引用；開局發牌可設 `linkToConversation: false` 只保鮮不綁專屬引用。 */
   noteConversationLoad(input: {
     readonly conversationId: string;
     readonly cardId: CardId;
+    readonly kind?: "search" | "deal";
+    readonly linkToConversation?: boolean;
   }): Promise<void>;
 }
 

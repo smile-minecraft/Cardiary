@@ -22,6 +22,7 @@ import { CONTROL_PROTOCOL } from "./control/frames.js";
 import type { ProtocolSink } from "./control/stdoutGuard.js";
 import type { FakeModelStep } from "@cardiary/engine-fake";
 import { StderrLogger } from "./logging.js";
+import { EXIT_MEMORY_LIMIT, MemoryWatchdog, memoryLimitConfig } from "./memory-watchdog.js";
 import { generateToken, isValidToken } from "./tokens.js";
 import { PROTOCOL_VERSION } from "./version.js";
 
@@ -419,7 +420,9 @@ async function runIndependent(
     clientToken,
   };
   await sink.writeLine(JSON.stringify(ready));
+  const watchdog = startMemoryWatchdog(host, sink, logger);
   const stop = (signal: string): void => {
+    watchdog.stop();
     void host.service.abort(signal).then(async () => {
       await sink.flush();
       process.exit(0);
@@ -428,6 +431,38 @@ async function runIndependent(
   process.once("SIGTERM", () => stop("sigterm"));
   process.once("SIGINT", () => stop("sigint"));
   return new Promise<number>(() => undefined);
+}
+
+/**
+ * 啟動記憶體上限監控（規格第 13 章）：RSS 超過上限就走和 SIGTERM 相同的乾淨關閉，
+ * 再以 `EXIT_MEMORY_LIMIT`（75）退出，讓殼知道這是預期的重啟而不是當機。
+ */
+function startMemoryWatchdog(
+  host: RunningHost,
+  sink: ProtocolSink,
+  logger: StderrLogger,
+): MemoryWatchdog {
+  const config = memoryLimitConfig();
+  if (config.warning !== undefined) logger.warn(config.warning);
+  const watchdog = new MemoryWatchdog({
+    limitBytes: config.limitBytes,
+    intervalMs: config.intervalMs,
+    onExceeded: (rssBytes, limitBytes) => {
+      logger.warn("主機記憶體超過上限，乾淨關閉後以結束碼 75 退出，由殼重啟", {
+        rssMb: Math.round(rssBytes / (1024 * 1024)),
+        limitMb: Math.round(limitBytes / (1024 * 1024)),
+      });
+      void host.service
+        .abort("memory_limit")
+        .catch(() => undefined)
+        .then(async () => {
+          await sink.flush();
+          process.exit(EXIT_MEMORY_LIMIT);
+        });
+    },
+  });
+  watchdog.start();
+  return watchdog;
 }
 
 async function runControl(
@@ -573,7 +608,9 @@ async function runControl(
     input.destroy();
     return 2;
   }
+  const watchdog = startMemoryWatchdog(host, sink, logger);
   const stop = (signal: string): void => {
+    watchdog.stop();
     void host.service.abort(signal).then(async () => {
       await sink.flush();
       process.exit(0);

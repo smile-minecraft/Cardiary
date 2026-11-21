@@ -14,7 +14,7 @@ import { AgentPermissions } from "../../src/permissions/agent-permissions.js";
 /**
  * `system.permissions.*` 的處理邏輯（規格第 11 章「M5 權限模式裁決」）。
  *
- * 契約測試控制不了主機時鐘，到期後的讀取在這裡用指定的 `now` 驗。只有本機
+ * 全部允許沒有期限：開啟後重啟保留，直到人撤銷或緊急全部暫停。只有本機
  * client 連線能進到這裡：遠端裝置被拒的負面測試在 `test/remote/bypass.test.ts`，
  * 代理路徑的負面測試在 `contract-tests/permissions/agent-paths.test.ts`。
  */
@@ -23,9 +23,6 @@ const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-
-const T0 = Date.parse("2026-01-01T00:00:00.000Z");
-const MINUTE = 60_000;
 
 function setup() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cardiary-permission-modes-")));
@@ -42,13 +39,11 @@ function setup() {
   return { root, permissions, read };
 }
 
-function grant(permissions: AgentPermissions, root: string, minutes?: number) {
-  return applyPermissionModeRequest(
-    permissions,
-    "system.permissions.grant_allow_all",
-    { tools: ["write_file"], paths: [root], ...(minutes === undefined ? {} : { minutes }) },
-    T0,
-  );
+function grant(permissions: AgentPermissions, root: string, tools: string[] = ["write_file"]) {
+  return applyPermissionModeRequest(permissions, "system.permissions.grant_allow_all", {
+    tools,
+    paths: [root],
+  });
 }
 
 function inputError(action: () => unknown): PermissionModeInputError {
@@ -61,48 +56,46 @@ function inputError(action: () => unknown): PermissionModeInputError {
   throw new Error("預期會丟 PermissionModeInputError");
 }
 
-describe("全部允許的到期", () => {
-  it("預設 15 分鐘：到期前一毫秒還在，剛好到期與之後讀取都沒有 allowAll", () => {
+describe("全部允許沒有期限", () => {
+  it("開啟後狀態只有範圍，沒有期限欄位", () => {
     const { root, permissions } = setup();
     const granted = grant(permissions, root);
     expect(granted.changed).toBe(true);
-    expect(granted.state.allowAll).toMatchObject({
+    expect(granted.state.allowAll).toEqual({ tools: ["write_file"], paths: [root], domains: [] });
+    expect(granted.state).not.toHaveProperty("defaultAllowAllMinutes");
+    expect(granted.state).not.toHaveProperty("maxAllowAllMinutes");
+  });
+
+  it("重新載入正本（主機重啟）後仍然開著", () => {
+    const { root, permissions } = setup();
+    grant(permissions, root);
+    const restarted = new AgentPermissions(root, { diagnostic: () => {} });
+    expect(permissionModesState(restarted).allowAll).toEqual({
       tools: ["write_file"],
       paths: [root],
-      expiresAt: new Date(T0 + 15 * MINUTE).toISOString(),
+      domains: [],
     });
-
-    const read = (now: number) =>
-      applyPermissionModeRequest(permissions, "system.permissions.get", {}, now).state;
-    expect(read(T0 + 15 * MINUTE - 1).allowAll).toBeDefined();
-    expect(read(T0 + 15 * MINUTE).allowAll).toBeUndefined();
-    expect(read(T0 + 15 * MINUTE + 1).allowAll).toBeUndefined();
-    expect(permissions.allowAllFor(T0 + 15 * MINUTE)).toBeNull();
+    expect(restarted.allowAll()?.tools).toEqual(["write_file"]);
   });
 
-  it("上限 60 分鐘：60 分鐘後一樣失效", () => {
+  it("撤銷後消失，重啟後也不會回來", () => {
     const { root, permissions } = setup();
-    grant(permissions, root, 60);
-    expect(permissionModesState(permissions, T0 + 60 * MINUTE - 1).allowAll).toBeDefined();
-    expect(permissionModesState(permissions, T0 + 60 * MINUTE).allowAll).toBeUndefined();
+    grant(permissions, root);
+    applyPermissionModeRequest(permissions, "system.permissions.revoke_allow_all", {});
+    expect(permissionModesState(permissions).allowAll).toBeUndefined();
+    expect(new AgentPermissions(root).allowAll()).toBeNull();
   });
 
-  it("到期後撤銷不會讓舊授權回來，重新開啟才有新的期限", () => {
+  it("再次開啟以新範圍覆寫，不疊加", () => {
     const { root, permissions } = setup();
-    grant(permissions, root, 1);
-    const later = T0 + 5 * MINUTE;
-    expect(permissionModesState(permissions, later).allowAll).toBeUndefined();
-    applyPermissionModeRequest(permissions, "system.permissions.revoke_allow_all", {}, later);
-    expect(permissionModesState(permissions, later).allowAll).toBeUndefined();
+    grant(permissions, root, ["write_file"]);
+    grant(permissions, root, ["read_file"]);
+    expect(permissionModesState(permissions).allowAll).toMatchObject({ tools: ["read_file"] });
   });
 });
 
 describe("輸入檢查", () => {
   it.each([
-    ["零分鐘", { tools: ["write_file"], paths: ["/tmp/x"], minutes: 0 }, "minutes"],
-    ["超過 60 分鐘", { tools: ["write_file"], paths: ["/tmp/x"], minutes: 61 }, "minutes"],
-    ["小數分鐘", { tools: ["write_file"], paths: ["/tmp/x"], minutes: 1.5 }, "minutes"],
-    ["分鐘是字串", { tools: ["write_file"], paths: ["/tmp/x"], minutes: "15" }, "minutes"],
     ["沒有路徑也沒有網域", { tools: ["write_file"], paths: [] }, "paths"],
     ["缺 paths", { tools: ["write_file"] }, "paths"],
     ["缺工具", { paths: ["/tmp/x"] }, "tools"],
@@ -114,10 +107,10 @@ describe("輸入檢查", () => {
     const { permissions, read } = setup();
     const before = read();
     const error = inputError(() =>
-      applyPermissionModeRequest(permissions, "system.permissions.grant_allow_all", payload, T0),
+      applyPermissionModeRequest(permissions, "system.permissions.grant_allow_all", payload),
     );
     expect(error.field).toBe(field);
-    expect(permissions.allowAllFor(T0)).toBeNull();
+    expect(permissions.allowAll()).toBeNull();
     expect(read()).toBe(before);
   });
 
@@ -130,24 +123,21 @@ describe("輸入檢查", () => {
   ])("System One 類別：%s 被拒，類別不變", (_label, payload, field) => {
     const { permissions } = setup();
     const error = inputError(() =>
-      applyPermissionModeRequest(permissions, "system.permissions.set_category", payload, T0),
+      applyPermissionModeRequest(permissions, "system.permissions.set_category", payload),
     );
     expect(error.field).toBe(field);
-    expect(permissionModesState(permissions, T0).categories).toEqual([]);
+    expect(permissionModesState(permissions).categories).toEqual([]);
   });
 
   it("可委派網域：私有網段被拒，清單不變", () => {
     const { permissions } = setup();
     const error = inputError(() =>
-      applyPermissionModeRequest(
-        permissions,
-        "system.permissions.set_domains",
-        { domains: ["192.168.0.1"] },
-        T0,
-      ),
+      applyPermissionModeRequest(permissions, "system.permissions.set_domains", {
+        domains: ["192.168.0.1"],
+      }),
     );
     expect(error.field).toBe("domains");
-    expect(permissionModesState(permissions, T0).allowedDomains).toEqual([]);
+    expect(permissionModesState(permissions).allowedDomains).toEqual([]);
   });
 });
 
@@ -156,24 +146,22 @@ describe("get", () => {
     const { root, permissions, read } = setup();
     grant(permissions, root);
     const before = read();
-    const stateBefore = permissionModesState(permissions, T0);
+    const stateBefore = permissionModesState(permissions);
 
-    const result = applyPermissionModeRequest(permissions, "system.permissions.get", {}, T0);
+    const result = applyPermissionModeRequest(permissions, "system.permissions.get", {});
 
     expect(result.changed).toBe(false);
     expect(result.state).toEqual(stateBefore);
     expect(read()).toBe(before);
   });
 
-  it("預設全部關閉，回報預設 15 分鐘與上限 60 分鐘", () => {
+  it("預設全部關閉，沒有全部允許", () => {
     const { permissions } = setup();
-    const { state } = applyPermissionModeRequest(permissions, "system.permissions.get", {}, T0);
-    expect(state).toMatchObject({
+    const { state } = applyPermissionModeRequest(permissions, "system.permissions.get", {});
+    expect(state).toEqual({
       categories: [],
+      availableCategories: expect.any(Array),
       allowedDomains: [],
-      defaultAllowAllMinutes: 15,
-      maxAllowAllMinutes: 60,
     });
-    expect(state.allowAll).toBeUndefined();
   });
 });

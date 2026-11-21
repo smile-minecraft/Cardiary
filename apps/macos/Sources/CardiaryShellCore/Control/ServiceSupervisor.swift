@@ -559,19 +559,20 @@ public final class ServiceSupervisor: @unchecked Sendable {
     // MARK: - 結束與重啟
 
     private func handleExit(_ exit: ServiceExit, generation launchGeneration: Int) {
-        let decision = queue.sync { () -> (Bool, FolderSnapshot, Int, TimeInterval, Bool) in
+        let decision = queue.sync { () -> (Bool, FolderSnapshot, Int, Bool, Bool) in
             guard launchGeneration == generation else {
-                return (false, folder, status.consecutiveFailures, 0, false)
+                return (false, folder, status.consecutiveFailures, false, false)
             }
             let wasIntentional = intentionalStop || status.phase == .stopping || status.phase == .stopped
+            let isMemoryLimit = !wasIntentional && exit.isMemoryLimitRestart
             guard let launchStartedAt else {
-                return (wasIntentional, folder, status.consecutiveFailures, 0, true)
+                return (wasIntentional, folder, status.consecutiveFailures, isMemoryLimit, true)
             }
             let uptime = Date().timeIntervalSince(launchStartedAt)
             if configuration.restartPolicy.resetsFailures(uptime: uptime) {
                 status.consecutiveFailures = 0
             }
-            if !wasIntentional {
+            if !wasIntentional && !isMemoryLimit {
                 status.consecutiveFailures += 1
             }
             status.pid = 0
@@ -582,10 +583,10 @@ public final class ServiceSupervisor: @unchecked Sendable {
             self.handle = nil
             self.channel?.invalidate(reason: .closed)
             self.channel = nil
-            return (wasIntentional, folder, status.consecutiveFailures, 0, true)
+            return (wasIntentional, folder, status.consecutiveFailures, isMemoryLimit, true)
         }
 
-        let (wasIntentional, currentFolder, failures, _, current) = decision
+        let (wasIntentional, currentFolder, failures, isMemoryLimit, current) = decision
         guard current else { return }
 
         log("服務結束（\(exit.description)）")
@@ -596,10 +597,14 @@ public final class ServiceSupervisor: @unchecked Sendable {
             return
         }
 
-        guard configuration.restartPolicy.shouldRestart(consecutiveFailures: failures) else {
-            log("連續失敗 \(failures) 次，停止重啟")
-            setPhase(.failed)
-            return
+        if isMemoryLimit {
+            log("主機因記憶體上限主動退出（exit 75），自動重啟且不計失敗次數")
+        } else {
+            guard configuration.restartPolicy.shouldRestart(consecutiveFailures: failures) else {
+                log("連續失敗 \(failures) 次，停止重啟")
+                setPhase(.failed)
+                return
+            }
         }
 
         guard currentFolder.isUsable else {
@@ -608,7 +613,9 @@ public final class ServiceSupervisor: @unchecked Sendable {
             return
         }
 
-        let delay = configuration.restartPolicy.delay(afterFailure: failures)
+        let delay = isMemoryLimit
+            ? configuration.restartPolicy.baseDelay
+            : configuration.restartPolicy.delay(afterFailure: failures)
         log("\(String(format: "%.2f", delay)) 秒後重啟服務")
         queue.sync { status.phase = .starting }
         publishStatus()
