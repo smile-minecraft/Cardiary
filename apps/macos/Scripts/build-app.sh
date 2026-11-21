@@ -4,6 +4,7 @@
 # 用法：
 #   ./Scripts/build-app.sh
 #   CODESIGN_IDENTITY="Developer ID Application: …" ./Scripts/build-app.sh
+#   CODESIGN_IDENTITY=- ./Scripts/build-app.sh    # 強制 ad-hoc 簽章
 #   CARDIARY_SERVICE_SCRIPT=/path/to/service.mjs ./Scripts/build-app.sh
 #   CONFIGURATION=debug ./Scripts/build-app.sh
 #   CODESIGN_TIMESTAMP=1 ./Scripts/build-app.sh   # 簽章加安全時間戳（發行用）
@@ -14,7 +15,27 @@ set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-release}"
-IDENTITY="${CODESIGN_IDENTITY:--}"
+# 沒指定身分時，優先用鑰匙圈裡已安裝的 Developer ID Application，其次 Apple
+# Development；都沒有才退回 ad-hoc。ad-hoc 簽章每次建置都不同，登入鑰匙圈的
+# 存取控制會認不得新版 App，讀 API 金鑰時每次都跳密碼提示；固定身分讓
+# 「永遠允許」跨建置有效。
+if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+  IDENTITY="$CODESIGN_IDENTITY"
+else
+  IDENTITY="-"
+  AVAILABLE_IDENTITIES="$(/usr/bin/security find-identity -v -p codesigning 2>/dev/null || true)"
+  for prefix in "Developer ID Application" "Apple Development"; do
+    candidate="$(printf '%s\n' "$AVAILABLE_IDENTITIES" \
+      | /usr/bin/sed -n "s/^ *[0-9][0-9]*) \([0-9A-F]\{40\}\) \"${prefix}: .*\"\$/\1/p" | /usr/bin/head -n 1)"
+    if [[ -n "$candidate" ]]; then
+      IDENTITY="$candidate"
+      break
+    fi
+  done
+  if [[ "$IDENTITY" == "-" ]]; then
+    echo "警告：找不到簽章憑證，改用 ad-hoc 簽章；每次重新建置後讀鑰匙圈都會再要求密碼。" >&2
+  fi
+fi
 # 預設不連時間戳伺服器，本機驗證離線可跑；發行時設 CODESIGN_TIMESTAMP=1。
 if [[ "${CODESIGN_TIMESTAMP:-0}" == "1" ]]; then
   TIMESTAMP_ARGS=(--timestamp)

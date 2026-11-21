@@ -109,8 +109,11 @@ production 依賴，用 `pnpm deploy` 打包）；`CARDIARY_SERVICE_SCRIPT=...` 
    把用不到的供應商 SDK 拿掉）再談發行。
 4. **GUI 內的對話沒有人工驗證。** 殼的核心層已用真服務跑完含審批的對話，但 App 內的
    選單操作、TCC 提示與 `tccd` 歸屬仍列手動。
-5. **公證未執行。** 本機用 ad-hoc 簽章；發行要 Developer ID + `--timestamp` +
-   `notarytool` + `stapler`。
+5. **公證未執行。** 本機建置自動選用已安裝的 Developer ID Application 或 Apple
+   Development 憑證（都沒有才 ad-hoc，`CODESIGN_IDENTITY=-` 可強制 ad-hoc）；發行要
+   Developer ID + `--timestamp` + `notarytool` + `stapler`。ad-hoc 簽章每次建置都不同，
+   登入鑰匙圈認不得新版 App，讀金鑰時會跳密碼提示；殼把讀到的金鑰留在行程記憶體，
+   一次啟動最多問一次。換成固定身分後第一次提示按「永遠允許」，之後重建不再詢問。
 6. **工具子行程的 `inherit` 拒絕與 fd 清單屬於服務端。** 殼這邊驗的是「不傳額外 fd」
    與「控制通道只有 stdin／stdout」；spawn wrapper 的硬規則由主機服務工作實作。
 
