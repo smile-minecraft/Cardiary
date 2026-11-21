@@ -32,6 +32,16 @@ public enum L10n {
         case menuCopy
         case menuPaste
         case menuSelectAll
+        case menuView
+        case menuZoomIn
+        case menuZoomOut
+        case menuActualSize
+        case menuToggleInspector
+        case menuFullScreen
+        case menuWindow
+        case menuCloseWindow
+        case menuMinimize
+        case menuWindowZoom
 
         case serviceIdle
         case serviceStarting
@@ -135,6 +145,16 @@ public enum L10n {
         .menuCopy: "複製",
         .menuPaste: "貼上",
         .menuSelectAll: "全選",
+        .menuView: "檢視",
+        .menuZoomIn: "放大",
+        .menuZoomOut: "縮小",
+        .menuActualSize: "實際大小",
+        .menuToggleInspector: "顯示或收合檢視欄",
+        .menuFullScreen: "進入全螢幕",
+        .menuWindow: "視窗",
+        .menuCloseWindow: "關閉視窗",
+        .menuMinimize: "縮到最小",
+        .menuWindowZoom: "縮放",
 
         .serviceIdle: "未啟動",
         .serviceStarting: "啟動中…",
@@ -195,6 +215,16 @@ public enum L10n {
         .menuCopy: "Copy",
         .menuPaste: "Paste",
         .menuSelectAll: "Select All",
+        .menuView: "View",
+        .menuZoomIn: "Zoom In",
+        .menuZoomOut: "Zoom Out",
+        .menuActualSize: "Actual Size",
+        .menuToggleInspector: "Show or Hide Inspector",
+        .menuFullScreen: "Enter Full Screen",
+        .menuWindow: "Window",
+        .menuCloseWindow: "Close Window",
+        .menuMinimize: "Minimize",
+        .menuWindowZoom: "Zoom",
 
         .serviceIdle: "Not started",
         .serviceStarting: "Starting…",

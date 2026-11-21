@@ -30,7 +30,7 @@ struct ContextInspectorView: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             if model.sessionId == nil {
                 Text(CardL10n.text(.inspectorNoSession))
-                    .font(.cardiary(.callout))
+                    .cardiaryFont(.callout)
                     .foregroundStyle(Palette.inkSecondary)
             } else {
                 header
@@ -39,12 +39,12 @@ struct ContextInspectorView: View {
                     HStack(spacing: DesignTokens.spacingS) {
                         SuitLoader(size: 7)
                         Text(CardL10n.text(.cardsLoading))
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                             .foregroundStyle(Palette.inkSecondary)
                     }
                 } else if model.entries.isEmpty {
                     Text(CardL10n.text(.inspectorEmpty))
-                        .font(.cardiary(.callout))
+                        .cardiaryFont(.callout)
                         .foregroundStyle(Palette.inkSecondary)
                 } else if model.mode == .treemap {
                     treemap
@@ -62,7 +62,7 @@ struct ContextInspectorView: View {
                     .fill(Palette.orangeSoft.opacity(0.9))
                     .overlay {
                         Label(CardL10n.text(.inspectorDropping), systemImage: "arrow.down.to.line")
-                            .font(.cardiary(.callout, weight: .semibold))
+                            .cardiaryFont(.callout, weight: .semibold)
                             .foregroundStyle(Palette.orangeInk)
                     }
                     .allowsHitTesting(false)
@@ -114,13 +114,13 @@ struct ContextInspectorView: View {
                         .inspectorUsage,
                         ["used": "\(model.usedTokens)", "budget": "\(model.budgetTokens)"]
                     ))
-                    .font(.cardiary(.callout, weight: .semibold, monospacedDigits: true))
+                    .cardiaryFont(.callout, weight: .semibold, monospacedDigits: true)
                     Text(CardL10n.text(.inspectorEstimated))
-                        .font(.cardiary(.caption2))
+                        .cardiaryFont(.caption2)
                         .foregroundStyle(Palette.inkTertiary)
                 } else {
                     Text(CardL10n.format(.inspectorUsageNoBudget, value: "\(model.usedTokens)"))
-                        .font(.cardiary(.callout, weight: .semibold, monospacedDigits: true))
+                        .cardiaryFont(.callout, weight: .semibold, monospacedDigits: true)
                 }
                 Spacer(minLength: 0)
                 if model.isCompacting {
@@ -135,7 +135,7 @@ struct ContextInspectorView: View {
             }
             if model.contextWindow > 0 {
                 Text(CardL10n.count(.inspectorContextWindow, count: model.contextWindow))
-                    .font(.cardiary(.caption2))
+                    .cardiaryFont(.caption2)
                     .foregroundStyle(Palette.inkSecondary)
             }
         }
@@ -156,7 +156,7 @@ struct ContextInspectorView: View {
                             }
                             .frame(width: 10, height: 10)
                         Text(model.layerTitle(layer))
-                            .font(.cardiary(.caption2))
+                            .cardiaryFont(.caption2)
                             .foregroundStyle(Palette.inkSecondary)
                     }
                 }
@@ -170,7 +170,7 @@ struct ContextInspectorView: View {
                 }
                 Text(CardL10n.text(.inspectorLegendStale))
             }
-            .font(.cardiary(.caption2))
+            .cardiaryFont(.caption2)
             .foregroundStyle(Palette.inkSecondary)
         }
     }
@@ -218,7 +218,7 @@ struct ContextInspectorView: View {
             .overlay(alignment: .topLeading) {
                 if item.rect.width > 46, item.rect.height > 18 {
                     Text(treemapTitle(item))
-                        .font(.cardiary(size: 10, weight: .semibold))
+                        .cardiaryFont(size: 10, weight: .semibold)
                         .lineLimit(2)
                         .padding(4)
                         .foregroundStyle(fill.text)
@@ -343,10 +343,10 @@ struct ContextInspectorView: View {
             let tone = ContextBlockColor.tone(for: entry.layer)
             VStack(alignment: .leading, spacing: 6) {
                 Text(CardL10n.text(.inspectorSelectedTitle))
-                    .font(.cardiary(.caption2, weight: .semibold))
+                    .cardiaryFont(.caption2, weight: .semibold)
                     .foregroundStyle(Palette.inkSecondary)
                 Text(entry.title)
-                    .font(.cardiary(.callout, weight: .bold))
+                    .cardiaryFont(.callout, weight: .bold)
                 FlowLayout(spacing: 4) {
                     ThemeChip(text: model.layerTitle(entry.layer), tone: tone, filled: true)
                     ThemeChip(text: CardL10n.count(.inspectorTokens, count: entry.tokenEstimate), tone: .gray)
@@ -360,7 +360,7 @@ struct ContextInspectorView: View {
 
                 if entry.state == .pendingRemoval {
                     Label(CardL10n.text(.inspectorPendingRemoval), systemImage: "clock.arrow.circlepath")
-                        .font(.cardiary(.caption, weight: .semibold))
+                        .cardiaryFont(.caption, weight: .semibold)
                         .foregroundStyle(Palette.orangeInk)
                 } else if entry.cardId != nil {
                     Button(CardL10n.text(.inspectorRemove)) {
@@ -376,7 +376,7 @@ struct ContextInspectorView: View {
             .themeBlock(tone.soft, radius: DesignTokens.cardRadius)
         } else {
             Text(CardL10n.text(.inspectorDropHint))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkTertiary)
         }
     }
@@ -388,7 +388,7 @@ struct ContextInspectorView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: DesignTokens.spacingXS) {
                     Text(text)
-                        .font(.cardiary(.caption2, weight: .semibold, monospacedDigits: true))
+                        .cardiaryFont(.caption2, weight: .semibold, monospacedDigits: true)
                         .foregroundStyle(Palette.inkSecondary)
                     if model.isPossiblyRelated(entry) {
                         ThemeChip(
@@ -398,13 +398,13 @@ struct ContextInspectorView: View {
                     }
                     if model.isDealtByRetrieval(entry) {
                         Text(CardL10n.text(.inspectorDealByRetrieval))
-                            .font(.cardiary(.caption2))
+                            .cardiaryFont(.caption2)
                             .foregroundStyle(Palette.inkTertiary)
                     }
                 }
                 if let hint = model.smallModelQualityHint {
                     Text(hint)
-                        .font(.cardiary(.caption2))
+                        .cardiaryFont(.caption2)
                         .foregroundStyle(Palette.orangeInk)
                 }
             }
@@ -417,7 +417,7 @@ struct ContextInspectorView: View {
             HStack(spacing: DesignTokens.spacingS) {
                 SuitLoader(size: 7)
                 Text(CardL10n.text(.inspectorCompacting))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
         }

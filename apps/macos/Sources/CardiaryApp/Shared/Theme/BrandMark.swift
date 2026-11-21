@@ -40,7 +40,7 @@ struct BrandHeader: View {
         HStack(spacing: DesignTokens.spacingS) {
             CardFanMark(size: markSize)
             Text(AppL10n.text(.appTitle))
-                .font(.cardiary(size: titleSize, weight: .bold))
+                .cardiaryFont(size: titleSize, weight: .bold)
                 .foregroundStyle(Palette.redInk)
         }
         .accessibilityElement(children: .combine)

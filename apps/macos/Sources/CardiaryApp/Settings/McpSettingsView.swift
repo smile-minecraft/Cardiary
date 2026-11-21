@@ -69,13 +69,13 @@ struct McpSettingsView: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             SuitHeading(title: McpL10n.text(.mcpServersTitle), suit: .heart)
             Text(McpL10n.text(.mcpServersHint))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkSecondary)
             if model.isLoading && model.servers.isEmpty {
                 LoadingSettingsView()
             } else if model.servers.isEmpty {
                 Text(McpL10n.text(.mcpEmpty))
-                    .font(.cardiary(.callout))
+                    .cardiaryFont(.callout)
                     .foregroundStyle(Palette.inkSecondary)
             } else {
                 ForEach(model.servers, id: \.serverId) { server in
@@ -86,7 +86,7 @@ struct McpSettingsView: View {
                 HStack(spacing: DesignTokens.spacingS) {
                     ThemeChip(text: McpL10n.text(.mcpWaitingApproval), tone: .orange)
                     Text(McpL10n.text(.mcpApprovalSubmitted))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 }
             }
@@ -99,7 +99,7 @@ struct McpSettingsView: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             HStack(spacing: DesignTokens.spacingS) {
                 Text(server.name)
-                    .font(.cardiary(.callout, weight: .semibold))
+                    .cardiaryFont(.callout, weight: .semibold)
                 ThemeChip(
                     text: McpL10n.text(transportKey(server.transport)),
                     tone: .gray
@@ -125,31 +125,31 @@ struct McpSettingsView: View {
 
             if server.transport == .http, let url = server.url, !url.isEmpty {
                 Text(url)
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
                     .textSelection(.enabled)
             }
             if server.transport == .stdio {
                 if let command = server.command, !command.isEmpty {
                     Text(stdioDescription(command: command, arguments: server.args ?? []))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                         .textSelection(.enabled)
                     Text(McpL10n.text(.mcpStdioSecretNote))
-                        .font(.cardiary(.caption2))
+                        .cardiaryFont(.caption2)
                         .foregroundStyle(Palette.inkSecondary)
                 }
                 if let summary = McpSettingsModel.persistentDataSummary(server.persistentData) {
                     Text(McpL10n.text(.mcpPersistentDataTitle))
-                        .font(.cardiary(.caption, weight: .semibold))
+                        .cardiaryFont(.caption, weight: .semibold)
                     Text(summary)
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 }
             }
             if let failure = server.failure, !failure.isEmpty {
                 Text(McpL10n.format(.mcpFailure, value: failure))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.redInk)
             }
             if server.transport == .http {
@@ -163,10 +163,10 @@ struct McpSettingsView: View {
     private func allowedHostsEditor(_ server: McpServerInfo) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(McpL10n.text(.mcpAllowedHosts))
-                .font(.cardiary(.caption, weight: .semibold))
+                .cardiaryFont(.caption, weight: .semibold)
             if server.allowedHosts.isEmpty {
                 Text(McpL10n.text(.mcpHostsEmpty))
-                    .font(.cardiary(.caption2))
+                    .cardiaryFont(.caption2)
                     .foregroundStyle(Palette.inkSecondary)
             } else {
                 ScrollView(.horizontal) {
@@ -216,25 +216,25 @@ struct McpSettingsView: View {
                 TextField(McpL10n.text(.mcpCommand), text: $command)
                 TextField(McpL10n.text(.mcpArguments), text: $arguments)
                 Text(McpL10n.text(.mcpStdioSecretNote))
-                    .font(.cardiary(.caption2))
+                    .cardiaryFont(.caption2)
                     .foregroundStyle(Palette.inkSecondary)
                 Toggle(isOn: $persistentData) {
                     Text(McpL10n.text(.mcpPersistentDataToggle))
-                        .font(.cardiary(.callout))
+                        .cardiaryFont(.callout)
                 }
                 .toggleStyle(ThemeSwitchStyle())
                 Text(McpL10n.text(.mcpPersistentDataHint))
-                    .font(.cardiary(.caption2))
+                    .cardiaryFont(.caption2)
                     .foregroundStyle(Palette.inkSecondary)
             case .http:
                 TextField(McpL10n.text(.mcpURL), text: $url)
                 TextField(McpL10n.text(.mcpAllowedHosts), text: $allowedHosts)
                 Text(McpL10n.text(.mcpAllowedHostsHint))
-                    .font(.cardiary(.caption2))
+                    .cardiaryFont(.caption2)
                     .foregroundStyle(Palette.inkSecondary)
             }
             Text(McpL10n.text(.mcpApprovalNote))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkSecondary)
             Button(McpL10n.text(.mcpCreate)) {
                 Task {

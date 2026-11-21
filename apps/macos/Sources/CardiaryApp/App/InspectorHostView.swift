@@ -20,7 +20,8 @@ struct InspectorHostView: View {
                                 SuitHeading(
                                     title: AppL10n.text(panel.titleKey),
                                     suit: Self.panelSuits[index % Self.panelSuits.count],
-                                    font: .cardiary(.callout, weight: .bold)
+                                    style: .callout,
+                                    weight: .bold
                                 )
                                 Spacer()
                                 if panel.id == "approvals", let count = bridge.approvalCount, count > 0 {
@@ -29,7 +30,7 @@ struct InspectorHostView: View {
                             }
                             if let subtitleKey = panel.subtitleKey {
                                 Text(AppL10n.text(subtitleKey))
-                                    .font(.cardiary(.caption))
+                                    .cardiaryFont(.caption)
                                     .foregroundStyle(Palette.inkSecondary)
                             }
                         }
@@ -55,10 +56,11 @@ struct InspectorHostView: View {
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     @State private var selectedTabId: String?
+    @Environment(\.cardiaryScale) private var uiScale
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingL) {
-            // 分頁名稱放不下時（例如英文的七個分頁）改成標題在上、分頁在下，
+            // 分頁名稱放不下時（例如英文或放大介面）改成標題在上、分頁在下並允許橫向捲動，
             // 不然固定寬度的分頁會把標題擠成逐字換行，整頁也被撐寬裁切。
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: DesignTokens.spacingL) {
@@ -68,7 +70,9 @@ struct SettingsView: View {
                 }
                 VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
                     title
-                    tabs
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        tabs
+                    }
                 }
             }
             .padding(.horizontal, DesignTokens.spacingL)
@@ -80,7 +84,7 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
-        .frame(maxWidth: DesignTokens.settingsMaxWidth, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: DesignTokens.settingsMaxWidth * max(1.0, uiScale), maxHeight: .infinity, alignment: .top)
         .frame(maxWidth: .infinity)
         .background(Palette.canvas)
     }

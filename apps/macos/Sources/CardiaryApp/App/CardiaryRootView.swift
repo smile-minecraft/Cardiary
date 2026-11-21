@@ -23,7 +23,7 @@ public struct CardiaryRootView: View {
         }
         .frame(minWidth: DesignTokens.windowMinWidth, minHeight: DesignTokens.windowMinHeight)
         .background(Palette.canvas)
-        .cardiaryTheme()
+        .cardiaryTheme(uiScale: model.uiScale)
     }
 }
 
@@ -35,9 +35,9 @@ struct UnavailableView: View {
     var body: some View {
         StatusCard(suit: .diamond, systemImage: "externaldrive.badge.questionmark") {
             Text(AppL10n.text(.unavailableTitle))
-                .font(.cardiary(.title2, weight: .bold))
+                .cardiaryFont(.title2, weight: .bold)
             Text(AppL10n.format(.folderLabel, value: model.bridge.folder.path ?? model.bridge.folder.displayName ?? "—"))
-                .font(.cardiary(.callout))
+                .cardiaryFont(.callout)
                 .foregroundStyle(Palette.inkSecondary)
                 .padding(.horizontal, DesignTokens.spacingM)
                 .padding(.vertical, DesignTokens.spacingXS)
@@ -61,7 +61,7 @@ struct NeedsUpdateView: View {
     var body: some View {
         StatusCard(suit: .spade, systemImage: "arrow.down.circle") {
             Text(AppL10n.text(.updateRequiredTitle))
-                .font(.cardiary(.title2, weight: .bold))
+                .cardiaryFont(.title2, weight: .bold)
             Text(AppL10n.text(.updateRequiredBody))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Palette.inkSecondary)
@@ -108,7 +108,7 @@ struct ConnectionBanner: View {
                 Image(systemName: "bolt.horizontal.circle.fill")
                     .foregroundStyle(Palette.orangeInk)
                 Text(text)
-                    .font(.cardiary(.callout))
+                    .cardiaryFont(.callout)
                 Spacer()
                 if case .disconnected = model.bridge.connection {
                     Button(AppL10n.text(.connectionRetry)) { model.retry() }

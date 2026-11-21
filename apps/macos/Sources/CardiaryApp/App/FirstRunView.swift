@@ -7,6 +7,7 @@ struct FirstRunView: View {
     @ObservedObject var firstRun: FirstRunModel
     /// 供應商、金鑰與角色的狀態由設定頁的模型分頁共用；首次設定只顯示主模型需要的部分。
     @ObservedObject var modelSettings: ModelsSettingsModel
+    @Environment(\.cardiaryScale) private var uiScale
 
     init(model: AppModel) {
         self.model = model
@@ -22,7 +23,7 @@ struct FirstRunView: View {
                     SuitDivider()
                         .frame(width: 180)
                     Text(AppL10n.text(.firstRunTitle))
-                        .font(.cardiary(.largeTitle, weight: .bold))
+                        .cardiaryFont(.largeTitle, weight: .bold)
                     Text(AppL10n.text(.firstRunBody))
                         .foregroundStyle(Palette.inkSecondary)
                 }
@@ -33,7 +34,7 @@ struct FirstRunView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .themeBlock(Palette.surface, radius: DesignTokens.panelRadius, padding: DesignTokens.spacingXL)
             }
-            .frame(maxWidth: DesignTokens.firstRunMaxWidth, alignment: .leading)
+            .frame(maxWidth: DesignTokens.firstRunMaxWidth * max(1.0, uiScale), alignment: .leading)
             .padding(DesignTokens.spacingXL)
             .frame(maxWidth: .infinity)
         }
@@ -111,7 +112,7 @@ struct FirstRunView: View {
             } else {
                 if firstRun.providers.isEmpty {
                     Text(AppL10n.text(.settingsProvidersEmpty))
-                        .font(.cardiary(.callout))
+                        .cardiaryFont(.callout)
                         .foregroundStyle(Palette.inkSecondary)
                 } else {
                     ThemeLabeledRow(title: AppL10n.text(.firstRunProvider)) {
@@ -147,7 +148,7 @@ struct FirstRunView: View {
 
             if let message = firstRun.message {
                 Text(message)
-                    .font(.cardiary(.callout))
+                    .cardiaryFont(.callout)
                     .foregroundStyle(Palette.inkSecondary)
             }
             if let error = modelSettings.errorMessage {
@@ -211,7 +212,7 @@ private struct FirstRunStepper: View {
                     .foregroundStyle(isActive || isDone ? Palette.onAccent : suit.ink)
             }
             Text(title)
-                .font(.cardiary(.caption, weight: isActive ? .bold : .medium))
+                .cardiaryFont(.caption, weight: isActive ? .bold : .medium)
                 .foregroundStyle(isActive ? Palette.ink : Palette.inkSecondary)
                 .lineLimit(1)
         }

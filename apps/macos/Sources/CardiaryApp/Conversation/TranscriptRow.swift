@@ -5,6 +5,7 @@ import SwiftUI
 struct TranscriptRow: View {
     /// 目前的深淺色配置，交給嵌入的 MCP App 作為主題。
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.cardiaryScale) private var uiScale
     let item: ConversationItem
     /// 只有最後一則使用者訊息會帶非 nil 的重送動作；`isResending` 進行中時按鈕顯示明確狀態。
     let resendAction: (() -> Void)?
@@ -30,6 +31,9 @@ struct TranscriptRow: View {
                 Spacer(minLength: 60)
                 VStack(alignment: .trailing, spacing: DesignTokens.spacingXS) {
                     Text(text)
+                        .cardiaryFont(.body)
+                        .lineSpacing(3 * min(2.0, max(0.75, uiScale)))
+                        .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
@@ -45,7 +49,7 @@ struct TranscriptRow: View {
                                     Text(AppL10n.text(.conversationResending))
                                 } else {
                                     Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 9, weight: .bold))
+                                        .cardiarySymbolFont(size: 9, weight: .bold)
                                     Text(AppL10n.text(.conversationResend))
                                 }
                             }
@@ -104,8 +108,7 @@ struct AssistantBubble<Footer: View>: View {
             }
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
-                Text(text)
-                    .textSelection(.enabled)
+                MarkdownView(text: text)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(Palette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.messageBubbleRadius, style: .continuous))
@@ -133,19 +136,19 @@ struct ToolCallRow: View {
                             .fill(tone.soft)
                             .frame(width: 26, height: 26)
                         Image(systemName: symbol)
-                            .font(.system(size: 11, weight: .bold))
+                            .cardiarySymbolFont(size: 11, weight: .bold)
                             .foregroundStyle(tone.ink)
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(tool.title ?? tool.name)
-                            .font(.cardiary(.callout, weight: .semibold))
+                            .cardiaryFont(.callout, weight: .semibold)
                         Text(AppL10n.text(.conversationToolCall) + " · " + statusLabel)
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                             .foregroundStyle(Palette.inkSecondary)
                     }
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
+                        .cardiarySymbolFont(size: 10, weight: .bold)
                         .foregroundStyle(Palette.inkTertiary)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
@@ -163,7 +166,7 @@ struct ToolCallRow: View {
                     }
                     if tool.diagnosticCount > 0 {
                         Text("\(tool.diagnosticCount) diagnostics")
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                             .foregroundStyle(Palette.inkSecondary)
                     }
                 }
@@ -203,10 +206,10 @@ struct ToolCallRow: View {
     private func labeledJSON(_ title: String, text: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.cardiary(.caption, weight: .semibold))
+                .cardiaryFont(.caption, weight: .semibold)
                 .foregroundStyle(Palette.inkSecondary)
             Text(text)
-                .font(.system(.caption, design: .monospaced))
+                .cardiaryMonospacedFont(.caption)
                 .textSelection(.enabled)
                 .lineLimit(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -255,7 +258,7 @@ struct UiBlockView: View {
             HStack(spacing: DesignTokens.spacingS) {
                 SuitLoader(size: 7)
                 Text(AppL10n.text(.conversationStreaming))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
         } else {
@@ -266,7 +269,7 @@ struct UiBlockView: View {
                 table
             default:
                 Text(JSONText.compact(block.data, limit: 600))
-                    .font(.system(.caption, design: .monospaced))
+                    .cardiaryMonospacedFont(.caption)
                     .textSelection(.enabled)
             }
         }
@@ -304,19 +307,19 @@ struct UiBlockView: View {
     private var bars: some View {
         if rows.isEmpty {
             Text(JSONText.compact(block.data, limit: 600))
-                .font(.system(.caption, design: .monospaced))
+                .cardiaryMonospacedFont(.caption)
         } else {
             let maximum = max(rows.map(\.value).max() ?? 1, 0.0001)
             VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                     HStack(spacing: DesignTokens.spacingS) {
                         Text(row.label)
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                             .frame(width: 120, alignment: .leading)
                             .lineLimit(1)
                         ThemeProgressBar(value: row.value / maximum, tone: Self.barTones[index % Self.barTones.count], height: 10)
                         Text(row.value, format: .number.precision(.fractionLength(0...2)))
-                            .font(.cardiary(.caption, monospacedDigits: true))
+                            .cardiaryFont(.caption, monospacedDigits: true)
                             .foregroundStyle(Palette.inkSecondary)
                     }
                 }
@@ -328,15 +331,15 @@ struct UiBlockView: View {
     private var table: some View {
         if rows.isEmpty {
             Text(JSONText.compact(block.data, limit: 600))
-                .font(.system(.caption, design: .monospaced))
+                .cardiaryMonospacedFont(.caption)
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                     HStack {
-                        Text(row.label).font(.cardiary(.caption))
+                        Text(row.label).cardiaryFont(.caption)
                         Spacer()
                         Text(row.value, format: .number)
-                            .font(.cardiary(.caption, monospacedDigits: true))
+                            .cardiaryFont(.caption, monospacedDigits: true)
                             .foregroundStyle(Palette.inkSecondary)
                     }
                 }

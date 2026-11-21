@@ -15,7 +15,7 @@ public struct NotificationListView: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             HStack {
                 Text(NotificationL10n.text(.notificationTitle))
-                    .font(.cardiary(.title3, weight: .semibold))
+                    .cardiaryFont(.title3, weight: .semibold)
                 Spacer()
                 ThemeSegmented(
                     selection: $tab,
@@ -115,10 +115,10 @@ public struct NotificationListView: View {
             }
 
             if let message = model.errorMessage {
-                Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.red)
+                Text(message).cardiaryFont(.caption).foregroundStyle(Palette.red)
             }
             if let message = model.noticeMessage {
-                Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.sageInk)
+                Text(message).cardiaryFont(.caption).foregroundStyle(Palette.sageInk)
             }
         }
     }
@@ -143,24 +143,21 @@ private struct NotificationRow: View {
                 }
                 Spacer()
                 Text(item.createdAt)
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkTertiary)
                     .lineLimit(1)
             }
             Text(item.title)
-                .font(.cardiary(.callout, weight: item.isUnread ? .semibold : .regular))
+                .cardiaryFont(.callout, weight: item.isUnread ? .semibold : .regular)
                 .foregroundStyle(Palette.ink)
-            Text(item.body)
-                .font(.cardiary(.caption))
-                .foregroundStyle(Palette.inkSecondary)
-                .lineLimit(3)
+            MarkdownView(text: item.body, baseStyle: .caption, textColor: Palette.inkSecondary)
             if let source = item.sourceScheduleId, !source.isEmpty {
                 Text(NotificationL10n.format(
                     .notificationSourceScheduleName,
                     value: scheduleName,
                     language: nil
                 ))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkTertiary)
                     .lineLimit(1)
             }
@@ -198,9 +195,9 @@ private struct NotificationRow: View {
 
             HStack(spacing: 4) {
                 Image(systemName: "hand.draw")
-                    .font(.system(size: 10, weight: .semibold))
+                    .cardiarySymbolFont(size: 10, weight: .semibold)
                 Text(NotificationL10n.text(.notificationDragHint))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
             }
             .foregroundStyle(Palette.inkTertiary)
             .frame(maxWidth: .infinity, alignment: .trailing)

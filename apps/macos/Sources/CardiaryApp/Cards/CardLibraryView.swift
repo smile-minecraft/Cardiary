@@ -17,9 +17,17 @@ struct CardLibraryView: View {
             header
             HSplitView {
                 libraryPane
-                    .frame(minWidth: 240, idealWidth: DesignTokens.cardListWidth, maxWidth: 380)
+                    .frame(
+                        minWidth: DesignTokens.cardListMinWidth,
+                        idealWidth: DesignTokens.cardListWidth,
+                        maxWidth: DesignTokens.cardListMaxWidth
+                    )
                 detailPane
-                    .frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(
+                        minWidth: DesignTokens.cardDetailMinWidth,
+                        maxWidth: .infinity,
+                        maxHeight: .infinity
+                    )
                     .background(Palette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.panelRadius, style: .continuous))
             }
         }
@@ -35,7 +43,7 @@ struct CardLibraryView: View {
                     .fill(Palette.orangeSoft.opacity(0.85))
                     .overlay {
                         Label(CardL10n.text(.cardsDropHint), systemImage: "square.and.arrow.down.fill")
-                            .font(.cardiary(.headline))
+                            .cardiaryFont(.headline)
                             .foregroundStyle(Palette.orangeInk)
                     }
                     .padding(DesignTokens.spacingM)
@@ -76,7 +84,7 @@ struct CardLibraryView: View {
                     Task { await model.reload() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .bold))
+                        .cardiarySymbolFont(size: 12, weight: .bold)
                 }
                 .buttonStyle(ThemeIconButtonStyle(diameter: 30))
                 .help(CardL10n.text(.cardsRefresh))
@@ -91,33 +99,43 @@ struct CardLibraryView: View {
                 .disabled(!model.isServiceAvailable)
             }
 
-            HStack(spacing: DesignTokens.spacingS) {
-                ThemeSegmented(
-                    selection: Binding(
-                        get: { model.mode },
-                        set: { model.setMode($0) }
-                    ),
-                    options: [
-                        (CardLibraryMode.list, CardL10n.text(.cardsModeList)),
-                        (CardLibraryMode.overview, CardL10n.text(.cardsModeOverview)),
-                    ]
-                )
-                .fixedSize()
-                searchField
-                tagPicker
-                Spacer(minLength: 0)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DesignTokens.spacingS) {
+                    filterControls
+                    Spacer(minLength: 0)
+                }
+                VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
+                    filterControls
+                }
             }
         }
+    }
+
+    @ViewBuilder
+    private var filterControls: some View {
+        ThemeSegmented(
+            selection: Binding(
+                get: { model.mode },
+                set: { model.setMode($0) }
+            ),
+            options: [
+                (CardLibraryMode.list, CardL10n.text(.cardsModeList)),
+                (CardLibraryMode.overview, CardL10n.text(.cardsModeOverview)),
+            ]
+        )
+        .fixedSize()
+        searchField
+        tagPicker
     }
 
     private var searchField: some View {
         HStack(spacing: DesignTokens.spacingXS) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .bold))
+                .cardiarySymbolFont(size: 11, weight: .bold)
                 .foregroundStyle(Palette.inkSecondary)
             TextField(CardL10n.text(.cardsSearchPlaceholder), text: $model.query)
                 .textFieldStyle(.plain)
-                .font(.cardiary(.callout))
+                .cardiaryFont(.callout)
                 .onSubmit { Task { await model.loadFirstPage() } }
             if !model.query.isEmpty {
                 Button {
@@ -125,7 +143,7 @@ struct CardLibraryView: View {
                     Task { await model.loadFirstPage() }
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
+                        .cardiarySymbolFont(size: 8, weight: .bold)
                 }
                 .buttonStyle(ThemeIconButtonStyle(diameter: 18))
                 .help(CardL10n.text(.cardsSearchClear))
@@ -134,7 +152,7 @@ struct CardLibraryView: View {
         .padding(.horizontal, DesignTokens.spacingM)
         .padding(.vertical, 6)
         .background(Palette.sunken, in: Capsule(style: .continuous))
-        .frame(maxWidth: 260)
+        .frame(minWidth: 120, maxWidth: 260)
     }
 
     private var tagPicker: some View {
@@ -164,7 +182,7 @@ struct CardLibraryView: View {
                     VStack(spacing: DesignTokens.spacingS) {
                         SuitLoader()
                         Text(CardL10n.text(.cardsLoading))
-                            .font(.cardiary(.callout))
+                            .cardiaryFont(.callout)
                             .foregroundStyle(Palette.inkSecondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -201,7 +219,7 @@ struct CardLibraryView: View {
                     HStack(spacing: DesignTokens.spacingS) {
                         SuitLoader(size: 7)
                         Text(CardL10n.text(.cardsLoadingMore))
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                             .foregroundStyle(Palette.inkSecondary)
                     }
                     .padding(DesignTokens.spacingM)
@@ -253,7 +271,7 @@ struct CardLibraryView: View {
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.panelRadius, style: .continuous))
         .overlay(alignment: .bottom) {
             Text(CardL10n.text(.cardsOverviewHint))
-                .font(.cardiary(.caption2))
+                .cardiaryFont(.caption2)
                 .foregroundStyle(Palette.inkSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
@@ -346,29 +364,29 @@ private struct CardRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: DesignTokens.spacingXS) {
                     Text(item.title)
-                        .font(.cardiary(.callout, weight: .semibold))
+                        .cardiaryFont(.callout, weight: .semibold)
                         .lineLimit(1)
                     if item.broken {
                         ThemeChip(text: CardL10n.text(.cardsBroken), tone: .red)
                     }
                     if item.lifecycle == .cold {
                         Image(systemName: "snowflake")
-                            .font(.system(size: 9, weight: .bold))
+                            .cardiarySymbolFont(size: 9, weight: .bold)
                             .foregroundStyle(Palette.grayInk)
                     }
                     Spacer(minLength: 0)
                     Text(CardL10n.text(item.kind.cardStringKey))
-                        .font(.cardiary(.caption2, weight: .semibold))
+                        .cardiaryFont(.caption2, weight: .semibold)
                         .foregroundStyle(suit.ink)
                 }
                 if let snippet = item.snippet, !snippet.isEmpty {
                     Text(snippet)
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                         .lineLimit(2)
                 } else if let summary = item.summary, !summary.isEmpty {
                     Text(summary)
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                         .lineLimit(2)
                 }
@@ -376,7 +394,7 @@ private struct CardRowView: View {
                     FreshnessPips(appearance: appearance, suit: suit)
                         .help(CardL10n.format(.cardsFreshnessHelp, value: "\(appearance.value)"))
                     Text(CardL10n.format(.cardsDetailFreshness, value: "\(appearance.value)"))
-                        .font(.cardiary(.caption2, monospacedDigits: true))
+                        .cardiaryFont(.caption2, monospacedDigits: true)
                         .foregroundStyle(appearance.needsAttention ? Palette.orangeInk : Palette.inkSecondary)
                         .fixedSize()
                         .help(
@@ -435,7 +453,7 @@ private struct CardDetailView: View {
                     imageBlock
                 } else if card.kind == .audio {
                     Label(CardL10n.text(.cardsAudioCard), systemImage: "waveform")
-                        .font(.cardiary(.callout))
+                        .cardiaryFont(.callout)
                         .foregroundStyle(Palette.inkSecondary)
                 }
                 bodyBlock
@@ -492,11 +510,11 @@ private struct CardDetailView: View {
                 }
             }
             Text(card.title)
-                .font(.cardiary(.title2, weight: .bold))
+                .cardiaryFont(.title2, weight: .bold)
                 .textSelection(.enabled)
             HStack(spacing: DesignTokens.spacingS) {
                 Text(CardL10n.format(.cardsDetailFreshness, value: "\(appearance.value)"))
-                    .font(.cardiary(.callout, weight: .semibold, monospacedDigits: true))
+                    .cardiaryFont(.callout, weight: .semibold, monospacedDigits: true)
                     .foregroundStyle(appearance.needsAttention ? Palette.orangeInk : Palette.ink)
                 FreshnessPips(appearance: appearance, suit: suit)
                     .help(CardL10n.format(.cardsFreshnessHelp, value: "\(appearance.value)"))
@@ -509,7 +527,7 @@ private struct CardDetailView: View {
                 }
                 Spacer(minLength: 0)
                 Image(systemName: suit.symbol)
-                    .font(.system(size: 16, weight: .bold))
+                    .cardiarySymbolFont(size: 16, weight: .bold)
                     .foregroundStyle(suit.ink)
                     .accessibilityHidden(true)
             }
@@ -533,7 +551,7 @@ private struct CardDetailView: View {
             HStack(spacing: DesignTokens.spacingS) {
                 SuitLoader(size: 7)
                 Text(CardL10n.text(.cardsImageLoading))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
         }
@@ -544,7 +562,7 @@ private struct CardDetailView: View {
         if model.isEditing {
             VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
                 TextEditor(text: $model.editingBody)
-                    .font(.body.monospaced())
+                    .cardiaryMonospacedFont(.body)
                     .themeEditor(minHeight: 220)
                 HStack {
                     Button(CardL10n.text(.cardsDetailSave)) {
@@ -556,14 +574,28 @@ private struct CardDetailView: View {
                 }
                 .controlSize(.small)
             }
-        } else {
-            Text(card.body.isEmpty ? CardL10n.text(.cardsBodyPlaceholder) : card.body)
-                .font(.cardiary(.body))
-                .foregroundStyle(card.body.isEmpty ? Palette.inkTertiary : Palette.ink)
-                .lineSpacing(3)
-                .textSelection(.enabled)
+        } else if card.body.isEmpty {
+            Text(CardL10n.text(.cardsBodyPlaceholder))
+                .cardiaryFont(.body)
+                .foregroundStyle(Palette.inkTertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, DesignTokens.spacingXS)
+        } else {
+            MarkdownView(text: card.body) { target in
+                openWikiTarget(target)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, DesignTokens.spacingXS)
+        }
+    }
+
+    private func openWikiTarget(_ target: String) {
+        let normalized = target.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        if let match = model.items.first(where: { $0.id == normalized })
+            ?? model.items.first(where: { $0.title.localizedCaseInsensitiveCompare(normalized) == .orderedSame })
+        {
+            Task { await model.select(cardId: match.id) }
         }
     }
 
@@ -572,14 +604,14 @@ private struct CardDetailView: View {
         if !model.pendingPatches.isEmpty {
             VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
                 Text(model.pendingCountLabel)
-                    .font(.headline)
+                    .cardiaryFont(.headline)
                 HStack {
                     Button(CardL10n.text(.cardsAcceptAll)) { Task { await model.decideAllPatches(accept: true) } }
                     Button(CardL10n.text(.cardsRejectAll)) { Task { await model.decideAllPatches(accept: false) } }
                 }.disabled(model.isEditing || model.isDeciding)
                 ForEach(model.pendingPatches, id: \.patchId) { patch in
                     DisclosureGroup {
-                        Text(patch.patch.text).font(.body.monospaced()).textSelection(.enabled)
+                        Text(patch.patch.text).cardiaryMonospacedFont(.body).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         HStack {
                             Button(CardL10n.text(.cardsAccept)) { Task { await model.decidePatch(patch, accept: true) } }
@@ -589,7 +621,9 @@ private struct CardDetailView: View {
                         VStack(alignment: .leading) {
                             Text(patch.summary ?? patch.createdAt)
                             if model.isPatchStale(patch) {
-                                Text(CardL10n.text(.cardsPatchConflict)).font(.caption).foregroundStyle(.secondary)
+                                Text(CardL10n.text(.cardsPatchConflict))
+                                    .cardiaryFont(.caption)
+                                    .foregroundStyle(Palette.inkSecondary)
                             }
                         }
                     }
@@ -611,8 +645,8 @@ private struct CardDetailView: View {
                     }
                 }
                 if let comparison = model.versionComparison {
-                    Text(CardL10n.text(.cardsVersionCurrent)).font(.headline)
-                    Text(comparison).font(.body.monospaced()).textSelection(.enabled)
+                    Text(CardL10n.text(.cardsVersionCurrent)).cardiaryFont(.headline)
+                    Text(comparison).cardiaryMonospacedFont(.body).textSelection(.enabled)
                 }
             }
         }
@@ -620,10 +654,10 @@ private struct CardDetailView: View {
 
     private var linksBlock: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
-            SuitHeading(title: CardL10n.text(.cardsBacklinks), suit: .club, font: .cardiary(.caption, weight: .bold))
+            SuitHeading(title: CardL10n.text(.cardsBacklinks), suit: .club, style: .caption, weight: .bold)
             if card.links.backlinks.isEmpty && card.links.outgoing.isEmpty {
                 Text(CardL10n.text(.cardsLinksNone))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkTertiary)
             } else {
                 ForEach(card.links.backlinks, id: \.self) { id in
@@ -634,7 +668,7 @@ private struct CardDetailView: View {
                 }
             }
             if !card.sources.isEmpty {
-                SuitHeading(title: CardL10n.text(.cardsSources), suit: .diamond, font: .cardiary(.caption, weight: .bold))
+                SuitHeading(title: CardL10n.text(.cardsSources), suit: .diamond, style: .caption, weight: .bold)
                     .padding(.top, DesignTokens.spacingXS)
                 ForEach(card.sources, id: \.self) { id in
                     linkRow(id, systemImage: "doc.on.doc.fill")
@@ -667,7 +701,7 @@ private struct FlowTags: View {
         FlowLayout(spacing: DesignTokens.spacingXS) {
             ForEach(tags, id: \.self) { tag in
                 Text("# " + tag)
-                    .font(.cardiary(.caption, weight: .semibold))
+                    .cardiaryFont(.caption, weight: .semibold)
                     .foregroundStyle(tone.ink)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 3)
@@ -742,10 +776,10 @@ private struct NewCardSheet: View {
             TextField(CardL10n.text(.cardsNewTitle), text: $title)
             TextField(CardL10n.text(.cardsNewTags), text: $tags)
             Text(CardL10n.text(.cardsNewBody))
-                .font(.cardiary(.caption, weight: .semibold))
+                .cardiaryFont(.caption, weight: .semibold)
                 .foregroundStyle(Palette.inkSecondary)
             TextEditor(text: $bodyText)
-                .font(.body.monospaced())
+                .cardiaryMonospacedFont(.body)
                 .themeEditor(minHeight: 160)
             HStack {
                 Spacer()
@@ -769,7 +803,7 @@ private struct NewCardSheet: View {
             }
         }
         .padding(DesignTokens.spacingXL)
-        .frame(width: 520)
+        .frame(minWidth: 420, idealWidth: 520, maxWidth: 680)
         .background(Palette.canvas)
         .cardiaryTheme()
     }

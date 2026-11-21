@@ -317,7 +317,7 @@ struct ThemeIconGallery: View {
                                         }
                                     }
                                     Text(icon.rawValue)
-                                        .font(.cardiary(.caption2))
+                                        .cardiaryFont(.caption2)
                                         .foregroundStyle(Palette.inkSecondary)
                                         .lineLimit(1)
                                 }

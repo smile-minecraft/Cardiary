@@ -5,17 +5,10 @@ import SwiftUI
 // MARK: - 根畫面
 
 extension View {
-    /// 套用撲克牌主題：圓體、暖色文字、紅心主色與無框線的預設控制項。
+    /// 套用撲克牌主題：圓體、暖色文字、紅心主色、全域縮放與無框線的預設控制項。
     /// 主視窗、匯入視窗與表單都從這裡進來。
-    public func cardiaryTheme() -> some View {
-        self
-            .font(.cardiary(.body))
-            .fontDesign(.rounded)
-            .foregroundStyle(Palette.ink)
-            .tint(Palette.red)
-            .buttonStyle(ThemeButtonStyle(kind: .soft))
-            .textFieldStyle(ThemeFieldStyle())
-            .toggleStyle(ThemeCheckboxStyle())
+    public func cardiaryTheme(uiScale: UIScaleStore? = nil) -> some View {
+        modifier(CardiaryThemeModifier(uiScale: uiScale ?? .shared))
     }
 
     /// 浮在底色上的扁平色塊。
@@ -27,6 +20,22 @@ extension View {
         self
             .padding(padding ?? 0)
             .background(fill, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+    }
+}
+
+private struct CardiaryThemeModifier: ViewModifier {
+    @ObservedObject var uiScale: UIScaleStore
+
+    func body(content: Content) -> some View {
+        content
+            .font(.cardiary(.body, scale: uiScale.scale))
+            .fontDesign(.rounded)
+            .foregroundStyle(Palette.ink)
+            .tint(Palette.red)
+            .buttonStyle(ThemeButtonStyle(kind: .soft))
+            .textFieldStyle(ThemeFieldStyle())
+            .toggleStyle(ThemeCheckboxStyle())
+            .environment(\.cardiaryScale, uiScale.scale)
     }
 }
 
@@ -68,11 +77,12 @@ private struct ThemeButtonBody: View {
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.controlSize) private var controlSize
+    @Environment(\.cardiaryScale) private var uiScale
     @State private var isHovered = false
 
     var body: some View {
         configuration.label
-            .font(font)
+            .cardiaryFont(isCompact ? .caption : .callout, weight: .semibold)
             .lineLimit(1)
             .foregroundStyle(foreground)
             .padding(.horizontal, kind == .link ? 0 : horizontalPadding)
@@ -90,12 +100,17 @@ private struct ThemeButtonBody: View {
         controlSize == .small || controlSize == .mini
     }
 
-    private var font: Font {
-        .cardiary(isCompact ? .caption : .callout, weight: .semibold)
+    private var paddingScale: CGFloat {
+        min(1.35, max(0.85, uiScale))
     }
 
-    private var horizontalPadding: CGFloat { isCompact ? DesignTokens.buttonPaddingHCompact : DesignTokens.buttonPaddingH }
-    private var verticalPadding: CGFloat { isCompact ? DesignTokens.buttonPaddingVCompact : DesignTokens.buttonPaddingV }
+    private var horizontalPadding: CGFloat {
+        (isCompact ? DesignTokens.buttonPaddingHCompact : DesignTokens.buttonPaddingH) * paddingScale
+    }
+
+    private var verticalPadding: CGFloat {
+        (isCompact ? DesignTokens.buttonPaddingVCompact : DesignTokens.buttonPaddingV) * paddingScale
+    }
 
     private var foreground: Color {
         switch kind {
@@ -151,12 +166,17 @@ private struct ThemeIconButtonBody: View {
     let diameter: CGFloat
 
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.cardiaryScale) private var uiScale
     @State private var isHovered = false
+
+    private var scaledDiameter: CGFloat {
+        diameter * min(1.35, max(0.85, uiScale))
+    }
 
     var body: some View {
         configuration.label
             .foregroundStyle(foreground)
-            .frame(width: diameter, height: diameter)
+            .frame(width: scaledDiameter, height: scaledDiameter)
             .background(
                 Circle().fill(fill == .clear ? (isHovered ? Palette.hover : .clear) : fill)
             )
@@ -249,7 +269,7 @@ private struct ThemeCheckboxBody: View {
                     .overlay {
                         if configuration.isOn {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 9, weight: .heavy))
+                                .cardiarySymbolFont(size: 9, weight: .heavy)
                                 .foregroundStyle(Palette.onAccent)
                         }
                     }
@@ -279,7 +299,7 @@ struct ThemeSegmented<Value: Hashable>: View {
                     selection = option.value
                 } label: {
                     Text(option.title)
-                        .font(.cardiary(.caption, weight: .semibold))
+                        .cardiaryFont(.caption, weight: .semibold)
                         .lineLimit(1)
                         .foregroundStyle(isSelected ? Palette.onAccent : Palette.inkSecondary)
                         .padding(.horizontal, DesignTokens.spacingM)
@@ -324,6 +344,7 @@ struct ThemeMenuPicker<Value: Hashable>: View {
             }
         } label: {
             Text(currentTitle)
+                .cardiaryFont(.callout)
                 .lineLimit(1)
         }
         .menuStyle(.borderlessButton)
@@ -347,7 +368,7 @@ struct ThemeLabeledRow<Content: View>: View {
     var body: some View {
         HStack(spacing: DesignTokens.spacingM) {
             Text(title)
-                .font(.cardiary(.callout))
+                .cardiaryFont(.callout)
                 .foregroundStyle(Palette.inkSecondary)
             Spacer(minLength: DesignTokens.spacingS)
             content
@@ -391,7 +412,7 @@ struct SuitLoader: View {
                 ForEach(Array(Suit.allCases.enumerated()), id: \.offset) { index, suit in
                     let wave = (sin(phase - Double(index) * 0.9) + 1) / 2
                     Image(systemName: suit.symbol)
-                        .font(.system(size: size, weight: .bold))
+                        .cardiarySymbolFont(size: size, weight: .bold)
                         .foregroundStyle(suit.color)
                         .opacity(0.35 + 0.65 * wave)
                         .offset(y: -size * 0.25 * wave)
@@ -410,20 +431,22 @@ struct ThemeChip: View {
     var tone: Tone = .gray
     var systemImage: String?
     var filled = false
+    @Environment(\.cardiaryScale) private var uiScale
 
     var body: some View {
+        let paddingScale = min(1.25, max(0.85, uiScale))
         HStack(spacing: 3) {
             if let systemImage {
                 Image(systemName: systemImage)
-                    .font(.system(size: 8, weight: .bold))
+                    .cardiarySymbolFont(size: 8, weight: .bold)
             }
             Text(text)
                 .lineLimit(1)
         }
-        .font(.cardiary(.caption2, weight: .semibold))
+        .cardiaryFont(.caption2, weight: .semibold)
         .foregroundStyle(filled ? Palette.onAccent : tone.ink)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 2.5)
+        .padding(.horizontal, 8 * paddingScale)
+        .padding(.vertical, 2.5 * paddingScale)
         .background(filled ? tone.color : tone.soft, in: Capsule(style: .continuous))
     }
 }
@@ -432,15 +455,16 @@ struct ThemeChip: View {
 struct SuitHeading: View {
     let title: String
     var suit: Suit = .heart
-    var font: Font = .cardiary(.headline)
+    var style: Font.TextStyle = .headline
+    var weight: Font.Weight?
 
     var body: some View {
         HStack(spacing: DesignTokens.spacingS) {
             Image(systemName: suit.symbol)
-                .font(.system(size: 11, weight: .bold))
+                .cardiarySymbolFont(size: 11, weight: .bold)
                 .foregroundStyle(suit.ink)
             Text(title)
-                .font(font)
+                .cardiaryFont(style, weight: weight)
                 .foregroundStyle(Palette.ink)
         }
     }
@@ -453,7 +477,7 @@ struct SuitDivider: View {
             Capsule().fill(Palette.hover).frame(height: 2)
             ForEach(Suit.allCases, id: \.self) { suit in
                 Image(systemName: suit.symbol)
-                    .font(.system(size: 8, weight: .bold))
+                    .cardiarySymbolFont(size: 8, weight: .bold)
                     .foregroundStyle(suit.color.opacity(0.8))
             }
             Capsule().fill(Palette.hover).frame(height: 2)
@@ -475,11 +499,11 @@ struct ThemeEmptyState: View {
                     .fill(suit.soft)
                     .frame(width: 54, height: 54)
                 Image(systemName: systemImage ?? suit.symbol)
-                    .font(.system(size: 22, weight: .semibold))
+                    .cardiarySymbolFont(size: 22, weight: .semibold)
                     .foregroundStyle(suit.ink)
             }
             Text(text)
-                .font(.cardiary(.callout))
+                .cardiaryFont(.callout)
                 .foregroundStyle(Palette.inkSecondary)
                 .multilineTextAlignment(.center)
         }
@@ -501,16 +525,16 @@ struct ThemePageTitle: View {
                     .fill(suit.color)
                     .frame(width: 34, height: 34)
                 Image(systemName: suit.symbol)
-                    .font(.system(size: 15, weight: .bold))
+                    .cardiarySymbolFont(size: 15, weight: .bold)
                     .foregroundStyle(Palette.onAccent)
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.cardiary(.title3, weight: .bold))
+                    .cardiaryFont(.title3, weight: .bold)
                     .foregroundStyle(Palette.ink)
                 if let subtitle {
                     Text(subtitle)
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 }
             }

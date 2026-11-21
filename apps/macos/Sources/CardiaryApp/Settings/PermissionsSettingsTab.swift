@@ -44,9 +44,9 @@ struct PermissionsSettingsContent: View {
                 Divider()
                 DomainsSection(model: model)
                 if let message = model.errorMessage {
-                    Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.red)
+                    Text(message).cardiaryFont(.caption).foregroundStyle(Palette.red)
                 } else if let message = model.noticeMessage {
-                    Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.sageInk)
+                    Text(message).cardiaryFont(.caption).foregroundStyle(Palette.sageInk)
                 }
             }
     }
@@ -58,9 +58,9 @@ private struct AllowAllSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             Text(PermissionL10n.text(.permAllowAllTitle))
-                .font(.cardiary(.title3, weight: .semibold))
+                .cardiaryFont(.title3, weight: .semibold)
             Text(PermissionL10n.text(.permAllowAllBody))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -110,9 +110,9 @@ private struct SystemOneSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             Text(PermissionL10n.text(.permSystemOneTitle))
-                .font(.cardiary(.title3, weight: .semibold))
+                .cardiaryFont(.title3, weight: .semibold)
             Text(PermissionL10n.text(.permSystemOneBody))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             ForEach(DelegatedCategory.allCases, id: \.self) { category in
@@ -156,13 +156,13 @@ private struct DomainsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
             Text(PermissionL10n.text(.permDomainsTitle))
-                .font(.cardiary(.callout, weight: .semibold))
+                .cardiaryFont(.callout, weight: .semibold)
             Text(PermissionL10n.text(.permDomainsBody))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             TextEditor(text: $model.domainsText)
-                .font(.cardiary(.callout, weight: .regular, monospacedDigits: true))
+                .cardiaryFont(.callout, weight: .regular, monospacedDigits: true)
                 .frame(minHeight: 72, maxHeight: 140)
                 .overlay(
                     RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous)
@@ -190,7 +190,7 @@ private struct FolderList: View {
                     Image(systemName: "folder")
                         .foregroundStyle(Palette.inkSecondary)
                     Text(folder)
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(folder)
@@ -224,7 +224,7 @@ private struct AllowAllActiveCard: View {
                 Image(systemName: "checkmark.shield.fill")
                     .foregroundStyle(Palette.redInk)
                 Text(PermissionL10n.text(.permAllowAllActive))
-                    .font(.cardiary(.callout, weight: .semibold))
+                    .cardiaryFont(.callout, weight: .semibold)
                 Spacer()
                 Button(PermissionL10n.text(.permAllowAllEnd)) {
                     Task { await model.endAllowAll() }
@@ -238,7 +238,7 @@ private struct AllowAllActiveCard: View {
                 value: (grant.tools + grant.paths + grant.domains)
                     .joined(separator: AppL10n.language == .zhHant ? "、" : ", ")
             ))
-            .font(.cardiary(.caption))
+            .cardiaryFont(.caption)
             .foregroundStyle(Palette.inkSecondary)
             .lineLimit(2)
         }

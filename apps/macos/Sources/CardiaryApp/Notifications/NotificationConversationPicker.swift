@@ -44,7 +44,7 @@ struct NotificationConversationPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             Text(NotificationL10n.text(.notificationChooseConversationTitle))
-                .font(.cardiary(.title3, weight: .semibold))
+                .cardiaryFont(.title3, weight: .semibold)
                 .padding([.top, .horizontal], DesignTokens.spacingM)
 
             if model.isLoadingConversations {
@@ -55,7 +55,7 @@ struct NotificationConversationPicker: View {
             } else if model.conversations.isEmpty {
                 Spacer()
                 Text(NotificationL10n.text(.notificationConversationEmpty))
-                    .font(.cardiary(.callout))
+                    .cardiaryFont(.callout)
                     .foregroundStyle(Palette.inkSecondary)
                     .frame(maxWidth: .infinity)
                     .multilineTextAlignment(.center)
@@ -76,10 +76,10 @@ struct NotificationConversationPicker: View {
                                 HStack {
                                     VStack(alignment: .leading) {
                                         Text(session.title)
-                                            .font(.cardiary(.callout))
+                                            .cardiaryFont(.callout)
                                             .foregroundStyle(Palette.ink)
                                         Text(session.id)
-                                            .font(.cardiary(.caption))
+                                            .cardiaryFont(.caption)
                                             .foregroundStyle(Palette.inkTertiary)
                                             .lineLimit(1)
                                     }
@@ -105,14 +105,14 @@ struct NotificationConversationPicker: View {
             // 會以為按鈕壞掉。
             if let message = model.errorMessage {
                 Text(message)
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.red)
                     .padding(.horizontal, DesignTokens.spacingM)
                     .multilineTextAlignment(.leading)
             }
             if let message = model.noticeMessage {
                 Text(message)
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.sageInk)
                     .padding(.horizontal, DesignTokens.spacingM)
                     .multilineTextAlignment(.leading)

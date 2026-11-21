@@ -18,18 +18,20 @@ public final class ModelsSettingsTab: SettingsTab {
     }
 }
 
-/// 一般設定分頁：主機的設定值與分級。
+/// 一般設定分頁：介面縮放、主機設定值與分級。
 public final class GeneralSettingsTab: SettingsTab {
     public let id = "general"
     public let titleKey: AppString = .settingsGeneralTab
     private let model: GeneralSettingsModel
+    private let uiScale: UIScaleStore
 
-    public init(model: GeneralSettingsModel) {
+    public init(model: GeneralSettingsModel, uiScale: UIScaleStore? = nil) {
         self.model = model
+        self.uiScale = uiScale ?? .shared
     }
 
     public func makeBody() -> AnyView {
-        AnyView(GeneralSettingsView(model: model))
+        AnyView(GeneralSettingsView(model: model, uiScale: uiScale))
     }
 }
 
@@ -79,7 +81,7 @@ struct ModelsSettingsView: View {
                 LoadingSettingsView()
             } else if model.providers.isEmpty {
                 Text(AppL10n.text(.settingsProvidersEmpty))
-                    .font(.cardiary(.callout))
+                    .cardiaryFont(.callout)
                     .foregroundStyle(Palette.inkSecondary)
             } else {
                 ForEach(model.providers, id: \.providerId) { provider in
@@ -125,11 +127,11 @@ struct ModelsSettingsView: View {
             ForEach(ModelRole.allCases, id: \.self) { role in
                 HStack(alignment: .firstTextBaseline, spacing: DesignTokens.spacingS) {
                     Text(AppL10n.text(Self.roleKey(role)))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                         .frame(width: 120, alignment: .leading)
                     Text(ModelsSettingsModel.resolvedLabel(model.resolved(for: role)))
-                        .font(.cardiary(.caption, weight: .semibold))
+                        .cardiaryFont(.caption, weight: .semibold)
                 }
             }
         }
@@ -181,7 +183,7 @@ struct ProviderCard: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             HStack(spacing: DesignTokens.spacingS) {
                 Text(provider.displayName)
-                    .font(.cardiary(.callout, weight: .semibold))
+                    .cardiaryFont(.callout, weight: .semibold)
                 ThemeChip(text: AppL10n.text(ModelsSettingsView.kindKey(provider.kind)), tone: .purple)
                 Spacer()
                 Button(AppL10n.text(.settingsCredentialSet)) {
@@ -191,17 +193,17 @@ struct ProviderCard: View {
             }
             if let baseUrl = provider.baseUrl, !baseUrl.isEmpty {
                 Text(baseUrl)
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
             Text(AppL10n.count(.settingsProviderModelCount, count: provider.models.count))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkSecondary)
             Text(AppL10n.format(
                 .settingsCredentialAccount,
                 value: model.keychainAccount(for: provider)
             ))
-            .font(.cardiary(.caption2))
+            .cardiaryFont(.caption2)
             .foregroundStyle(Palette.inkTertiary)
 
             if model.credentialProviderId == provider.providerId {
@@ -272,15 +274,23 @@ struct AddProviderForm: View {
 
 struct GeneralSettingsView: View {
     @ObservedObject var model: GeneralSettingsModel
+    @ObservedObject var uiScale: UIScaleStore
+
+    init(model: GeneralSettingsModel, uiScale: UIScaleStore? = nil) {
+        self.model = model
+        self.uiScale = uiScale ?? .shared
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignTokens.spacingL) {
+                displayZoomSection
+
                 if model.isLoading && model.items.isEmpty {
                     LoadingSettingsView()
                 } else if model.items.isEmpty {
                     Text(AppL10n.text(.settingsGeneralEmpty))
-                        .font(.cardiary(.callout))
+                        .cardiaryFont(.callout)
                         .foregroundStyle(Palette.inkSecondary)
                 } else {
                     ForEach(model.items, id: \.key) { item in
@@ -288,7 +298,7 @@ struct GeneralSettingsView: View {
                     }
                     if model.items.contains(where: { $0.key.hasPrefix("boards.") }) {
                         Text(BoardL10n.text(.boardsAgentModeNote))
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                             .foregroundStyle(Palette.inkSecondary)
                     }
                 }
@@ -311,20 +321,66 @@ struct GeneralSettingsView: View {
         }
     }
 
+    private var displayZoomSection: some View {
+        SettingsSection(title: .settingsDisplaySection, suit: .club) {
+            VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
+                ThemeLabeledRow(title: AppL10n.text(.settingsZoomLabel)) {
+                    HStack(spacing: DesignTokens.spacingS) {
+                        Button {
+                            uiScale.zoomOut()
+                        } label: {
+                            Image(systemName: "minus")
+                                .cardiarySymbolFont(size: 11, weight: .bold)
+                        }
+                        .buttonStyle(ThemeIconButtonStyle(fill: Palette.sunken, foreground: Palette.ink, diameter: 26))
+                        .disabled(!uiScale.canZoomOut)
+                        .help(AppL10n.text(.viewZoomOut))
+                        .accessibilityLabel(AppL10n.text(.viewZoomOut))
+
+                        Text(uiScale.percentageText)
+                            .cardiaryFont(.callout, weight: .semibold, monospacedDigits: true)
+                            .frame(minWidth: 46)
+
+                        Button {
+                            uiScale.zoomIn()
+                        } label: {
+                            Image(systemName: "plus")
+                                .cardiarySymbolFont(size: 11, weight: .bold)
+                        }
+                        .buttonStyle(ThemeIconButtonStyle(fill: Palette.sunken, foreground: Palette.ink, diameter: 26))
+                        .disabled(!uiScale.canZoomIn)
+                        .help(AppL10n.text(.viewZoomIn))
+                        .accessibilityLabel(AppL10n.text(.viewZoomIn))
+
+                        Button(AppL10n.text(.settingsZoomReset)) {
+                            uiScale.reset()
+                        }
+                        .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
+                        .controlSize(.small)
+                        .disabled(uiScale.isDefault)
+                    }
+                }
+                Text(AppL10n.text(.settingsZoomHint))
+                    .cardiaryFont(.caption)
+                    .foregroundStyle(Palette.inkSecondary)
+            }
+        }
+    }
+
     private func itemRow(_ item: SettingItem) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             HStack(spacing: DesignTokens.spacingS) {
                 Text(model.title(for: item))
-                    .font(.cardiary(.callout, weight: .semibold))
+                    .cardiaryFont(.callout, weight: .semibold)
                 ThemeChip(text: AppL10n.text(GeneralSettingsModel.levelKey(item.level)), tone: Self.levelTone(item.level))
                 Spacer()
             }
             Text(item.key)
-                .font(.cardiary(.caption2))
+                .cardiaryFont(.caption2)
                 .foregroundStyle(Palette.inkTertiary)
             if let description = model.description(for: item) {
                 Text(description)
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
 
@@ -378,7 +434,7 @@ struct ModulesSettingsView: View {
                     LoadingSettingsView()
                 } else if model.modules.isEmpty {
                     Text(AppL10n.text(.settingsModulesEmpty))
-                        .font(.cardiary(.callout))
+                        .cardiaryFont(.callout)
                         .foregroundStyle(Palette.inkSecondary)
                 } else {
                     ForEach(model.modules, id: \.moduleId) { module in
@@ -408,9 +464,9 @@ struct ModulesSettingsView: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             HStack(spacing: DesignTokens.spacingS) {
                 Text(module.name)
-                    .font(.cardiary(.callout, weight: .semibold))
+                    .cardiaryFont(.callout, weight: .semibold)
                 Text(AppL10n.format(.settingsModuleVersion, value: module.version))
-                    .font(.cardiary(.caption2))
+                    .cardiaryFont(.caption2)
                     .foregroundStyle(Palette.inkSecondary)
                 ThemeChip(
                     text: AppL10n.text(ModulesSettingsModel.stateKey(module.state)),
@@ -427,7 +483,7 @@ struct ModulesSettingsView: View {
             }
             if let failure = module.failure, !failure.isEmpty {
                 Text(AppL10n.format(.settingsModuleFailed, value: failure))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.redInk)
             }
         }
@@ -444,7 +500,7 @@ struct LoadingSettingsView: View {
         HStack(spacing: DesignTokens.spacingS) {
             SuitLoader(size: 7)
             Text(AppL10n.text(.settingsLoading))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkSecondary)
         }
     }
