@@ -4,19 +4,16 @@
  * 規格第 11 章「M5 權限模式裁決」：這些模式只由人開啟。閘道只讓本機 Mac
  * 客戶端（client Token）呼叫 `system.permissions.*`；遠端裝置與代理在閘道
  * 外層就被擋下，這裡只負責驗證輸入、呼叫 `AgentPermissions`、回傳完整狀態。
- * 範圍與期限的規則（預設 15 分鐘、上限 60 分鐘、工具不可為空）由
- * `AgentPermissions` 執行，這裡再加一條：全部允許一定要限定路徑或網域。
+ * 範圍的規則（工具不可為空、路徑必須是絕對路徑）由 `AgentPermissions`
+ * 執行，這裡再加一條：全部允許一定要限定路徑或網域。全部允許沒有期限，
+ * 開啟後重啟保留，直到人撤銷或緊急全部暫停。
  */
 
 import type { JSONObject } from "@cardiary/protocol";
 import { DELEGABLE_CATEGORIES, type DelegatedCategory } from "@cardiary/domain";
 
 import { protocolError } from "../errors.js";
-import {
-  DEFAULT_ALLOW_ALL_MINUTES,
-  MAX_ALLOW_ALL_MINUTES,
-  type AgentPermissions,
-} from "../permissions/agent-permissions.js";
+import type { AgentPermissions } from "../permissions/agent-permissions.js";
 
 export const PERMISSION_MODE_TYPES = [
   "system.permissions.get",
@@ -42,8 +39,8 @@ export class PermissionModeInputError extends Error {
   }
 }
 
-export function permissionModesState(permissions: AgentPermissions, now: number): JSONObject {
-  const status = permissions.status("", now);
+export function permissionModesState(permissions: AgentPermissions): JSONObject {
+  const status = permissions.status("");
   return {
     categories: status.categories.map((entry) => ({
       category: entry.category,
@@ -58,11 +55,8 @@ export function permissionModesState(permissions: AgentPermissions, now: number)
             tools: [...status.allowAll.tools],
             paths: [...status.allowAll.paths],
             domains: [...status.allowAll.domains],
-            expiresAt: new Date(status.allowAll.expiresAt).toISOString(),
           },
         }),
-    defaultAllowAllMinutes: DEFAULT_ALLOW_ALL_MINUTES,
-    maxAllowAllMinutes: MAX_ALLOW_ALL_MINUTES,
   };
 }
 
@@ -74,11 +68,10 @@ export function applyPermissionModeRequest(
   permissions: AgentPermissions,
   type: PermissionModeType,
   payload: JSONObject,
-  now: number,
 ): { readonly state: JSONObject; readonly changed: boolean } {
   switch (type) {
     case "system.permissions.get":
-      return { state: permissionModesState(permissions, now), changed: false };
+      return { state: permissionModesState(permissions), changed: false };
     case "system.permissions.set_category": {
       const category = payload.category;
       if (
@@ -108,27 +101,14 @@ export function applyPermissionModeRequest(
       if (paths.length === 0 && domains.length === 0) {
         throw new PermissionModeInputError("全部允許必須限定路徑或網域。", "paths");
       }
-      const minutes =
-        payload.minutes === undefined ? DEFAULT_ALLOW_ALL_MINUTES : (payload.minutes as unknown);
-      if (
-        typeof minutes !== "number" ||
-        !Number.isInteger(minutes) ||
-        minutes < 1 ||
-        minutes > MAX_ALLOW_ALL_MINUTES
-      ) {
-        throw new PermissionModeInputError(
-          `期限必須是 1 到 ${MAX_ALLOW_ALL_MINUTES} 分鐘的整數。`,
-          "minutes",
-        );
-      }
-      wrap("tools", () => permissions.grantAllowAll({ tools, paths, domains }, now, minutes));
+      wrap("tools", () => permissions.grantAllowAll({ tools, paths, domains }));
       break;
     }
     case "system.permissions.revoke_allow_all":
       permissions.revokeAllowAll();
       break;
   }
-  return { state: permissionModesState(permissions, now), changed: true };
+  return { state: permissionModesState(permissions), changed: true };
 }
 
 function stringList(value: unknown, field: string): string[] {

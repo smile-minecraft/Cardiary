@@ -1735,7 +1735,7 @@ export interface SystemPermissionsSetDomainsRequestPayload {
   clientRequestId: string;
 }
 /**
- * 開啟限時的全部允許。
+ * 開啟全部允許（無期限，重啟保留，直到撤銷或緊急全部暫停）。
  */
 export interface SystemPermissionsGrantAllowAllRequest {
   v: 1;
@@ -1768,10 +1768,6 @@ export interface SystemPermissionsGrantAllowAllRequestPayload {
    * Items: 網域規則。
    */
   domains?: string[];
-  /**
-   * 期限分鐘數；省略時用預設值，超過上限被拒。
-   */
-  minutes?: number;
   /**
    * 冪等鍵。
    */
@@ -4146,7 +4142,7 @@ export interface SystemPermissionsGetResponse {
   payload: PermissionModesState;
 }
 /**
- * 目前的權限模式；沒有 allowAll 代表全部允許沒有開啟或已到期。
+ * 目前的權限模式；沒有 allowAll 代表全部允許沒有開啟或已撤銷。
  */
 export interface PermissionModesState {
   /**
@@ -4164,14 +4160,6 @@ export interface PermissionModesState {
    */
   allowedDomains: string[];
   allowAll?: AllowAllGrantState;
-  /**
-   * 全部允許的預設分鐘數。
-   */
-  defaultAllowAllMinutes: number;
-  /**
-   * 全部允許的上限分鐘數。
-   */
-  maxAllowAllMinutes: number;
 }
 export interface DelegatedCategoryGrant {
   category: DelegatedCategory;
@@ -4182,6 +4170,9 @@ export interface DelegatedCategoryGrant {
    */
   paths: string[];
 }
+/**
+ * 全部允許的範圍；沒有期限，重啟後保留，直到人撤銷或緊急全部暫停。
+ */
 export interface AllowAllGrantState {
   /**
    * 放行的工具。
@@ -4203,10 +4194,6 @@ export interface AllowAllGrantState {
    * Items: 網域規則。
    */
   domains: string[];
-  /**
-   * 到期時間，RFC 3339；到期自動失效。
-   */
-  expiresAt: string;
 }
 /**
  * 變更後的權限模式。

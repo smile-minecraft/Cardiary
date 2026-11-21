@@ -300,7 +300,6 @@ public protocol PermissionModesService: Sendable {
         tools: [String],
         paths: [String],
         domains: [String],
-        minutes: Int,
         clientRequestId: String
     ) async throws -> PermissionModesState
     func revokeAllowAll(clientRequestId: String) async throws -> PermissionModesState

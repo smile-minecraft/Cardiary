@@ -940,25 +940,21 @@ public struct AllowAllGrantState: Codable, Equatable, Sendable {
     public let tools: [String]
     public let paths: [String]
     public let domains: [String]
-    public let expiresAt: String
 
     public init(
         tools: [String],
         paths: [String],
-        domains: [String],
-        expiresAt: String
+        domains: [String]
     ) {
         self.tools = tools
         self.paths = paths
         self.domains = domains
-        self.expiresAt = expiresAt
     }
 
     private enum CodingKeys: String, CodingKey {
         case tools = "tools"
         case paths = "paths"
         case domains = "domains"
-        case expiresAt = "expiresAt"
     }
 
     public init(from decoder: Decoder) throws {
@@ -966,12 +962,10 @@ public struct AllowAllGrantState: Codable, Equatable, Sendable {
         let tools = try container.decode([String].self, forKey: .tools)
         let paths = try container.decode([String].self, forKey: .paths)
         let domains = try container.decode([String].self, forKey: .domains)
-        let expiresAt = try container.decode(String.self, forKey: .expiresAt)
         self.init(
             tools: tools,
             paths: paths,
-            domains: domains,
-            expiresAt: expiresAt
+            domains: domains
         )
     }
 
@@ -980,7 +974,6 @@ public struct AllowAllGrantState: Codable, Equatable, Sendable {
         try container.encode(tools, forKey: .tools)
         try container.encode(paths, forKey: .paths)
         try container.encode(domains, forKey: .domains)
-        try container.encode(expiresAt, forKey: .expiresAt)
     }
 }
 
@@ -13786,23 +13779,17 @@ public struct PermissionModesState: Codable, Equatable, Sendable {
     public let availableCategories: [DelegatedCategory]
     public let allowedDomains: [String]
     public let allowAll: AllowAllGrantState?
-    public let defaultAllowAllMinutes: Int
-    public let maxAllowAllMinutes: Int
 
     public init(
         categories: [DelegatedCategoryGrant],
         availableCategories: [DelegatedCategory],
         allowedDomains: [String],
-        allowAll: AllowAllGrantState? = nil,
-        defaultAllowAllMinutes: Int,
-        maxAllowAllMinutes: Int
+        allowAll: AllowAllGrantState? = nil
     ) {
         self.categories = categories
         self.availableCategories = availableCategories
         self.allowedDomains = allowedDomains
         self.allowAll = allowAll
-        self.defaultAllowAllMinutes = defaultAllowAllMinutes
-        self.maxAllowAllMinutes = maxAllowAllMinutes
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -13810,8 +13797,6 @@ public struct PermissionModesState: Codable, Equatable, Sendable {
         case availableCategories = "availableCategories"
         case allowedDomains = "allowedDomains"
         case allowAll = "allowAll"
-        case defaultAllowAllMinutes = "defaultAllowAllMinutes"
-        case maxAllowAllMinutes = "maxAllowAllMinutes"
     }
 
     public init(from decoder: Decoder) throws {
@@ -13820,15 +13805,11 @@ public struct PermissionModesState: Codable, Equatable, Sendable {
         let availableCategories = try container.decode([DelegatedCategory].self, forKey: .availableCategories)
         let allowedDomains = try container.decode([String].self, forKey: .allowedDomains)
         let allowAll = try container.decodeIfPresent(AllowAllGrantState.self, forKey: .allowAll)
-        let defaultAllowAllMinutes = try container.decode(Int.self, forKey: .defaultAllowAllMinutes)
-        let maxAllowAllMinutes = try container.decode(Int.self, forKey: .maxAllowAllMinutes)
         self.init(
             categories: categories,
             availableCategories: availableCategories,
             allowedDomains: allowedDomains,
-            allowAll: allowAll,
-            defaultAllowAllMinutes: defaultAllowAllMinutes,
-            maxAllowAllMinutes: maxAllowAllMinutes
+            allowAll: allowAll
         )
     }
 
@@ -13838,8 +13819,6 @@ public struct PermissionModesState: Codable, Equatable, Sendable {
         try container.encode(availableCategories, forKey: .availableCategories)
         try container.encode(allowedDomains, forKey: .allowedDomains)
         try container.encodeIfPresent(allowAll, forKey: .allowAll)
-        try container.encode(defaultAllowAllMinutes, forKey: .defaultAllowAllMinutes)
-        try container.encode(maxAllowAllMinutes, forKey: .maxAllowAllMinutes)
     }
 }
 
@@ -21975,20 +21954,17 @@ public struct SystemPermissionsGrantAllowAllRequestPayload: Codable, Equatable, 
     public let tools: [String]
     public let paths: [String]
     public let domains: [String]?
-    public let minutes: Int?
     public let clientRequestId: String
 
     public init(
         tools: [String],
         paths: [String],
         domains: [String]? = nil,
-        minutes: Int? = nil,
         clientRequestId: String
     ) {
         self.tools = tools
         self.paths = paths
         self.domains = domains
-        self.minutes = minutes
         self.clientRequestId = clientRequestId
     }
 
@@ -21996,7 +21972,6 @@ public struct SystemPermissionsGrantAllowAllRequestPayload: Codable, Equatable, 
         case tools = "tools"
         case paths = "paths"
         case domains = "domains"
-        case minutes = "minutes"
         case clientRequestId = "clientRequestId"
     }
 
@@ -22005,13 +21980,11 @@ public struct SystemPermissionsGrantAllowAllRequestPayload: Codable, Equatable, 
         let tools = try container.decode([String].self, forKey: .tools)
         let paths = try container.decode([String].self, forKey: .paths)
         let domains = try container.decodeIfPresent([String].self, forKey: .domains)
-        let minutes = try container.decodeIfPresent(Int.self, forKey: .minutes)
         let clientRequestId = try container.decode(String.self, forKey: .clientRequestId)
         self.init(
             tools: tools,
             paths: paths,
             domains: domains,
-            minutes: minutes,
             clientRequestId: clientRequestId
         )
     }
@@ -22021,7 +21994,6 @@ public struct SystemPermissionsGrantAllowAllRequestPayload: Codable, Equatable, 
         try container.encode(tools, forKey: .tools)
         try container.encode(paths, forKey: .paths)
         try container.encodeIfPresent(domains, forKey: .domains)
-        try container.encodeIfPresent(minutes, forKey: .minutes)
         try container.encode(clientRequestId, forKey: .clientRequestId)
     }
 }

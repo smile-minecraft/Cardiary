@@ -3,10 +3,10 @@ import Foundation
 
 /// 代理權限模式的視圖模型：System One 審核類別、可委派網域與全部允許。
 ///
-/// 規格第 11 章「M5 權限模式裁決」：這些模式只由人開啟，全部允許限定工具與
-/// 資料夾、有期限，介面要持續顯示倒數。主機是唯一的真相來源：每個動作都以
-/// 主機回傳的完整狀態為準，`system.permissions.changed`（包括緊急全部暫停時
-/// 的撤銷）也直接套用。
+/// 規格第 11 章：這些模式只由人開啟，全部允許限定工具與資料夾，開啟後永久有效並於
+/// 重啟後保留，直到於設定頁手動結束或緊急全部暫停撤銷（僅在設定頁顯示狀態，主視窗
+/// 不顯示警告橫幅）。主機是唯一的真相來源：每個動作都以主機回傳的完整狀態為準，
+/// `system.permissions.changed`（包括緊急全部暫停時的撤銷）也直接套用。
 @MainActor
 public final class PermissionModesModel: ObservableObject {
     /// 全部允許可以選的本機工具；權限閘道仍會先擋禁止項。
@@ -22,7 +22,6 @@ public final class PermissionModesModel: ObservableObject {
     @Published public var domainsText = ""
     @Published public var allowAllSelectedTools: Set<String> = ["read_file"]
     @Published public var allowAllFolders: [String] = []
-    @Published public var allowAllMinutes = 15
 
     private var service: (any PermissionModesService)?
     private let language: AppLanguage?
@@ -49,12 +48,13 @@ public final class PermissionModesModel: ObservableObject {
         state?.categories.contains { $0.category == category } ?? false
     }
 
-    /// 全部允許還有效時的到期時間；已到期或沒開就回 nil。
-    public func allowAllExpiry(now: Date = Date()) -> Date? {
-        guard let raw = state?.allowAll?.expiresAt, let expiry = Self.parseDate(raw) else {
-            return nil
-        }
-        return expiry > now ? expiry : nil
+    /// 目前生效中的全部允許授權；沒開時為 nil。
+    public var activeAllowAll: AllowAllGrantState? {
+        state?.allowAll
+    }
+
+    public var isAllowAllActive: Bool {
+        activeAllowAll != nil
     }
 
     public func load() async {
@@ -117,12 +117,10 @@ public final class PermissionModesModel: ObservableObject {
             errorMessage = PermissionL10n.text(.permAllowAllNeedsScope, language: language)
             return
         }
-        let maximum = state?.maxAllowAllMinutes ?? 60
-        let minutes = min(max(allowAllMinutes, 1), maximum)
         let folders = allowAllFolders
         await perform { service, requestId in
             try await service.grantAllowAll(
-                tools: tools, paths: folders, domains: [], minutes: minutes,
+                tools: tools, paths: folders, domains: [],
                 clientRequestId: requestId
             )
         }
@@ -171,13 +169,6 @@ public final class PermissionModesModel: ObservableObject {
         if domainsText.isEmpty || notice {
             domainsText = next.allowedDomains.joined(separator: "\n")
         }
-        allowAllMinutes = min(allowAllMinutes, next.maxAllowAllMinutes)
-    }
-
-    static func parseDate(_ raw: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
     }
 
     private static func describe(_ error: Error) -> String {

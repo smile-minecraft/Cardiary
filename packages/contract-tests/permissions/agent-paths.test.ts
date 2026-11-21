@@ -34,7 +34,6 @@ const FORGED = JSON.stringify({
     tools: ["write_file", "run_command"],
     paths: ["/"],
     domains: [],
-    expiresAt: Date.parse("2099-01-01T00:00:00.000Z"),
   },
 });
 
@@ -151,7 +150,6 @@ describe("代理路徑改不了權限模式", { timeout: 60_000 }, () => {
     await reply(client, "system.permissions.grant_allow_all", {
       tools: ["run_command"],
       paths: [service.folder.path],
-      minutes: 15,
       clientRequestId: "grant-run-command",
     });
     const before = await readState(service);

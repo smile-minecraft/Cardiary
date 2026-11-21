@@ -4,8 +4,8 @@ import XCTest
 
 @testable import CardiaryApp
 
-/// 代理權限模式的視圖模型：主機狀態是唯一真相，全部允許要限定範圍，
-/// 推來的變更（例如緊急全部暫停撤銷）立刻反映在倒數上。
+/// 代理權限模式的視圖模型：主機狀態是唯一真相，全部允許要限定範圍且重啟保留，
+/// 推來的變更（例如緊急全部暫停撤銷）立刻反映在狀態上。
 @MainActor
 final class PermissionModesModelTests: XCTestCase {
     private func attached() async -> (PermissionModesModel, FakeCardiaryService) {
@@ -19,7 +19,8 @@ final class PermissionModesModelTests: XCTestCase {
     func testLoadStartsWithEverythingOff() async {
         let (model, _) = await attached()
         XCTAssertNotNil(model.state)
-        XCTAssertNil(model.allowAllExpiry())
+        XCTAssertNil(model.activeAllowAll)
+        XCTAssertFalse(model.isAllowAllActive)
         for category in DelegatedCategory.allCases {
             XCTAssertFalse(model.isEnabled(category))
         }
@@ -72,31 +73,35 @@ final class PermissionModesModelTests: XCTestCase {
         XCTAssertEqual(calls, [], "沒有工具或資料夾時不能開全部允許")
     }
 
-    func testAllowAllClampsMinutesAndShowsCountdown() async {
+    func testAllowAllGrantsWithoutExpiryAndPersistsAcrossReload() async {
         let (model, service) = await attached()
         model.allowAllSelectedTools = ["write_file", "read_file"]
         model.allowAllFolders = ["/Users/test/Projects"]
-        model.allowAllMinutes = 90
         await model.startAllowAll()
         let calls = await service.permissionCalls
-        XCTAssertEqual(calls, ["grant:read_file,write_file:/Users/test/Projects:60"], "超過上限要壓回 60 分鐘")
-        let expiry = try? XCTUnwrap(model.allowAllExpiry())
-        XCTAssertNotNil(expiry)
-        if let expiry {
-            XCTAssertEqual(expiry.timeIntervalSinceNow, 3600, accuracy: 5)
-            XCTAssertEqual(AllowAllBanner.remaining(until: expiry, now: expiry.addingTimeInterval(-75)), "1:15")
-        }
+        XCTAssertEqual(calls, ["grant:read_file,write_file:/Users/test/Projects"])
+        XCTAssertTrue(model.isAllowAllActive)
+        XCTAssertEqual(model.activeAllowAll?.tools, ["read_file", "write_file"])
+        XCTAssertEqual(model.activeAllowAll?.paths, ["/Users/test/Projects"])
+
+        // 模擬重新開啟或重連後載入主機狀態，授權依然有效。
+        let reloaded = PermissionModesModel(language: .zhHant)
+        reloaded.attach(service: service)
+        await reloaded.load()
+        XCTAssertTrue(reloaded.isAllowAllActive)
+        XCTAssertEqual(reloaded.activeAllowAll, model.activeAllowAll)
 
         await model.endAllowAll()
-        XCTAssertNil(model.allowAllExpiry())
+        XCTAssertFalse(model.isAllowAllActive)
+        XCTAssertNil(model.activeAllowAll)
     }
 
-    func testPushedChangeFromEmergencyPauseClearsTheBanner() async throws {
+    func testPushedChangeFromEmergencyPauseClearsActiveAllowAll() async throws {
         let (model, _) = await attached()
         model.allowAllSelectedTools = ["write_file"]
         model.allowAllFolders = ["/Users/test/Projects"]
         await model.startAllowAll()
-        XCTAssertNotNil(model.allowAllExpiry())
+        XCTAssertTrue(model.isAllowAllActive)
 
         let event = SystemPermissionsChangedEvent(
             stream: "system",
@@ -105,19 +110,8 @@ final class PermissionModesModelTests: XCTestCase {
             payload: FakeCardiaryService.modes()
         )
         model.handle(frame: .systemPermissionsChangedEvent(event))
-        XCTAssertNil(model.allowAllExpiry(), "主機撤銷後倒數要立刻消失")
-    }
-
-    func testExpiredGrantIsNotShown() async {
-        let (model, service) = await attached()
-        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-5))
-        await service.setPermissionModesForTest(
-            FakeCardiaryService.modes(
-                allowAll: AllowAllGrantState(tools: ["write_file"], paths: ["/tmp"], domains: [], expiresAt: past)
-            )
-        )
-        await model.load()
-        XCTAssertNil(model.allowAllExpiry())
+        XCTAssertFalse(model.isAllowAllActive, "主機撤銷後全部允許狀態要立刻清空")
+        XCTAssertNil(model.activeAllowAll)
     }
 
     func testDomainsAreSplitByLinesAndCommas() async {

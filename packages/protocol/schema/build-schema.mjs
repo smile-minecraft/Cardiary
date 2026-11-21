@@ -1692,34 +1692,30 @@ add(
 
 add(
   "AllowAllGrantState",
-  objectOf("AllowAllGrantState", ["tools", "paths", "domains", "expiresAt"], {
-    tools: arrayOf(str("工具名稱。"), "放行的工具。", { minItems: 1 }),
-    paths: arrayOf(str("絕對路徑。"), "放行的路徑範圍。"),
-    domains: arrayOf(str("網域規則。"), "放行的網域範圍。"),
-    expiresAt: str("到期時間，RFC 3339；到期自動失效。", { format: "date-time" }),
-  }),
+  objectOf(
+    "AllowAllGrantState",
+    ["tools", "paths", "domains"],
+    {
+      tools: arrayOf(str("工具名稱。"), "放行的工具。", { minItems: 1 }),
+      paths: arrayOf(str("絕對路徑。"), "放行的路徑範圍。"),
+      domains: arrayOf(str("網域規則。"), "放行的網域範圍。"),
+    },
+    "全部允許的範圍；沒有期限，重啟後保留，直到人撤銷或緊急全部暫停。",
+  ),
 );
 
 add(
   "PermissionModesState",
   objectOf(
     "PermissionModesState",
-    [
-      "categories",
-      "availableCategories",
-      "allowedDomains",
-      "defaultAllowAllMinutes",
-      "maxAllowAllMinutes",
-    ],
+    ["categories", "availableCategories", "allowedDomains"],
     {
       categories: arrayOf(ref("DelegatedCategoryGrant"), "已開啟的 System One 類別。"),
       availableCategories: arrayOf(ref("DelegatedCategory"), "可以開啟的類別。"),
       allowedDomains: arrayOf(str("網域規則。"), "人工維護的可委派網域。"),
       allowAll: ref("AllowAllGrantState"),
-      defaultAllowAllMinutes: int("全部允許的預設分鐘數。"),
-      maxAllowAllMinutes: int("全部允許的上限分鐘數。"),
     },
-    "目前的權限模式；沒有 allowAll 代表全部允許沒有開啟或已到期。",
+    "目前的權限模式；沒有 allowAll 代表全部允許沒有開啟或已撤銷。",
   ),
 );
 
@@ -1753,7 +1749,6 @@ add(
     tools: arrayOf(str("工具名稱。"), "放行的工具。", { minItems: 1 }),
     paths: arrayOf(str("絕對路徑。"), "放行的路徑範圍。"),
     domains: arrayOf(str("網域規則。"), "放行的網域範圍。"),
-    minutes: int("期限分鐘數；省略時用預設值，超過上限被拒。", { minimum: 1 }),
     clientRequestId: str("冪等鍵。"),
   }),
 );
@@ -2851,7 +2846,7 @@ requestFrame(
   "SystemPermissionsGrantAllowAllRequest",
   "system.permissions.grant_allow_all",
   "SystemPermissionsGrantAllowAllRequestPayload",
-  "開啟限時的全部允許。",
+  "開啟全部允許（無期限，重啟保留，直到撤銷或緊急全部暫停）。",
 );
 responseFrame(
   "SystemPermissionsGrantAllowAllResponse",

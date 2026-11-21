@@ -21,8 +21,6 @@ struct MainWindowView: View {
         } detail: {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
-                    // 全部允許期間持續顯示倒數（規格第 11 章）；沒開時不佔空間。
-                    AllowAllBanner(model: model.permissions, insetInWindow: true)
                     ConnectionBanner(model: model)
                     MainContentView(model: model)
                 }

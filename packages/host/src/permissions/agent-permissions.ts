@@ -1,5 +1,5 @@
 /**
- * 代理權限的人類設定：委派類別、可委派網域清單與限時的全部允許。
+ * 代理權限的人類設定：委派類別、可委派網域清單與全部允許。
  *
  * 這個服務只有人類的設定入口會拿到；工具與模型都碰不到。狀態存
  * `state/agent-permissions.json`（正本區，原子寫入）。檔案損毀或格式
@@ -24,10 +24,6 @@ import {
 /** 每場對話的自動放行上限；用完之後一律重新詢問。 */
 export const MAX_DELEGATED_APPROVALS = 20;
 
-/** 全部允許的預設與上限（分鐘）。 */
-export const DEFAULT_ALLOW_ALL_MINUTES = 15;
-export const MAX_ALLOW_ALL_MINUTES = 60;
-
 export interface CategoryGrant {
   readonly category: DelegatedCategory;
   readonly paths: readonly string[];
@@ -39,7 +35,6 @@ export interface AllowAllGrant {
   readonly paths: readonly string[];
   /** 網路類工具的網域範圍；必須同時在人類的可委派清單內。 */
   readonly domains: readonly string[];
-  readonly expiresAt: number;
 }
 
 interface StoredPermissions {
@@ -76,14 +71,21 @@ export class AgentPermissions {
       if (!validState(parsed)) {
         throw new Error("設定格式錯誤");
       }
+      if (hasLegacyExpiry(parsed)) {
+        // 舊版的全部允許是限時的；把它當成無期限會在使用者不知情下擴權，
+        // 所以丟掉這筆授權（其餘設定保留），要用再由人重新開啟。
+        this.#save({ ...parsed, allowAll: null });
+        options.diagnostic?.("舊版的限時全部允許已撤銷，需要時請在設定頁重新開啟。");
+        return;
+      }
       this.#state = parsed;
     } catch {
       options.diagnostic?.("代理權限設定損毀，已停用所有委派權限。");
     }
   }
 
-  status(conversationId: string, now: number) {
-    const allowAll = this.allowAllFor(now);
+  status(conversationId: string) {
+    const allowAll = this.allowAll();
     return {
       categories: this.#state.categories.map((entry) => ({ ...entry, paths: [...entry.paths] })),
       allowedDomains: [...this.#state.allowedDomains],
@@ -94,7 +96,6 @@ export class AgentPermissions {
               tools: [...allowAll.tools],
               paths: [...allowAll.paths],
               domains: [...allowAll.domains],
-              expiresAt: allowAll.expiresAt,
             },
       remaining: Math.max(0, MAX_DELEGATED_APPROVALS - (this.#state.counts[conversationId] ?? 0)),
     };
@@ -122,24 +123,21 @@ export class AgentPermissions {
   }
 
   /**
-   * 人類按下「全部允許」：限時、限定工具與路徑或網域。
+   * 人類按下「全部允許」：限定工具與路徑或網域。
    *
-   * 期限預設 15 分鐘、上限 60 分鐘；時間到就自動失效，不需要任何人記得關。
+   * 沒有期限，存在正本區，主機重啟後仍然有效；只有人在設定頁撤銷或按下
+   * 緊急全部暫停（`revokeAllowAll`）才會結束。再次開啟會以新範圍覆寫。
    */
-  grantAllowAll(
-    scope: { tools: readonly string[]; paths: readonly string[]; domains?: readonly string[] },
-    now: number,
-    minutes = DEFAULT_ALLOW_ALL_MINUTES,
-  ): void {
+  grantAllowAll(scope: {
+    tools: readonly string[];
+    paths: readonly string[];
+    domains?: readonly string[];
+  }): void {
     if (
-      !Number.isFinite(now) ||
-      !Number.isFinite(minutes) ||
-      minutes <= 0 ||
-      minutes > MAX_ALLOW_ALL_MINUTES ||
       scope.tools.length === 0 ||
       scope.tools.some((tool) => typeof tool !== "string" || tool.length === 0)
     ) {
-      throw new Error("全部允許的範圍或期限無效");
+      throw new Error("全部允許的範圍無效");
     }
     const domains = (scope.domains ?? []).map((domain) =>
       formatDomainRule(parseDomainRule(domain)),
@@ -150,7 +148,6 @@ export class AgentPermissions {
         tools: [...new Set(scope.tools)],
         paths: validPaths(scope.paths),
         domains: [...new Set(domains)],
-        expiresAt: now + minutes * 60_000,
       },
     });
   }
@@ -159,10 +156,9 @@ export class AgentPermissions {
     this.#save({ ...this.#state, allowAll: null });
   }
 
-  /** 有效的限時授權；過期就回 `null`，不刪紀錄（讓人看得到它失效了）。 */
-  allowAllFor(now: number): AllowAllGrant | null {
-    const grant = this.#state.allowAll;
-    return grant !== null && grant.expiresAt > now ? grant : null;
+  /** 目前的全部允許；沒開或已撤銷時回 `null`。 */
+  allowAll(): AllowAllGrant | null {
+    return this.#state.allowAll;
   }
 
   /**
@@ -317,15 +313,23 @@ function validState(value: unknown): value is StoredPermissions {
     return false;
   }
   const grant = record.allowAll as Record<string, unknown>;
+  // 只認得這幾個欄位；`expiresAt` 是舊版的限時欄位，載入時另外撤銷。
+  if (Object.keys(grant).some((key) => !ALLOW_ALL_KEYS.has(key))) {
+    return false;
+  }
   return (
     Array.isArray(grant.tools) &&
     grant.tools.length > 0 &&
     grant.tools.every((tool: unknown) => typeof tool === "string" && tool.length > 0) &&
     isPaths(grant.paths) &&
-    isDomainList(grant.domains) &&
-    typeof grant.expiresAt === "number" &&
-    Number.isFinite(grant.expiresAt)
+    isDomainList(grant.domains)
   );
+}
+
+const ALLOW_ALL_KEYS = new Set(["tools", "paths", "domains", "expiresAt"]);
+
+function hasLegacyExpiry(state: StoredPermissions): boolean {
+  return state.allowAll !== null && "expiresAt" in state.allowAll;
 }
 
 function isPaths(value: unknown): value is string[] {

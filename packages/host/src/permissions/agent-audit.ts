@@ -28,7 +28,7 @@ export interface AgentAuditEntry {
   readonly tool: string;
   readonly input: unknown;
   readonly reason: AgentAuditReason;
-  /** System One 的機率；限時的全部允許沒有人工智慧判斷，記 `null`。 */
+  /** System One 的機率；全部允許沒有人工智慧判斷，記 `null`。 */
   readonly probability: number | null;
   /** 判斷用的模型 id；沒有用到模型時記 `null`。 */
   readonly modelId: string | null;

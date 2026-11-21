@@ -14,8 +14,8 @@ import {
  * 權限模式的協定契約（規格第 11 章「M5 權限模式裁決」）。
  *
  * 只由人開啟：本機 Mac 客戶端可以讀寫 System One 類別、可委派網域與全部允許；
- * 全部允許一定要限定路徑或網域，預設 15 分鐘、上限 60 分鐘；緊急全部暫停會
- * 撤銷全部允許並通知客戶端。遠端裝置被拒的負面測試在
+ * 全部允許一定要限定路徑或網域，沒有期限、主機重啟後保留，直到人撤銷；緊急
+ * 全部暫停會撤銷全部允許並通知客戶端。遠端裝置被拒的負面測試在
  * `packages/host/test/remote/bypass.test.ts`。
  */
 
@@ -23,9 +23,7 @@ interface ModesState {
   readonly categories: Array<{ category: string; paths: string[] }>;
   readonly availableCategories: string[];
   readonly allowedDomains: string[];
-  readonly allowAll?: { tools: string[]; paths: string[]; domains: string[]; expiresAt: string };
-  readonly defaultAllowAllMinutes: number;
-  readonly maxAllowAllMinutes: number;
+  readonly allowAll?: { tools: string[]; paths: string[]; domains: string[] };
 }
 
 const running: SpawnedService[] = [];
@@ -62,7 +60,7 @@ function state(reply: Record<string, unknown>): ModesState {
 }
 
 describe("權限模式", () => {
-  it("預設全部關閉；四個可開啟的類別、預設 15 分鐘、上限 60 分鐘", async () => {
+  it("預設全部關閉；四個可開啟的類別，沒有期限設定", async () => {
     const { client } = await boot();
     const initial = state(await call(client, "system.permissions.get"));
     expect(initial.categories).toEqual([]);
@@ -71,14 +69,13 @@ describe("權限模式", () => {
     expect([...initial.availableCategories].sort()).toEqual(
       ["create-card", "git-readonly", "own-notification", "read-only-files"].sort(),
     );
-    expect(initial.defaultAllowAllMinutes).toBe(15);
-    expect(initial.maxAllowAllMinutes).toBe(60);
+    expect(initial).not.toHaveProperty("defaultAllowAllMinutes");
+    expect(initial).not.toHaveProperty("maxAllowAllMinutes");
   });
 
-  it("開啟全部允許：預設 15 分鐘到期，system 串流收到變更；撤銷後消失", async () => {
+  it("開啟全部允許：只有範圍沒有期限，system 串流收到變更；撤銷後消失", async () => {
     const { service, client } = await boot();
     await call(client, "system.subscribe");
-    const before = Date.now();
     const granted = state(
       await call(client, "system.permissions.grant_allow_all", {
         tools: ["write_file"],
@@ -86,9 +83,7 @@ describe("權限模式", () => {
       }),
     );
     expect(granted.allowAll?.tools).toEqual(["write_file"]);
-    const expiresAt = Date.parse(granted.allowAll?.expiresAt ?? "");
-    expect(expiresAt - before).toBeGreaterThanOrEqual(15 * 60_000 - 5_000);
-    expect(expiresAt - before).toBeLessThanOrEqual(15 * 60_000 + 5_000);
+    expect(granted.allowAll).not.toHaveProperty("expiresAt");
     await client.waitFor(
       (frame) =>
         frame.type === "system.permissions.changed" &&
@@ -102,8 +97,6 @@ describe("權限模式", () => {
   });
 
   it.each([
-    ["超過上限 60 分鐘", { tools: ["write_file"], paths: ["/tmp/x"], minutes: 61 }, "minutes"],
-    ["零分鐘", { tools: ["write_file"], paths: ["/tmp/x"], minutes: 0 }, "minutes"],
     ["沒有限定路徑或網域", { tools: ["write_file"], paths: [] }, "paths"],
     ["沒有工具", { tools: [], paths: ["/tmp/x"] }, "tools"],
     ["相對路徑", { tools: ["write_file"], paths: ["relative/dir"] }, "tools"],
@@ -125,7 +118,6 @@ describe("權限模式", () => {
       await call(client, "system.permissions.grant_allow_all", {
         tools: ["write_file"],
         paths: [service.folder.path],
-        minutes: 30,
       }),
     );
     const paused = await call(client, "approval.pause_all", { reason: "契約測試" });
@@ -137,6 +129,30 @@ describe("權限模式", () => {
       10_000,
     );
     expect(state(await call(client, "system.permissions.get")).allowAll).toBeUndefined();
+  });
+
+  it("全部允許在主機重啟後仍然開著，直到人撤銷", async () => {
+    const { service, client } = await boot();
+    state(
+      await call(client, "system.permissions.grant_allow_all", {
+        tools: ["write_file"],
+        paths: [service.folder.path],
+      }),
+    );
+
+    await client.close();
+    await service.stop();
+    running.splice(running.indexOf(service), 1);
+    const restarted = await boot(service.folder);
+    const after = state(await call(restarted.client, "system.permissions.get"));
+    expect(after.allowAll).toEqual({
+      tools: ["write_file"],
+      paths: [realpathSync.native(service.folder.path)],
+      domains: [],
+    });
+
+    const revoked = state(await call(restarted.client, "system.permissions.revoke_allow_all"));
+    expect(revoked.allowAll).toBeUndefined();
   });
 
   it("System One 類別：路徑類別要絕對路徑，非路徑類別不能帶路徑；重啟後仍在", async () => {

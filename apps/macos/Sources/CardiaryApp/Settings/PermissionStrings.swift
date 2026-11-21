@@ -21,7 +21,6 @@ public enum PermissionString: String, CaseIterable, Sendable {
     case permToolRead
     case permToolWrite
     case permToolCommand
-    case permAllowAllMinutes
     case permAllowAllStart
     case permAllowAllNeedsScope
     case permAllowAllActive
@@ -74,14 +73,13 @@ enum PermissionStringTables {
             "permDomainsBody": "System One 只能對這些網域發 HTTP GET。每行一個；localhost 與私有網段不能加入。",
             "permDomainsSave": "儲存網域",
             "permAllowAllTitle": "全部允許",
-            "permAllowAllBody": "在選定的工具與資料夾內，暫時不再詢問。禁止項、權限設定、金鑰與憑證、對外送訊息永遠不包含在內。按下緊急全部暫停會立刻結束。",
+            "permAllowAllBody": "在選定的工具與資料夾內不再詢問，重啟後仍保留，直到手動結束。禁止項、權限設定、金鑰與憑證、對外送訊息永遠不包含在內。按下緊急全部暫停會立刻結束。",
             "permToolRead": "讀檔",
             "permToolWrite": "寫檔",
             "permToolCommand": "執行指令",
-            "permAllowAllMinutes": "期限：{value} 分鐘",
             "permAllowAllStart": "開始全部允許",
             "permAllowAllNeedsScope": "至少選一個工具和一個資料夾。",
-            "permAllowAllActive": "全部允許進行中，剩 {value}",
+            "permAllowAllActive": "全部允許已開啟",
             "permAllowAllEnd": "立即結束",
             "permAllowAllScope": "範圍：{value}",
             "permUnavailable": "還沒連上服務。",
@@ -102,14 +100,13 @@ enum PermissionStringTables {
             "permDomainsBody": "System One may only send HTTP GET requests to these domains. One per line; localhost and private networks are not allowed.",
             "permDomainsSave": "Save domains",
             "permAllowAllTitle": "Allow all",
-            "permAllowAllBody": "For a limited time, stops asking for the chosen tools inside the chosen folders. Forbidden actions, permission settings, keys and credentials, and sending messages out are never included. Emergency pause ends it immediately.",
+            "permAllowAllBody": "Stops asking for the chosen tools inside the chosen folders until you end it, including across restarts. Forbidden actions, permission settings, keys and credentials, and sending messages out are never included. Emergency pause ends it immediately.",
             "permToolRead": "Read files",
             "permToolWrite": "Write files",
             "permToolCommand": "Run commands",
-            "permAllowAllMinutes": "Duration: {value} min",
             "permAllowAllStart": "Start allow all",
             "permAllowAllNeedsScope": "Choose at least one tool and one folder.",
-            "permAllowAllActive": "Allow all is on, {value} left",
+            "permAllowAllActive": "Allow all is on",
             "permAllowAllEnd": "End now",
             "permAllowAllScope": "Scope: {value}",
             "permUnavailable": "Not connected to the service.",

@@ -228,13 +228,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "For a limited time, stops asking for the chosen tools inside the chosen folders. Forbidden actions, permission settings, keys and credentials, and sending messages out are never included. Emergency pause ends it immediately."
+            "value": "Stops asking for the chosen tools inside the chosen folders until you end it, including across restarts. Forbidden actions, permission settings, keys and credentials, and sending messages out are never included. Emergency pause ends it immediately."
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "在選定的工具與資料夾內，暫時不再詢問。禁止項、權限設定、金鑰與憑證、對外送訊息永遠不包含在內。按下緊急全部暫停會立刻結束。"
+            "value": "在選定的工具與資料夾內不再詢問，重啟後仍保留，直到手動結束。禁止項、權限設定、金鑰與憑證、對外送訊息永遠不包含在內。按下緊急全部暫停會立刻結束。"
           }
         }
       }
@@ -290,23 +290,6 @@
         }
       }
     },
-    "permAllowAllMinutes": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Duration: {value} min"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "期限：{value} 分鐘"
-          }
-        }
-      }
-    },
     "permAllowAllStart": {
       "extractionState": "manual",
       "localizations": {
@@ -347,13 +330,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Allow all is on, {value} left"
+            "value": "Allow all is on"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "全部允許進行中，剩 {value}"
+            "value": "全部允許已開啟"
           }
         }
       }

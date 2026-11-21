@@ -375,7 +375,6 @@ public actor CardiaryConnection {
         tools: [String],
         paths: [String],
         domains: [String],
-        minutes: Int,
         clientRequestId: String,
         options: RequestOptions = .default
     ) async throws -> PermissionModesState {
@@ -385,7 +384,6 @@ public actor CardiaryConnection {
                 tools: tools,
                 paths: paths,
                 domains: domains,
-                minutes: minutes,
                 clientRequestId: clientRequestId
             )
         )
