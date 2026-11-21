@@ -44,7 +44,7 @@ struct ArchiveView: View {
                 HStack(spacing: DesignTokens.spacingS) {
                     SuitLoader(size: 7)
                     Text(CardL10n.text(.archivePreviewLoading))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 }
             } else if model.deletingSessionId != nil {
@@ -130,15 +130,15 @@ private struct ArchiveRowView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.title)
-                    .font(.cardiary(.body, weight: .semibold))
+                    .cardiaryFont(.body, weight: .semibold)
                     .lineLimit(1)
 
                 Text(CardL10n.format(.archiveArchivedAt, value: Self.displayDate(entry.archivedAt)))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
 
                 Text(CardL10n.format(.archivePurgeAt, value: Self.displayDate(entry.purgeAt)))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
 
@@ -199,15 +199,15 @@ private struct DeleteConfirmationView: View {
                     .frame(width: 34, height: 34)
                     .background(Palette.red, in: RoundedRectangle(cornerRadius: DesignTokens.tileRadius, style: .continuous))
                 Text(CardL10n.text(.archiveDeleteConfirmTitle))
-                    .font(.cardiary(.title3, weight: .bold))
+                    .cardiaryFont(.title3, weight: .bold)
             }
 
             Text(target.sessionTitle)
-                .font(.cardiary(.body, weight: .semibold))
+                .cardiaryFont(.body, weight: .semibold)
                 .lineLimit(2)
 
             Text(CardL10n.text(.archiveDeleteConfirmBody))
-                .font(.cardiary(.callout))
+                .cardiaryFont(.callout)
                 .foregroundStyle(Palette.inkSecondary)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -249,7 +249,7 @@ private struct DeleteConfirmationView: View {
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(suit.ink)
             Text(text)
-                .font(.cardiary(.callout, monospacedDigits: true))
+                .cardiaryFont(.callout, monospacedDigits: true)
         }
     }
 }

@@ -5,6 +5,7 @@ import SwiftUI
 struct ComposerView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var conversation: ConversationModel
+    @Environment(\.cardiaryScale) private var uiScale
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
@@ -22,7 +23,7 @@ struct ComposerView: View {
                     axis: .vertical
                 )
                 .textFieldStyle(.plain)
-                .font(.cardiary(.body))
+                .cardiaryFont(.body)
                 .lineLimit(1...8)
                 .frame(minHeight: 22, alignment: .top)
                 .onSubmit {
@@ -70,7 +71,7 @@ struct ComposerView: View {
             .padding(.bottom, DesignTokens.spacingS)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: DesignTokens.panelRadius, style: .continuous))
         }
-        .frame(maxWidth: DesignTokens.transcriptMaxWidth)
+        .frame(maxWidth: DesignTokens.transcriptMaxWidth * max(1.0, uiScale))
         .padding(.horizontal, DesignTokens.spacingL)
         .padding(.bottom, DesignTokens.spacingL)
         .padding(.top, DesignTokens.spacingXS)

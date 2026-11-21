@@ -71,7 +71,7 @@ enum AppRegistry {
 
         // 設定分頁：模型、一般設定、模組、儲存空間與 MCP。卡片相關設定由卡片介面再加一頁。
         app.settings.register(ModelsSettingsTab(model: app.settingsModel.models))
-        app.settings.register(GeneralSettingsTab(model: app.settingsModel.general))
+        app.settings.register(GeneralSettingsTab(model: app.settingsModel.general, uiScale: app.uiScale))
         app.settings.register(ModulesSettingsTab(model: app.settingsModel.modules))
         app.settings.register(StorageSettingsTab(model: app.settingsModel.storage))
         app.settings.register(McpSettingsTab(model: app.settingsModel.mcp))
@@ -83,7 +83,16 @@ enum AppRegistry {
             commands: [
                 AppCommand(id: "view.toggleInspector", titleKey: .commandToggleInspector) {
                     app.toggleInspector()
-                }
+                },
+                AppCommand(id: "view.zoomIn", titleKey: .viewZoomIn) {
+                    app.uiScale.zoomIn()
+                },
+                AppCommand(id: "view.zoomOut", titleKey: .viewZoomOut) {
+                    app.uiScale.zoomOut()
+                },
+                AppCommand(id: "view.actualSize", titleKey: .viewActualSize) {
+                    app.uiScale.reset()
+                },
             ]
         ))
         app.commands.register(CommandGroup(

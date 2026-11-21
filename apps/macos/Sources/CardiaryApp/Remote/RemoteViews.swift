@@ -10,7 +10,7 @@ struct AccessSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             Text(RemoteL10n.text(.remoteAccessTitle))
-                .font(.cardiary(.title3, weight: .semibold))
+                .cardiaryFont(.title3, weight: .semibold)
             Toggle(
                 isOn: Binding(
                     get: { model.accessEnabled },
@@ -22,27 +22,27 @@ struct AccessSettingsView: View {
             .toggleStyle(.switch)
             .disabled(model.savingAccess)
             Text(RemoteL10n.text(.remoteAccessBody))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkSecondary)
             if model.isPairingPaused {
                 Text(RemoteL10n.text(.remoteAccessDisabledHint))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
             if let message = model.accessError {
-                Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.red)
+                Text(message).cardiaryFont(.caption).foregroundStyle(Palette.red)
             }
             if let message = model.accessNotice {
-                Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.sageInk)
+                Text(message).cardiaryFont(.caption).foregroundStyle(Palette.sageInk)
             }
 
             VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
                 Text(RemoteL10n.text(.remoteAddressTitle))
-                    .font(.cardiary(.callout, weight: .semibold))
+                    .cardiaryFont(.callout, weight: .semibold)
                 if let address = model.remoteAddress {
                     HStack {
                         Text(address)
-                            .font(.cardiary(.callout, weight: .regular, monospacedDigits: true))
+                            .cardiaryFont(.callout, weight: .regular, monospacedDigits: true)
                             .textSelection(.enabled)
                         Spacer()
                         Button {
@@ -53,16 +53,16 @@ struct AccessSettingsView: View {
                         .buttonStyle(ThemeButtonStyle(kind: .soft, tone: .gray))
                     }
                     Text(RemoteL10n.text(.remoteAddressHint))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 } else {
                     Text(RemoteL10n.text(.remoteAddressUnavailable))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 }
                 if copied {
                     Text(RemoteL10n.text(.remoteAddressCopied))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.sageInk)
                 }
             }
@@ -93,20 +93,20 @@ public struct PairingApprovalView: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             if let request = model.pendingRequests.first {
                 Text(RemoteL10n.text(.remotePairingTitle))
-                    .font(.cardiary(.title3, weight: .semibold))
+                    .cardiaryFont(.title3, weight: .semibold)
                 Text(RemoteL10n.text(.remotePairingBody))
-                    .font(.cardiary(.callout))
+                    .cardiaryFont(.callout)
                     .foregroundStyle(Palette.inkSecondary)
 
                 VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
                     Text(RemoteL10n.format(.remotePairingDevice, value: request.deviceName))
                     Text(kindLabel(request.deviceKind))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                     Text(RemoteL10n.format(.remotePairingCode, value: request.code))
-                        .font(.cardiary(.title2, weight: .bold, monospacedDigits: true))
+                        .cardiaryFont(.title2, weight: .bold, monospacedDigits: true)
                     Text(RemoteL10n.format(.remotePairingExpires, value: request.expiresAt))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 }
                 .padding(DesignTokens.spacingM)
@@ -132,7 +132,7 @@ public struct PairingApprovalView: View {
 
                 if model.decidingIds.contains(request.pairingRequestId) {
                     Text(RemoteL10n.text(.remotePairingDeciding))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 }
             } else {
@@ -144,10 +144,10 @@ public struct PairingApprovalView: View {
             }
 
             if let message = model.errorMessage {
-                Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.red)
+                Text(message).cardiaryFont(.caption).foregroundStyle(Palette.red)
             }
             if let message = model.noticeMessage {
-                Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.sageInk)
+                Text(message).cardiaryFont(.caption).foregroundStyle(Palette.sageInk)
             }
         }
         .padding(DesignTokens.spacingM)
@@ -174,7 +174,7 @@ public struct DevicesView: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             HStack {
                 Text(RemoteL10n.text(.remoteDevicesTitle))
-                    .font(.cardiary(.title3, weight: .semibold))
+                    .cardiaryFont(.title3, weight: .semibold)
                 Spacer()
                 Button {
                     Task { await model.refreshDevices() }
@@ -197,10 +197,10 @@ public struct DevicesView: View {
             }
 
             if let message = model.errorMessage {
-                Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.red)
+                Text(message).cardiaryFont(.caption).foregroundStyle(Palette.red)
             }
             if let message = model.noticeMessage {
-                Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.sageInk)
+                Text(message).cardiaryFont(.caption).foregroundStyle(Palette.sageInk)
             }
         }
         .padding(DesignTokens.spacingM)
@@ -216,19 +216,19 @@ private struct DeviceRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(device.deviceName)
-                    .font(.cardiary(.callout, weight: .semibold))
+                    .cardiaryFont(.callout, weight: .semibold)
                 Spacer()
                 if device.isRevoked {
                     ThemeChip(text: RemoteL10n.text(.remoteDevicesRevoked), tone: .gray)
                 }
             }
             Text(RemoteL10n.format(.remoteDevicesFingerprint, value: device.fingerprint))
-                .font(.cardiary(.caption, weight: .regular, monospacedDigits: true))
+                .cardiaryFont(.caption, weight: .regular, monospacedDigits: true)
                 .foregroundStyle(Palette.inkSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Text(RemoteL10n.format(.remoteDevicesLastUsed, value: device.createdAt))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkTertiary)
             if !device.isRevoked {
                 Button(role: .destructive) {

@@ -57,14 +57,14 @@ struct StorageSettingsView: View {
                     LoadingSettingsView()
                 } else if model.usage.isEmpty {
                     Text(AppL10n.text(.storageUsageEmpty))
-                        .font(.cardiary(.callout))
+                        .cardiaryFont(.callout)
                         .foregroundStyle(Palette.inkSecondary)
                 } else {
                     ForEach(StorageSettingsModel.usageOrder, id: \.rawValue) { category in
                         usageRow(category)
                     }
                     Text(AppL10n.text(.storageShellStateNote))
-                        .font(.cardiary(.caption2))
+                        .cardiaryFont(.caption2)
                         .foregroundStyle(Palette.inkTertiary)
                 }
             }
@@ -75,7 +75,7 @@ struct StorageSettingsView: View {
         let row = model.usageRow(category)
         return HStack(spacing: DesignTokens.spacingS) {
             Text(AppL10n.text(StorageSettingsModel.titleKey(category)))
-                .font(.cardiary(.callout))
+                .cardiaryFont(.callout)
             if let cleanable = row?.cleanableBytes, cleanable > 0 {
                 ThemeChip(
                     text: AppL10n.format(
@@ -87,7 +87,7 @@ struct StorageSettingsView: View {
             }
             Spacer()
             Text(StorageSettingsModel.formattedBytes(row?.bytes ?? 0))
-                .font(.cardiary(.callout))
+                .cardiaryFont(.callout)
                 .monospacedDigit()
                 .foregroundStyle(Palette.inkSecondary)
         }
@@ -107,7 +107,7 @@ struct StorageSettingsView: View {
                         }
                     }
                     Text(AppL10n.text(.storageOutsideWritesNote))
-                        .font(.cardiary(.caption2))
+                        .cardiaryFont(.caption2)
                         .foregroundStyle(Palette.inkTertiary)
                 }
             }
@@ -118,15 +118,15 @@ struct StorageSettingsView: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             HStack(spacing: DesignTokens.spacingS) {
                 Text(StorageSettingsModel.outsideWriteToolName(entry.tool))
-                    .font(.cardiary(.callout))
+                    .cardiaryFont(.callout)
                 Spacer()
                 Text(StorageSettingsModel.outsideWriteSize(entry))
-                    .font(.cardiary(.callout))
+                    .cardiaryFont(.callout)
                     .monospacedDigit()
                     .foregroundStyle(Palette.inkSecondary)
             }
             Text(entry.path)
-                .font(.cardiary(.caption2))
+                .cardiaryFont(.caption2)
                 .foregroundStyle(Palette.inkTertiary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -188,16 +188,16 @@ struct StorageSettingsView: View {
         )) {
             HStack(spacing: DesignTokens.spacingS) {
                 Text(AppL10n.text(category.titleKey))
-                    .font(.cardiary(.callout))
+                    .cardiaryFont(.callout)
                 Spacer()
                 if let bytes = model.allocatedBytes(category) {
                     Text(StorageSettingsModel.formattedBytes(bytes))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .monospacedDigit()
                         .foregroundStyle(Palette.inkSecondary)
                 } else {
                     Text("—")
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkTertiary)
                 }
             }
@@ -211,23 +211,23 @@ struct StorageSettingsView: View {
             ForEach(preview.targets, id: \.category) { target in
                 HStack(spacing: DesignTokens.spacingS) {
                     Text(cleanupTitle(target.category))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                     Text(AppL10n.count(.storagePreviewItems, count: target.items))
-                        .font(.cardiary(.caption2))
+                        .cardiaryFont(.caption2)
                         .foregroundStyle(Palette.inkSecondary)
                     Spacer()
                     Text(StorageSettingsModel.formattedBytes(target.bytes))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .monospacedDigit()
                         .foregroundStyle(Palette.inkSecondary)
                 }
             }
             HStack(spacing: DesignTokens.spacingS) {
                 Text(AppL10n.text(.storagePreviewTotal))
-                    .font(.cardiary(.caption, weight: .semibold))
+                    .cardiaryFont(.caption, weight: .semibold)
                 Spacer()
                 Text(StorageSettingsModel.formattedBytes(preview.totalBytes))
-                    .font(.cardiary(.caption, weight: .semibold))
+                    .cardiaryFont(.caption, weight: .semibold)
                     .monospacedDigit()
             }
         }

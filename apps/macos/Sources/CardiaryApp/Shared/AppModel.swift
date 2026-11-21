@@ -31,6 +31,7 @@ public final class AppModel: ObservableObject {
     /// 通知流；資料走客戶端協定。
     public let notifications: NotificationModel
     public let settingsModel: SettingsModel
+    public let uiScale: UIScaleStore
     public let sidebar = SidebarRegistry()
     public let inspector = InspectorRegistry()
     public let settings = SettingsRegistry()
@@ -58,10 +59,12 @@ public final class AppModel: ObservableObject {
         bridge: ShellBridge? = nil,
         language: AppLanguage = AppL10n.language,
         setupCompleted: Bool = false,
-        keychain: (any KeychainWriting)? = nil
+        keychain: (any KeychainWriting)? = nil,
+        uiScale: UIScaleStore? = nil
     ) {
         self.bridge = bridge ?? ShellBridge()
         self.language = language
+        self.uiScale = uiScale ?? .shared
         AppL10n.language = language
         self.conversations = ConversationListModel()
         self.conversation = ConversationModel()

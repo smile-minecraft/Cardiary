@@ -47,7 +47,7 @@ public struct ImportView: View {
                             .importProgress,
                             value: "\(progress.done) / \(progress.total)"
                         ))
-                        .font(.cardiary(.callout, monospacedDigits: true))
+                        .cardiaryFont(.callout, monospacedDigits: true)
                         .foregroundStyle(Palette.inkSecondary)
                         ThemeProgressBar(
                             value: progress.total > 0 ? Double(progress.done) / Double(progress.total) : 0,
@@ -108,13 +108,13 @@ public struct ImportView: View {
                             .background(isChosen ? Palette.red : Palette.orangeSoft, in: Circle())
                         VStack(alignment: .leading, spacing: 2) {
                             Text(source.name)
-                                .font(.cardiary(.callout, weight: .semibold))
+                                .cardiaryFont(.callout, weight: .semibold)
                             Text(source.detail)
-                                .font(.cardiary(.caption))
+                                .cardiaryFont(.caption)
                                 .foregroundStyle(Palette.inkSecondary)
                             if let unverified = source.unverified {
                                 Text(ImportL10n.format(.importSourceUnverified, value: unverified))
-                                    .font(.cardiary(.caption))
+                                    .cardiaryFont(.caption)
                                     .foregroundStyle(Palette.orangeInk)
                             }
                         }
@@ -134,7 +134,7 @@ public struct ImportView: View {
                     }
                     if !model.sourcePath.isEmpty {
                         Text(model.sourcePath)
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                             .foregroundStyle(Palette.inkSecondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -143,7 +143,7 @@ public struct ImportView: View {
             }
             if model.sourceKind == .claude && !model.sourcePath.isEmpty {
                 Text(model.sourcePath)
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -178,13 +178,13 @@ public struct ImportView: View {
             SuitHeading(title: ImportL10n.text(.importCategoriesTitle), suit: .club)
             if model.files.isEmpty {
                 Text(ImportL10n.text(.importChooseFolder))
-                    .font(.cardiary(.callout))
+                    .cardiaryFont(.callout)
                     .foregroundStyle(Palette.inkSecondary)
             } else {
                 ForEach(model.files) { file in
                     HStack(spacing: DesignTokens.spacingM) {
                         Text(file.relativePath)
-                            .font(.cardiary(.callout))
+                            .cardiaryFont(.callout)
                             .lineLimit(1)
                         Spacer()
                         ThemeMenuPicker(
@@ -208,19 +208,19 @@ public struct ImportView: View {
     private var personaSection: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
             Text(ImportL10n.text(.importPersonaProvided))
-                .font(.cardiary(.callout))
+                .cardiaryFont(.callout)
                 .foregroundStyle(Palette.inkSecondary)
             Text(ImportL10n.text(.importPersonaHint))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkSecondary)
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $model.personaText)
-                    .font(.cardiary(.callout))
+                    .cardiaryFont(.callout)
                     .themeEditor(minHeight: 96)
                     .accessibilityLabel(ImportL10n.text(.importPersonaPlaceholder))
                 if model.personaText.isEmpty {
                     Text(ImportL10n.text(.importPersonaPlaceholder))
-                        .font(.cardiary(.callout))
+                        .cardiaryFont(.callout)
                         .foregroundStyle(Palette.inkTertiary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 8)
@@ -259,7 +259,7 @@ public struct ImportView: View {
                 }
                 if model.requiresRange {
                     Text(ImportL10n.text(.importRangeRequired))
-                        .font(.cardiary(.callout))
+                        .cardiaryFont(.callout)
                         .foregroundStyle(Palette.orangeInk)
                 }
             }
@@ -275,7 +275,7 @@ public struct ImportView: View {
             VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
                 Toggle(ImportL10n.text(.importReimport), isOn: $model.allowReimport)
                 Text(ImportL10n.text(.importReimportDetail))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
         }
@@ -334,9 +334,9 @@ public struct ImportView: View {
                     Text(ImportL10n.count(.importCoreMemoryCount, count: model.coreMemoryKeys.count))
                         .foregroundStyle(Palette.inkSecondary)
                 }
-                .font(.cardiary(.headline))
+                .cardiaryFont(.headline)
                 Text(ImportL10n.text(.importDefaultSelectionNote))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
 
@@ -377,7 +377,7 @@ public struct ImportView: View {
     private func estimateSection(_ estimate: ImportConversationEstimate) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(ImportL10n.text(.importEstimateTitle))
-                .font(.cardiary(.headline))
+                .cardiaryFont(.headline)
             Text(ImportL10n.count(.importEstimateConversations, count: estimate.candidates))
             Text(ImportL10n.count(.importEstimateTokens, count: estimate.estimatedModelInputTokens))
             if estimate.existingSummaries > 0 {
@@ -388,7 +388,7 @@ public struct ImportView: View {
                 .foregroundStyle(Palette.inkSecondary)
             }
         }
-        .font(.cardiary(.callout))
+        .cardiaryFont(.callout)
     }
 
     private func categorySection(
@@ -397,7 +397,7 @@ public struct ImportView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(ImportL10n.text(category.titleKey))
-                .font(.cardiary(.headline))
+                .cardiaryFont(.headline)
             ForEach(items) { item in
                 selectableRow(
                     item: item,
@@ -412,7 +412,7 @@ public struct ImportView: View {
     private func conversationList(_ conversations: [ImportConversation]) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(ImportL10n.text(.importCategoryConversation))
-                .font(.cardiary(.headline))
+                .cardiaryFont(.headline)
             ForEach(conversations) { conversation in
                 let item = ImportPreviewItem(
                     key: conversation.key,
@@ -440,13 +440,13 @@ public struct ImportView: View {
     private func skillList(_ skills: [ImportPreviewSkill]) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(ImportL10n.text(.importCategorySkill))
-                .font(.cardiary(.headline))
+                .cardiaryFont(.headline)
             ForEach(skills) { skill in
                 Toggle(isOn: binding(for: skill.key, duplicate: skill.existingSkillPath != nil)) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(skill.name)
                         Text(skill.description)
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                             .foregroundStyle(Palette.inkSecondary)
                     }
                 }
@@ -470,14 +470,14 @@ public struct ImportView: View {
                 .disabled(isDuplicate && !model.allowReimport)
                 if isDuplicate {
                     Text(ImportL10n.text(.importDuplicate))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 }
                 Spacer()
             }
             if !item.body.isEmpty {
                 Text(item.body)
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
                     .lineLimit(3)
             }
@@ -486,7 +486,7 @@ public struct ImportView: View {
                     ImportL10n.text(.importCoreMemory),
                     isOn: coreMemoryBinding(for: item.key)
                 )
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .disabled(!isSelected)
             }
         }
@@ -495,10 +495,10 @@ public struct ImportView: View {
     private func skippedList(_ skipped: [ImportSkippedItem]) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(ImportL10n.text(.importSkippedTitle))
-                .font(.cardiary(.headline))
+                .cardiaryFont(.headline)
             ForEach(Array(skipped.enumerated()), id: \.offset) { _, item in
                 Text("\(item.path)：\(item.reason)")
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
         }
@@ -507,10 +507,10 @@ public struct ImportView: View {
     private func noteList(_ title: String, _ notes: [String]) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(title)
-                .font(.cardiary(.headline))
+                .cardiaryFont(.headline)
             ForEach(Array(notes.enumerated()), id: \.offset) { _, note in
                 Text(note)
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
         }
@@ -521,7 +521,7 @@ public struct ImportView: View {
     private func resultSection(_ result: ImportWriteResult) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
             Text(ImportL10n.text(.importResultTitle))
-                .font(.cardiary(.headline))
+                .cardiaryFont(.headline)
             Text(ImportL10n.count(.importResultCards, count: result.cardsCreated))
             Text(ImportL10n.count(.importResultSkills, count: result.skillsCopied))
             if result.duplicates > 0 {
@@ -533,7 +533,7 @@ public struct ImportView: View {
                     .foregroundStyle(Palette.redInk)
             }
             Text(ImportL10n.text(.importResultHint))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkSecondary)
             if let onOpenLibrary {
                 HStack {
@@ -543,7 +543,7 @@ public struct ImportView: View {
                 }
             }
         }
-        .font(.cardiary(.callout))
+        .cardiaryFont(.callout)
         .frame(maxWidth: .infinity, alignment: .leading)
         .themeBlock(Palette.sageSoft, radius: DesignTokens.panelRadius, padding: DesignTokens.spacingL)
     }

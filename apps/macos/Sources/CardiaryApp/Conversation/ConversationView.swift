@@ -5,6 +5,7 @@ import SwiftUI
 struct ConversationView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var conversation: ConversationModel
+    @Environment(\.cardiaryScale) private var uiScale
 
     init(model: AppModel) {
         self.model = model
@@ -32,14 +33,14 @@ struct ConversationView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(conversation.title.isEmpty ? AppL10n.text(.conversationUntitled) : conversation.title)
-                    .font(.cardiary(.title3, weight: .bold))
+                    .cardiaryFont(.title3, weight: .bold)
                     .lineLimit(1)
                 HStack(spacing: 5) {
                     Circle()
                         .fill(statusTone.ink)
                         .frame(width: 6, height: 6)
                     Text(statusText)
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 }
             }
@@ -101,7 +102,7 @@ struct ConversationView: View {
                         .frame(height: 1)
                         .id(Self.bottomAnchor)
                 }
-                .frame(maxWidth: DesignTokens.transcriptMaxWidth, alignment: .leading)
+                .frame(maxWidth: DesignTokens.transcriptMaxWidth * max(1.0, uiScale), alignment: .leading)
                 .padding(.horizontal, DesignTokens.spacingL)
                 .padding(.vertical, DesignTokens.spacingS)
                 .frame(maxWidth: .infinity)
@@ -147,7 +148,7 @@ struct ConversationView: View {
             HStack(spacing: DesignTokens.spacingS) {
                 Rectangle().fill(Palette.inkSecondary).frame(width: 24, height: 1)
                 Text(AppL10n.text(.conversationNoMoreHistory))
-                    .font(.cardiary(.caption2))
+                    .cardiaryFont(.caption2)
                     .foregroundStyle(Palette.inkSecondary)
                 Rectangle().fill(Palette.inkSecondary).frame(width: 24, height: 1)
             }
@@ -167,7 +168,7 @@ struct StreamingRow: View {
             HStack(spacing: DesignTokens.spacingS) {
                 SuitLoader(size: 7)
                 Text(AppL10n.text(.conversationStreaming))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
         }
@@ -190,13 +191,13 @@ struct PendingApprovalRow: View {
             }
             VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
                 Text(AppL10n.text(.inspectorApprovalsTitle))
-                    .font(.cardiary(.caption, weight: .semibold))
+                    .cardiaryFont(.caption, weight: .semibold)
                     .foregroundStyle(Palette.orangeInk)
                 Text(approval.title)
-                    .font(.cardiary(.callout, weight: .semibold))
+                    .cardiaryFont(.callout, weight: .semibold)
                 if let summary = approval.summary {
                     Text(summary)
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 }
             }

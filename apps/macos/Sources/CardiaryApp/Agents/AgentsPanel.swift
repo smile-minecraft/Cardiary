@@ -53,7 +53,7 @@ struct AgentsPanelView: View {
     private var startSection: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
             Text(AppL10n.text(.agentStartTitle))
-                .font(.cardiary(.callout, weight: .semibold))
+                .cardiaryFont(.callout, weight: .semibold)
 
             Picker(AppL10n.text(.agentStartKind), selection: $kind) {
                 Text(AppL10n.text(.agentKindOpencode)).tag(AgentKind.opencode)
@@ -64,11 +64,11 @@ struct AgentsPanelView: View {
             if kind == .claudeCode {
                 VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
                     Text(AppL10n.text(.agentClaudeTokenTitle))
-                        .font(.cardiary(.callout, weight: .semibold))
+                        .cardiaryFont(.callout, weight: .semibold)
                     SecureField(AppL10n.text(.agentClaudeTokenPlaceholder), text: $claudeToken)
                         .textFieldStyle(ThemeFieldStyle())
                     Text(AppL10n.text(.agentClaudeTokenHint))
-                        .font(.cardiary(.caption2))
+                        .cardiaryFont(.caption2)
                         .foregroundStyle(Palette.inkSecondary)
                     HStack {
                         Spacer()
@@ -102,7 +102,7 @@ struct AgentsPanelView: View {
                 .lineLimit(2...5)
 
             Text(AppL10n.text(.agentStartNeedsApproval))
-                .font(.cardiary(.caption2))
+                .cardiaryFont(.caption2)
                 .foregroundStyle(Palette.inkSecondary)
 
             HStack {
@@ -153,7 +153,7 @@ struct AgentsPanelView: View {
                 .frame(width: 22, height: 22)
                 .background(Palette.sageSoft, in: Circle())
             Text(text)
-                .font(.cardiary(.callout))
+                .cardiaryFont(.callout)
                 .foregroundStyle(Palette.inkSecondary)
         }
     }
@@ -178,16 +178,16 @@ private struct AgentCard: View {
                     .background(Palette.sage, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(session.kindText())
-                        .font(.cardiary(.callout, weight: .semibold))
+                        .cardiaryFont(.callout, weight: .semibold)
                     Text(session.statusText())
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 }
             }
 
             if !session.workingDirectory.isEmpty {
                 Text(AppL10n.format(.agentWorkingDirectory, value: session.workingDirectory))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -197,11 +197,11 @@ private struct AgentCard: View {
                 VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
                     HStack {
                         Text(progress.label)
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                         Spacer()
                         if let text = session.progressText() {
                             Text(text)
-                                .font(.cardiary(.caption))
+                                .cardiaryFont(.caption)
                                 .foregroundStyle(Palette.inkSecondary)
                         }
                     }
@@ -214,7 +214,7 @@ private struct AgentCard: View {
 
             if let message = session.message, !message.isEmpty {
                 Text(message)
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .textSelection(.enabled)
                     .foregroundStyle(Palette.ink)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -226,9 +226,9 @@ private struct AgentCard: View {
             if session.resultUnknown {
                 VStack(alignment: .leading, spacing: 2) {
                     Label(AppL10n.text(.agentResultUnknown), systemImage: "questionmark.circle")
-                        .font(.cardiary(.caption, weight: .semibold))
+                        .cardiaryFont(.caption, weight: .semibold)
                     Text(AppL10n.text(.agentResultUnknownHelp))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 }
                 .foregroundStyle(Palette.orange)
@@ -237,10 +237,10 @@ private struct AgentCard: View {
             if let permission = session.pendingPermission {
                 VStack(alignment: .leading, spacing: DesignTokens.spacingXS) {
                     Text(AppL10n.format(.agentPermissionTitle, value: permission.toolName))
-                        .font(.cardiary(.caption, weight: .semibold))
+                        .cardiaryFont(.caption, weight: .semibold)
                     if let description = permission.description, !description.isEmpty {
                         Text(description)
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                             .textSelection(.enabled)
                             .foregroundStyle(Palette.ink)
                     }
@@ -248,7 +248,7 @@ private struct AgentCard: View {
                         HStack(spacing: DesignTokens.spacingS) {
                             SuitLoader(size: 7)
                             Text(AppL10n.text(.approvalDeciding))
-                                .font(.cardiary(.caption))
+                                .cardiaryFont(.caption)
                                 .foregroundStyle(Palette.inkSecondary)
                         }
                     } else {

@@ -9,10 +9,10 @@ struct MessageBanner: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: DesignTokens.spacingS) {
             Image(systemName: systemImage)
-                .font(.system(size: 11, weight: .bold))
+                .cardiarySymbolFont(size: 11, weight: .bold)
                 .foregroundStyle(tone.ink)
             Text(text)
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.ink)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)

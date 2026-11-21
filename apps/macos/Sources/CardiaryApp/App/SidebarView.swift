@@ -63,7 +63,7 @@ struct SidebarView: View {
                         .padding(.bottom, DesignTokens.spacingXS)
                     if conversations.sessions.isEmpty {
                         Text(AppL10n.text(.conversationListEmpty))
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                             .foregroundStyle(Palette.inkTertiary)
                             .padding(.horizontal, DesignTokens.spacingM)
                             .padding(.vertical, DesignTokens.spacingXS)
@@ -235,10 +235,10 @@ private struct SidebarSectionLabel: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: suit.symbol)
-                .font(.system(size: 9, weight: .bold))
+                .cardiarySymbolFont(size: 9, weight: .bold)
                 .foregroundStyle(suit.ink)
             Text(title)
-                .font(.cardiary(.caption, weight: .semibold))
+                .cardiaryFont(.caption, weight: .semibold)
                 .foregroundStyle(Palette.inkSecondary)
         }
         .padding(.horizontal, 10)
@@ -270,11 +270,11 @@ private struct SidebarRowLabel: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: systemImage)
-                .font(.system(size: 13, weight: .semibold))
+                .cardiarySymbolFont(size: 13, weight: .semibold)
                 .foregroundStyle(isSelected && !isDropTarget ? Palette.onAccent : tone.ink)
                 .frame(width: 20)
             Text(title)
-                .font(.cardiary(.callout, weight: isSelected ? .semibold : .medium))
+                .cardiaryFont(.callout, weight: isSelected ? .semibold : .medium)
                 .foregroundStyle(isSelected && !isDropTarget ? Palette.onAccent : Palette.ink)
                 .lineLimit(1)
             Spacer(minLength: 0)
@@ -324,7 +324,7 @@ private struct SidebarFooter: View {
                 .fill(isConnected ? Palette.sageInk : Palette.orangeInk)
                 .frame(width: 8, height: 8)
             Text(bridge.folder.displayName ?? AppL10n.text(.appTitle))
-                .font(.cardiary(.caption, weight: .medium))
+                .cardiaryFont(.caption, weight: .medium)
                 .foregroundStyle(Palette.inkSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)

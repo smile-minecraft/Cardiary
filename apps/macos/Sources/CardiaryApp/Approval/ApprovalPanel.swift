@@ -77,7 +77,7 @@ struct ApprovalPanelView: View {
                 .frame(width: 22, height: 22)
                 .background(Palette.sageSoft, in: Circle())
             Text(text)
-                .font(.cardiary(.callout))
+                .cardiaryFont(.callout)
                 .foregroundStyle(Palette.inkSecondary)
         }
     }
@@ -102,22 +102,22 @@ private struct ApprovalCard: View {
                     .background(Palette.orange, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(approval.title)
-                        .font(.cardiary(.callout, weight: .semibold))
+                        .cardiaryFont(.callout, weight: .semibold)
                     if let sourceScheduleName = approval.sourceScheduleName, !sourceScheduleName.isEmpty {
                         Text(AppL10n.format(.approvalSourceSchedule, value: sourceScheduleName))
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                             .foregroundStyle(Palette.inkSecondary)
                     }
                     if let toolName = approval.toolName {
                         Text(AppL10n.format(.approvalTool, value: toolName))
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                             .foregroundStyle(Palette.inkSecondary)
                     }
                 }
             }
             if let summary = approval.summary, !summary.isEmpty {
                 Text(summary)
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .textSelection(.enabled)
                     .foregroundStyle(Palette.ink)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -129,7 +129,7 @@ private struct ApprovalCard: View {
                 HStack(spacing: DesignTokens.spacingS) {
                     SuitLoader(size: 7)
                     Text(AppL10n.text(.approvalDeciding))
-                        .font(.cardiary(.caption))
+                        .cardiaryFont(.caption)
                         .foregroundStyle(Palette.inkSecondary)
                 }
             } else {

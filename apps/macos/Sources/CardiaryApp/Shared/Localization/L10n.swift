@@ -266,6 +266,16 @@ public enum AppString: String, CaseIterable, LocalizedKey {
     case commandGroupImport
     case commandGroupView
     case commandToggleInspector
+    case markdownCopyCode
+    case markdownCopied
+    case markdownCodeBlock
+    case viewZoomIn
+    case viewZoomOut
+    case viewActualSize
+    case settingsDisplaySection
+    case settingsZoomLabel
+    case settingsZoomHint
+    case settingsZoomReset
 
     public static let catalog = StringCatalogName.localizable
 }

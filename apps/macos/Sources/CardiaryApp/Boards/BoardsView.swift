@@ -38,9 +38,9 @@ struct BoardsView: View {
             } else {
                 HSplitView {
                     canvasPane
-                        .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
                     inboxPane
-                        .frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
+                        .frame(minWidth: 190, idealWidth: 260, maxWidth: 340)
                 }
             }
         }
@@ -191,7 +191,7 @@ struct BoardsView: View {
                     ? BoardL10n.count(.boardsSelection, count: model.selectionCount)
                     : BoardL10n.text(.boardsNoSelection)
             )
-            .font(.cardiary(.caption))
+            .cardiaryFont(.caption)
             .foregroundStyle(Palette.inkSecondary)
             Spacer()
             if model.selectionCount > 0 {
@@ -348,7 +348,7 @@ struct BoardsView: View {
                         .fill(Palette.orangeSoft.opacity(0.7))
                         .overlay {
                             Label(BoardL10n.text(.boardsDropHint), systemImage: "rectangle.stack.badge.plus")
-                                .font(.cardiary(.headline))
+                                .cardiaryFont(.headline)
                                 .foregroundStyle(Palette.orangeInk)
                         }
                         .allowsHitTesting(false)
@@ -539,18 +539,18 @@ struct BoardsView: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
             HStack {
                 Label(BoardL10n.text(.boardsInbox), systemImage: "tray")
-                    .font(.cardiary(.headline))
+                    .cardiaryFont(.headline)
                 Spacer()
                 Text(BoardL10n.count(.boardsCardCount, count: model.inbox.count))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
             Text(BoardL10n.text(.boardsInboxHint))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkTertiary)
             if model.inbox.isEmpty {
                 Text(BoardL10n.text(.boardsInboxEmpty))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
                     .padding(.top, DesignTokens.spacingS)
                 Spacer()
@@ -572,12 +572,12 @@ struct BoardsView: View {
     private func inboxRow(_ item: BoardItem) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(model.cardInfo[item.cardId]?.title ?? String(item.cardId.suffix(6)))
-                .font(.cardiary(.body))
+                .cardiaryFont(.body)
                 .lineLimit(2)
             HStack(spacing: 6) {
                 if item.projectedBy == .agent {
                     Text("AI")
-                        .font(.cardiary(.caption2))
+                        .cardiaryFont(.caption2)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Palette.pinkSoft, in: Capsule())
@@ -593,7 +593,7 @@ struct BoardsView: View {
                 }
                 .buttonStyle(.borderless)
             }
-            .font(.cardiary(.caption))
+            .cardiaryFont(.caption)
         }
         .padding(DesignTokens.spacingS)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -621,7 +621,7 @@ struct BoardsView: View {
     private var newBoardSheet: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             Text(BoardL10n.text(.boardsNewTitle))
-                .font(.cardiary(.title3))
+                .cardiaryFont(.title3)
             TextField(BoardL10n.text(.boardsBoardName), text: $newBoardTitle)
                 .textFieldStyle(ThemeFieldStyle())
             HStack {
@@ -643,11 +643,11 @@ struct BoardsView: View {
     private var newCardSheet: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             Text(BoardL10n.text(.boardsGenerateCard))
-                .font(.cardiary(.title3))
+                .cardiaryFont(.title3)
             TextField(BoardL10n.text(.boardsNewCardTitle), text: $newCardTitle)
                 .textFieldStyle(ThemeFieldStyle())
             TextEditor(text: $newCardBody)
-                .font(.cardiary(.body))
+                .cardiaryFont(.body)
                 .frame(minHeight: 120)
                 .overlay {
                     RoundedRectangle(cornerRadius: DesignTokens.panelRadius, style: .continuous)
@@ -655,7 +655,7 @@ struct BoardsView: View {
                 }
             if model.isCreatingCard {
                 Text(BoardL10n.text(.boardsCreating))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
             }
             HStack {
@@ -678,11 +678,11 @@ struct BoardsView: View {
     private var newGroupSheet: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             Text(BoardL10n.text(.boardsCreateGroup))
-                .font(.cardiary(.title3))
+                .cardiaryFont(.title3)
             TextField(BoardL10n.text(.boardsGroupNameTitle), text: $newGroupLabel)
                 .textFieldStyle(ThemeFieldStyle())
             Text(BoardL10n.count(.boardsSelection, count: model.selectionCount))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkSecondary)
             HStack {
                 Spacer()
@@ -705,7 +705,7 @@ struct BoardsView: View {
 
     private func banner(_ text: String, tone: BannerTone) -> some View {
         Text(text)
-            .font(.cardiary(.caption))
+            .cardiaryFont(.caption)
             .foregroundStyle(tone.ink)
             .padding(.horizontal, DesignTokens.spacingM)
             .padding(.vertical, DesignTokens.spacingS)

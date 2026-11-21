@@ -13,7 +13,7 @@ public enum ThemeTypography {
     static let cjkRegular = "STYuanti-TC-Regular"
     static let cjkBold = "STYuanti-TC-Bold"
 
-    /// 各文字樣式的字級。比 macOS 預設略大，配合圓體與寬鬆的色塊。
+    /// 各文字樣式的基準字級（100% 縮放時）。比 macOS 預設略大，配合圓體與寬鬆的色塊。
     static func size(for style: Font.TextStyle) -> CGFloat {
         switch style {
         case .largeTitle: return 28
@@ -40,24 +40,97 @@ public enum ThemeTypography {
     }
 
     private struct CacheKey: Hashable {
-        let size: CGFloat
+        let halfPoints: Int
         let weight: CGFloat
+        let italic: Bool
+        let monospaced: Bool
         let monospacedDigits: Bool
     }
 
     private static let lock = NSLock()
     private static var cache: [CacheKey: NSFont] = [:]
 
+    /// 依環境縮放夾緊字級並以 0.5 pt 粒度取整，讓快取保持有界且文字清晰。
+    static func scaledPointSize(_ baseSize: CGFloat, scale: CGFloat) -> CGFloat {
+        let safeScale = scale.isFinite ? min(2.5, max(0.5, scale)) : 1.0
+        let raw = (baseSize.isFinite ? baseSize : 14) * safeScale
+        let clamped = min(96, max(6, raw))
+        return (clamped * 2).rounded() / 2
+    }
+
     /// 拉丁圓體加中文圓體遞補的字型。
-    static func nsFont(size: CGFloat, weight: Font.Weight, monospacedDigits: Bool = false) -> NSFont {
+    static func nsFont(
+        size: CGFloat,
+        weight: Font.Weight,
+        italic: Bool = false,
+        monospacedDigits: Bool = false
+    ) -> NSFont {
+        let normalizedSize = scaledPointSize(size, scale: 1.0)
+        let halfPoints = Int((normalizedSize * 2).rounded())
         let nsWeight = weight.nsWeight
-        let key = CacheKey(size: size, weight: nsWeight.rawValue, monospacedDigits: monospacedDigits)
+        let key = CacheKey(
+            halfPoints: halfPoints,
+            weight: nsWeight.rawValue,
+            italic: italic,
+            monospaced: false,
+            monospacedDigits: monospacedDigits
+        )
         lock.lock()
         defer { lock.unlock() }
         if let cached = cache[key] { return cached }
 
-        let base = NSFont.systemFont(ofSize: size, weight: nsWeight)
+        let base = NSFont.systemFont(ofSize: normalizedSize, weight: nsWeight)
         var descriptor = base.fontDescriptor.withDesign(.rounded) ?? base.fontDescriptor
+        if italic {
+            descriptor = descriptor.withSymbolicTraits(descriptor.symbolicTraits.union(.italic))
+        }
+        let attributes = cascadeAttributes(
+            size: normalizedSize,
+            nsWeight: nsWeight,
+            monospacedDigits: monospacedDigits
+        )
+        descriptor = descriptor.addingAttributes(attributes)
+        var font = NSFont(descriptor: descriptor, size: normalizedSize) ?? base
+        if italic && !font.fontDescriptor.symbolicTraits.contains(.italic) {
+            let converted = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+            if converted.fontDescriptor.symbolicTraits.contains(.italic) {
+                let italicDescriptor = converted.fontDescriptor.addingAttributes(attributes)
+                font = NSFont(descriptor: italicDescriptor, size: normalizedSize) ?? converted
+            }
+        }
+        cache[key] = font
+        return font
+    }
+
+    /// 等寬字型加中文遞補，供行內程式碼與程式碼區塊使用。
+    static func monospacedNSFont(size: CGFloat, weight: Font.Weight = .regular) -> NSFont {
+        let normalizedSize = scaledPointSize(size, scale: 1.0)
+        let halfPoints = Int((normalizedSize * 2).rounded())
+        let nsWeight = weight.nsWeight
+        let key = CacheKey(
+            halfPoints: halfPoints,
+            weight: nsWeight.rawValue,
+            italic: false,
+            monospaced: true,
+            monospacedDigits: false
+        )
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = cache[key] { return cached }
+
+        let base = NSFont.monospacedSystemFont(ofSize: normalizedSize, weight: nsWeight)
+        let attributes = cascadeAttributes(size: normalizedSize, nsWeight: nsWeight, monospacedDigits: false)
+        let descriptor = base.fontDescriptor.addingAttributes(attributes)
+        let font = NSFont(descriptor: descriptor, size: normalizedSize) ?? base
+        cache[key] = font
+        return font
+    }
+
+    private static func cascadeAttributes(
+        size: CGFloat,
+        nsWeight: NSFont.Weight,
+        monospacedDigits: Bool
+    ) -> [NSFontDescriptor.AttributeName: Any] {
         let cjkName: String
         if nsWeight.rawValue >= NSFont.Weight.semibold.rawValue {
             cjkName = cjkBold
@@ -75,10 +148,7 @@ public enum ThemeTypography {
                 NSFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector,
             ]]
         }
-        descriptor = descriptor.addingAttributes(attributes)
-        let font = NSFont(descriptor: descriptor, size: size) ?? base
-        cache[key] = font
-        return font
+        return attributes
     }
 
     /// 圓體-繁沒有安裝時，請系統下載。只在 App 啟動時呼叫一次。
@@ -94,22 +164,110 @@ public enum ThemeTypography {
 }
 
 extension Font {
-    /// 主題字型。取代 `.caption`、`.headline` 這些系統樣式。
+    /// 主題字型。取代 `.caption`、`.headline` 這些系統樣式，支援縮放倍率。
     static func cardiary(
         _ style: Font.TextStyle,
         weight: Font.Weight? = nil,
-        monospacedDigits: Bool = false
+        monospacedDigits: Bool = false,
+        scale: CGFloat = 1.0
     ) -> Font {
-        Font(ThemeTypography.nsFont(
-            size: ThemeTypography.size(for: style),
+        let scaled = ThemeTypography.scaledPointSize(ThemeTypography.size(for: style), scale: scale)
+        return Font(ThemeTypography.nsFont(
+            size: scaled,
             weight: weight ?? ThemeTypography.defaultWeight(for: style),
             monospacedDigits: monospacedDigits
         ) as CTFont)
     }
 
-    /// 指定字級的主題字型，給格子裡的小字用。
-    static func cardiary(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        Font(ThemeTypography.nsFont(size: size, weight: weight) as CTFont)
+    /// 指定字級的主題字型，給格子與標題字標使用。
+    static func cardiary(
+        size: CGFloat,
+        weight: Font.Weight = .regular,
+        scale: CGFloat = 1.0
+    ) -> Font {
+        let scaled = ThemeTypography.scaledPointSize(size, scale: scale)
+        return Font(ThemeTypography.nsFont(size: scaled, weight: weight) as CTFont)
+    }
+
+    /// 等寬主題字型，隨縮放倍率調整。
+    static func cardiaryMonospaced(
+        _ style: Font.TextStyle,
+        weight: Font.Weight = .regular,
+        scale: CGFloat = 1.0
+    ) -> Font {
+        let scaled = ThemeTypography.scaledPointSize(ThemeTypography.size(for: style), scale: scale)
+        return Font(ThemeTypography.monospacedNSFont(size: scaled, weight: weight) as CTFont)
+    }
+}
+
+private struct CardiaryFontStyleModifier: ViewModifier {
+    let style: Font.TextStyle
+    let weight: Font.Weight?
+    let monospacedDigits: Bool
+    @Environment(\.cardiaryScale) private var scale
+
+    func body(content: Content) -> some View {
+        content.font(.cardiary(style, weight: weight, monospacedDigits: monospacedDigits, scale: scale))
+    }
+}
+
+private struct CardiaryFontSizeModifier: ViewModifier {
+    let size: CGFloat
+    let weight: Font.Weight
+    @Environment(\.cardiaryScale) private var scale
+
+    func body(content: Content) -> some View {
+        content.font(.cardiary(size: size, weight: weight, scale: scale))
+    }
+}
+
+private struct CardiaryMonospacedFontModifier: ViewModifier {
+    let style: Font.TextStyle
+    let weight: Font.Weight
+    @Environment(\.cardiaryScale) private var scale
+
+    func body(content: Content) -> some View {
+        content.font(.cardiaryMonospaced(style, weight: weight, scale: scale))
+    }
+}
+
+private struct CardiarySymbolFontModifier: ViewModifier {
+    let size: CGFloat
+    let weight: Font.Weight
+    @Environment(\.cardiaryScale) private var scale
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: ThemeTypography.scaledPointSize(size, scale: scale), weight: weight))
+    }
+}
+
+extension View {
+    /// 會跟隨 `EnvironmentValues.cardiaryScale` 即時縮放的主題字型。
+    func cardiaryFont(
+        _ style: Font.TextStyle,
+        weight: Font.Weight? = nil,
+        monospacedDigits: Bool = false
+    ) -> some View {
+        modifier(CardiaryFontStyleModifier(
+            style: style,
+            weight: weight,
+            monospacedDigits: monospacedDigits
+        ))
+    }
+
+    /// 指定基準字級並隨介面縮放的字型。
+    func cardiaryFont(size: CGFloat, weight: Font.Weight = .regular) -> some View {
+        modifier(CardiaryFontSizeModifier(size: size, weight: weight))
+    }
+
+    /// 會跟隨 `EnvironmentValues.cardiaryScale` 即時縮放的等寬字型。
+    func cardiaryMonospacedFont(_ style: Font.TextStyle, weight: Font.Weight = .regular) -> some View {
+        modifier(CardiaryMonospacedFontModifier(style: style, weight: weight))
+    }
+
+    /// 會跟隨 `EnvironmentValues.cardiaryScale` 調整大小的符號字型。
+    func cardiarySymbolFont(size: CGFloat, weight: Font.Weight = .regular) -> some View {
+        modifier(CardiarySymbolFontModifier(size: size, weight: weight))
     }
 }
 

@@ -16,7 +16,7 @@ public struct SchedulerView: View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingM) {
             HStack {
                 Text(NotificationL10n.text(.schedulerTitle))
-                    .font(.cardiary(.title3, weight: .semibold))
+                    .cardiaryFont(.title3, weight: .semibold)
                 Spacer()
                 Button {
                     Task { await model.reload() }
@@ -34,10 +34,10 @@ public struct SchedulerView: View {
             }
 
             if let message = model.errorMessage {
-                Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.red)
+                Text(message).cardiaryFont(.caption).foregroundStyle(Palette.red)
             }
             if let message = model.noticeMessage {
-                Text(message).font(.cardiary(.caption)).foregroundStyle(Palette.sageInk)
+                Text(message).cardiaryFont(.caption).foregroundStyle(Palette.sageInk)
             }
         }
         .padding(DesignTokens.spacingM)
@@ -47,7 +47,7 @@ public struct SchedulerView: View {
     private var createForm: some View {
         VStack(alignment: .leading, spacing: DesignTokens.spacingS) {
             Text(NotificationL10n.text(.schedulerCreate))
-                .font(.cardiary(.callout, weight: .semibold))
+                .cardiaryFont(.callout, weight: .semibold)
                 .foregroundStyle(Palette.inkSecondary)
 
             TextField(NotificationL10n.text(.schedulerName), text: $draft.name)
@@ -55,7 +55,7 @@ public struct SchedulerView: View {
 
             HStack(spacing: DesignTokens.spacingM) {
                 Text(NotificationL10n.text(.schedulerKind))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
                 ThemeMenuPicker(
                     selection: $draft.kind,
@@ -79,11 +79,11 @@ public struct SchedulerView: View {
                 Stepper(value: $draft.everyMinutes, in: 5...10080) {
                     HStack {
                         Text(NotificationL10n.text(.schedulerEveryMinutes))
-                            .font(.cardiary(.caption))
+                            .cardiaryFont(.caption)
                             .foregroundStyle(Palette.inkSecondary)
                         Spacer()
                         Text("\(draft.everyMinutes)")
-                            .font(.cardiary(.callout))
+                            .cardiaryFont(.callout)
                             .foregroundStyle(Palette.ink)
                     }
                 }
@@ -91,7 +91,7 @@ public struct SchedulerView: View {
 
             HStack(spacing: DesignTokens.spacingM) {
                 Text(NotificationL10n.text(.schedulerTask))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkSecondary)
                 ThemeMenuPicker(
                     selection: $taskChoice,
@@ -181,7 +181,7 @@ private struct ScheduleRow: View {
                     .frame(width: 9, height: 9)
                     .accessibilityHidden(true)
                 Text(schedule.name)
-                    .font(.cardiary(.callout, weight: .semibold))
+                    .cardiaryFont(.callout, weight: .semibold)
                     .foregroundStyle(Palette.ink)
                 Spacer()
                 if let status = model.statusDescription(schedule) {
@@ -189,18 +189,18 @@ private struct ScheduleRow: View {
                 }
             }
             Text(model.specDescription(schedule))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkSecondary)
             Text(model.taskDescription(schedule))
-                .font(.cardiary(.caption))
+                .cardiaryFont(.caption)
                 .foregroundStyle(Palette.inkSecondary)
                 .lineLimit(2)
             HStack(spacing: DesignTokens.spacingS) {
                 Text(NotificationL10n.format(.schedulerNextRun, value: schedule.nextRunAt, language: nil))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkTertiary)
                 Text(NotificationL10n.count(.schedulerRunCount, count: schedule.runCount, language: nil))
-                    .font(.cardiary(.caption))
+                    .cardiaryFont(.caption)
                     .foregroundStyle(Palette.inkTertiary)
                 Spacer()
                 Button {

@@ -737,7 +737,24 @@ final class ShellController: NSObject {
         editEntry.submenu = EditMenu.make()
         mainMenu.addItem(editEntry)
 
+        let viewMenu = ViewMenu.make(
+            target: self,
+            zoomInAction: #selector(zoomInAction),
+            zoomOutAction: #selector(zoomOutAction),
+            resetZoomAction: #selector(resetZoomAction),
+            toggleInspectorAction: #selector(toggleInspectorAction)
+        )
+        let viewEntry = NSMenuItem(title: viewMenu.title, action: nil, keyEquivalent: "")
+        viewEntry.submenu = viewMenu
+        mainMenu.addItem(viewEntry)
+
+        let windowMenu = WindowMenu.make()
+        let windowEntry = NSMenuItem(title: windowMenu.title, action: nil, keyEquivalent: "")
+        windowEntry.submenu = windowMenu
+        mainMenu.addItem(windowEntry)
+
         NSApp.mainMenu = mainMenu
+        NSApp.windowsMenu = windowMenu
     }
 
     @objc private func openSettingsAction() {
@@ -747,6 +764,22 @@ final class ShellController: NSObject {
 
     @objc private func openImportAction() {
         appModel?.openImport()
+    }
+
+    @objc private func zoomInAction() {
+        appModel?.uiScale.zoomIn()
+    }
+
+    @objc private func zoomOutAction() {
+        appModel?.uiScale.zoomOut()
+    }
+
+    @objc private func resetZoomAction() {
+        appModel?.uiScale.reset()
+    }
+
+    @objc private func toggleInspectorAction() {
+        appModel?.toggleInspector()
     }
 
     private func installStatusItem() {
