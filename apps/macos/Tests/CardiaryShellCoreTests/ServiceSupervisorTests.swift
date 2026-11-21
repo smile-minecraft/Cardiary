@@ -411,9 +411,251 @@ final class ServiceSupervisorTests: XCTestCase {
         XCTAssertFalse(processAlive(pid))
     }
 
+    func testMemoryLimitExit75RestartsWithoutCountingFailures() async throws {
+        let folder = try TestSupport.makeTemporaryFolder("memory-limit-restart")
+        let plan = ServiceLaunchPlan(
+            executableURL: URL(fileURLWithPath: "/usr/bin/true"),
+            arguments: [],
+            environment: [:],
+            workingDirectory: folder
+        )
+        let handles = FakeProcessRecorder()
+        let statuses = StatusRecorder()
+        let logs = LogRecorder()
+        let supervisor = ServiceSupervisor(
+            configuration: ServiceSupervisorConfiguration(
+                launchPlan: plan,
+                healthInterval: 60,
+                restartPolicy: RestartPolicy(
+                    baseDelay: 0.02,
+                    maxDelay: 0.05,
+                    maxConsecutiveFailures: 1,
+                    stableWindow: 30
+                )
+            ),
+            folder: FolderSnapshot(),
+            brokerHandler: { _, _ in .ok(.object([:])) },
+            launcher: { _ in handles.spawn() }
+        )
+        supervisor.onStatusChange = { statuses.append($0) }
+        supervisor.onLog = { logs.append($0) }
+        supervisors.append(supervisor)
+
+        await supervisor.start(folder: readyFolder(folder))
+        try await TestSupport.waitUntil(timeout: 5, message: "首次應進入執行中") {
+            statuses.latest?.phase == .running
+        }
+        let first = try XCTUnwrap(handles.current)
+
+        // 連續兩次以 exit 75 退出，即使 maxConsecutiveFailures=1 也必須重啟且不計失敗次數。
+        first.simulateExit(ServiceExit(status: 75, wasSignaled: false))
+        try await TestSupport.waitUntil(timeout: 5, message: "第一次 exit 75 後應自動重啟") {
+            guard let latest = statuses.latest else { return false }
+            return latest.phase == .running && latest.pid == 102
+        }
+        XCTAssertEqual(statuses.latest?.consecutiveFailures, 0)
+        XCTAssertEqual(statuses.latest?.restarts, 1)
+
+        let second = try XCTUnwrap(handles.current)
+        second.simulateExit(ServiceExit(status: 75, wasSignaled: false))
+        try await TestSupport.waitUntil(timeout: 5, message: "第二次 exit 75 後應仍可自動重啟") {
+            guard let latest = statuses.latest else { return false }
+            return latest.phase == .running && latest.pid == 103
+        }
+        XCTAssertEqual(statuses.latest?.consecutiveFailures, 0)
+        XCTAssertEqual(statuses.latest?.restarts, 2)
+        XCTAssertTrue(
+            logs.all.contains { $0.contains("exit 75") },
+            "日誌應記錄因記憶體上限自動重啟"
+        )
+
+        // 資料夾不可用時，即使收到 exit 75 也不得重啟，停在 unavailable。
+        supervisor.folderSnapshot = FolderSnapshot(
+            state: .unavailable,
+            path: folder.path,
+            writable: false
+        )
+        let third = try XCTUnwrap(handles.current)
+        third.simulateExit(ServiceExit(status: 75, wasSignaled: false))
+        try await TestSupport.waitUntil(timeout: 5, message: "資料夾不可用時 exit 75 應停在不可用") {
+            statuses.latest?.phase == .unavailable
+        }
+        XCTAssertEqual(handles.count, 3)
+
+        _ = await supervisor.shutdown(reason: .shellExit)
+    }
+
     private func processAlive(_ pid: Int32) -> Bool {
         guard pid > 0 else { return false }
         return kill(pid, 0) == 0
+    }
+}
+
+private final class FakeProcessRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var nextPID: Int32 = 100
+    private var spawned: [FakeServiceProcessHandle] = []
+
+    func spawn() -> FakeServiceProcessHandle {
+        lock.lock()
+        nextPID += 1
+        let handle = FakeServiceProcessHandle(pid: nextPID)
+        spawned.append(handle)
+        lock.unlock()
+        return handle
+    }
+
+    var current: FakeServiceProcessHandle? {
+        lock.lock()
+        defer { lock.unlock() }
+        return spawned.last
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return spawned.count
+    }
+}
+
+private final class FakeServiceProcessHandle: ServiceProcessHandle, @unchecked Sendable {
+    let pid: Int32
+    private let lock = NSLock()
+    private var running = true
+    private var dataHandler: (@Sendable (Data) -> Void)?
+    private var logHandler: (@Sendable (String) -> Void)?
+    private var exitHandler: (@Sendable (ServiceExit) -> Void)?
+    private var buffer = Data()
+    private var brokerToken = ""
+
+    init(pid: Int32) {
+        self.pid = pid
+    }
+
+    var isRunning: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return running
+    }
+
+    func setDataHandler(_ handler: @escaping @Sendable (Data) -> Void) {
+        lock.lock()
+        dataHandler = handler
+        lock.unlock()
+    }
+
+    func setLogHandler(_ handler: @escaping @Sendable (String) -> Void) {
+        lock.lock()
+        logHandler = handler
+        lock.unlock()
+    }
+
+    func setExitHandler(_ handler: @escaping @Sendable (ServiceExit) -> Void) {
+        lock.lock()
+        exitHandler = handler
+        lock.unlock()
+    }
+
+    func write(_ data: Data) throws {
+        var lines: [Data] = []
+        lock.lock()
+        buffer.append(data)
+        while let newline = buffer.firstIndex(of: 0x0A) {
+            lines.append(buffer.subdata(in: buffer.startIndex..<newline))
+            buffer.removeSubrange(buffer.startIndex...newline)
+        }
+        lock.unlock()
+
+        for line in lines {
+            handleFrame(line)
+        }
+    }
+
+    func closeStdin() {}
+
+    func terminate() {
+        simulateExit(ServiceExit(status: 0, wasSignaled: false))
+    }
+
+    func kill() {
+        simulateExit(ServiceExit(status: SIGKILL, wasSignaled: true))
+    }
+
+    func simulateExit(_ exit: ServiceExit) {
+        let callback: (@Sendable (ServiceExit) -> Void)? = lock.withLock {
+            guard running else { return nil }
+            running = false
+            return exitHandler
+        }
+        callback?(exit)
+    }
+
+    private func handleFrame(_ line: Data) {
+        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else {
+            return
+        }
+        if object["type"] as? String == "init" {
+            let token = (object["brokerToken"] as? String) ?? ""
+            lock.withLock { brokerToken = token }
+            emit([
+                "type": "ready",
+                "protocol": 1,
+                "pid": Int(pid),
+                "clientPort": 49_152,
+                "folderId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+                "epoch": "01JCX8Q3W7Z9K5V2N4M6P8R0T2",
+            ])
+            emit([
+                "v": 1,
+                "kind": "hello",
+                "role": "host-service",
+                "pid": Int(pid),
+                "auth": ["token": token],
+            ])
+            return
+        }
+        guard object["kind"] as? String == "request",
+            let id = object["id"] as? String,
+            let route = object["route"] as? String
+        else { return }
+        let token = lock.withLock { brokerToken }
+        if route == "control.shutdown" {
+            emit([
+                "v": 1,
+                "kind": "response",
+                "id": "res_\(id)",
+                "replyTo": id,
+                "auth": ["token": token],
+                "ok": true,
+                "payload": ["state": "closed", "cleanShutdown": true],
+            ])
+            simulateExit(ServiceExit(status: 0, wasSignaled: false))
+        } else if route == "control.health" {
+            emit([
+                "v": 1,
+                "kind": "response",
+                "id": "res_\(id)",
+                "replyTo": id,
+                "auth": ["token": token],
+                "ok": true,
+                "payload": [
+                    "state": "running",
+                    "epoch": "01JCX8Q3W7Z9K5V2N4M6P8R0T2",
+                    "uptimeSeconds": 0,
+                    "folderId": "01JCX8Q3W7Z9K5V2N4M6P8R0T1",
+                    "clientPort": 49_152,
+                    "lifecycle": "idle",
+                ],
+            ])
+        }
+    }
+
+    private func emit(_ object: [String: Any]) {
+        guard var data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        else { return }
+        data.append(0x0A)
+        let handler = lock.withLock { dataHandler }
+        handler?(data)
     }
 }
 

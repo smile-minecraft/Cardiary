@@ -63,6 +63,8 @@ public struct ServiceLaunchPlan: Equatable, Sendable {
 
 /// 服務行程結束的原因。
 public struct ServiceExit: Equatable, Sendable {
+    public static let memoryLimitStatus: Int32 = 75
+
     public let status: Int32
     public let wasSignaled: Bool
 
@@ -78,6 +80,11 @@ public struct ServiceExit: Equatable, Sendable {
     /// 被 SIGBUS 殺掉（強制卸載）時的退出碼。
     public var isBusError: Bool {
         wasSignaled && status == SIGBUS
+    }
+
+    /// 主機超過記憶體上限後主動乾淨關閉退出的結束碼（規格第 13 章）。
+    public var isMemoryLimitRestart: Bool {
+        !wasSignaled && status == Self.memoryLimitStatus
     }
 }
 
